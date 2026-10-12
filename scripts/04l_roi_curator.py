@@ -5514,8 +5514,11 @@ def main():
     # against 0.90 without the split.
     hulls = [h for p in pl for h in p["hulls"]]
     if hulls:
-        wide = max((max(v[0] for v in h["v"]) - min(v[0] for v in h["v"]), h)
-                   for h in hulls)
+        # key= on the width: two hulls of equal width (a mirrored polygon and its
+        # original always are) would otherwise be compared as dicts, which raises
+        # after the page has been written and makes the run exit non-zero.
+        wide = max(((max(v[0] for v in h["v"]) - min(v[0] for v in h["v"]), h)
+                    for h in hulls), key=lambda t: t[0])
         multi = sorted({h["region"] for h in hulls if h["n_parts"] > 1})
         one = sorted({h["region"] for h in hulls if h["n_parts"] == 1})
         print(f"  {len(hulls)} region hulls, widest {wide[0]:.2f} of a plate "

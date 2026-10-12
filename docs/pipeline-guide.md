@@ -1005,6 +1005,25 @@ and one shape spanning both lobes would cross the midline gap. Without the split
 covered most of a plate; with it, a fifth of one. Numbering follows the reading order the dots
 already had, so a region's number is stable across runs and across every export.
 
+**Choosing which regions to draw.** A plate carries every region the atlas has, and a study rarely
+quantifies all of them. The first time the curator opens it asks **Which ROIs will you draw?** in a
+pop-up (`ROIs...` button, or `o`, reopens it at any time). Tick the regions in the order you want
+them numbered. After you confirm, only those are highlighted on the atlas plate, each in its own
+colour and numbered `1..N` in your order; the other outlines stay visible but dimmed and grey, and
+cannot be clicked, so the wrong region cannot be drawn by accident. Drawing on the section is
+unchanged: the guided cursor walks your selection, one polygon per region.
+
+- The choice is **study-wide**: one list for every section and animal. It is kept under its own
+  `ls_roi_curator_v1_rois` key (mirrored by the app to `curation/ls_roi_curator_v1_rois.json`), not
+  inside the curation file, so the importers still see only section records.
+- **Nothing is renumbered in the data.** The atlas's own ROI number stays in every polygon and in
+  `roi_n` in the exports; the `1..N` is only what the screen shows. A region with two lobes keeps one
+  number and the lobes are lettered (`3a`, `3b`).
+- Changing the selection never deletes a polygon. One already drawn for a region you have since
+  deselected stays on its section, shown with `-` in place of a number, and the sidebar says how many
+  are outside the selection.
+- Closing the first question without choosing means *all regions*, as before, and is remembered.
+
 Circles are no longer used for anatomy at all. The disc survives only for the **background reference
 regions** — patches of tissue the operator judges to hold no signal — which are measured by exactly
 the same detector and are what later gives both the positivity threshold and the detector's own

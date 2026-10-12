@@ -49,7 +49,11 @@ const builtJs = page => path.join(__dirname, "build", page + ".js");
 const CURATOR_JS = builtJs("curator");
 
 function makeEnv() {
-  const store = {};          // localStorage
+  // The ROI curator asks which regions to draw the first time it opens, and an
+  // open pop-up swallows the keyboard shortcuts. A suite is not a person: it
+  // starts with that question already answered ("[]" = all regions), and a
+  // suite about the selection sets its own.
+  const store = { ls_roi_curator_v1_rois: "[]" };          // localStorage
   const win = {};            // window event listeners, by type
   const els = {};            // getElementById cache
 

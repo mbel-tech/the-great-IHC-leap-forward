@@ -31,10 +31,8 @@ Run:  python 04b_atlas_match.py
       then open D:/LS-analysis/qc/atlasmatch/atlas_curator.html
 """
 
-import sys
 import argparse
 import csv
-import importlib.util
 import json
 import os
 
@@ -42,36 +40,13 @@ import numpy as np
 from PIL import Image
 from scipy import ndimage
 
-_lsio = importlib.util.spec_from_file_location(
-    "_lsio", os.path.join(os.path.dirname(os.path.abspath(__file__)), "ls_io.py"))
-IO = importlib.util.module_from_spec(_lsio)
-_lsio.loader.exec_module(IO)
-
-_HERE = os.path.dirname(os.path.abspath(__file__))
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
-# ls_config resolves LS_CONFIG, applies the defaults and validates once for
-# the whole process. Imported, not re-implemented: this block used to be four
-# lines copy-pasted into every stage.
-from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
-import ls_atlas as AT  # noqa: E402
-import ls_channels as CH  # noqa: E402
-import ls_naming as NM  # noqa: E402
-
-MARKERS = list(CH.marker_names(CONFIG))
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.json")
+with open(CONFIG_PATH, encoding="utf-8") as _fh:
+    CONFIG = json.load(_fh)
 
 OUT_ROOT = CONFIG["out_root"]
 OVERVIEW_DIR = os.path.join(OUT_ROOT, "overviews")
-# THE EXTRACTION SET, deliberately - not the study's configured set.
-#
-# 04b is in app/stages.py NOT_LISTED as "measured to fail on this data
-# (LOGS 2026-08-12); kept as evidence". Re-pointing it at plates_final would
-# change the candidate universe from 47 figures to 64 plates and invalidate the
-# measurement it exists to record. The literal is gone; the choice is not.
-#
-# KNOWN GAP: its atlas_proposals_v2.csv still feeds 04d's plate preview, which
-# renders from the configured set. Not closed here - see the plan's scope note.
-PLATE_DIR = AT.plate_dir(CONFIG, set_name=AT.EXTRACTED)
+PLATE_DIR = os.path.join(OUT_ROOT, "atlas", "plates")
 QC_CSV = os.path.join(OUT_ROOT, "qc", "focus.csv")
 REPORT_DIR = os.path.join(OUT_ROOT, "qc", "atlasmatch")
 
@@ -226,33 +201,11 @@ def best_path(sim):
     return path
 
 
-def build_parser():
-    """The parser, built separately so a test can read the marker choices and
-    default off the object argparse will actually use.
-
-    `--marker` used to be `default="AF488"` with NO `choices=` at all - the one
-    shape argparse cannot validate: it accepted any string, the `marker_channel`
-    filter matched nothing, and the stage walked zero sections and wrote zero
-    atlas proposals without erroring. Derived choices make a marker this study
-    does not have a usage error instead.
-
-    The default is the SECOND declared marker. That is not a fluorophore fact:
-    the sections registered against the atlas are the pass whose geometry every
-    other stage is expressed in, which is `04a.DEFAULT_MARKER`, and under
-    `paired` that is `MARKERS[1]`. Deriving `MARKERS[0]` here would silently
-    register the other pass - the trap this migration keeps meeting, since the
-    marker with the unsuffixed outputs is the second declared.
-    """
+def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--animal", default=None, help="restrict to one animal")
-    _default = MARKERS[1] if len(MARKERS) > 1 else (MARKERS[0] if MARKERS else None)
-    ap.add_argument("--marker", default=_default, choices=MARKERS,
-                    help=f"channel whose DAPI is used (default {_default})")
-    return ap
-
-
-def main():
-    args = build_parser().parse_args()
+    ap.add_argument("--marker", default="AF488", help="channel whose DAPI is used")
+    args = ap.parse_args()
     os.makedirs(REPORT_DIR, exist_ok=True)
 
     with open(os.path.join(PLATE_DIR, "plates.csv"), newline="", encoding="utf-8") as fh:
@@ -278,7 +231,7 @@ def main():
         by_animal.setdefault(r["animal"], []).append(r)
 
     proposals = []
-    for animal, group in sorted(by_animal.items(), key=lambda kv: NM.natural_key(kv[0])):
+    for animal, group in sorted(by_animal.items(), key=lambda kv: int(kv[0][2:])):
         group.sort(key=lambda r: int(r["section_order"]))
         sils, keep = [], []
         for r in group:
@@ -304,7 +257,7 @@ def main():
             cands = [{
                 "plate_id": plate_meta[j]["plate_id"],
                 "page": plate_meta[j]["page"],
-                "img": os.path.join("..", "..", "atlas", PLATE_SET,
+                "img": os.path.join("..", "..", "atlas", "plates",
                                     plate_meta[j]["image_file"]).replace("\\", "/"),
                 "score": round(float(sim[i, j]), 3),
                 "regions": plate_meta[j]["regions"],
@@ -357,7 +310,7 @@ def build_curator(proposals):
     ordered = sorted(proposals,
                      key=lambda p: (p["proposed_score"],
                                     p["proposed_plate"] == p["local_best"]))
-    page = IO.fill(TEMPLATE, {"__DATA__": ordered})
+    page = TEMPLATE.replace("__DATA__", json.dumps(ordered))
     out = os.path.join(REPORT_DIR, "atlas_curator.html")
     with open(out, "w", encoding="utf-8") as fh:
         fh.write(page)
@@ -428,11 +381,6 @@ const KEY = "ls_atlas_curator_v1";
 let marks = JSON.parse(localStorage.getItem(KEY) || "{}");
 let i = 0;
 const el = id => document.getElementById(id);
-const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g,
-  c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
-el("cands").addEventListener("click", e => {
-  const c = e.target.closest && e.target.closest(".cand"); if(c) setMark(c.dataset.plate);
-});
 
 function render(){
   const d = DATA[i];
@@ -448,10 +396,10 @@ function render(){
   const chosen = marks[d.scene_uid];
   el("decision").textContent = chosen || "-";
   el("cands").innerHTML = d.candidates.map((c,k) => `
-    <div class="cand ${chosen===c.plate_id?'chosen':''}" data-plate="${esc(c.plate_id)}">
-      <img src="${esc(c.img)}" alt="">
-      <div class="cap"><b>${k+1}. ${esc(c.plate_id)}</b> p${esc(c.page)} &middot; IoU ${c.score}
-      ${c.regions ? '<br>'+esc(c.regions) : ''}</div>
+    <div class="cand ${chosen===c.plate_id?'chosen':''}" onclick="setMark('${c.plate_id}')">
+      <img src="${c.img}" alt="">
+      <div class="cap"><b>${k+1}. ${c.plate_id}</b> p${c.page} &middot; IoU ${c.score}
+      ${c.regions ? '<br>'+c.regions : ''}</div>
     </div>`).join("");
 
   const n = Object.keys(marks).length;

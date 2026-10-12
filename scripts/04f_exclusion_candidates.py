@@ -60,7 +60,6 @@ Run:  python 04f_exclusion_candidates.py
       python 04f_exclusion_candidates.py --survey      # measure and plot only
 """
 
-import sys
 import argparse
 import csv
 import json
@@ -79,58 +78,15 @@ _SPEC = importlib.util.spec_from_file_location(
     "reformat_mod", os.path.join(os.path.dirname(os.path.abspath(__file__)), "04a_reformat.py"))
 _RF = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(_RF)
-
-_lsio = importlib.util.spec_from_file_location(
-    "_lsio", os.path.join(os.path.dirname(os.path.abspath(__file__)), "ls_io.py"))
-IO = importlib.util.module_from_spec(_lsio)
-_lsio.loader.exec_module(IO)
-
 tissue_mask, WORK = _RF.tissue_mask, _RF.WORK_SIZE
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
-# ls_config resolves LS_CONFIG, applies the defaults and validates once for
-# the whole process. Imported, not re-implemented: this block used to be four
-# lines copy-pasted into every stage.
-from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
-import ls_channels as CH  # noqa: E402
-
-MARKERS = list(CH.marker_names(CONFIG))
-# The pass that owns the UNSUFFIXED outputs - `reformat_index.csv` and
-# `sections/` - which is the index this stage walks. 04a's rule: under `paired`
-# that is the SECOND declared marker, not the first.
-DEFAULT_MARKER = MARKERS[1] if len(MARKERS) > 1 else (MARKERS[0] if MARKERS else None)
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.json")
+with open(CONFIG_PATH, encoding="utf-8") as _fh:
+    CONFIG = json.load(_fh)
 
 OUT_ROOT = CONFIG["out_root"]
 OVERVIEW_DIR = os.path.join(OUT_ROOT, "overviews")
 REFORMAT_DIR = os.path.join(OUT_ROOT, "reformatted")
-CANDIDATES_CSV = os.path.join(REFORMAT_DIR, "exclusion_candidates.csv")
-SURVEY_CSV = os.path.join(OUT_ROOT, "qc", "exclusion", "survey.csv")
-
-
-def output_path(survey):
-    """--survey measures and proposes nothing, so it must not overwrite the
-    proposals 04d reads. It gets its own file under qc/."""
-    return SURVEY_CSV if survey else CANDIDATES_CSV
-
-
-def source_png(animal, uid, chan):
-    """Where this section's DAPI overview is, given the manifest's channel map.
-
-    The fallback used to be the literal `"AF488"`, which for any other study
-    named a directory that does not exist - so `measure()` returned None on the
-    missing file and the section dropped out of the candidate list with nothing
-    said. That is the worst shape a default can have here: this stage's whole
-    job is to propose which sections to exclude, and a section it never
-    measured is simply never proposed.
-
-    `DEFAULT_MARKER` is the right fallback rather than the first marker: the
-    index being walked is `reformat_index.csv`, the unsuffixed one, whose
-    sections belong to the default marker's pass.
-    """
-    return os.path.join(OVERVIEW_DIR, animal, chan.get(uid, DEFAULT_MARKER),
-                        uid + "_DAPI.png")
 QC_CSV = os.path.join(OUT_ROOT, "qc", "focus.csv")
 REPORT_DIR = os.path.join(OUT_ROOT, "qc", "exclusion")
 
@@ -220,7 +176,8 @@ def main():
 
     rows = []
     for i, r in enumerate(index):
-        src = source_png(r["animal"], r["id"], chan)
+        src = os.path.join(OVERVIEW_DIR, r["animal"], chan.get(r["id"], "AF488"),
+                           r["id"] + "_DAPI.png")
         m = measure(src)
         if m is None:
             continue
@@ -288,11 +245,13 @@ def main():
         print("proposal was wrong stays measurable rather than assumed.")
     print("=" * 74)
 
-    out = output_path(args.survey)
-    os.makedirs(os.path.dirname(out), exist_ok=True)
+    out = os.path.join(REFORMAT_DIR, "exclusion_candidates.csv")
     keys = ["uid", "animal", "section_order", "proposed", "artifact_class", "reason",
             "largest_mm2", "total_mm2", "n_pieces", "focus_score", "frame_mm2"]
-    IO.atomic_write_csv(out, sorted(rows, key=lambda r: (-r["proposed"], r["animal"], r["section_order"])), keys)
+    with open(out, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=keys, extrasaction="ignore")
+        w.writeheader()
+        w.writerows(sorted(rows, key=lambda r: (-r["proposed"], r["animal"], r["section_order"])))
     print(f"wrote {out}")
 
     montage(rows, args.montage)

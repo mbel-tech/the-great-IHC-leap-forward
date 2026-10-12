@@ -28,13 +28,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import tifffile
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
-# ls_config resolves LS_CONFIG, applies the defaults and validates once for
-# the whole process. Imported, not re-implemented: this block used to be four
-# lines copy-pasted into every stage.
-from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.json")
+with open(CONFIG_PATH, encoding="utf-8") as _fh:
+    CONFIG = json.load(_fh)
 
 OUT_ROOT = CONFIG["out_root"]
 BASE_PX_UM = CONFIG["pixel_size_um"]
@@ -269,9 +265,6 @@ def plot(path, result, panels):
 
 def main():
     targets = [a for a in sys.argv[1:] if not a.startswith("--")]
-    # Expand globs here: the app runs this in-process with a literal
-    # ".../test_sections_corrected/*.tif", which no shell has expanded.
-    targets = [p for t in targets for p in (sorted(glob.glob(t)) or [t])]
     if not targets:
         targets = sorted(glob.glob(os.path.join(TEST_DIR, "*.tif")))
     if not targets:

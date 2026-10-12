@@ -16,20 +16,15 @@ usually means a box was drawn too tight.
 Run:  python 04a4_plate_rebuild.py --dpi 300
 """
 
-import sys
 import argparse
 import csv
 import json
 import os
 from collections import Counter, defaultdict
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
-# ls_config resolves LS_CONFIG, applies the defaults and validates once for
-# the whole process. Imported, not re-implemented: this block used to be four
-# lines copy-pasted into every stage.
-from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.json")
+with open(CONFIG_PATH, encoding="utf-8") as _fh:
+    CONFIG = json.load(_fh)
 
 OUT_ROOT = CONFIG["out_root"]
 ATLAS_PDF = CONFIG["atlas_pdf"]

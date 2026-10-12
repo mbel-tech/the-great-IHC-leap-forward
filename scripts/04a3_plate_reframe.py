@@ -30,18 +30,13 @@ resolution and carries the region seeds across.
 Run:  python 04a3_plate_reframe.py
 """
 
-import sys
 import argparse
 import json
 import os
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
-# ls_config resolves LS_CONFIG, applies the defaults and validates once for
-# the whole process. Imported, not re-implemented: this block used to be four
-# lines copy-pasted into every stage.
-from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.json")
+with open(CONFIG_PATH, encoding="utf-8") as _fh:
+    CONFIG = json.load(_fh)
 
 OUT_ROOT = CONFIG["out_root"]
 ATLAS_DIR = os.path.join(OUT_ROOT, "atlas")

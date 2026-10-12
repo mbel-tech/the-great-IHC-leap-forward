@@ -34,10 +34,8 @@ Run:  python 04a_reformat.py
       python 04a_reformat.py --preview 12
 """
 
-import sys
 import argparse
 import csv
-import importlib.util
 import json
 import os
 
@@ -45,57 +43,15 @@ import numpy as np
 from PIL import Image
 from scipy import ndimage
 
-_lsio = importlib.util.spec_from_file_location(
-    "_lsio", os.path.join(os.path.dirname(os.path.abspath(__file__)), "ls_io.py"))
-IO = importlib.util.module_from_spec(_lsio)
-_lsio.loader.exec_module(IO)
-
-_HERE = os.path.dirname(os.path.abspath(__file__))
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
-# ls_config resolves LS_CONFIG, applies the defaults and validates once for
-# the whole process. Imported, not re-implemented: this block used to be four
-# lines copy-pasted into every stage.
-from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
-import ls_channels as CH  # noqa: E402
-import ls_paths as LP  # noqa: E402
-import ls_atlas as AT  # noqa: E402
-
-# The markers this study measures, in declared order. ls_channels is the
-# single source of that list; naming a fluorophore here would pin the stage
-# to one study.
-MARKERS = list(CH.marker_names(CONFIG))
-
-# Which acquisition layout this study used. `paired` means each marker is a
-# separate physical scan of the same sections, so the reformat is decided once
-# per marker; `multiplex` means one scan carries every marker, so it is decided
-# once per SCENE. Defaulted to multiplex to match ls_channels and the example
-# config: a study that declares no layout is a new one.
-LAYOUT = (CONFIG.get("acquisition") or {}).get("layout", CH.LAYOUT_MULTIPLEX)
-
-# 04a and 04g have always defaulted to the SECOND marker (AF488 = PCNA on the
-# LS study): it is the pass that was curated first, and its outputs are the
-# unsuffixed ones. Kept rather than adopting the first-declared default,
-# because this default selects which sections get written and a silent flip
-# would process the wrong pass.
-DEFAULT_MARKER = MARKERS[1] if len(MARKERS) > 1 else (MARKERS[0] if MARKERS else None)
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.json")
+with open(CONFIG_PATH, encoding="utf-8") as _fh:
+    CONFIG = json.load(_fh)
 
 OUT_ROOT = CONFIG["out_root"]
 OVERVIEW_DIR = os.path.join(OUT_ROOT, "overviews")
-# The set the study CHOSE, not the raw extraction. 04a writes
-# reformatted/plates/<plate_id>.png, and 04d:527 and 04e:405 read those images
-# while taking plates.csv from the configured set. On this drive that join was
-# wrong for every id: plates holds 47 merged figures and plates_final holds 64
-# reframed plates, so 17 ids had no image at all (04e silently continue'd past
-# them) and the other 47 resolved to a picture of a different plate.
-PLATE_DIR = AT.plate_dir(CONFIG)
+PLATE_DIR = os.path.join(OUT_ROOT, "atlas", "plates")
 QC_CSV = os.path.join(OUT_ROOT, "qc", "focus.csv")
 REFORMAT_DIR = os.path.join(OUT_ROOT, "reformatted")
-
-# The naming rule, borrowed rather than restated. ls_paths owns it; this
-# module is one of its callers. See marker_paths below for what still is not
-# routed through it and why.
-NAMES = LP.for_config(CONFIG)
 
 GRID = 256                  # normalised output is GRID x GRID
 MIN_COMPONENT_FRACTION = 0.12   # debris threshold, relative to the largest component
@@ -189,13 +145,94 @@ def load_artifact(uid, shape):
     return np.asarray(a) > 0
 
 
-def _stretch_to_grid(pi, pm, pa, grid=GRID):
-    """Robust in-tissue stretch, then resize to GRID. See the note below.
+def reformat(path, light_background, extra_angle=0.0, flip=False, artifact=None,
+             censor=None, invert=False):
+    """Return (normalised grayscale, normalised mask, angle applied).
 
-    Pulled out of `reformat` so a companion channel is stretched by exactly the
-    same rule as the geometry channel rather than a second copy of it that can
-    drift.
+    `extra_angle` is the curator's manual correction, in degrees. It is folded
+    into the automatic angle and applied in the SAME rotation, for two reasons.
+
+    Interpolating twice would blur the image for no gain; more importantly, the
+    curator allows any angle, and rotating an already-cropped square frame by,
+    say, 40 degrees pushes the corners of the tissue outside it. Rotating before
+    the crop means the bounding box is recomputed afterwards and nothing is ever
+    clipped. The manual angle is added *after* the 180 degree resolution below,
+    so a manual 180 is not silently cancelled by the automatic one.
     """
+    try:
+        img = Image.open(path).convert("L")
+    except OSError:
+        return None
+    work = np.asarray(img.resize((WORK_SIZE, WORK_SIZE), Image.BILINEAR)).astype(np.float32)
+    # Invert BEFORE anything else, so an atlas plate ends up in the same polarity
+    # as a DAPI section: cell-dense bright, fibre tracts and ventricles dark,
+    # background black. Doing it afterwards is not equivalent - the intensity
+    # stretch below is asymmetric (median - MAD to median + 4 MAD), so applied to
+    # the wrong polarity it clips away exactly the cell-density detail that makes
+    # the plate comparable to a section.
+    if invert:
+        work = 255.0 - work
+
+    mask = tissue_mask(work, light_background)
+    if mask is None:
+        return None
+
+    angle = principal_angle(mask)
+    # The 180 decision needs the rotated mask, so rotate the mask alone first -
+    # order=0 on a binary array is cheap. The image is rotated once, afterwards,
+    # by the final combined angle.
+    probe = ndimage.rotate(mask.astype(np.uint8), angle, order=0, reshape=True) > 0
+    if probe.sum() < 100:
+        return None
+    if resolve_180(probe):
+        angle += 180.0
+    angle += extra_angle
+
+    rot_mask = ndimage.rotate(mask.astype(np.uint8), angle, order=0, reshape=True) > 0
+    rot_img = ndimage.rotate(work, angle, order=1, reshape=True)
+    if rot_mask.sum() < 100:
+        return None
+    # The artifact mask rides the SAME geometry, so it stays registered to the
+    # image through rotation, crop and resize.
+    rot_art = (ndimage.rotate(artifact.astype(np.uint8), angle, order=0, reshape=True) > 0
+               if artifact is not None else None)
+    # Censored pixels ride the same geometry but are NEVER blanked: a clipped
+    # pixel is real signal whose value is lost, not an artifact to remove. See
+    # 04j_censor_clipped.py.
+    rot_cen = (ndimage.rotate(censor.astype(np.uint8), angle, order=0, reshape=True) > 0
+               if censor is not None else None)
+    if flip:
+        rot_mask, rot_img = rot_mask[:, ::-1], rot_img[:, ::-1]
+        if rot_art is not None:
+            rot_art = rot_art[:, ::-1]
+        if rot_cen is not None:
+            rot_cen = rot_cen[:, ::-1]
+
+    ys, xs = np.nonzero(rot_mask)
+    y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
+    crop_m = rot_mask[y0:y1, x0:x1]
+    crop_i = np.where(rot_mask, rot_img, 0.0)[y0:y1, x0:x1]
+    crop_a = rot_art[y0:y1, x0:x1] if rot_art is not None else None
+    crop_c = rot_cen[y0:y1, x0:x1] if rot_cen is not None else None
+
+    # Square-pad rather than stretch, so aspect - which is real shape
+    # information - survives the resize.
+    h, w = crop_m.shape
+    side = max(h, w)
+    pm = np.zeros((side, side), bool)
+    pi = np.zeros((side, side), np.float32)
+    pa = np.zeros((side, side), bool)
+    pc = np.zeros((side, side), bool)
+    oy, ox = (side - h) // 2, (side - w) // 2
+    pm[oy:oy + h, ox:ox + w] = crop_m
+    pi[oy:oy + h, ox:ox + w] = crop_i
+    if crop_a is not None:
+        pa[oy:oy + h, ox:ox + w] = crop_a
+    if crop_c is not None:
+        pc[oy:oy + h, ox:ox + w] = crop_c
+
+    out_m = np.asarray(Image.fromarray(pm.astype(np.uint8) * 255).resize((GRID, GRID), Image.BILINEAR)) > 127
+
     # Stretch on a ROBUST range of in-tissue pixels: median +/- multiples of the
     # MAD, not min/max and not percentiles.
     #
@@ -224,275 +261,39 @@ def _stretch_to_grid(pi, pm, pa, grid=GRID):
     norm = np.clip((pi - lo) / max(hi - lo, 1e-6), 0, 1) * 255.0
     norm[~pm] = 0
     norm[pa] = 0
-    return np.asarray(Image.fromarray(norm.astype(np.uint8)).resize((grid, grid), Image.BILINEAR))
-
-
-def reformat(path, light_background, extra_angle=0.0, flip=False, artifact=None,
-             censor=None, invert=False, companion=None, render_scale=1,
-             report=None):
-    """Return (normalised grayscale, normalised mask, angle applied).
-
-    `companion` is a second image - the marker channel - carried through the
-    *same* rotation, flip, crop, pad and resize as `path`. It takes no part in
-    deciding the geometry: the mask and the angle come from `path` alone, which
-    is DAPI for a section, because the marker channel is a sparse signal and a
-    poor silhouette. Passing it appends a sixth element to the return; omitting
-    it leaves the return exactly five long, as every existing caller expects.
-
-    `report`, if given a dict, is filled with the geometry this call applied:
-    source size, working grid, angle, flip, crop origin, pad offsets and output
-    grid. That is everything needed to map a point in the normalised output back
-    to a pixel of the source overview, which is how an ROI drawn on the 256 grid
-    becomes a rectangle in the CZI (see 05a_roi_geometry.py).
-
-    It is an OUT parameter rather than an extra return value because the return
-    is already 5 or 6 elements depending on `companion`, and every caller unpacks
-    it positionally; making the length depend on two independent flags is how
-    that starts going wrong. Callers that pass nothing see no change.
-
-    The numbers must come from the run that produced the image the operator
-    annotated. The mask decides the angle, the angle decides the crop, so
-    recomputing any of them separately would move every ROI on the section.
-
-    `extra_angle` is the curator's manual correction, in degrees. It is folded
-    into the automatic angle and applied in the SAME rotation, for two reasons.
-
-    Interpolating twice would blur the image for no gain; more importantly, the
-    curator allows any angle, and rotating an already-cropped square frame by,
-    say, 40 degrees pushes the corners of the tissue outside it. Rotating before
-    the crop means the bounding box is recomputed afterwards and nothing is ever
-    clipped. The manual angle is added *after* the 180 degree resolution below,
-    so a manual 180 is not silently cancelled by the automatic one.
-    """
-    try:
-        img = Image.open(path).convert("L")
-    except OSError:
-        return None
-    src_w, src_h = img.size
-    work = np.asarray(img.resize((WORK_SIZE, WORK_SIZE), Image.BILINEAR)).astype(np.float32)
-    comp = None
-    if companion is not None:
-        try:
-            cim = Image.open(companion).convert("L")
-        except OSError:
-            return None
-        comp = np.asarray(cim.resize((WORK_SIZE, WORK_SIZE), Image.BILINEAR)).astype(np.float32)
-    # Invert BEFORE anything else, so an atlas plate ends up in the same polarity
-    # as a DAPI section: cell-dense bright, fibre tracts and ventricles dark,
-    # background black. Doing it afterwards is not equivalent - the intensity
-    # stretch below is asymmetric (median - MAD to median + 4 MAD), so applied to
-    # the wrong polarity it clips away exactly the cell-density detail that makes
-    # the plate comparable to a section.
-    if invert:
-        work = 255.0 - work
-
-    mask = tissue_mask(work, light_background)
-    if mask is None:
-        return None
-
-    angle = principal_angle(mask)
-    # The 180 decision needs the rotated mask, so rotate the mask alone first -
-    # order=0 on a binary array is cheap. The image is rotated once, afterwards,
-    # by the final combined angle.
-    probe = ndimage.rotate(mask.astype(np.uint8), angle, order=0, reshape=True) > 0
-    if probe.sum() < 100:
-        return None
-    if resolve_180(probe):
-        angle += 180.0
-    angle += extra_angle
-
-    # `render_scale` changes only how finely this frame is SAMPLED. The mask, the
-    # angle and therefore the crop are all decided above at WORK_SIZE and are not
-    # recomputed, so the output is the same picture at a higher resolution rather
-    # than a slightly different one - which matters because a landmark placed on
-    # it has to mean the same thing. Raising WORK_SIZE instead would change the
-    # mask, and with it the angle and the bounding box.
-    S = int(render_scale)
-    work_size = WORK_SIZE * S
-    if S > 1:
-        big = WORK_SIZE * S
-        work = np.asarray(img.resize((big, big), Image.BILINEAR)).astype(np.float32)
-        if invert:
-            work = 255.0 - work
-        if comp is not None:
-            comp = np.asarray(cim.resize((big, big), Image.BILINEAR)).astype(np.float32)
-        def _up(a):
-            return np.asarray(Image.fromarray(a.astype(np.uint8) * 255)
-                              .resize((big, big), Image.NEAREST)) > 127
-        mask = _up(mask)
-        if artifact is not None:
-            artifact = _up(artifact)
-        if censor is not None:
-            censor = _up(censor)
-
-    rot_mask = ndimage.rotate(mask.astype(np.uint8), angle, order=0, reshape=True) > 0
-    rot_img = ndimage.rotate(work, angle, order=1, reshape=True)
-    rot_comp = (ndimage.rotate(comp, angle, order=1, reshape=True)
-                if comp is not None else None)
-    if rot_mask.sum() < 100:
-        return None
-    # The artifact mask rides the SAME geometry, so it stays registered to the
-    # image through rotation, crop and resize.
-    rot_art = (ndimage.rotate(artifact.astype(np.uint8), angle, order=0, reshape=True) > 0
-               if artifact is not None else None)
-    # Censored pixels ride the same geometry but are NEVER blanked: a clipped
-    # pixel is real signal whose value is lost, not an artifact to remove. See
-    # 04j_censor_clipped.py.
-    rot_cen = (ndimage.rotate(censor.astype(np.uint8), angle, order=0, reshape=True) > 0
-               if censor is not None else None)
-    if flip:
-        rot_mask, rot_img = rot_mask[:, ::-1], rot_img[:, ::-1]
-        if rot_comp is not None:
-            rot_comp = rot_comp[:, ::-1]
-        if rot_art is not None:
-            rot_art = rot_art[:, ::-1]
-        if rot_cen is not None:
-            rot_cen = rot_cen[:, ::-1]
-
-    ys, xs = np.nonzero(rot_mask)
-    y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
-    crop_m = rot_mask[y0:y1, x0:x1]
-    crop_i = np.where(rot_mask, rot_img, 0.0)[y0:y1, x0:x1]
-    crop_p = (np.where(rot_mask, rot_comp, 0.0)[y0:y1, x0:x1]
-              if rot_comp is not None else None)
-    crop_a = rot_art[y0:y1, x0:x1] if rot_art is not None else None
-    crop_c = rot_cen[y0:y1, x0:x1] if rot_cen is not None else None
-
-    # Square-pad rather than stretch, so aspect - which is real shape
-    # information - survives the resize.
-    h, w = crop_m.shape
-    side = max(h, w)
-    pm = np.zeros((side, side), bool)
-    pi = np.zeros((side, side), np.float32)
-    pa = np.zeros((side, side), bool)
-    pc = np.zeros((side, side), bool)
-    oy, ox = (side - h) // 2, (side - w) // 2
-    pm[oy:oy + h, ox:ox + w] = crop_m
-    pi[oy:oy + h, ox:ox + w] = crop_i
-    pp = None
-    if crop_p is not None:
-        pp = np.zeros((side, side), np.float32)
-        pp[oy:oy + h, ox:ox + w] = crop_p
-    if crop_a is not None:
-        pa[oy:oy + h, ox:ox + w] = crop_a
-    if crop_c is not None:
-        pc[oy:oy + h, ox:ox + w] = crop_c
-
-    grid = GRID * S
-    if report is not None:
-        # The forward chain, in order. Composed and inverted by 05a.
-        #
-        # Note src_w/src_h separately: the resize to a SQUARE working grid is
-        # anisotropic whenever the scan box is not square, which it rarely is.
-        # A circle drawn on the output is therefore an ellipse on the slide, and
-        # anything that carries a single radius forward is wrong.
-        report.update({
-            "src_w": int(src_w), "src_h": int(src_h),
-            "work_size": int(work_size),
-            "angle": float(angle % 360.0),
-            "flip": bool(flip),
-            "rot_h": int(rot_mask.shape[0]), "rot_w": int(rot_mask.shape[1]),
-            "x0": int(x0), "y0": int(y0),
-            "crop_w": int(w), "crop_h": int(h),
-            "side": int(side), "ox": int(ox), "oy": int(oy),
-            "grid": int(grid),
-        })
-    out_m = np.asarray(Image.fromarray(pm.astype(np.uint8) * 255).resize((grid, grid), Image.BILINEAR)) > 127
-
-    out_i = _stretch_to_grid(pi, pm, pa, grid)
-    out_p = _stretch_to_grid(pp, pm, pa, grid) if pp is not None else None
+    out_i = np.asarray(Image.fromarray(norm.astype(np.uint8)).resize((GRID, GRID), Image.BILINEAR))
     # The tissue mask is deliberately NOT reduced by the artifact mask. It is the
     # section's silhouette, used for orientation and matching, and punching holes
     # in it would change the shape those depend on. What is masked is the
     # measurement and the picture, not the outline.
     out_a = np.asarray(Image.fromarray(pa.astype(np.uint8) * 255)
-                       .resize((grid, grid), Image.NEAREST)) > 127
+                       .resize((GRID, GRID), Image.NEAREST)) > 127
     # Blank AFTER the resize as well as before it. The image is downsampled
     # bilinearly, which smears bright neighbours back into the hole - measured at
     # up to full intensity on a 190 px artifact. Zeroing before the resize alone
     # leaves the artifact faintly visible in exactly the place it was removed.
     out_i = np.where(out_a, 0, out_i).astype(np.uint8)
     out_c = np.asarray(Image.fromarray(pc.astype(np.uint8) * 255)
-                       .resize((grid, grid), Image.NEAREST)) > 127
-    if out_p is None:
-        return out_i, out_m, angle % 360.0, out_a, out_c
-    # Same post-resize blanking as the geometry channel, for the same reason:
-    # the bilinear downsample smears a bright artifact back into the hole.
-    out_p = np.where(out_a, 0, out_p).astype(np.uint8)
-    return out_i, out_m, angle % 360.0, out_a, out_c, out_p
-
-
-def _overrides_path(marker):
-    """The rotation-override file for one marker. Delegated to ls_paths.
-
-    This key used to be the literal `perk_overrides.csv` for every marker that
-    is not the geometry source - an ANTIBODY name, with no marker in it. For
-    the LS study that reads as a quirk; for a paired study with three markers
-    it is a collision, because the first and third markers were both handed
-    the same file and whichever ran second overwrote the other's curation.
-    Nothing raised.
-
-    `read()`, not `path()`, and the distinction is the whole risk here. The
-    operator's `perk_overrides.csv` is 82,893 bytes of hand-entered rotations
-    and exclusions covering 130 curated sections, and `load_overrides` returns
-    ({}, {}) for a file that is not there - so a reader that stopped resolving
-    to it would drop every one of them with no error at all. Every writer of
-    this file goes through this same function (04i), so the writer and the
-    reader cannot name different files.
-
-    A marker this study did not declare is given the derived name rather than
-    the refusal `Names` would normally raise: `marker_paths` has always
-    answered for any string - `tests/test_reformat_layout.py` flips LAYOUT and
-    asks for two invented names - and turning that into a ValueError is a
-    behaviour change this does not make. `including()` is that widening, and
-    it lives in ls_paths so the rule is still not restated here.
-
-    LAYOUT is re-read rather than taken from NAMES, because the rest of
-    `marker_paths` reads the module-level one and a suite flips it in place to
-    ask what the other layout does. A Names frozen at import would keep
-    answering `paired` after the flip and hand two markers separate override
-    files from inside a branch that gives them one shared index - the two
-    halves of one answer disagreeing, which is the whole failure mode this
-    change is about.
-    """
-    names = NAMES if LAYOUT == NAMES.layout else LP.Names(OUT_ROOT, MARKERS, LAYOUT)
-    return names.including(marker).read("overrides", marker)
+                       .resize((GRID, GRID), Image.NEAREST)) > 127
+    return out_i, out_m, angle % 360.0, out_a, out_c
 
 
 def marker_paths(marker):
     """Per-marker output paths and override source.
 
-    **Paired only.** The two markers are separate acquisitions of the same
-    sections, so they get separate index files and separate section
-    directories. Scene uids differ anyway (`..._s03b_...` vs `..._s03a_...`),
-    but sharing an index would let one run silently overwrite the other's.
-
-    Under `multiplex` there is one scan per section carrying every marker, so
-    every marker answers with the SAME set of paths - see the branch below.
-
-    The unsuffixed set belongs to `DEFAULT_MARKER`, the pass that was curated
-    first, not to a fluorophore this stage names itself.
+    The two markers are separate acquisitions of the same sections, so they get
+    separate index files and separate section directories. Scene uids differ
+    anyway (`..._s03b_...` vs `..._s03a_...`), but sharing an index would let one
+    run silently overwrite the other's.
     """
-    if LAYOUT == CH.LAYOUT_MULTIPLEX:
-        # One scan carries every marker, so there is ONE frame per scene and
-        # the reformat is decided once. Suffixing these by marker would write
-        # the same pixels several times under different names, and would let
-        # two markers of one section disagree about where the section is -
-        # which is the thing the curator then has to reconcile by hand.
-        return {"overrides": _overrides_path(marker),
+    if marker == "AF488":
+        return {"overrides": os.path.join(REFORMAT_DIR, "rotation_overrides.csv"),
                 "uid_col": "scene_uid",
                 "sections": os.path.join(REFORMAT_DIR, "sections"),
                 "index": os.path.join(REFORMAT_DIR, "reformat_index.csv"),
                 "excluded": os.path.join(REFORMAT_DIR, "excluded_sections.csv"),
                 "lost": os.path.join(REFORMAT_DIR, "lost_sections.csv")}
-    if marker == DEFAULT_MARKER:
-        return {"overrides": _overrides_path(marker),
-                "uid_col": "scene_uid",
-                "sections": os.path.join(REFORMAT_DIR, "sections"),
-                "index": os.path.join(REFORMAT_DIR, "reformat_index.csv"),
-                "excluded": os.path.join(REFORMAT_DIR, "excluded_sections.csv"),
-                "lost": os.path.join(REFORMAT_DIR, "lost_sections.csv")}
-    return {"overrides": _overrides_path(marker),
+    return {"overrides": os.path.join(REFORMAT_DIR, f"perk_overrides.csv"),
             # 04i writes the pERK scene under its own column name.
             "uid_col": "perk_scene_uid",
             "sections": os.path.join(REFORMAT_DIR, f"sections_{marker}"),
@@ -501,87 +302,14 @@ def marker_paths(marker):
             "lost": os.path.join(REFORMAT_DIR, f"lost_sections_{marker}.csv")}
 
 
-REVIEW_CSV = os.path.join(REFORMAT_DIR, "section_review.csv")
-
-
-def apply_review(excluded, marker):
-    """Merge `section_review.csv` - the Review mode's decisions - over the
-    exclusion list, and collect the sections whose artifact mask was rejected.
-
-    **A separate file, MERGED, rather than a rewritten override file.** The
-    Review mode runs in a browser and can only download; having it write
-    `perk_overrides.csv` directly would mean a page that knows about the handful
-    of sections someone reviewed overwriting a file that carries hand-entered
-    rotations for 1,134. One bad export would destroy work that cannot be
-    recovered. So it writes only its own decisions and this merges them.
-
-    Reinstating is not a new concept: `load_overrides` already reads and counts
-    `decision="restored"`. This applies the same idea from the other file.
-
-    Returns (excluded, mask_rejected). `excluded` is a new dict; the caller's is
-    not mutated.
-    """
-    if not os.path.exists(REVIEW_CSV):
-        return excluded, set()
-    out, rejected = dict(excluded), set()
-    restored = dropped = 0
-    with open(REVIEW_CSV, newline="", encoding="utf-8") as fh:
-        for r in csv.DictReader(fh):
-            uid = r.get("scene_uid", "")
-            # Paired: rows for the other marker belong to the other run's
-            # index and would never match a section here; skipping them keeps
-            # the counts honest rather than reporting decisions this run did
-            # not apply.
-            #
-            # Multiplex: there is one frame per scene, so a decision is about
-            # THAT frame whatever marker the reviewer happened to have on
-            # screen when they made it. Filtering by marker here would let two
-            # markers of one section disagree about whether it is excluded,
-            # which is exactly what one frame per scene exists to prevent.
-            other_marker = (LAYOUT != CH.LAYOUT_MULTIPLEX
-                            and r.get("marker") and r["marker"] != marker)
-            if not uid or other_marker:
-                continue
-            if r.get("mask_rejected") == "1":
-                rejected.add(uid)
-            if (r.get("decision") or "") == "restored":
-                if out.pop(uid, None) is not None:
-                    restored += 1
-            elif r.get("excluded") == "1":
-                out[uid] = ("manual", r.get("reason") or "excluded on review")
-                dropped += 1
-    if restored or dropped or rejected:
-        print(f"section_review.csv: {restored} reinstated, {dropped} dropped, "
-              f"{len(rejected)} mask(s) rejected")
-    return out, rejected
-
-
-def frames_for(rows, marker):
-    """The QC rows this run reformats - one frame per SCENE.
-
-    Paired: each marker is its own physical scan, so a run takes the rows for
-    that scan and the other marker's rows belong to the other run.
-
-    Multiplex: one scan carries every marker, so there is a single frame per
-    scene and every scene is reformatted once. `marker_channel` is filled by
-    00_manifest from the file's SECOND channel name, so under multiplex it
-    names at most one of the declared markers - filtering by it would silently
-    reformat nothing for all the others. The overview path is built from each
-    row's own `marker_channel`, not from `marker`, so it still resolves.
-    """
-    if LAYOUT == CH.LAYOUT_MULTIPLEX:
-        return list(rows)
-    return [r for r in rows if r["marker_channel"] == marker]
-
-
-def load_overrides(paths=None, write=False):
+def load_overrides(paths=None):
     """Manual rotation corrections from 04d_rotation_curator.py.
 
     Stored as a correction *on top of* the automatic angle rather than as an
     absolute orientation, so improving the auto-rotation later does not
     invalidate the manual work.
     """
-    paths = paths or marker_paths(DEFAULT_MARKER)
+    paths = paths or marker_paths("AF488")
     path, uid_col = paths["overrides"], paths["uid_col"]
     if not os.path.exists(path):
         return {}, {}
@@ -613,137 +341,34 @@ def load_overrides(paths=None, write=False):
         print(f"  {restored} of {prop} automatic proposals were overruled "
               f"({100 * restored / prop:.0f}%) - see LOGS.md if that rate is high")
 
-    # The canonical list is written by main(), AFTER apply_review() has merged
-    # section_review.csv over this - writing it here published a list that
-    # never carried a Review-mode drop or reinstatement, and every caller of
-    # this loader (04o builds composites) rewrote it. `write=True` is for a
-    # caller that has no review to merge and wants the old behaviour.
-    if write:
-        write_excluded(paths["excluded"], excluded)
+    # Written out separately as the canonical list, so any stage can honour
+    # exclusions without parsing the curator's export format.
+    if excluded:
+        with open(paths["excluded"], "w", newline="", encoding="utf-8") as fh:
+            w = csv.writer(fh)
+            w.writerow(["scene_uid", "decision", "reason"])
+            for uid in sorted(excluded):
+                w.writerow([uid, excluded[uid][0], excluded[uid][1]])
     return out, excluded
-
-
-def write_excluded(path, excluded):
-    """`excluded_sections*.csv`: the canonical exclusion list, one row per
-    section, so any stage can honour it without parsing a curator export.
-    Header-only when there is nothing to exclude: an absent file reads as
-    "never computed", which is a different fact."""
-    rows = [{"scene_uid": uid, "decision": excluded[uid][0], "reason": excluded[uid][1]}
-            for uid in sorted(excluded)]
-    IO.atomic_write_csv(path, rows, ["scene_uid", "decision", "reason"])
-
-
-def wants_masks(is_excl, mask_artifacts, censor, mask_rejected, uid):
-    """(use artifact mask, use censor mask) for one section.
-
-    An excluded section is rendered RAW whatever the flags say. 04o builds its
-    composite unmasked - the blue plane has to equal this picture - and a
-    section on screen so somebody can decide whether to reinstate it cannot
-    be judged with the artifact already painted black.
-    """
-    if is_excl:
-        return False, False
-    return (mask_artifacts and uid not in mask_rejected), censor
-
-
-def select_only(spec, excluded):
-    """The uids a `--only` run may touch, or raise.
-
-    A PARTIAL RUN REPAIRS PICTURES AND NOTHING ELSE. The index is written from
-    the rows a full pass builds, so `--only` writes none - and this guard is
-    what makes that safe rather than merely true. Re-rendering an INDEXED
-    section without rewriting its row would leave the analysis pointing at an
-    image that no longer matches the angle and fill recorded for it, and nothing
-    downstream could detect that. An excluded section has no row to disagree
-    with, so those are the only ones this can touch.
-
-    `spec` is a comma-separated list, or "@path" for one uid per line.
-    """
-    if spec.startswith("@"):
-        with open(spec[1:], encoding="utf-8") as fh:
-            want = {ln.strip() for ln in fh if ln.strip()}
-    else:
-        want = {u.strip() for u in spec.split(",") if u.strip()}
-    if not want:
-        raise SystemExit("--only was given no scene_uids")
-    indexed = want - set(excluded)
-    if indexed:
-        raise SystemExit(
-            "--only refuses %d section(s) that are not excluded, because a "
-            "partial run writes no index and their rows would go stale: %s"
-            % (len(indexed), ", ".join(sorted(indexed)[:10])))
-    return want
-
-
-def regions_from_seeds(plate_dir):
-    """{plate_id: [region, ...]} from `<plate_dir>/seeds.csv`, or `{}` when
-    there is no seeds.csv to read.
-
-    regions came from a plates.csv column that only the raw extraction set
-    has. seeds.csv carries the same information in every set, under an
-    identical header, so it is derived rather than required.
-    """
-    regions_of = {}
-    try:
-        with open(os.path.join(plate_dir, "seeds.csv"), newline="",
-                  encoding="utf-8") as fh:
-            for s in csv.DictReader(fh):
-                regions_of.setdefault(s["plate_id"], []).append(s.get("region", ""))
-    except OSError:
-        pass
-    return regions_of
-
-
-def plate_regions(plate_row, regions_of):
-    """The `regions` value for one plates.csv row.
-
-    `plate_row["regions"]` when the plate set's own plates.csv carries that
-    column (the raw extraction set) - a no-op for anyone still pointed at
-    `plates`. Otherwise the seeds-derived list for that plate_id: sorted and
-    deduplicated, so the value is stable rather than dependent on set
-    iteration order or seeds.csv row order.
-    """
-    return (plate_row.get("regions")
-            or ";".join(sorted(set(
-                r for r in regions_of.get(plate_row["plate_id"], []) if r))))
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--preview", type=int, default=8)
-    # The pass that was curated first; see DEFAULT_MARKER.
-    _default = DEFAULT_MARKER
-    ap.add_argument("--marker", default=_default, choices=MARKERS,
-                    help=f"which marker to process (default {_default})")
+    ap.add_argument("--marker", default="AF488", choices=["AF488", "AF568"],
+                    help="AF488 = PCNA (default), AF568 = pERK")
     ap.add_argument("--censor", action="store_true",
                     help="carry 04j clipped-pixel censor masks through the geometry")
     ap.add_argument("--mask-artifacts", action="store_true",
                     help="blank 04g artifact pixels in the reformatted output")
     ap.add_argument("--apply-overrides", action="store_true",
                     help="apply manual rotations from rotation_overrides.csv")
-    ap.add_argument("--render-excluded", action="store_true",
-                    help="also render excluded sections, so they can be LOOKED at "
-                         "in the ROI curator's Review mode. They are never added "
-                         "to the index, so nothing downstream can pick them up.")
-    ap.add_argument("--only", metavar="UIDS",
-                    help="re-render just these scene_uids (comma-separated, or @file "
-                         "for one per line) and write NO index. Every uid must be an "
-                         "excluded one: a partial run cannot produce a complete "
-                         "index, and re-rendering an INDEXED section without "
-                         "rewriting the index would leave the analysis pointing at "
-                         "an image that no longer matches its row. Repairs the "
-                         "look-at-only PNGs, nothing else")
     args = ap.parse_args()
     paths = marker_paths(args.marker)
     overrides, excluded = load_overrides(paths) if args.apply_overrides else ({}, {})
-    mask_rejected = set()
-    if args.apply_overrides:
-        excluded, mask_rejected = apply_review(excluded, args.marker)
-        # After the merge, unconditionally: header-only means "nothing excluded".
-        write_excluded(paths["excluded"], excluded)
 
     sec_dir = paths["sections"]
-    plate_dir = os.path.join(REFORMAT_DIR, AT.reformatted_dir(CONFIG))
+    plate_dir = os.path.join(REFORMAT_DIR, "plates")
     os.makedirs(sec_dir, exist_ok=True)
     os.makedirs(plate_dir, exist_ok=True)
 
@@ -752,13 +377,6 @@ def main():
     with open(os.path.join(PLATE_DIR, "plates.csv"), newline="", encoding="utf-8") as fh:
         plates = list(csv.DictReader(fh))
     ok = 0
-    regions_of = regions_from_seeds(PLATE_DIR)
-
-    # A --only run repairs section pictures; the plates are not sections and
-    # rewriting them would be a side effect nobody asked for, even though the
-    # bytes would come out the same.
-    if args.only:
-        plates = []
     for p in plates:
         # Plates are Nissl - cell bodies DARK on white paper - so they are
         # inverted into DAPI polarity and then treated by the dark-background
@@ -771,58 +389,23 @@ def main():
         Image.fromarray(img).save(os.path.join(plate_dir, p["plate_id"] + ".png"))
         np.save(os.path.join(plate_dir, p["plate_id"] + "_mask.npy"), mask)
         rows.append({"kind": "plate", "id": p["plate_id"], "angle": round(angle, 1),
-                     "fill": round(float(mask.mean()), 4),
-                     "regions": plate_regions(p, regions_of)})
+                     "fill": round(float(mask.mean()), 4), "regions": p["regions"]})
         ok += 1
     print(f"plates reformatted: {ok}/{len(plates)}")
 
     with open(QC_CSV, newline="", encoding="utf-8") as fh:
-        secs = frames_for(csv.DictReader(fh), args.marker)
-
-    # A PARTIAL RUN REPAIRS PICTURES AND NOTHING ELSE.
-    #
-    # The index is written from `rows`, which a partial run only half fills, so
-    # --only must not reach it - and the guard below is what makes that safe
-    # rather than merely true. Re-rendering an INDEXED section without rewriting
-    # its row would leave the analysis pointing at an image that no longer
-    # matches the angle and fill recorded for it, which nothing downstream could
-    # detect. Excluded sections have no row to disagree with, so they are the
-    # only ones this can touch.
-    if args.only:
-        want = select_only(args.only, excluded)
-        secs = [r for r in secs if r["scene_uid"] in want]
-        gone = want - {r["scene_uid"] for r in secs}
-        if gone:
-            print("--only: %d uid(s) not in %s for this marker, skipped: %s"
-                  % (len(gone), os.path.basename(QC_CSV), ", ".join(sorted(gone)[:5])))
-        print(f"--only: re-rendering {len(secs)} excluded section(s), no index write")
-        args.render_excluded = True
+        secs = [r for r in csv.DictReader(fh) if r["marker_channel"] == args.marker]
     ok = 0
     n_excluded = 0
-    n_rendered = 0
     lost = []
     no_mask = []
     for i, r in enumerate(secs):
-        # Excluded sections are kept out of the INDEX rather than filtered
-        # later, so nothing downstream can accidentally pick them up.
-        #
-        # Whether their image is rendered at all is a separate question, and it
-        # used to be answered by accident. PCNA was reformatted and excluded
-        # afterwards, so all 1,381 have a PNG; pERK exclusions were applied
-        # first, so 473 have none - which left the Review mode able to show an
-        # excluded PCNA section in the analysis frame and an excluded pERK one
-        # only as the original scan. Same pipeline, different order, and the
-        # asymmetry fell entirely on one channel.
-        #
-        # --render-excluded renders them too. It never adds an index row, so
-        # nothing downstream can pick them up either way: the image exists to be
-        # LOOKED AT, and being in reformatted/ has never been what puts a
-        # section into the analysis.
-        is_excl = r["scene_uid"] in excluded
-        if is_excl:
+        # Excluded sections are dropped here rather than filtered later, so
+        # nothing downstream can accidentally pick them up: they simply do not
+        # appear in reformatted/ or in the index.
+        if r["scene_uid"] in excluded:
             n_excluded += 1
-            if not args.render_excluded:
-                continue
+            continue
         src = os.path.join(OVERVIEW_DIR, r["animal"], r["marker_channel"],
                            r["scene_uid"] + "_DAPI.png")
         # A section that was NOT excluded must survive, or it must be reported.
@@ -833,18 +416,9 @@ def main():
             lost.append((r["scene_uid"], "overview PNG missing"))
             continue
         extra, flip = overrides.get(r["scene_uid"], (0.0, False))
-        # A rejected mask means this section reformats UNMASKED even with
-        # --mask-artifacts on. The mask file is left alone, so the decision is
-        # reversible by deleting one row of section_review.csv.
-        use_art, use_cen = wants_masks(is_excl, args.mask_artifacts, args.censor,
-                                       mask_rejected, r["scene_uid"])
-        art = load_artifact(r["scene_uid"], (WORK_SIZE, WORK_SIZE)) if use_art else None
-        cen = load_censor(r["scene_uid"], (WORK_SIZE, WORK_SIZE)) if use_cen else None
-        # "no mask was built for this section" and "its mask was rejected on
-        # review" are different facts, and reporting the second as the first
-        # would read as a gap in 04g rather than as a decision someone made.
-        if (args.mask_artifacts and art is None and not is_excl
-                and r["scene_uid"] not in mask_rejected):
+        art = load_artifact(r["scene_uid"], (WORK_SIZE, WORK_SIZE)) if args.mask_artifacts else None
+        cen = load_censor(r["scene_uid"], (WORK_SIZE, WORK_SIZE)) if args.censor else None
+        if args.mask_artifacts and art is None:
             no_mask.append(r["scene_uid"])
         out = reformat(src, light_background=False, extra_angle=extra, flip=flip,
                        artifact=art, censor=cen)
@@ -854,17 +428,10 @@ def main():
         img, mask, angle, amask, cmask = out
         Image.fromarray(img).save(os.path.join(sec_dir, r["scene_uid"] + ".png"))
         np.save(os.path.join(sec_dir, r["scene_uid"] + "_mask.npy"), mask)
-        # No mask products for an excluded section: it is a picture to look at,
-        # and 05c reads these .npy files as "this section is in the analysis".
-        if use_art:
+        if args.mask_artifacts:
             np.save(os.path.join(sec_dir, r["scene_uid"] + "_artifact.npy"), amask)
-        if use_cen:
+        if args.censor:
             np.save(os.path.join(sec_dir, r["scene_uid"] + "_censor.npy"), cmask)
-        # THE INDEX IS WHAT PUTS A SECTION INTO THE ANALYSIS, and an excluded
-        # one must never enter it - however good its picture looks.
-        if is_excl:
-            n_rendered += 1
-            continue
         rows.append({"kind": "section", "id": r["scene_uid"], "angle": round(angle, 1),
                      "fill": round(float(mask.mean()), 4),
                      "animal": r["animal"], "section_order": r["section_order"],
@@ -892,16 +459,13 @@ def main():
             print(f"    {uid}")
         print("!" * 74)
 
-    if args.only:
-        print()
-        print("=" * 72)
-        print(f"--only: rendered {n_rendered} excluded section(s); index left alone")
-        return
-
     out_csv = paths["index"]
     keys = ["kind", "id", "angle", "fill", "animal", "section_order", "regions",
             "manual_rotation", "manual_flip"]
-    IO.atomic_write_csv(out_csv, rows, keys)
+    with open(out_csv, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=keys, extrasaction="ignore")
+        w.writeheader()
+        w.writerows(rows)
 
     if args.preview:
         preview(rows, sec_dir, plate_dir, args.preview)
@@ -950,9 +514,7 @@ def preview(rows, sec_dir, plate_dir, n):
     plates = [r for r in rows if r["kind"] == "plate"][:n]
     secs = [r for r in rows if r["kind"] == "section"]
     secs = secs[:: max(1, len(secs) // n)][:n]
-    # squeeze=False: with n == 1 the axes array comes back 1-D and every
-    # ax[row, col] below raises.
-    fig, ax = plt.subplots(2, n, figsize=(2.1 * n, 4.6), squeeze=False)
+    fig, ax = plt.subplots(2, n, figsize=(2.1 * n, 4.6))
     for k, p in enumerate(plates):
         ax[0, k].imshow(np.asarray(Image.open(os.path.join(plate_dir, p["id"] + ".png"))), cmap="gray")
         ax[0, k].set_title(f"{p['id']}\n{p['angle']:.0f} deg", fontsize=7)

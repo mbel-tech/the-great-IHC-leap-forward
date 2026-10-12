@@ -53,7 +53,6 @@ Run:  python 04g_artifact_mask.py --preview 8     # look before committing
       python 04g_artifact_mask.py
 """
 
-import sys
 import argparse
 import csv
 import importlib.util
@@ -68,38 +67,17 @@ _SPEC = importlib.util.spec_from_file_location(
     "reformat_mod", os.path.join(os.path.dirname(os.path.abspath(__file__)), "04a_reformat.py"))
 _RF = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(_RF)
-
-_lsio = importlib.util.spec_from_file_location(
-    "_lsio", os.path.join(os.path.dirname(os.path.abspath(__file__)), "ls_io.py"))
-IO = importlib.util.module_from_spec(_lsio)
-_lsio.loader.exec_module(IO)
-
 tissue_mask, WORK = _RF.tissue_mask, _RF.WORK_SIZE
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
-# ls_config resolves LS_CONFIG, applies the defaults and validates once for
-# the whole process. Imported, not re-implemented: this block used to be four
-# lines copy-pasted into every stage.
-from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
-import ls_channels as CH  # noqa: E402
-
-# The markers this study measures, in declared order. ls_channels is the
-# single source of that list; naming a fluorophore here would pin the stage
-# to one study.
-MARKERS = list(CH.marker_names(CONFIG))
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.json")
+with open(CONFIG_PATH, encoding="utf-8") as _fh:
+    CONFIG = json.load(_fh)
 
 OUT_ROOT = CONFIG["out_root"]
 OVERVIEW_DIR = os.path.join(OUT_ROOT, "overviews")
 REFORMAT_DIR = os.path.join(OUT_ROOT, "reformatted")
 QC_CSV = os.path.join(OUT_ROOT, "qc", "focus.csv")
 MASK_DIR = os.path.join(OUT_ROOT, "artifacts")
-# summary_row()'s columns, pinned so an empty run still writes a header.
-SUMMARY_KEYS = ["scene_uid", "animal", "section_order", "excluded", "tissue_mm2",
-                "n_compact", "n_elongated", "compact_mm2", "elongated_mm2",
-                "artifact_mm2", "artifact_pct_of_tissue", "measurable_mm2",
-                "saturated_fraction", "saturated_fraction_raw"]
 REPORT_DIR = os.path.join(OUT_ROOT, "qc", "artifacts")
 
 UM_PX = 5.20e-3
@@ -264,86 +242,17 @@ def load_tissue(im):
         (im.shape[1], im.shape[0]), Image.NEAREST)) > 127
 
 
-def summary_row(uid, r, recs, tissue_mm2, satur, satur_raw):
-    """One artifact_summary row. Pure, so the columns can be pinned by a test."""
-    a_c = sum(x["area_mm2"] for x in recs if x["label"] == LBL_COMPACT)
-    a_e = sum(x["area_mm2"] for x in recs if x["label"] == LBL_ELONGATED)
-    return {
-        "scene_uid": uid, "animal": r["animal"], "section_order": r["section_order"],
-        # Which rows describe the analysis set and which describe sections
-        # that were thrown out. Without it a consumer joining on this file
-        # would silently gain the rejects.
-        "excluded": r.get("excluded", 0),
-        "tissue_mm2": round(tissue_mm2, 3),
-        "n_compact": sum(1 for x in recs if x["label"] == LBL_COMPACT),
-        "n_elongated": sum(1 for x in recs if x["label"] == LBL_ELONGATED),
-        "compact_mm2": round(a_c, 4), "elongated_mm2": round(a_e, 4),
-        "artifact_mm2": round(a_c + a_e, 4),
-        "artifact_pct_of_tissue": round(100 * (a_c + a_e) / max(tissue_mm2, 1e-9), 3),
-        # Tissue that survives masking - the denominator any later density
-        # should use.
-        "measurable_mm2": round(tissue_mm2 - a_c - a_e, 3),
-        # Channel-specific and NOT masked here; carried so the two can be
-        # joined later without recomputing. Both columns from focus.csv:
-        # `saturated_fraction` is after the tile-field correction and
-        # undercounts clipping by about 2x; `_raw` is measured before it and is
-        # the one to judge on. The old column stays so nothing reading it breaks.
-        "saturated_fraction": satur.get(uid, ""),
-        "saturated_fraction_raw": satur_raw.get(uid, ""),
-    }
-
-
-def run_plan(preview, collected):
-    """(keep processing, write masks). --preview N is a LOOK: it stops once N
-    overlays are collected and writes nothing to MASK_DIR on the way."""
-    if not preview:
-        return True, True
-    return collected < preview, False
-
-def summary_csv(marker):
-    """This stage's own per-marker summary. 04a's naming rule, 04g's directory.
-
-    Not from 04a.marker_paths - that table is about the reformat's files, and
-    this one lives in MASK_DIR - but the RULE is 04a's and is taken from it:
-    the unsuffixed name belongs to DEFAULT_MARKER, and under `multiplex` one
-    scan carries every marker so every marker answers with the unsuffixed
-    name. This used to test the literal "AF488", which agreed with 04a only
-    for the live study.
-    """
-    if _RF.LAYOUT == CH.LAYOUT_MULTIPLEX or marker == _RF.DEFAULT_MARKER:
-        return os.path.join(MASK_DIR, "artifact_summary.csv")
-    return os.path.join(MASK_DIR, f"artifact_summary_{marker}.csv")
-
-
-def build_parser():
-    """The parser, built separately so a test can read the marker default off
-    it. The default is not a detail: it selects which pass gets masked."""
+def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--preview", type=int, default=0, help="render N overlays and stop")
     ap.add_argument("--limit", type=int, default=0)
-    # 04a and 04g have always defaulted to the SECOND marker (AF488 = PCNA):
-    # it is the pass that was curated first. Kept rather than adopting the
-    # first-declared default, because this default selects which sections get
-    # written and a silent flip would process the wrong pass. Pinned in
-    # tests/test_reformat_layout.py, alongside 04a's, and read off the built
-    # parser rather than from the help text - a reviewer flipped this to
-    # MARKERS[0] and the whole suite stayed green.
-    _default = MARKERS[1] if len(MARKERS) > 1 else (MARKERS[0] if MARKERS else None)
-    ap.add_argument("--marker", default=_default, choices=MARKERS,
-                    help=f"which marker to process (default {_default})")
-    ap.add_argument("--include-excluded", action="store_true",
-                    help="also mask sections in excluded_sections_<marker>.csv, so "
-                         "they can be reviewed with a mask like every other "
-                         "section. They are marked excluded=1 in the summary.")
-    return ap
-
-
-def main():
-    args = build_parser().parse_args()
+    ap.add_argument("--marker", default="AF488", choices=["AF488", "AF568"],
+                    help="AF488 = PCNA (default), AF568 = pERK")
+    args = ap.parse_args()
     os.makedirs(MASK_DIR, exist_ok=True)
     os.makedirs(REPORT_DIR, exist_ok=True)
 
-    chan, satur, satur_raw = {}, {}, {}
+    chan, satur = {}, {}
     with open(QC_CSV, newline="", encoding="utf-8") as fh:
         for r in csv.DictReader(fh):
             chan[r["scene_uid"]] = r["marker_channel"]
@@ -351,66 +260,16 @@ def main():
                 satur[r["scene_uid"]] = float(r["saturated_fraction"])
             except (KeyError, ValueError):
                 pass
-            try:
-                satur_raw[r["scene_uid"]] = float(r["saturated_fraction_raw"])
-            except (KeyError, ValueError):
-                pass
 
-    # 04a WROTE these files, so 04a says what they are called. This used to
-    # rebuild the names against the literal "AF488", which agreed with 04a
-    # only because AF488 happens to be this study's DEFAULT_MARKER: for
-    # markers ['Mk1', 'Mk2'], 04a writes Mk2's index as reformat_index.csv
-    # while this read reformat_index_Mk2.csv and failed - or worse, under a
-    # study whose second marker is called AF488, read the other pass.
-    paths = _RF.marker_paths(args.marker)
-    index_csv = paths["index"]
+    index_csv = (os.path.join(REFORMAT_DIR, "reformat_index.csv") if args.marker == "AF488"
+                 else os.path.join(REFORMAT_DIR, f"reformat_index_{args.marker}.csv"))
     with open(index_csv, newline="", encoding="utf-8") as fh:
-        index = [{"id": r["id"], "animal": r["animal"],
-                  "section_order": r["section_order"], "excluded": 0}
-                 for r in csv.DictReader(fh) if r["kind"] == "section"]
-
-    # EXCLUDED SECTIONS GET A MASK TOO, on request.
-    #
-    # They are not in the index - that is what excluded means - so this stage
-    # never saw them, and the ROI curator's Review mode could offer a
-    # with/without-mask comparison for a kept section and nothing for a rejected
-    # one. Reviewing an exclusion is exactly when you want to know whether an
-    # artifact is what drove it.
-    #
-    # The identity comes from focus.csv, the only table that covers every
-    # scanned section; the index does not have them by construction. Masking one
-    # changes nothing downstream: 04a reads the mask only for sections it
-    # reformats, and these are not in its index either.
-    if args.include_excluded:
-        exc_csv = paths["excluded"]
-        have = {r["id"] for r in index}
-        meta = {}
-        with open(QC_CSV, newline="", encoding="utf-8") as fh:
-            for r in csv.DictReader(fh):
-                meta[r["scene_uid"]] = r
-        n_add = 0
-        if os.path.exists(exc_csv):
-            with open(exc_csv, newline="", encoding="utf-8") as fh:
-                for r in csv.DictReader(fh):
-                    uid = r["scene_uid"]
-                    m = meta.get(uid)
-                    if uid in have or not m:
-                        continue
-                    index.append({"id": uid, "animal": m["animal"],
-                                  "section_order": m["section_order"],
-                                  "excluded": 1})
-                    n_add += 1
-        print(f"  including {n_add} excluded section(s) from "
-              f"{os.path.basename(exc_csv)}")
-
+        index = [r for r in csv.DictReader(fh) if r["kind"] == "section"]
     if args.limit:
         index = index[: args.limit]
 
     rows, previews = [], []
     for i, r in enumerate(index):
-        go, write_masks = run_plan(args.preview, len(previews))
-        if not go:
-            break
         uid = r["id"]
         src = os.path.join(OVERVIEW_DIR, r["animal"], chan.get(uid, args.marker), uid + "_DAPI.png")
         if not os.path.exists(src):
@@ -423,20 +282,32 @@ def main():
 
         # Written per section rather than batched: this drive has dropped writes
         # mid-run before, and a partial run should cost minutes, not the lot.
-        if write_masks:
-            with IO.atomic_save(os.path.join(MASK_DIR, uid + "_artifact.png")) as tmp:
-                Image.fromarray(mask).save(tmp, format="PNG")
+        Image.fromarray(mask).save(os.path.join(MASK_DIR, uid + "_artifact.png"))
 
         tissue_mm2 = float(tis.sum()) * UM_PX ** 2
-        rows.append(summary_row(uid, r, recs, tissue_mm2, satur, satur_raw))
+        a_c = sum(x["area_mm2"] for x in recs if x["label"] == LBL_COMPACT)
+        a_e = sum(x["area_mm2"] for x in recs if x["label"] == LBL_ELONGATED)
+        rows.append({
+            "scene_uid": uid, "animal": r["animal"], "section_order": r["section_order"],
+            "tissue_mm2": round(tissue_mm2, 3),
+            "n_compact": sum(1 for x in recs if x["label"] == LBL_COMPACT),
+            "n_elongated": sum(1 for x in recs if x["label"] == LBL_ELONGATED),
+            "compact_mm2": round(a_c, 4), "elongated_mm2": round(a_e, 4),
+            "artifact_mm2": round(a_c + a_e, 4),
+            "artifact_pct_of_tissue": round(100 * (a_c + a_e) / max(tissue_mm2, 1e-9), 3),
+            # Tissue that survives masking - the denominator any later density
+            # should use.
+            "measurable_mm2": round(tissue_mm2 - a_c - a_e, 3),
+            # Channel-specific and NOT masked here; carried so the two can be
+            # joined later without recomputing.
+            "saturated_fraction": satur.get(uid, ""),
+        })
         if args.preview and len(previews) < args.preview and recs:
             previews.append((uid, im, tis, mask))
         if (i + 1) % 100 == 0:
             print(f"\r  {i + 1}/{len(index)}", end="")
     print(f"\r  masked {len(rows)}/{len(index)} sections        ")
-    # A preview that found no artifact in its first few sections reports; only
-    # a full run with nothing masked is a missing-input error.
-    if not rows and not args.preview:
+    if not rows:
         raise SystemExit("nothing masked - run 04a_reformat.py first")
 
     if previews:
@@ -444,8 +315,12 @@ def main():
         if args.preview:
             return
 
-    out = summary_csv(args.marker)
-    IO.atomic_write_csv(out, rows, SUMMARY_KEYS)
+    out = os.path.join(MASK_DIR, "artifact_summary.csv" if args.marker == "AF488"
+                       else f"artifact_summary_{args.marker}.csv")
+    with open(out, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
+        w.writeheader()
+        w.writerows(rows)
 
     pct = np.array([r["artifact_pct_of_tissue"] for r in rows])
     aff = sum(1 for r in rows if r["n_compact"] or r["n_elongated"])

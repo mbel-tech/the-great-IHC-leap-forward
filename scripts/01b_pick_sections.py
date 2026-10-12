@@ -12,7 +12,6 @@ Run:  python 01b_pick_sections.py            # ~72 sections
       python 01b_pick_sections.py --n 120
 """
 
-import sys
 import argparse
 import csv
 import json
@@ -20,28 +19,15 @@ import os
 import random
 from collections import defaultdict
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
-# ls_config resolves LS_CONFIG, applies the defaults and validates once for
-# the whole process. Imported, not re-implemented: this block used to be four
-# lines copy-pasted into every stage.
-from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
-import ls_naming as NM  # noqa: E402
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.json")
+with open(CONFIG_PATH, encoding="utf-8") as _fh:
+    CONFIG = json.load(_fh)
 
 SOURCE_DIR = CONFIG["source_dir"]
 OUT_ROOT = CONFIG["out_root"]
 OUT_CSV = os.path.join(OUT_ROOT, "qc", "tilefield_sample.csv")
 SEED = 20260811
 
-
-def pick_files(files, n_files):
-    """`n_files` of `files`, evenly spread. Sampling at the CENTRE of each
-    stride, so one file from a series is its middle slide - not the first,
-    which is what `int(i * stride)` always returned for i = 0 and left every
-    animal's tile-field sample on its most rostral slide."""
-    stride = len(files) / n_files
-    return [files[min(int((i + 0.5) * stride), len(files) - 1)] for i in range(n_files)]
 
 def main():
     ap = argparse.ArgumentParser()
@@ -81,7 +67,8 @@ def main():
             by_file[r["file"]].append(r)
         files = sorted(by_file)
         n_files = max(1, min(len(files), -(-per_group // args.scenes_per_file)))
-        chosen_files = pick_files(files, n_files)
+        stride = len(files) / n_files
+        chosen_files = [files[min(int(i * stride), len(files) - 1)] for i in range(n_files)]
 
         for fname in chosen_files:
             scenes = sorted(by_file[fname], key=lambda r: r["section_order"])
@@ -111,7 +98,7 @@ def main():
         by_animal[r["animal"]] += 1
     print(f"picked {len(unique)} sections from {len({r['file'] for r in unique})} files")
     print(f"  per marker: {dict(by_marker)}")
-    print(f"  per animal: {dict(sorted(by_animal.items(), key=lambda kv: NM.natural_key(kv[0])))}")
+    print(f"  per animal: {dict(sorted(by_animal.items(), key=lambda kv: int(kv[0][2:])))}")
     print(f"wrote {OUT_CSV}")
 
 

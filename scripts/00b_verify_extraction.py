@@ -15,7 +15,6 @@ Run:  python 00b_verify_extraction.py
 
 import csv
 import glob
-import importlib.util
 import json
 import os
 import sys
@@ -24,26 +23,13 @@ import zipfile
 import zlib
 from collections import defaultdict
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
-# ls_config resolves LS_CONFIG, applies the defaults and validates once for
-# the whole process. Imported, not re-implemented: this block used to be four
-# lines copy-pasted into every stage.
-from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.json")
+with open(CONFIG_PATH, encoding="utf-8") as _fh:
+    CONFIG = json.load(_fh)
 
 SOURCE_DIR = CONFIG["source_dir"]
 OUT_ROOT = CONFIG["out_root"]
 QC_DIR = os.path.join(OUT_ROOT, "qc")
-
-_lsio = importlib.util.spec_from_file_location(
-    "_lsio", os.path.join(os.path.dirname(os.path.abspath(__file__)), "ls_io.py"))
-IO = importlib.util.module_from_spec(_lsio)
-_lsio.loader.exec_module(IO)
-
-# check()'s columns, pinned: an inventory with nothing in it must still
-# leave a file with a header rather than crash on rows[0].
-STATUS_KEYS = ["file", "zip", "expected_bytes", "actual_bytes", "status", "crc_ok"]
 
 WATCH_INTERVAL_S = 60
 CRC_CHUNK = 1 << 24
@@ -180,7 +166,10 @@ def main():
 
         os.makedirs(QC_DIR, exist_ok=True)
         out = os.path.join(QC_DIR, "extraction_status.csv")
-        IO.atomic_write_csv(out, rows, STATUS_KEYS)
+        with open(out, "w", newline="", encoding="utf-8") as fh:
+            writer = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
+            writer.writeheader()
+            writer.writerows(rows)
         print(f"  wrote {out}")
 
         if not watch or not (counts.get("missing") or counts.get("in_progress")):

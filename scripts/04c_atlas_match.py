@@ -68,40 +68,22 @@ Run:  python 04c_atlas_match.py
       python 04c_atlas_match.py --animal LS45 --variants 12
 """
 
-import sys
 import argparse
 import csv
-import importlib.util
 import glob
 import json
 import os
 
 import numpy as np
-
-_lsio = importlib.util.spec_from_file_location(
-    "_lsio", os.path.join(os.path.dirname(os.path.abspath(__file__)), "ls_io.py"))
-IO = importlib.util.module_from_spec(_lsio)
-_lsio.loader.exec_module(IO)
-
 from scipy import ndimage
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
-# ls_config resolves LS_CONFIG, applies the defaults and validates once for
-# the whole process. Imported, not re-implemented: this block used to be four
-# lines copy-pasted into every stage.
-from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
-import ls_atlas as AT  # noqa: E402
-import ls_naming as NM  # noqa: E402
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.json")
+with open(CONFIG_PATH, encoding="utf-8") as _fh:
+    CONFIG = json.load(_fh)
 
 OUT_ROOT = CONFIG["out_root"]
 REFORMAT_DIR = os.path.join(OUT_ROOT, "reformatted")
-# THE EXTRACTION SET, deliberately - not the study's configured set. See
-# 04b_atlas_match.py's comment: 04c is measured to fail on this data and kept
-# as evidence, and re-pointing it at a different plate set would invalidate
-# that measurement.
-PLATE_DIR = AT.plate_dir(CONFIG, set_name=AT.EXTRACTED)
+PLATE_DIR = os.path.join(OUT_ROOT, "atlas", "plates")
 REPORT_DIR = os.path.join(OUT_ROOT, "qc", "atlasmatch")
 
 TOP_K = 4
@@ -256,7 +238,7 @@ def main():
         by_animal.setdefault(r["animal"], []).append(r)
 
     proposals = []
-    for animal, group in sorted(by_animal.items(), key=lambda kv: NM.natural_key(kv[0])):
+    for animal, group in sorted(by_animal.items(), key=lambda kv: int(kv[0][2:])):
         group.sort(key=lambda r: int(r["section_order"]))
         masks, keep = [], []
         for r in group:
@@ -296,10 +278,11 @@ def main():
               f"{plate_ids[int(path.min())]} -> {plate_ids[int(path.max())]}  "
               f"mean {chosen.mean():.3f}  flipped {int(flipped.sum())}/{len(keep)}")
 
-    if not proposals:
-        raise SystemExit("no sections matched - is reformat_index.csv empty? Run 04a_reformat.py first")
     out = os.path.join(REPORT_DIR, "atlas_proposals_v2.csv")
-    IO.atomic_write_csv(out, proposals, list(proposals[0].keys()))
+    with open(out, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=list(proposals[0].keys()))
+        w.writeheader()
+        w.writerows(proposals)
 
     scores = [p["proposed_score"] for p in proposals]
     locals_ = [p["local_best_score"] for p in proposals]

@@ -16,7 +16,6 @@ Run:  python 01d_contactsheets.py
       python 01d_contactsheets.py --cols 6 --thumb 260
 """
 
-import sys
 import argparse
 import csv
 import html
@@ -26,14 +25,9 @@ from collections import defaultdict
 
 from PIL import Image, ImageDraw, ImageFont
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
-# ls_config resolves LS_CONFIG, applies the defaults and validates once for
-# the whole process. Imported, not re-implemented: this block used to be four
-# lines copy-pasted into every stage.
-from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
-import ls_naming as NM  # noqa: E402
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.json")
+with open(CONFIG_PATH, encoding="utf-8") as _fh:
+    CONFIG = json.load(_fh)
 
 OUT_ROOT = CONFIG["out_root"]
 OVERVIEW_DIR = os.path.join(OUT_ROOT, "overviews")
@@ -120,7 +114,6 @@ def load_qc():
                 r[key] = float(r[key])
             except (TypeError, ValueError):
                 r[key] = 0.0
-        r["saturated_fraction_raw"] = saturation(r)
         r["section_order"] = int(r["section_order"] or 0)
         r["slide"] = int(r["slide"] or 0)
     return rows
@@ -134,30 +127,6 @@ def quantile(values, q):
     return ordered[idx]
 
 
-def saturation(row):
-    """The clipped fraction to judge a section on.
-
-    focus.csv carries two: `saturated_fraction` is measured after the tile-field
-    correction, `saturated_fraction_raw` before it. Clipping happens in the
-    camera, before any correction exists, so the raw column is the one that
-    says whether pixels were lost - the corrected one undercounts by about 2x,
-    because flattening the field pulls clipped values back under the ceiling
-    and they stop looking clipped. Older focus.csv files have only the
-    corrected column, and a row from one still needs a number, so that is the
-    fallback rather than an error. Accepts either strings from the CSV or
-    floats already parsed.
-    """
-    for key in ("saturated_fraction_raw", "saturated_fraction"):
-        v = row.get(key)
-        if v is None or v == "":
-            continue
-        try:
-            return float(v)
-        except (TypeError, ValueError):
-            continue
-    return 0.0
-
-
 def flag(row, focus_floor):
     """Short QC tag, or empty when the section is fine."""
     tags = []
@@ -165,7 +134,7 @@ def flag(row, focus_floor):
         tags.append("EMPTY")
     if row["focus_score"] < focus_floor:
         tags.append("BLUR?")
-    if saturation(row) > MAX_SATURATED_FRACTION:
+    if row["saturated_fraction"] > MAX_SATURATED_FRACTION:
         tags.append("SAT")
     return "/".join(tags)
 
@@ -260,7 +229,7 @@ def build_gallery(by_key, sheets, kind):
         f"Showing <b>{kind}</b>. Red border = QC flag.</p>",
     ]
 
-    for (animal, marker) in sorted(by_key, key=lambda k: (NM.natural_key(k[0]), k[1])):
+    for (animal, marker) in sorted(by_key, key=lambda k: (int(k[0][2:]), k[1])):
         rows = sorted(by_key[(animal, marker)], key=lambda r: r["section_order"])
         focus_floor = quantile([r["focus_score"] for r in rows], FOCUS_LOW_QUANTILE)
         parts.append(f"<h2>{html.escape(animal)} &mdash; {html.escape(marker)} "
@@ -306,7 +275,7 @@ def main():
         by_key[(r["animal"], r["marker_channel"])].append(r)
 
     sheets = []
-    for (animal, marker), group in sorted(by_key.items(), key=lambda kv: (NM.natural_key(kv[0][0]), kv[0][1])):
+    for (animal, marker), group in sorted(by_key.items(), key=lambda kv: (int(kv[0][0][2:]), kv[0][1])):
         written = build_sheet(group, animal, marker, args.kind, args.cols, args.thumb, SHEET_DIR)
         sheets.extend(written)
         print(f"  {animal:<7} {marker:<6} {len(group):>4} sections -> {len(written)} page(s)")

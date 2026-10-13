@@ -43,6 +43,21 @@ except ImportError:                                         # pragma: no cover
     # validator skips the channel rules when this is None, as it always has.
     ls_channels = None
 
+try:
+    import atlas_registry
+except ImportError:                                         # pragma: no cover
+    # Same reasoning as ls_channels above: a sibling module, and a hard
+    # dependency would turn "the atlas list could not be loaded" into "no stage
+    # can start".
+    atlas_registry = None
+
+#: The built-in atlases, from the registry that owns the concept, so the
+#: settings dialog's dropdown, the generated docs and `ls_atlas.source()` are
+#: one list. A study's own atlases (the `atlases` block) are judged by the
+#: registry at use; this is the list a fresh study is offered.
+ATLAS_SOURCES = (tuple(atlas_registry.BUILTIN) if atlas_registry
+                 else ("salmon", "wullimann1996"))
+
 #: The two acquisition layouts. From ls_channels, which owns the concept, so
 #: the spec's `choices` and the validator agree with the module that judges
 #: them. The literal is the fallback for the import above having failed, where
@@ -457,7 +472,7 @@ SPEC = [
     # ---- atlas -----------------------------------------------------------
     Key("atlas_source", "str",
         "Which atlas the run uses: salmon (the default) or wullimann1996.",
-        default="salmon", label="Atlas", choices=["salmon", "wullimann1996"],
+        default="salmon", label="Atlas", choices=list(ATLAS_SOURCES),
         note="salmon takes its plates from atlas_pdf and atlas_plate_set. "
              "wullimann1996 is the zebrafish cross-section atlas: 04w builds "
              "its plate set (plates_wullimann), 04x turns each plate's region "

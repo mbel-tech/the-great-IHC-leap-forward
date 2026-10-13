@@ -284,6 +284,13 @@ NOT_LISTED = {
                           "fail; the ROI curator assigns plates by hand.",
     "04e_register_elastix.py": "elastix registration is QC only - nothing "
                                "downstream reads it (methods section 9).",
+    "01i_multisection_review.py": "hand-run review tooling for scenes that may hold "
+                                  "more than one brain section: finds candidates, "
+                                  "and --fit calibrates the rule on the verdicts. "
+                                  "Not part of the app's run order.",
+    "01j_build_curator.py": "builds the HTML page where those candidates are "
+                            "adjudicated (reads back through 01i --fit). Run by "
+                            "hand alongside 01i; not part of the app's run order.",
 }
 
 REF = "reformatted/"

@@ -29,6 +29,7 @@ import hashlib
 import os
 import re
 
+import atlas_registry as REG
 import ls_io as IO
 
 # What `04a_atlas_extract.py` writes, and the fallback when a study declares
@@ -70,46 +71,60 @@ _TRAILING_INT = re.compile(r"(\d+)\s*$")
 _SHAPE_RE = re.compile(r"^(\d+)x(\d+)$")
 
 
-SALMON = "salmon"
-WULLIMANN = "wullimann1996"
-SOURCES = (SALMON, WULLIMANN)
-WULLIMANN_SET = "plates_wullimann"
+# What the atlases ARE lives in atlas_registry; these names stay here because the
+# stages and tests import them from this module.
+SALMON = REG.SALMON
+WULLIMANN = REG.WULLIMANN
+WULLIMANN_SET = REG.WULLIMANN_SET
+SOURCES = tuple(REG.BUILTIN)        # the built-ins; a study's own come from `names(cfg)`
+
+
+def names(cfg=None):
+    """Every atlas this study can use: the built-ins and any it declares."""
+    return REG.names(cfg)
 
 
 def source(cfg):
-    """Which atlas the study uses: "salmon" (the default) or "wullimann1996".
+    """Which atlas the study uses: "salmon" (the default) or any registered name.
 
     An unknown value raises rather than falling back to salmon. A typo that
     silently chose the other atlas would register sections against the wrong
     species and nothing downstream would say so.
     """
     src = (cfg or {}).get("atlas_source") or SALMON
-    if src not in SOURCES:
-        raise ValueError("atlas_source %r is not one of %s" % (src, ", ".join(SOURCES)))
+    REG.get(cfg, src)                 # raises, listing the valid names
     return src
+
+
+def entry(cfg):
+    """The registry entry for this study's atlas: what the stages ask about it
+    (micrograph half? mirrorable? which folder?) instead of comparing its name."""
+    return REG.get(cfg, source(cfg))
 
 
 def reformatted_dir(cfg):
     """Subfolder of `reformatted/` for this atlas's reformatted plates.
 
-    Salmon keeps `plates`, so existing work is untouched. Wullimann gets its
-    own, so a tool that globs the folder never sees the other atlas's plates.
+    Salmon keeps `plates`, so existing work is untouched. Every other atlas gets
+    its own, so a tool that globs the folder never sees another atlas's plates.
     """
-    return WULLIMANN_SET if source(cfg) == WULLIMANN else "plates"
+    return entry(cfg).reformatted_dir
 
 
 def set_name(cfg):
     """The plate set directory name this study uses.
 
-    Wullimann has one fixed set; `atlas_plate_set` is then ignored.
+    An atlas with a fixed set (Wullimann, or one the study registered) uses it
+    and `atlas_plate_set` is then ignored; salmon reads `atlas_plate_set.dir`.
 
     A malformed block is judged rather than crashed on, for the reason
     `ls_channels.marker_names` gives: every caller of this is a module-level
     stage constant evaluated at import, and a traceback there takes all 46
     stages down at once.
     """
-    if source(cfg) == WULLIMANN:
-        return WULLIMANN_SET
+    fixed = entry(cfg).set_dir
+    if fixed:
+        return fixed
     block = (cfg or {}).get("atlas_plate_set")
     if not isinstance(block, dict):
         return EXTRACTED

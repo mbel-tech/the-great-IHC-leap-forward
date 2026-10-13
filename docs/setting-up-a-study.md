@@ -81,6 +81,29 @@ Studies whose filenames carry less degrade on their own:
 | subject, slide | `AB12_s03_sc05` |
 | subject only | `Fish07_sc05` |
 
+## Channels, markers and their colours
+
+In the app, **Settings → Channels and markers…** edits all of this as a table, so
+the config file does not have to be written by hand. Under `multiplex` each row is a
+channel: its name (what the outputs call it), its role (nuclear, marker,
+registration, ignore), the name the CZI file gives it, its plane as a fallback,
+and for a marker where its objects come from (see below). Under `paired`, where
+each scan carries the counterstain plus one marker, the table is just the marker
+names. **Fill names from a CZI file…** reads the channels a scan reports.
+
+Each marker also gets a **Colour** and a **Show** box. *Show* controls whether it
+is drawn in the composite and the curator's Review pane; *(default)* means the
+first shown marker is red, the second green, and any further one has no colour
+and is not drawn, which the pipeline says rather than guessing. The counterstain's
+colour is the separate **Counterstain colour** setting.
+
+The table is judged by the same rules the pipeline applies when it loads the
+config, live, and OK stays disabled while it would be refused. Nothing is written
+until you press Save in Settings. A marker's name becomes folder and file names in
+every output, so renaming asks you to confirm; colours and the composite follow a
+rename. The same keys (`acquisition.channels`, `acquisition.markers`,
+`display.colours`, `display.composite`) can still be edited by hand.
+
 ## Choosing a segmentation backend
 
 Under `multiplex`, `acquisition.channels` says what each channel is. For a

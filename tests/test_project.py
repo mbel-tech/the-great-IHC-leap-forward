@@ -308,6 +308,111 @@ legacy = P.Project.open(write_study(os.path.join(TMP, "mv_legacy")))
 chk("a legacy file with no record opens untouched", (legacy.reanchored, legacy.dirty), ([], False))
 chk("the keys come from the spec", P.path_keys(), ["source_dir", "out_root", "atlas_pdf", "export_dir"])
 
+print("--- curation inside the project file ---")
+cpath, cdir = fresh("cur")
+cout = read(cpath)["out_root"]
+cp_ = P.Project.open(cpath)
+chk("a project with no curation holds none", (cp_.curation_keys(), cp_.curation_text("ls_roi_curator_v1")), ([], None))
+cp_.set("pixel_size_um", 0.99, by="t")                                   # an UNSAVED edit
+disk_before = read(cpath)
+chk("writing curation reports a change", cp_.write_curation("ls_roi_curator_v1", '{"LS1_s1": {"plate": "p"}}', out_root=cout), True)
+on = read(cpath)
+chk("it is in the project file at once, parsed", on["curation"], {"ls_roi_curator_v1": {"LS1_s1": {"plate": "p"}}})
+chk("...without the unsaved settings edit", on["pixel_size_um"], disk_before["pixel_size_um"])
+chk("...and the edit is still unsaved in memory", (cp_.get("pixel_size_um"), cp_.dirty), (0.99, True))
+chk("a decision does not make a clean project unsaved",
+    (lambda q: (q.write_curation("ls_roi_curator_v1_rois", '["Dm"]'), q.dirty)[1])(P.Project.open(cpath)), False)
+chk("the plain copy the stages read is written too, compact like JSON.stringify",
+    open(os.path.join(cout, "curation", "ls_roi_curator_v1.json")).read(), '{"LS1_s1":{"plate":"p"}}')
+chk("the same value again changes nothing", cp_.write_curation("ls_roi_curator_v1", '{"LS1_s1": {"plate": "p"}}', out_root=cout), False)
+chk("a number and a non-JSON string both round-trip",
+    (cp_.write_curation("ls_roi_curator_v1_size", "7"), cp_.curation_text("ls_roi_curator_v1_size"),
+     cp_.write_curation("ls_note", "not json"), cp_.curation_text("ls_note")), (True, "7", True, "not json"))
+for badkey in ("../evil", "a/b", "", ".hidden", "x" * 90, "a..b"):
+    chk("a curation name that could leave the folder is refused: %r" % badkey[:12], raises(lambda k=badkey: cp_.write_curation(k, "1"), P.ProjectError, "usable"), True)
+bad_cfg = dict(read(cpath), curation={"../x": 1})
+chk("a hand-made bad name is a config error", any("curation" in e for e in LC.validate(bad_cfg, "x")[0]), True)
+chk("the config hash ignores curation and the project block",
+    (P.config_sha(read(cpath)), P.config_sha({k: v for k, v in read(cpath).items() if k not in ("curation", "project")})) and
+    P.config_sha(read(cpath)) == P.config_sha({k: v for k, v in read(cpath).items() if k not in ("curation", "project")}), True)
+cp_.save()
+chk("saving keeps the curation", read(cpath)["curation"]["ls_roi_curator_v1"], {"LS1_s1": {"plate": "p"}})
+chk("a curation write never leaves a temp file", [f for f in os.listdir(cdir) if f.endswith(".tmp")], [])
+cp_.revert()
+chk("revert keeps curation made since the last save (a decision is not an edit to undo)", cp_.curation_text("ls_roi_curator_v1_size"), "7")
+nv = P.Project.new("n")
+nv.write_curation("ls_roi_curator_v1", "[1]")
+chk("a never-saved project holds curation in memory", (nv.curation_text("ls_roi_curator_v1"), nv.dirty), ("[1]", True))
+fut = P.Project.open(cpath); fut.read_only = True
+chk("a read-only project refuses curation", raises(lambda: fut.write_curation("ls_roi_curator_v1", "1"), P.ProjectError, "newer"), True)
+
+print("--- reconciling with the copies in out_root ---")
+rp, rdir = fresh("rec")
+rout = read(rp)["out_root"]
+cur_dir = os.path.join(rout, "curation")
+os.makedirs(cur_dir, exist_ok=True)
+open(os.path.join(cur_dir, "ls_roi_curator_v1.json"), "w").write('{"a":1}')
+open(os.path.join(cur_dir, "ls_level_curator_v1.json"), "w").write('{"lv": 2}')
+open(os.path.join(cur_dir, "ls_junk.json.tmp"), "w").write("half")
+os.makedirs(os.path.join(cur_dir, "_backup_20200101_000000"), exist_ok=True)
+r1 = P.Project.open(rp)
+res = r1.reconcile_curation(rout)
+chk("curation made before the project held it is adopted, temp files and backups ignored",
+    (res.adopt, res.restore, res.conflict, bool(res)), (["ls_level_curator_v1", "ls_roi_curator_v1"], [], [], True))
+done = r1.apply_reconcile(rout, res)
+chk("adopting takes the files into the project, parsed", (r1.curation_text("ls_roi_curator_v1"), r1.get("curation")["ls_level_curator_v1"]), ('{"a":1}', {"lv": 2}))
+chk("...and the project file has them", sorted(read(rp)["curation"]), ["ls_level_curator_v1", "ls_roi_curator_v1"])
+chk("...leaving the project clean", r1.dirty, False)
+chk("...and a README beside the copies says they are generated", os.path.exists(os.path.join(cur_dir, "README.txt")), True)
+chk("a second look finds everything in sync", bool(r1.reconcile_curation(rout)), False)
+chk("...and records that they agree", sorted(read(rp)["project"]["synced"]), ["ls_level_curator_v1", "ls_roi_curator_v1"])
+
+os.remove(os.path.join(cur_dir, "ls_level_curator_v1.json"))
+res = r1.reconcile_curation(rout)
+chk("a missing copy is restored from the project", res.restore, ["ls_level_curator_v1"])
+chk("materialize writes only what is stale", (r1.materialize_curation(rout), open(os.path.join(cur_dir, "ls_level_curator_v1.json")).read()), (["ls_level_curator_v1"], '{"lv":2}'))
+
+r1.write_curation("ls_roi_curator_v1", '{"a": 2}')                        # the project moves on (no copy written)
+res = r1.reconcile_curation(rout)
+chk("the project newer than a copy untouched since: the copy is stale", (res.restore, res.conflict), (["ls_roi_curator_v1"], []))
+r1.materialize_curation(rout)
+open(os.path.join(cur_dir, "ls_roi_curator_v1.json"), "w").write('{"a":3}')   # something else edits the copy
+res = r1.reconcile_curation(rout)
+chk("a copy edited by something else while the project is untouched is adopted", (res.adopt, res.conflict), (["ls_roi_curator_v1"], []))
+
+r1.write_curation("ls_roi_curator_v1", '{"a": 4}')                        # now BOTH move
+res = r1.reconcile_curation(rout)
+chk("both changed since they last agreed is a conflict, decided by a person", (res.conflict, res.adopt, res.restore), (["ls_roi_curator_v1"], [], []))
+done = r1.apply_reconcile(rout, res)
+chk("an unanswered conflict is left alone", (done["restored"], done["adopted"], r1.curation_text("ls_roi_curator_v1"),
+    open(os.path.join(cur_dir, "ls_roi_curator_v1.json")).read()), ([], [], '{"a":4}', '{"a":3}'))
+done = r1.apply_reconcile(rout, res, resolve={"ls_roi_curator_v1": "project"})
+chk("the project's version wins when chosen...", (r1.curation_text("ls_roi_curator_v1"), open(os.path.join(cur_dir, "ls_roi_curator_v1.json")).read()), ('{"a":4}', '{"a":4}'))
+chk("...and the files' version is kept in a backup", open(os.path.join(done["backup"], "ls_roi_curator_v1.json")).read(), '{"a":3}')
+open(os.path.join(cur_dir, "ls_roi_curator_v1.json"), "w").write('{"a":5}')
+r1.write_curation("ls_roi_curator_v1", '{"a": 6}')
+res = r1.reconcile_curation(rout)
+done = r1.apply_reconcile(rout, res, resolve={"ls_roi_curator_v1": "files"})
+chk("the files' version wins when chosen, the project's is backed up",
+    (r1.curation_text("ls_roi_curator_v1"), open(os.path.join(done["backup"], "ls_roi_curator_v1.json")).read()), ('{"a":5}', '{"a":6}'))
+chk("whitespace-only differences are not differences",
+    (open(os.path.join(cur_dir, "ls_level_curator_v1.json"), "w").write('{ "lv" : 2 }'), bool(r1.reconcile_curation(rout)))[1], False)
+chk("a project opened elsewhere (no marker, same content) is simply in sync",
+    bool(P.Project.open(rp).reconcile_curation(rout)), False)
+
+print("--- the project file stays readable ---")
+rp2, _d2 = fresh("compact")
+q2 = P.Project.open(rp2)
+q2.write_curation("ls_roi_curator_v1", json.dumps({"S%d" % i: {"pairs": [[0.1, 0.2]] * 30} for i in range(50)}), out_root=read(rp2)["out_root"])
+q2.save()
+txt = open(rp2, encoding="utf-8").read()
+chk("curation is one line per state, not tens of thousands", txt.count("\n") < 400, True)
+chk("the settings around it are still indented", '\n  "pixel_size_um"' in txt, True)
+chk("it parses back to exactly the same project", json.loads(txt)["curation"], q2.cfg["curation"])
+chk("a string that looks like our placeholder in a setting is left alone",
+    (lambda t: json.loads(t)["study"]["name"])(ls_jsonio._dump({"study": {"name": "\u0001LSCOMPACT0\u0001"}, "curation": {"k": [1]}}, ("curation",))), "\u0001LSCOMPACT0\u0001")
+chk("with no compact blocks it is plain indented JSON", ls_jsonio._dump({"a": {"b": 1}}, ()), json.dumps({"a": {"b": 1}}, indent=2))
+
 print("--- recent projects ---")
 LC.remember_project(target)
 LC.remember_project(path)

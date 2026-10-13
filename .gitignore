@@ -84,3 +84,7 @@ docs/*.pdf
 # must never reach this public repo. Regenerate them locally.
 reformatted/shotgun_manifest*.csv
 reformatted/roi_curator.html
+
+# Shareable copies of a project (they may carry the unblinding key when exported unblinded)
+*-UNBLINDED-copy.*
+*-copy.zip

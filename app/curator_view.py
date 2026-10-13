@@ -115,12 +115,14 @@ class CuratorView(QWidget):
 
     logged = Signal(str)
 
-    def __init__(self, server, out_root, parent=None):
+    def __init__(self, server, out_root, parent=None, project_source=None):
         super().__init__(parent)
         self.server = server
         self.out_root = out_root
         self.rel = None
-        self.store = ST.CurationStore(out_root)
+        # `project_source` returns the open project, so curation is saved into the
+        # project file rather than only into loose files.
+        self.store = ST.CurationStore(out_root, project_source)
 
         self.view = QWebEngineView(self)
         self.title = QLabel("", self)
@@ -231,6 +233,7 @@ class CuratorView(QWidget):
         self.server = server
         self.out_root = out_root
         self.store.dir = os.path.join(out_root, "curation")
+        self.store.out_root = out_root
         self.refresh_seed()
         if self.rel:
             self.show_page(self.rel, self.title.text())

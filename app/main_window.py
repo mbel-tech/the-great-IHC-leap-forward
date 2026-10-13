@@ -64,6 +64,9 @@ class MainWindow(QMainWindow):
         self.session.opened.connect(self._project_opened)
         self.session.saved.connect(self._project_saved)
         self.out_root = self._config()["out_root"]
+        line = self.session.sync_curation(self)
+        if line:
+            self._pending_log = getattr(self, "_pending_log", []) + [f"curation: {line}"]
         self.server = LocalServer(self.out_root)
         self._thread = None
         self._states = {}
@@ -110,7 +113,8 @@ class MainWindow(QMainWindow):
         self.importer.logged.connect(self._log)
         self.importer.imported.connect(self.refresh)
 
-        self.curator = CuratorView(self.server, self.out_root)
+        self.curator = CuratorView(self.server, self.out_root,
+                                   project_source=lambda: self.session.project)
         self.curator.logged.connect(self._log)
 
         self.stack = QStackedWidget()
@@ -142,7 +146,7 @@ class MainWindow(QMainWindow):
             ST.write_export_page(self.out_root)
         except OSError as e:
             self._log(f"could not write the state export page: {e}")
-        held = ST.CurationStore(self.out_root).all_present()
+        held = ST.CurationStore(self.out_root, lambda: self.session.project).all_present()
         self._log(f"curation state on disk: "
                   + (", ".join(held) if held else "none yet"))
 
@@ -184,7 +188,7 @@ class MainWindow(QMainWindow):
             return act
 
         add("new", "&New project...", lambda: self.session.new_project(self.repo_root, self), "Ctrl+N")
-        add("open", "&Open project...", lambda: self.session.open_project(self), "Ctrl+O")
+        add("open", "&Open project...", lambda: self.session.open_project(self, repo_root=self.repo_root), "Ctrl+O")
         self._recent_menu = self._file_menu.addMenu("Open &Recent")
         self._file_menu.aboutToShow.connect(self._fill_recent)
         self._file_menu.addSeparator()
@@ -193,6 +197,7 @@ class MainWindow(QMainWindow):
         add("revert", "&Revert", lambda: self.session.revert(self))
         self._file_menu.addSeparator()
         add("history", "Project &history...", self._history)
+        add("copy", "Export a &copy...", lambda: self.session.export_copy(self))
         self._fill_recent()
 
     def _history(self):
@@ -227,13 +232,20 @@ class MainWindow(QMainWindow):
         self.runner.rebind(self.config_path)
         self.importer.config_path = self.config_path
         self._rebase()
+        line = self.session.sync_curation(self)
+        if line:
+            self._log(f"curation: {line}")
+            self.curator.refresh_seed()
         self._log(f"project is now {self.config_path}")
 
     def _project_saved(self):
         """After a save the stages see the new settings; re-root only if out_root moved."""
         new_root = self._config()["out_root"]
+        line = self.session.sync_curation(self) if new_root != self.out_root else None
         if new_root != self.out_root:
             self._rebase()
+            if line:
+                self._log(f"curation: {line}")
             self._log(f"saved - out_root {self.out_root}, serving on 127.0.0.1:{self.server.port}; "
                       "stage modules reload on next run")
         else:
@@ -293,7 +305,7 @@ class MainWindow(QMainWindow):
         if not path:
             return
         try:
-            keys = ST.CurationStore(self.out_root).import_bundle(path)
+            keys = ST.CurationStore(self.out_root, lambda: self.session.project).import_bundle(path)
         except (OSError, ValueError) as e:
             QMessageBox.warning(self, "Could not import", str(e))
             return
@@ -310,8 +322,12 @@ class MainWindow(QMainWindow):
                             "export_curation_state.html")
         QMessageBox.information(
             self, "Curation state",
-            "Decisions you make in this app are written to\n"
-            f"{os.path.join(self.out_root, 'curation')}\n\n"
+            "Decisions you make in this app are saved into the project file itself, "
+            "as you make them:\n"
+            f"{self.config_path}\n\n"
+            "The stages read plain copies of them in\n"
+            f"{os.path.join(self.out_root, 'curation')}\n"
+            "which the app rewrites from the project, so edit nothing there.\n\n"
             "Curation you did earlier in a web browser is still in that "
             "browser's storage, which no application can read from outside. "
             "To bring it over, open this page in that browser:\n\n"
@@ -472,6 +488,9 @@ class MainWindow(QMainWindow):
             return
         if not self.session.ensure_saved_for_run(self):
             return
+        line = self.session.sync_curation(self)
+        if line:
+            self._log(f"curation: {line}")
         self._run_started = now_iso()
         self._states[st.sid] = "running"
         self.refresh()

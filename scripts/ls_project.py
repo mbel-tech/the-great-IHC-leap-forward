@@ -85,12 +85,13 @@ def _sha(obj, n=12):
 
 
 def config_sha(cfg):
-    """A short hash of the config WITHOUT its `project` block.
+    """A short hash of the config WITHOUT its `project` and `curation` blocks.
 
-    The run history lives in the block, so a hash that included it would change
-    every time a stage finished and "the config changed" would be true forever.
+    The run history lives in `project` and the curators write `curation` on every
+    decision; a hash that included either would change constantly and "the config
+    changed" would be true forever.
     """
-    return _sha({k: v for k, v in (cfg or {}).items() if k != "project"})
+    return _sha({k: v for k, v in (cfg or {}).items() if k not in ("project", "curation")})
 
 
 _code = {}
@@ -184,6 +185,99 @@ def _stamp(path):
         return (st.st_mtime_ns, st.st_size)
     except OSError:
         return None
+
+
+# ---- curation inside the project -------------------------------------------------------
+#
+# The curators keep their state as JSON text under a handful of names. In the project
+# file it is stored PARSED (readable, diffable); the stages and the curator pages still
+# want plain files and text, so `curation_text` turns a value back into what they read.
+# Text that is not JSON is kept as {"__text__": ...}.
+
+TEXT_WRAP = "__text__"
+CURATION_DIR = "curation"
+README = ("These files are copies written by the app from the project file.\n"
+          "The project file is where your curation lives: edit it there (in the app), not here.\n"
+          "They are regenerated, so a change made here is either adopted by the app on the\n"
+          "next open (if the project had not changed) or offered to you as a conflict.\n")
+
+
+def curation_value(text):
+    try:
+        return json.loads(text)
+    except ValueError:
+        return {TEXT_WRAP: text}
+
+
+def curation_text(value):
+    if isinstance(value, dict) and set(value) == {TEXT_WRAP} and isinstance(value[TEXT_WRAP], str):
+        return value[TEXT_WRAP]
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def curation_hash(text):
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+
+
+def _valid_key(key):
+    return isinstance(key, str) and bool(LC.CURATION_KEY_RE.match(key)) and ".." not in key
+
+
+def _curation_dir(out_root):
+    return os.path.join(out_root, CURATION_DIR)
+
+
+def _files_in(out_root):
+    """{key: path} for the curation JSON files present, skipping temp files and backups."""
+    folder = _curation_dir(out_root)
+    out = {}
+    if os.path.isdir(folder):
+        for name in sorted(os.listdir(folder)):
+            key = name[:-5] if name.endswith(".json") else None
+            path = os.path.join(folder, name)
+            if key and _valid_key(key) and os.path.isfile(path):
+                out[key] = path
+    return out
+
+
+def _read_text(path):
+    with open(path, encoding="utf-8") as fh:
+        return fh.read()
+
+
+def _write_text_atomic(path, text):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8", newline="") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
+class Reconcile:
+    """What opening a project found between its curation and the copies in out_root.
+
+    ok        identical already
+    restore   the project is newer (or the copy is missing): rewrite the copy
+    adopt     the copy is newer or only exists there: take it into the project
+    conflict  both changed since they last agreed: a person decides
+    """
+
+    def __init__(self):
+        self.ok, self.restore, self.adopt, self.conflict = [], [], [], []
+
+    def __bool__(self):
+        return bool(self.restore or self.adopt or self.conflict)
+
+    def __repr__(self):
+        return "<Reconcile ok=%d restore=%s adopt=%s conflict=%s>" % (
+            len(self.ok), self.restore, self.adopt, self.conflict)
 
 
 class Project:
@@ -434,6 +528,195 @@ class Project:
         if self._snapshot is None:
             raise ProjectError("this project has never been saved, so there is nothing to revert to")
         self.cfg = copy.deepcopy(self._snapshot)
+
+    # ---- curation -----------------------------------------------------------------
+
+    def curation_keys(self):
+        cur = self.cfg.get("curation")
+        return sorted(cur) if isinstance(cur, dict) else []
+
+    def curation_text(self, key):
+        """What a curator reads for `key`, or None."""
+        cur = self.cfg.get("curation")
+        if isinstance(cur, dict) and key in cur:
+            return curation_text(cur[key])
+        return None
+
+    def _synced(self):
+        syn = self.block.get("synced")
+        return syn if isinstance(syn, dict) else {}
+
+    def write_curation(self, key, text, out_root=None):
+        """Store one curator's state in the project file, now.
+
+        Curators save on every decision, so this does not wait for File > Save and never
+        commits anything else: it rewrites only the `curation` block (and the sync marker)
+        of the file as it is on disk, like `record_run`. The in-memory project follows, so
+        the project is not "unsaved" because a decision was made. With `out_root`, the plain
+        copy the stages read is written too. Returns True if the value changed.
+        """
+        self._check_writable()
+        if not _valid_key(key):
+            raise ProjectError("%r is not a usable curation name" % (key,))
+        value = curation_value(text)
+        out_text = curation_text(value)
+        sha = curation_hash(out_text)
+        # `synced` is the value the project and its plain copy last AGREED on, so it moves only
+        # when the copy is written too; a write that leaves the copy behind is exactly how a
+        # stale copy is told from an edited one.
+        cur = self.cfg.get("curation")
+        unchanged = isinstance(cur, dict) and key in cur and _canon(cur[key]) == _canon(value)
+        if not unchanged:
+            if self.path and os.path.exists(self.path):
+                self._patch_disk_curation(key, value)
+            else:
+                self.cfg.setdefault("curation", {})[key] = copy.deepcopy(value)
+        if out_root:
+            _write_text_atomic(os.path.join(_curation_dir(out_root), key + ".json"), out_text)
+            self._mark_synced(key, sha)
+        return not unchanged
+
+    def _patch_disk_curation(self, key, value):
+        try:
+            with open(self.path, encoding="utf-8") as fh:
+                disk = json.load(fh)
+        except (OSError, ValueError) as e:
+            raise ProjectError("%s could not be read to record curation: %s" % (self.path, e))
+        if not isinstance(disk, dict):
+            raise ProjectError("%s is not a project" % self.path)
+        block = disk.get("project")
+        if block is None:
+            seed = (self._snapshot or self.cfg).get("project")
+            block = disk["project"] = copy.deepcopy(seed) if isinstance(seed, dict) else _new_block()
+        elif not isinstance(block, dict) or (block.get("project_version") or 1) > PROJECT_VERSION:
+            raise ProjectError("%s: its project block cannot be extended by this version" % self.path)
+        disk.setdefault("curation", {})[key] = value
+        ls_jsonio.write_json_atomic(self.path, disk)
+        for target in (self.cfg, self._snapshot):
+            if target is not None:
+                target.setdefault("curation", {})[key] = copy.deepcopy(value)
+        self._stamp = _stamp(self.path)
+        LC.clear_cache()
+
+    def _mark_synced(self, key, sha):
+        """Record that the copy on disk and the project agree on `sha`, without a decision or a dirty mark."""
+        if self._synced().get(key) == sha:
+            return
+        if self.path and os.path.exists(self.path):
+            try:
+                with open(self.path, encoding="utf-8") as fh:
+                    disk = json.load(fh)
+                blk = disk.get("project")
+                if isinstance(blk, dict) and (blk.get("project_version") or 1) <= PROJECT_VERSION:
+                    blk.setdefault("synced", {})[key] = sha
+                    ls_jsonio.write_json_atomic(self.path, disk)
+                    self._stamp = _stamp(self.path)
+            except (OSError, ValueError):
+                return
+        for target in (self.cfg, self._snapshot):
+            if target is not None:
+                target.setdefault("project", _new_block()).setdefault("synced", {})[key] = sha
+
+    def reconcile_curation(self, out_root):
+        """Compare the project's curation with the plain copies under out_root. Changes nothing.
+
+        Three-way, against the hash recorded the last time they agreed (`project.synced`):
+        a copy untouched since then is stale (restore it); a project untouched since then
+        means the copy was edited by something else on purpose (adopt it); both moved is a
+        conflict for a person to settle. Files that exist only in out_root (curation made
+        before the project held it) are adopted.
+        """
+        result = Reconcile()
+        files = _files_in(out_root)
+        synced = self._synced()
+        for key in sorted(set(self.curation_keys()) | set(files)):
+            p_text = self.curation_text(key)
+            f_text = None
+            if key in files:
+                try:
+                    f_text = curation_text(curation_value(_read_text(files[key])))
+                except (OSError, UnicodeDecodeError):
+                    f_text = None
+            if p_text is None and f_text is None:
+                continue
+            if p_text is None:
+                result.adopt.append(key)
+            elif f_text is None:
+                result.restore.append(key)
+            else:
+                hp, hf, hs = curation_hash(p_text), curation_hash(f_text), synced.get(key)
+                if hp == hf:
+                    result.ok.append(key)
+                elif hs == hf:
+                    result.restore.append(key)
+                elif hs == hp:
+                    result.adopt.append(key)
+                else:
+                    result.conflict.append(key)
+        return result
+
+    def apply_reconcile(self, out_root, result=None, resolve=None):
+        """Carry out `reconcile_curation`. `resolve` maps a conflicting key to "project" or "files".
+
+        The version that loses is first saved in `curation/_backup_<stamp>/<key>.json`. A conflict
+        with no answer is left alone. Returns {"restored": [...], "adopted": [...], "backup": dir|None}.
+        """
+        result = result or self.reconcile_curation(out_root)
+        resolve = resolve or {}
+        files = _files_in(out_root)
+        stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup = os.path.join(_curation_dir(out_root), "_backup_" + stamp)
+        used = []
+        done = {"restored": [], "adopted": [], "backup": None}
+
+        def back_up(key, text):
+            _write_text_atomic(os.path.join(backup, key + ".json"), text)
+            used.append(key)
+
+        for key in result.restore:
+            self.write_curation(key, self.curation_text(key), out_root)
+            done["restored"].append(key)
+        for key in result.adopt:
+            self.write_curation(key, _read_text(files[key]), out_root)
+            done["adopted"].append(key)
+        for key in result.conflict:
+            side = resolve.get(key)
+            if side == "project":
+                back_up(key, _read_text(files[key]))
+                self.write_curation(key, self.curation_text(key), out_root)
+                done["restored"].append(key)
+            elif side == "files":
+                back_up(key, self.curation_text(key))
+                self.write_curation(key, _read_text(files[key]), out_root)
+                done["adopted"].append(key)
+        if used:
+            done["backup"] = backup
+        for key in result.ok:
+            self._mark_synced(key, curation_hash(self.curation_text(key)))
+        if done["restored"] or done["adopted"]:
+            readme = os.path.join(_curation_dir(out_root), "README.txt")
+            if not os.path.exists(readme):
+                _write_text_atomic(readme, README)
+        return done
+
+    def materialize_curation(self, out_root):
+        """Make the plain copies match the project (what stages and the curator seed read).
+
+        Only rewrites a copy that is missing or stale; never overwrites one that someone edited
+        (that is a reconcile conflict, reported by `reconcile_curation`). Returns the keys written.
+        """
+        result = self.reconcile_curation(out_root)
+        wrote = []
+        for key in result.restore:
+            self.write_curation(key, self.curation_text(key), out_root)
+            wrote.append(key)
+        for key in result.ok:
+            self._mark_synced(key, curation_hash(self.curation_text(key)))
+        if wrote:
+            readme = os.path.join(_curation_dir(out_root), "README.txt")
+            if not os.path.exists(readme):
+                _write_text_atomic(readme, README)
+        return wrote
 
     def reload(self):
         """Read the file again, dropping anything unsaved. For when something else wrote it

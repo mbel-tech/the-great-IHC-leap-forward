@@ -205,6 +205,56 @@ chk("opening a moved project says its paths were updated, and leaves it unsaved"
     (True, True, True))
 chk("...and the settings point at the new place", pm.project.get("out_root"), os.path.join(mv_b, "out"))
 
+print("--- curation lives in the project ---")
+import state as ST                                              # noqa: E402
+
+cs = session_on("cur")
+cout = cs.project.get("out_root")
+os.makedirs(os.path.join(cout, "curation"), exist_ok=True)
+open(os.path.join(cout, "curation", "ls_roi_curator_v1.json"), "w").write('{"LS1_s1":{"plate":"p"}}')
+line = cs.sync_curation(None)
+chk("opening a project with loose curation files takes them in, and says so", ("took 1 curation file" in line, cs.project.curation_keys(), cs.dirty), (True, ["ls_roi_curator_v1"], False))
+chk("a second sync has nothing to say", cs.sync_curation(None), None)
+
+store = ST.CurationStore(cout, lambda: cs.project)
+chk("the store reads from the project", store.read("ls_roi_curator_v1"), '{"LS1_s1":{"plate":"p"}}')
+store.write("ls_roi_curator_v1", '{"LS1_s1":{"plate":"q"}}')
+chk("a curator's save lands in the project file at once", read(cs.project.path)["curation"]["ls_roi_curator_v1"]["LS1_s1"]["plate"], "q")
+chk("...and in the copy the stages read", open(store.path("ls_roi_curator_v1")).read(), '{"LS1_s1":{"plate":"q"}}')
+chk("...without making the project unsaved", cs.dirty, False)
+chk("the seed the curators start from comes from the project", '"plate": "q"' in ST.seed_script(store).replace('\\"', '"') or "q" in ST.seed_script(store), True)
+chk("importing a browser export goes into the project too",
+    (lambda f: (json.dump({"ls_roi_curator_v1_rois": ["Dm"]}, open(f, "w")), store.import_bundle(f), cs.project.curation_text("ls_roi_curator_v1_rois"))[2])(os.path.join(TMP, "exp.json")),
+    '["Dm"]')
+plain = ST.CurationStore(os.path.join(TMP, "plain_out"))
+plain.write("ls_roi_curator_v1", "[1]")
+chk("without a project the store is the file store it always was", (plain.read("ls_roi_curator_v1"), os.path.exists(plain.path("ls_roi_curator_v1"))), ("[1]", True))
+ro = session_on("cur_ro")
+ro.project.read_only = True
+rstore = ST.CurationStore(ro.project.get("out_root"), lambda: ro.project)
+rstore.write("ls_roi_curator_v1", "[2]")
+chk("a read-only project's store falls back to the files, not the project", ("curation" in read(ro.project.path), rstore.read("ls_roi_curator_v1")), (False, "[2]"))
+
+print("--- conflicts are put to the person ---")
+open(store.path("ls_roi_curator_v1"), "w").write('{"LS1_s1":{"plate":"from files"}}')
+cs.project.write_curation("ls_roi_curator_v1", '{"LS1_s1":{"plate":"from project"}}')
+asked.clear()
+answers["Curation differs"] = QMessageBox.Cancel
+line = cs.sync_curation(None)
+chk("Cancel leaves both as they are and says it is undecided", ("undecided" in line, open(store.path("ls_roi_curator_v1")).read()), (True, '{"LS1_s1":{"plate":"from files"}}'))
+answers["Curation differs"] = QMessageBox.Yes
+line = cs.sync_curation(None)
+chk("Yes: the project wins and the files' version is backed up", (open(store.path("ls_roi_curator_v1")).read(), "previous versions kept in" in line),
+    ('{"LS1_s1":{"plate":"from project"}}', True))
+open(store.path("ls_roi_curator_v1"), "w").write('{"LS1_s1":{"plate":"from files 2"}}')
+cs.project.write_curation("ls_roi_curator_v1", '{"LS1_s1":{"plate":"from project 2"}}')
+answers["Curation differs"] = QMessageBox.No
+cs.sync_curation(None)
+chk("No: the files' version wins", cs.project.curation_text("ls_roi_curator_v1"), '{"LS1_s1":{"plate":"from files 2"}}')
+blank = session_on("cur_blank")
+blank.project.set("out_root", os.path.join(TMP, "does", "not", "exist"), record=False)
+chk("a missing out_root writes nothing and does not ask", (blank.sync_curation(None), os.path.exists(os.path.join(TMP, "does"))), (None, False))
+
 print("--- the run history ---")
 r = session_on("e")
 chk("a run is recorded and the project stays clean", (r.record_run("05c", True, "a", "b"), r.dirty), (None, False))
@@ -303,9 +353,10 @@ stub = types.ModuleType("curator_view")
 class CuratorView(QWidget):
     logged = _S(str)
 
-    def __init__(self, server, out_root, parent=None):
+    def __init__(self, server, out_root, parent=None, project_source=None):
         super().__init__(parent)
         self.view = QObject()
+        self.project_source = project_source
 
     def show_page(self, *a):
         pass
@@ -339,7 +390,7 @@ if MW:
     w = MW.MainWindow(REPO, config_path=path)
     chk("the window title names the project", "win" in w.windowTitle() or os.path.basename(path) in w.windowTitle(), True)
     chk("a File menu with the project verbs",
-        sorted(w._file_actions), ["history", "new", "open", "revert", "save", "save_as"])
+        sorted(w._file_actions), ["copy", "history", "new", "open", "revert", "save", "save_as"])
     chk("Revert is disabled while clean", w._file_actions["revert"].isEnabled(), False)
     w.session.project.set("pixel_size_um", 0.31, by="t")
     w.session.touch()
@@ -369,6 +420,7 @@ if MW:
     w.session.open_project(w, other_path, confirmed=True)
     chk("opening another project points the stages at it", (w.config_path, os.environ["LS_CONFIG"]),
         (os.path.abspath(other_path), os.path.abspath(other_path)))
+    chk("the window hands the curators the open project", w.curator.project_source() is w.session.project, True)
     w.server.stop()
 
 print()

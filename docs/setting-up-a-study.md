@@ -100,6 +100,21 @@ file written by a newer version of the app opens read-only and is never rewritte
 The logic is in `scripts/ls_project.py` (`Project.new / open / set / save / save_as /
 revert / record_run`), which the app's File menu is built on.
 
+### One file: your decisions live in the project
+
+Your curation (ROI polygons, which ROIs to draw, rotations, levels) is saved **into the project file** as you make each decision, under `curation`: it never waits for File > Save, so a crash loses nothing, and it does not mark the project unsaved or commit your other unsaved edits. The stages still read plain files, so the app writes copies to `<out_root>/curation/` from the project and keeps them current (a `README.txt` there says so). **Edit the project, not those copies.**
+
+When a project is opened, saved to a new `out_root`, or a stage is about to run, the app compares the two against what they last agreed on:
+
+- a copy that is simply stale is rewritten;
+- a project that is older than a copy someone else edited (for example `import_exports.py`, which still writes the files) takes the copy in;
+- curation that exists only as files (made before the project held it) is taken in;
+- only if **both** changed does it ask: *use the project's* or *use the files'*. The version you do not pick is kept in `curation/_backup_<time>/`.
+
+### Sharing a project
+
+**File > Export a copy...** writes the project file (curation inside) with the paths on your machine blanked, your run history left out, and **the animal-to-treatment key (`groups.*`) stripped**. Unticking "Blinded" asks for confirmation, and the file name says `-UNBLINDED-`; never commit one. Tick *operator CSVs* or *imported atlases* to make a `.zip` that also carries those (they live outside the project file). **File > Open project...** opens a `.json` copy directly (set your own paths in Settings) or a `.zip` as a new project: you choose where to save it, set the data paths, and the extras are brought into your data folder (anything that differs is asked about, and replaced files are backed up first). A zip is verified before anything is read: every file's hash, and no path that could leave the folder. From a terminal: `python scripts/ls_bundle.py copy | export | inspect | import`.
+
 ### Moving a project
 
 The path settings (`source_dir`, `out_root`, `atlas_pdf`, `export_dir`) stay absolute in the file, because the stages - including the Fiji ones that read the JSON directly - need them that way. When a project is saved, those that lie **inside the project file's folder** are also recorded, relative to it, under `project.portable`. If you then move the whole folder (say from `D:` to `E:`), the stored absolute paths no longer exist; on opening, any setting whose recorded place exists beside the project file is re-pointed there, the change is listed, and the project is left unsaved for you to confirm with File > Save. A path that still exists is never changed (it may be a deliberate choice), and a path outside the project's folder stays as written.

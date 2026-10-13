@@ -39,15 +39,32 @@ KEYS = [
 
 
 class CurationStore:
-    """One JSON file per key under out_root/curation."""
+    """The curators' state: in the project file when there is one, else one JSON file per key.
 
-    def __init__(self, out_root):
+    With a project (`project_source` returns the open `ls_project.Project`), the project file
+    is where decisions live: every `write` goes into it at once (see
+    `Project.write_curation`) and the plain copy under out_root/curation is rewritten too, so
+    the stages and the curator seed keep reading files they already understand. Without one it
+    is the file store it always was.
+    """
+
+    def __init__(self, out_root, project_source=None):
         self.dir = os.path.join(out_root, "curation")
+        self.out_root = out_root
+        self.project_source = project_source
+
+    def _project(self):
+        return self.project_source() if self.project_source else None
 
     def path(self, key):
         return os.path.join(self.dir, key + ".json")
 
     def read(self, key):
+        project = self._project()
+        if project is not None:
+            text = project.curation_text(key)
+            if text is not None:
+                return text
         try:
             with open(self.path(key), encoding="utf-8") as fh:
                 return fh.read()
@@ -61,6 +78,10 @@ class CurationStore:
         user is still working; a crash mid-write must not leave a truncated file
         where the day's curation used to be.
         """
+        project = self._project()
+        if project is not None and not project.read_only:
+            project.write_curation(key, text, out_root=os.path.dirname(self.dir))
+            return
         os.makedirs(self.dir, exist_ok=True)
         tmp = self.path(key) + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:

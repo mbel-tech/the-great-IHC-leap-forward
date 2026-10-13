@@ -193,6 +193,9 @@ class Runner:
                 doc = json.loads(raw.decode("utf-8"))
                 if isinstance(doc, dict):
                     doc.pop("project", None)
+                    # Curation changes on every decision and no stage reads it from here
+                    # (they read the copies written to out_root/curation).
+                    doc.pop("curation", None)
                     raw = json.dumps(doc, sort_keys=True).encode("utf-8")
             except (ValueError, UnicodeDecodeError):
                 pass                      # not JSON: hash the bytes, as before

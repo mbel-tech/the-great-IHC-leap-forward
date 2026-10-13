@@ -589,6 +589,18 @@ SPEC = [
              "stay absolute). The lists are capped.",
         consumers=["app"]),
 
+    Key("curation", "raw",
+        "The curation decisions (ROI polygons, which ROIs to draw, rotations, levels), kept "
+        "inside the project file.",
+        default=None, ui=False, in_example=False,
+        note="Written by the app as the curators save, so the project file is the one place "
+             "your decisions live. {key: value} where each key names a curator's state "
+             "(`ls_roi_curator_v1`, ...). The stages read plain copies the app writes to "
+             "<out_root>/curation/ from this block; those copies are regenerated, so edit the "
+             "project, not them. Names are restricted to letters, digits, `_`, `.` and `-` "
+             "because they become file names.",
+        consumers=["app"]),
+
     # ---- unblinding (replaced by the metadata-join sub-project) ----------
     Key("groups.order", "list_str",
         "Which treatment is the LEFT half of every Shotgun slide, and the "
@@ -700,6 +712,20 @@ def _check_atlas_scope(value):
 
 PROJECT_CAPS = {"detected": 20, "decisions": 500, "runs": 200}
 
+#: A curation key becomes a file name under <out_root>/curation/, so it is judged strictly:
+#: nothing that could name another folder.
+CURATION_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,80}$")
+
+
+def _check_curation(value):
+    """Problems with a `curation` block, as a list of strings."""
+    if value is None:
+        return []
+    if not isinstance(value, dict):
+        return [f"must be a block of curator states, not a {type(value).__name__}"]
+    return [f"the name {k!r} is not usable (letters, digits, _ . - only, starting with a letter or digit)"
+            for k in value if not isinstance(k, str) or not CURATION_KEY_RE.match(k) or ".." in k]
+
 
 def _check_project(value):
     """Problems with a `project` block, as a list of strings."""
@@ -716,6 +742,10 @@ def _check_project(value):
         v = value.get(field)
         if v is not None and not isinstance(v, str):
             out.append(f"`{field}` must be text")
+    synced = value.get("synced")
+    if synced is not None and (not isinstance(synced, dict)
+                               or not all(isinstance(k, str) and isinstance(v, str) for k, v in synced.items())):
+        out.append("`synced` must map curation names to hashes")
     portable = value.get("portable")
     if portable is not None:
         if not isinstance(portable, dict) or not all(isinstance(k, str) and isinstance(v, str)
@@ -901,6 +931,8 @@ def validate(cfg, path="<config>", strict_paths=False):
             errors.append(f"{path}: `atlas_scope` {problem}")
         for problem in _check_project(cfg.get("project")):
             errors.append(f"{path}: `project` {problem}")
+        for problem in _check_curation(cfg.get("curation")):
+            errors.append(f"{path}: `curation` {problem}")
 
     # The study's own atlases are judged by the registry, which owns the rules
     # (own folder, no shadowing, no path tricks). Reported here as a config error

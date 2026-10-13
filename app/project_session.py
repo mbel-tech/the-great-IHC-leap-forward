@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QFileDialog, QInputDialog, QMessageBox
 
+import ls_bundle as LB
 import ls_config as LC
 import ls_project as LP
 
@@ -196,16 +197,18 @@ class ProjectSession(QObject):
         self.set_project(project)
         return True
 
-    def open_project(self, parent=None, path=None, confirmed=False):
-        """Open a project file. Returns True if it is now the open one."""
+    def open_project(self, parent=None, path=None, confirmed=False, repo_root=None):
+        """Open a project file (or a zip copy of one). Returns True if it is now the open one."""
         if not confirmed and not self.confirm_discard(parent, "open another project"):
             return False
         if path is None:
             path, _ = QFileDialog.getOpenFileName(parent, "Open project",
                                                   os.path.dirname(self.project.path or "") or LC.studies_dir(),
-                                                  "Project (*.json)")
+                                                  "Project (*.json *.zip)")
             if not path:
                 return False
+        if path.lower().endswith(".zip"):
+            return self.open_bundle(path, parent, repo_root)
         try:
             project = LP.Project.open(path)
         except LP.ProjectError as exc:
@@ -228,6 +231,143 @@ class ProjectSession(QObject):
                             "at it, but it cannot be changed or saved here.")
         self.set_project(project)
         return True
+
+    # ---- sharing -----------------------------------------------------------------
+
+    def export_copy(self, parent=None):
+        """Write a shareable copy: the project file (blinded by default), or a zip with extras."""
+        from bundle_dialog import ExportCopyDialog
+        project = self.project
+        if not project.path:
+            if not self.save_as(parent):
+                return None
+        elif project.dirty and not self.ensure_saved_for_run(parent):
+            return None
+        out_root = project.get("out_root")
+        out_root = out_root if isinstance(out_root, str) and os.path.isdir(out_root) else None
+        dlg = ExportCopyDialog(project.cfg, out_root, parent)
+        if not dlg.exec():
+            return None
+        c = dlg.choices()
+        zipped = bool((c["operator_csvs"] or c["atlases"]) and out_root)
+        stem = os.path.splitext(os.path.basename(project.path))[0] + ("-copy" if c["blinded"] else "-UNBLINDED-copy")
+        start = os.path.join(os.path.dirname(project.path), stem + (".zip" if zipped else ".json"))
+        dest, _ = QFileDialog.getSaveFileName(parent, "Save the copy as", start,
+                                              "Bundle (*.zip)" if zipped else "Project (*.json)")
+        if not dest:
+            return None
+        if not dest.lower().endswith(".zip" if zipped else ".json"):
+            dest += ".zip" if zipped else ".json"
+        try:
+            if zipped:
+                LB.build(project.path, out_root, dest, blinded=c["blinded"],
+                         atlases=c["atlases"], operator_csvs=c["operator_csvs"])
+            else:
+                LB.export_copy(project.path, dest, blinded=c["blinded"])
+        except (LB.BundleError, OSError) as exc:
+            BTN.warning(parent, "Copy not written", str(exc))
+            return None
+        BTN.information(parent, "Copy written", "%s\n\n%s" % (dest, "Blinded: the treatment key is not in it."
+                        if c["blinded"] else "UNBLINDED: it contains the treatment key."))
+        return dest
+
+    def open_bundle(self, path, parent=None, repo_root=None):
+        """Open a zip copy as a NEW project: set its paths, save it, then bring its extras in."""
+        try:
+            manifest = LB.inspect(path)
+            cfg = LB.project_from(path)
+        except (LB.BundleError, OSError) as exc:
+            BTN.warning(parent, "Could not open the bundle", str(exc))
+            return False
+        project = LP.Project(cfg)
+        project._snapshot = None
+        name = (manifest.get("project") or {}).get("name") or "project"
+        dest, _ = QFileDialog.getSaveFileName(parent, "Save the project from this bundle as",
+                                              os.path.join(LC.studies_dir(), LC.slugify(name) + ".json"),
+                                              "Project (*.json)")
+        if not dest:
+            return False
+        if not dest.lower().endswith(".json"):
+            dest += ".json"
+        if os.path.exists(dest):
+            BTN.warning(parent, "Already exists", "%s already exists. Choose another name." % dest)
+            return False
+        from config_dialog import ConfigDialog
+        dlg = ConfigDialog(repo_root or LC.REPO, path=dest, parent=parent, project=project)
+        if not dlg.exec():
+            return False
+        try:
+            project.save_as(dest)
+        except LP.ProjectError as exc:
+            BTN.warning(parent, "Not saved", str(exc))
+            return False
+        self.set_project(project)
+        out_root = project.get("out_root")
+        if isinstance(out_root, str) and os.path.isdir(out_root):
+            try:
+                plan = LB.plan_import(path, out_root)
+                differ = [a for a, _t, st in plan if st == "differs"]
+                replace = None
+                if differ and BTN.question(
+                        parent, "Replace files?",
+                        "%d file(s) in the data folder differ from the bundle's:\n%s\n\nReplace them? "
+                        "(Yes: replaced after a backup. No: yours are kept.)" % (len(differ), "\n".join(differ[:8])),
+                        BTN.Yes | BTN.No, BTN.No) != BTN.Yes:
+                    replace = set()
+                LB.apply_import(path, out_root, replace)
+            except (LB.BundleError, OSError) as exc:
+                BTN.warning(parent, "Extras not imported", str(exc))
+        return True
+
+    # ---- curation ---------------------------------------------------------------
+
+    def sync_curation(self, parent=None):
+        """Make the project's curation and the copies in out_root agree. Returns a log line, or None.
+
+        Curation lives in the project file; the stages read plain copies under
+        out_root/curation. Opening, saving and running all call this. Anything that is simply
+        stale is rewritten, a copy edited by something else while the project was untouched is
+        adopted, and only a real disagreement (both changed) is put to the person; whichever
+        version loses is kept in curation/_backup_<time>/.
+        """
+        project = self.project
+        out_root = project.get("out_root")
+        if project.read_only or not isinstance(out_root, str) or not os.path.isdir(out_root):
+            return None
+        try:
+            result = project.reconcile_curation(out_root)
+            resolve = {}
+            if result.conflict:
+                keys = ", ".join(result.conflict)
+                ans = BTN.question(
+                    parent, "Curation differs",
+                    "The curation saved in this project and the files in\n%s\ndiffer for: %s.\n\n"
+                    "Both changed since they last agreed. Use the project's version?\n\n"
+                    "Yes = the project's version (the files are replaced)\n"
+                    "No = the files' version (the project is updated)\n"
+                    "The version you do not choose is kept in a backup folder beside them."
+                    % (os.path.join(out_root, "curation"), keys),
+                    BTN.Yes | BTN.No | BTN.Cancel, BTN.Yes)
+                if ans == BTN.Yes:
+                    resolve = {k: "project" for k in result.conflict}
+                elif ans == BTN.No:
+                    resolve = {k: "files" for k in result.conflict}
+            done = project.apply_reconcile(out_root, result, resolve)
+        except (LP.ProjectError, OSError) as exc:
+            BTN.warning(parent, "Curation not synchronised", str(exc))
+            return None
+        self.changed.emit()
+        bits = []
+        if done["adopted"]:
+            bits.append("took %d curation file(s) into the project (%s)" % (len(done["adopted"]), ", ".join(done["adopted"])))
+        if done["restored"]:
+            bits.append("rewrote %d curation file(s) from the project" % len(done["restored"]))
+        left = [k for k in result.conflict if k not in done["restored"] and k not in done["adopted"]]
+        if left:
+            bits.append("left %s as they are (undecided)" % ", ".join(left))
+        if done["backup"]:
+            bits.append("previous versions kept in %s" % done["backup"])
+        return "; ".join(bits) or None
 
     # ---- the run history ----------------------------------------------------------
 

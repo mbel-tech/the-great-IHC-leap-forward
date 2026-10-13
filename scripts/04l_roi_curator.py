@@ -2444,6 +2444,9 @@ addEventListener("mouseup", ()=>{
 const SEL_KEY = "ls_roi_curator_v1_rois";
 const SEL_SEED = __ROISEL__;
 const SEL_GREY = "#7d8590";
+// The study's `atlas_scope`: regions it wants ticked first, and regions it wants
+// that this atlas lacks. Names are compared exactly, as the atlas writes them.
+const SCOPE = __ATLASSCOPE__;       // {existing:[names], toAdd:[names]}
 // Twelve colours that stay apart for the common colour-vision deficiencies and
 // show on both pale tissue and a dark casing; they cycle past twelve.
 const SEL_PALETTE = ["#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00",
@@ -2519,7 +2522,10 @@ const selIsOpen = () => selDraft !== null;
 function selOpen(){
   const all = selRegions().map(r => r.name);
   if(!all.length) return;
-  selDraft = (SEL ? SEL.filter(n => all.includes(n)) : all).slice();
+  // Nothing chosen yet: the study's own list, if it has one that this atlas can
+  // honour, else every region (what the page offered before atlas_scope).
+  const scoped = SCOPE.existing.filter(n => all.includes(n));
+  selDraft = (SEL ? SEL.filter(n => all.includes(n)) : (scoped.length ? scoped : all)).slice();
   el("selFilter").value = "";
   el("selDlg").style.display = "flex";
   selRender();
@@ -2537,6 +2543,19 @@ function selRender(){
          + `<span class="ct">${r.plates} plate${r.plates === 1 ? "" : "s"}</span></div>`;
   }).join("") || `<div class="selrow"><span class="nm" style="color:var(--dim)">`
                + `no regions match</span></div>`;
+  // What the study asked for that the atlas cannot give, shown rather than lost.
+  const have = new Set(selRegions().map(r => r.name));
+  const lost = SCOPE.existing.filter(n => !have.has(n)).map(n => [n,
+      "listed as existing but no plate carries it - a typo, or the wrong atlas"])
+    .concat(SCOPE.toAdd.filter(n => !have.has(n)).map(n => [n, "wanted, not in this atlas"]))
+    .filter(([n]) => !f || n.toLowerCase().includes(f));
+  if(lost.length){
+    el("selList").innerHTML += `<div class="selrow" style="cursor:default;color:var(--dim)">`
+      + `<span class="nm">not in this atlas</span></div>`
+      + lost.map(([n, why]) => `<div class="selrow miss" style="cursor:default;opacity:.55">`
+        + `<span class="sw"></span><span class="nm">${selEsc(n)}</span>`
+        + `<span class="ct">${selEsc(why)}</span></div>`).join("");
+  }
   el("selCount").textContent = `${selDraft.length} selected`;
   el("selOk").disabled = !selDraft.length;
 }
@@ -5710,7 +5729,26 @@ def main():
         except (OSError, ValueError):
             roisel = None
 
+    # The study's atlas_scope, as the page wants it. Reported against what this
+    # atlas really carries, so a typo or the wrong atlas shows at build time.
+    scope_cfg = CONFIG.get("atlas_scope") or {}
+    scope = {"existing": [n for n in (scope_cfg.get("existing_regions") or []) if isinstance(n, str)],
+             "toAdd": [n for n in (scope_cfg.get("regions_to_add") or []) if isinstance(n, str)]}
+    if scope["existing"] or scope["toAdd"]:
+        carried = {h["region"] for p in pl for h in (p.get("hulls") or [])}
+        miss_e = [n for n in scope["existing"] if n not in carried]
+        found_a = [n for n in scope["toAdd"] if n in carried]
+        print(f"  atlas_scope: {len(scope['existing']) - len(miss_e)}/{len(scope['existing'])} "
+              f"existing regions found, {len(scope['toAdd']) - len(found_a)} wanted but absent")
+        if miss_e:
+            print("  !! existing_regions no plate carries: " + ", ".join(miss_e[:12])
+                  + (" ..." if len(miss_e) > 12 else ""))
+        if found_a:
+            print("  !! regions_to_add this atlas already has (move to existing_regions): "
+                  + ", ".join(found_a[:12]))
+
     page = IO.fill(PAGE, {
+        "__ATLASSCOPE__": scope,
         "__SEED__": seed, "__ROISEL__": roisel, "__PROV__": load_provenance(), "__DATA__": data,
         "__PLATES__": pl, "__PLATESET__": PLATE_SET, "__MARKERS__": markers,
         # The page compares aspect ratios exactly as `ls_atlas.plate_status`

@@ -278,7 +278,7 @@ chk("every required key is either defaulted or has no default",
      and k.type in ("path_dir", "path_file")], [])
 chk("documented keys are marked, not silently live",
     sorted(k.path for k in C.SPEC if k.status == C.DOCUMENTED),
-    ["atlas_scope", "marker_identity"])
+    ["marker_identity"])
 
 # Requiring a key before a stage reads it breaks configs that were working and
 # buys nothing. `slide_naming.pattern` did exactly that for one commit: four
@@ -391,6 +391,21 @@ with tempfile.TemporaryDirectory() as tmp:
         defaulted = C.apply_defaults(minimal(tmp, acquisition={"layout": lay}))
         chk(f"the defaults do not contradict the validator under {lay}",
             C.validate(defaulted)[0], [])
+
+print("--- atlas_scope ---")
+good = {"mode": "sbn_nodes", "existing_regions": ["Dm", "Dl"], "regions_to_add": ["Vs"]}
+chk("a sound atlas_scope is accepted", C._check_atlas_scope(good), [])
+chk("an absent atlas_scope is accepted", C._check_atlas_scope(None), [])
+chk("a non-block is refused", len(C._check_atlas_scope(["Dm"])), 1)
+chk("a non-list is refused", len(C._check_atlas_scope({"existing_regions": "Dm"})), 1)
+chk("an empty name is refused", len(C._check_atlas_scope({"existing_regions": ["Dm", " "]})), 1)
+chk("a duplicate is refused", len(C._check_atlas_scope({"existing_regions": ["Dm", "Dm"]})), 1)
+chk("a region in both lists is refused",
+    len(C._check_atlas_scope({"existing_regions": ["Dm"], "regions_to_add": ["Dm"]})), 1)
+chk("names are matched exactly (case differs, so no clash)",
+    C._check_atlas_scope({"existing_regions": ["Dm"], "regions_to_add": ["dm"]}), [])
+chk("atlas_scope is live and read by 04l",
+    [(k.status, list(k.consumers)) for k in C.SPEC if k.path == "atlas_scope"], [(C.LIVE, ["04l"])])
 
 print()
 print("ALL PASS" if not failures else f"{len(failures)} FAILED")

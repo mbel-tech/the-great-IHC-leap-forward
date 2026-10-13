@@ -1013,6 +1013,11 @@ colour and numbered `1..N` in your order; the other outlines stay visible but di
 cannot be clicked, so the wrong region cannot be drawn by accident. Drawing on the section is
 unchanged: the guided cursor walks your selection, one polygon per region.
 
+- **Your region list (`atlas_scope`).** If the config has an `atlas_scope` block, the first time the
+  window opens its `existing_regions` are pre-ticked, in that order (names must match the atlas
+  exactly). A listed region no plate carries is flagged as a likely typo or the wrong atlas, and
+  `regions_to_add` that this atlas lacks appear greyed under *not in this atlas*, so a gap is visible.
+  The build also prints how many were found. A choice you already made always wins.
 - The choice is **study-wide**: one list for every section and animal. It is kept under its own
   `ls_roi_curator_v1_rois` key (mirrored by the app to `curation/ls_roi_curator_v1_rois.json`), not
   inside the curation file, so the importers still see only section records.

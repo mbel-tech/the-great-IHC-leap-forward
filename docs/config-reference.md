@@ -43,7 +43,7 @@ A key marked *required* has to be present before any stage will run.
 | `atlas_plate_set.dir` | str | `"plates"` | `04e`, `04k`, `04l` | Which plate set the ROI curator and the registration use. |
 | `atlas_figure_sections.two_sections` | str_opt |  | `04a3b` | Inclusive figure-number range, as a string, of merged figures holding two sections each - e.g. "31-47". Empty leaves every figure at whatever 04a2 detected. |
 | `atlas_figure_sections.drop_inset_boxes` | raw | `{}` | `04a3b` | Merged figure id -> the 1-based index of the box to drop, counted top to bottom. |
-| `atlas_scope` | raw |  | recorded here, read by no stage | Which regions the atlas already labels, and which are still wanted. |
+| `atlas_scope` | raw |  | `04l` | Which regions this study cares about: the ones the atlas already labels, and the ones still wanted. |
 | `groups.order` | list_str | `[]` | `04l`, `06c`, `06d` | Which treatment is the LEFT half of every Shotgun slide, and the order the halves are drawn in. |
 | `groups.by_animal` | raw | `{}` | `04l`, `05c`, `06c`, `06d` | Subject ID -> treatment, using exactly the labels in groups.order. |
 

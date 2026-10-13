@@ -20,10 +20,53 @@ from PySide6.QtWidgets import (
     QTableWidget, QVBoxLayout)
 
 import ls_channel_edit as E
+import ls_channel_guess as G
 import ls_channels as CH
 
 DEFAULT_TEXT = "(default)"
 CUSTOM_TEXT = "Custom..."
+
+
+CUSTOM_LABEL = "Custom (type your own)"
+
+
+class MarkerBox(QComboBox):
+    """A marker name: pick from the list, or choose Custom and type your own.
+
+    The list opens with Custom, then the markers usually seen in this channel's
+    colour band (when the file said which band it is), then every other marker.
+    It is an editable box, so typing a name that is not listed works too.
+    """
+
+    def __init__(self, text="", band=None, parent=None):
+        super().__init__(parent)
+        self.setEditable(True)
+        self.setInsertPolicy(QComboBox.NoInsert)
+        typical, rest = G.markers_for(band)
+        self.addItem(CUSTOM_LABEL)
+        if typical:
+            self._header("typical for %s" % band)
+            self.addItems(typical)
+        self._header("other markers" if typical else "markers")
+        self.addItems(rest)
+        self.setEditText(text)
+        self.activated.connect(self._picked)
+
+    def _header(self, title):
+        self.addItem("-- %s --" % title)
+        self.model().item(self.count() - 1).setEnabled(False)
+
+    def _picked(self, i):
+        if self.itemText(i) == CUSTOM_LABEL:
+            self.setEditText("")
+            self.lineEdit().setFocus()
+
+    def text(self):
+        t = self.currentText().strip()
+        return "" if t == CUSTOM_LABEL else t
+
+    def setText(self, t):
+        self.setEditText(t)
 
 
 class ChannelEditor(QDialog):
@@ -40,11 +83,11 @@ class ChannelEditor(QDialog):
         self.paired = layout == CH.LAYOUT_PAIRED
         self.result_edits = None
         self.setWindowTitle("Channels and markers")
-        self.resize(980 if not self.paired else 560, 520)
+        self.resize(1280 if not self.paired else 560, 520)
 
         self.cols = (["Show", "Name", "Colour"] if self.paired else
                      ["Show", "Name", "Role", "CZI channel name", "Plane",
-                      "Measured in", "Detector", "Nucleus-shaped", "Colour"])
+                      "Measured in", "Detector", "Nucleus-shaped", "Colour", "Detected"])
         self.table = QTableWidget(0, len(self.cols))
         self.table.setHorizontalHeaderLabels(self.cols)
         self.table.verticalHeader().setVisible(False)
@@ -52,6 +95,7 @@ class ChannelEditor(QDialog):
         self.table.setColumnWidth(self.cols.index("Name"), 150)
         if not self.paired:
             self.table.setColumnWidth(self.cols.index("CZI channel name"), 140)
+            self.table.setColumnWidth(self.cols.index("Detected"), 300)
 
         intro = QLabel(
             "Each marker is a channel of the scan. The name becomes folder and file "
@@ -74,9 +118,10 @@ class ChannelEditor(QDialog):
             nb = QPushButton("Add counterstain")
             nb.clicked.connect(lambda: self._add(CH.NUCLEAR))
             bar.insertWidget(1, nb)
-            fb = QPushButton("Fill names from a CZI file...")
-            fb.setToolTip("read the channel names a scan reports, so the table matches the file")
-            fb.clicked.connect(self._fill_from_czi)
+            fb = QPushButton("Detect from a CZI file...")
+            fb.setToolTip("read each channel's dye and wavelengths from a scan, and fill in "
+                          "its file name, plane, role and colour")
+            fb.clicked.connect(self._detect_from_czi)
             bar.addWidget(fb)
         bar.addStretch(1)
 
@@ -137,12 +182,13 @@ class ChannelEditor(QDialog):
         i = self.table.rowCount()
         self.table.insertRow(i)
         self._meta.append({"orig": r.get("orig"), "extra": r.get("extra") or {},
-                           "segment_set": r.get("segment_set", False)})
+                           "segment_set": r.get("segment_set", False),
+                           "detected": r.get("detected") or "", "band": r.get("band")})
         show = QCheckBox()
         show.setChecked(bool(r.get("show")))
         show.stateChanged.connect(lambda *_: self._refresh())
-        name = QLineEdit(r.get("name") or "")
-        name.textChanged.connect(lambda *_: self._refresh())
+        name = MarkerBox(r.get("name") or "", r.get("band"))
+        name.editTextChanged.connect(lambda *_: self._refresh())
         cell = {"Show": show, "Name": name, "Colour": self._colour_combo(r.get("colour"))}
         if not self.paired:
             role = self._combo(list(CH.ROLES), r.get("role"))
@@ -161,9 +207,18 @@ class ChannelEditor(QDialog):
             shaped.setChecked(bool(r.get("nucleus_shaped", True)))
             shaped.stateChanged.connect(lambda *_: self._refresh())
             cell.update({"Role": role, "CZI channel name": czi, "Plane": plane,
-                         "Measured in": seg, "Detector": det, "Nucleus-shaped": shaped})
+                         "Measured in": seg, "Detector": det, "Nucleus-shaped": shaped,
+                         "Detected": self._detected_label(r)})
         for c, title in enumerate(self.cols):
             self.table.setCellWidget(i, c, cell[title])
+
+    @staticmethod
+    def _detected_label(r):
+        label = QLabel(r.get("detected") or "")
+        label.setStyleSheet("color:#9aa0a8;font-size:11px")
+        label.setToolTip("what the CZI file says this channel is; the file records the dye, "
+                         "not the antibody, so the marker name is your choice")
+        return label
 
     # ---- reading it back ---------------------------------------------------
 
@@ -176,6 +231,7 @@ class ChannelEditor(QDialog):
             colour = self._w(i, "Colour").currentText()
             r = {"orig": meta["orig"], "extra": meta["extra"],
                  "segment_set": meta["segment_set"],
+                 "detected": meta["detected"], "band": meta["band"],
                  "name": self._w(i, "Name").text(), "show": self._w(i, "Show").isChecked(),
                  "colour": None if colour in (DEFAULT_TEXT, CUSTOM_TEXT) else colour,
                  "role": CH.MARKER}
@@ -253,8 +309,10 @@ class ChannelEditor(QDialog):
         self._populate(rows)
         self.table.setCurrentCell(r + d, 0)
 
-    def _fill_from_czi(self):
-        path, _ = QFileDialog.getOpenFileName(self, "A CZI scan of this study", "", "CZI (*.czi)")
+    def _detect_from_czi(self):
+        start = self.cfg.get("source_dir") or ""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "A CZI scan of this study", start if os.path.isdir(start) else "", "CZI (*.czi)")
         if not path:
             return
         try:
@@ -262,20 +320,16 @@ class ChannelEditor(QDialog):
         except (ValueError, ImportError) as exc:
             QMessageBox.warning(self, "Could not read the file", str(exc))
             return
-        rows = self.rows()
-        have = {(r.get("czi_name") or "").lower() for r in rows}
-        for f in found:
-            if f["name"].lower() in have:
-                continue
-            nr = E.new_row(self.layout)
-            nr.update({"czi_name": f["name"], "index": f["index"], "name": f["name"]})
-            rows.append(nr)
+        rows, added = E.merge_detected(self.rows(), found, self.layout)
         self._populate(rows)
+        lines = ["  plane %d  %s  ->  %s" % (f["index"], f["czi_name"] or "?", f["detected"])
+                 for f in found]
         QMessageBox.information(
-            self, "Channels read",
-            "%d channel(s) in the file: %s.\n\nSet which one is the counterstain and give "
-            "each marker the name you want in the outputs." % (
-                len(found), ", ".join(f["name"] or "?" for f in found)))
+            self, "Channels detected",
+            "%d channel(s) in the file, %d new in the table:\n\n%s\n\n"
+            "The file records each channel's dye, not the antibody. Check the counterstain, "
+            "and pick or type the marker name for each channel (the list offers the markers "
+            "usually seen in that colour)." % (len(found), added, "\n".join(lines)))
 
     def _ok(self):
         rows = self.rows()

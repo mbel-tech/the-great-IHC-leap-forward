@@ -139,6 +139,65 @@ dlg2._save()
 chk("saving after a layout change is refused", "warn:Channels need another look" in shown, True)
 chk("...and writes nothing", read() == after, True)
 
+# ---- the marker list and detection from a CZI ----------------------------------
+import struct                                               # noqa: E402
+import tempfile                                             # noqa: E402
+import czi_meta                                             # noqa: E402
+from PySide6.QtWidgets import QFileDialog                   # noqa: E402
+
+box = CEd.MarkerBox("", "green")
+items = [box.itemText(i) for i in range(box.count())]
+chk("the list opens with Custom", items[0], CEd.CUSTOM_LABEL)
+chk("...then the band's own markers under a header", items[1:4], ["-- typical for green --", "Ki-67", "Pan-cytokeratin"])
+chk("...then everything else", "-- other markers --" in items and "CD68" in items, True)
+chk("headers cannot be chosen", box.model().item(1).isEnabled(), False)
+box.setText("Ki-67")
+chk("a listed marker reads back", box.text(), "Ki-67")
+box.setText("my own antibody")
+chk("a typed marker reads back", box.text(), "my own antibody")
+box._picked(0)
+chk("choosing Custom clears the box for typing", box.text(), "")
+chk("a box left on the Custom label counts as empty", (box.setText(CEd.CUSTOM_LABEL), box.text())[1], "")
+chk("with no band known, nothing is 'typical'",
+    any(t.startswith("-- typical") for t in (CEd.MarkerBox("", None).itemText(i) for i in range(CEd.MarkerBox("", None).count()))), False)
+
+XML = """<ImageDocument><Metadata><Information><Image><Dimensions><Channels>
+<Channel Id="Channel:0" Name="DAPI"><EmissionWavelength>465</EmissionWavelength></Channel>
+<Channel Id="Channel:1" Name="AF568"><EmissionWavelength>603</EmissionWavelength></Channel>
+<Channel Id="Channel:2" Name="AF488"><EmissionWavelength>519</EmissionWavelength></Channel>
+</Channels></Dimensions></Image></Information></Metadata></ImageDocument>"""
+body = XML.encode()
+head = bytearray(czi_meta.HEADER_LEN)
+head[:10] = b"ZISRAWFILE"
+struct.pack_into("<QQ", head, 84, 0, czi_meta.HEADER_LEN)
+seg = bytearray(czi_meta.SEGMENT_HEADER_LEN)
+seg[:14] = b"ZISRAWMETADATA"
+czi_path = os.path.join(tempfile.mkdtemp(), "scan.czi")
+with open(czi_path, "wb") as fh:
+    fh.write(bytes(head) + bytes(seg) + struct.pack("<ii", len(body), 0).ljust(czi_meta.METADATA_DATA_LEN, b"\0") + body)
+
+QFileDialog.getOpenFileName = staticmethod(lambda *a, **k: (czi_path, ""))
+fresh = CEd.ChannelEditor({"acquisition": {"layout": "multiplex", "channels": []}}, "multiplex")
+chk("an empty table to start", fresh.table.rowCount(), 0)
+fresh._detect_from_czi()
+chk("detection fills one row per channel", fresh.table.rowCount(), 3)
+chk("...with the file's channel names", [fresh._w(i, "CZI channel name").text() for i in range(3)], ["DAPI", "AF568", "AF488"])
+chk("...the counterstain found", [fresh._w(i, "Role").currentText() for i in range(3)], ["nuclear", "marker", "marker"])
+chk("...the colours from the bands", [fresh._w(i, "Colour").currentText() for i in (1, 2)], ["red", "green"])
+chk("...the detection shown beside each", fresh._w(1, "Detected").text(), "AF568 | em 603 nm | red band")
+chk("...each name box offers its own band first",
+    [fresh._w(i, "Name").itemText(1) for i in range(3)],
+    ["-- typical for blue --", "-- typical for red --", "-- typical for green --"])
+chk("...and the pipeline accepts the result", "accepts" in fresh.status.text(), True)
+fresh._w(1, "Name").setText("cFos")                       # the person picks the marker
+fresh._detect_from_czi()
+chk("detecting again keeps what was chosen",
+    ([fresh._w(i, "Name").text() for i in range(3)], fresh.table.rowCount()),
+    (["DAPI", "cFos", "AF488"], 3))
+fresh._ok()
+chk("the chosen marker is what is written",
+    [c["name"] for c in fresh.result_edits["acquisition.channels"]], ["DAPI", "cFos", "AF488"])
+
 print()
 print("FAILED: " + ", ".join(failures) if failures else "ALL PASS")
 sys.exit(1 if failures else 0)

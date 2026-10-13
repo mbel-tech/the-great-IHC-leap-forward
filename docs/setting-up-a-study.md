@@ -89,7 +89,18 @@ channel: its name (what the outputs call it), its role (nuclear, marker,
 registration, ignore), the name the CZI file gives it, its plane as a fallback,
 and for a marker where its objects come from (see below). Under `paired`, where
 each scan carries the counterstain plus one marker, the table is just the marker
-names. **Fill names from a CZI file…** reads the channels a scan reports.
+names.
+
+**Detect from a CZI file…** reads what the scan records about each channel (its
+name, dye, excitation and emission) and fills in the CZI channel name, plane,
+role and colour: a blue channel is suggested as the counterstain, and a marker
+channel is coloured by its band (blue, green, red; far-red is drawn magenta). The
+file records the dye, not the antibody, so the **marker name is your choice**: each
+Name box is a drop-down that opens with *Custom (type your own)*, then the markers
+usually seen in that channel's colour band, then every other marker in
+[`docs/channel-markers.md`](channel-markers.md); you can also just type a name.
+Detecting never overwrites a name, colour or role you have already set, and a
+channel that is already in the table only gets its detection note refreshed.
 
 Each marker also gets a **Colour** and a **Show** box. *Show* controls whether it
 is drawn in the composite and the curator's Review pane; *(default)* means the

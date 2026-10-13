@@ -100,6 +100,59 @@ def _first(root, *paths):
     return None
 
 
+def _wavelength(text):
+    """A Zeiss wavelength element as nm, or None. Zeiss writes nm; a value in metres is scaled."""
+    try:
+        v = float(text)
+    except (TypeError, ValueError):
+        return None
+    if 0 < v < 1e-3:                     # written in metres
+        v *= 1e9
+    return round(v, 1) if v > 0 else None
+
+
+def channel_info(root):
+    """What the file says about each channel's dye, for guessing what it is.
+
+    Separate from `summarise` (whose output other stages pin) and read with the
+    same tolerance: every field is optional, because which of them a file carries
+    depends on the ZEN version and on whether the channel was picked from the dye
+    database or typed in. The dye is looked for in the acquisition channel and in
+    the matching DisplaySetting channel, which is where ZEN keeps `DyeName`,
+    `ShortName` and `Color`.
+
+    Returns [{id, name, fluor, dye_name, short_name, colour, excitation_nm,
+    emission_nm}] in plane order, `None` where the file is silent.
+    """
+    display = {}
+    for ch in root.findall(".//DisplaySetting/Channels/Channel"):
+        display[ch.get("Id")] = ch
+
+    def first(el, *tags):
+        for t in tags:
+            for src in el:
+                v = src.findtext(t) if src is not None else None
+                if v and v.strip():
+                    return v.strip()
+        return None
+
+    out = []
+    for ch in root.findall(".//Dimensions/Channels/Channel"):
+        pair = [ch, display.get(ch.get("Id"))]
+        pair = [e for e in pair if e is not None]
+        out.append({
+            "id": ch.get("Id"),
+            "name": ch.get("Name"),
+            "fluor": first(pair, "Fluor"),
+            "dye_name": first(pair, "DyeName"),
+            "short_name": first(pair, "ShortName"),
+            "colour": first(pair, "Color"),
+            "excitation_nm": _wavelength(first(pair, "ExcitationWavelength")),
+            "emission_nm": _wavelength(first(pair, "EmissionWavelength")),
+        })
+    return out
+
+
 def summarise(root):
     """Pull the fields the pipeline cares about out of a metadata XML root."""
     img = ".//Information/Image/"

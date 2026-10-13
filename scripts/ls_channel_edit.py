@@ -218,15 +218,47 @@ def check(cfg, layout):
 
 
 def czi_channels(path):
-    """[{"name", "index"}] for the channels a CZI file reports; ValueError if it cannot."""
+    """The rows a CZI file suggests (see `ls_channel_guess.detect`); ValueError if it cannot be read."""
     import czi_meta
+    import ls_channel_guess as G
     try:
         with open(path, "rb") as fh:
-            info = czi_meta.summarise(czi_meta.read_metadata(fh))
+            root = czi_meta.read_metadata(fh)
+        infos = czi_meta.channel_info(root)
     except (OSError, ValueError) as e:
         raise ValueError("%s could not be read as a CZI file: %s" % (os.path.basename(path), e))
-    found = [{"name": c.get("name") or "", "index": i}
-             for i, c in enumerate(info.get("channels") or [])]
-    if not found:
+    if not infos:
         raise ValueError("%s reports no channels" % os.path.basename(path))
-    return found
+    return G.detect(infos)
+
+
+def merge_detected(rows, found, layout):
+    """Rows with a CZI's channels folded in; the person's own choices are never overwritten.
+
+    A channel already in the table (matched on the file's channel name) only gets
+    its detection note refreshed. A new channel is appended with what the file
+    suggests. The counterstain is suggested only when the table has none; a second
+    one the file reports is appended as `ignore`.
+    """
+    rows = [dict(r) for r in rows]
+    have = {(r.get("czi_name") or "").lower(): r for r in rows if r.get("czi_name")}
+    has_nuclear = any(r.get("role") == CH.NUCLEAR for r in rows)
+    added = 0
+    for f in found:
+        row = have.get(f["czi_name"].lower())
+        if row is not None:
+            row["detected"] = f["detected"]
+            row["band"] = f["band"]
+            continue
+        # A counterstain the table already has under another name is not measured
+        # a second time as a marker; the new row is set aside for the person to judge.
+        role = CH.IGNORE if f["role"] == CH.NUCLEAR and has_nuclear else f["role"]
+        nr = new_row(layout, role)
+        has_nuclear = has_nuclear or nr["role"] == CH.NUCLEAR
+        nr.update({"name": f["name"], "czi_name": f["czi_name"], "index": f["index"],
+                   "detected": f["detected"], "band": f["band"]})
+        if nr["role"] == CH.MARKER:
+            nr["colour"] = f["colour"]
+        rows.append(nr)
+        added += 1
+    return rows, added

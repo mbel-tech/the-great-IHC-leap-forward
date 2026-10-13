@@ -16,9 +16,11 @@ import os
 
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
-    QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea,
-    QVBoxLayout, QWidget)
+    QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMessageBox, QPushButton,
+    QScrollArea, QVBoxLayout, QWidget)
 
+import atlas_registry as AR
+import ls_atlas_import as AI
 import ls_config as LC
 
 
@@ -87,8 +89,12 @@ class _PatternRow(QWidget):
         return self.edit.text().strip() or None
 
 
-def _widget_for(key, value):
-    """The editor for one spec key, and a callable giving its typed value."""
+def _widget_for(key, value, choices=None):
+    """The editor for one spec key, and a callable giving its typed value.
+
+    `choices` overrides the spec's list for a key whose valid values depend on the
+    study: `atlas_source` also offers the atlases that study registered itself.
+    """
     if key.ui in ("dir", "file", "outdir"):
         row = _PathRow(key.ui, value)
         return row, row.value
@@ -98,8 +104,9 @@ def _widget_for(key, value):
         return box, box.isChecked
     if key.ui == "choice":
         combo = QComboBox()
-        combo.addItems(list(key.choices or []))
-        if value in (key.choices or []):
+        offered = list(choices if choices is not None else (key.choices or []))
+        combo.addItems(offered)
+        if value in offered:
             combo.setCurrentText(value)
         return combo, combo.currentText
     edit = QLineEdit("" if value is None else str(value))
@@ -145,6 +152,11 @@ class ConfigDialog(QDialog):
                     lambda: self.rows["source_dir"][1]())
                 getter = widget.value
                 self.pattern_row = widget
+            elif key.path == "atlas_source":
+                # The study's own atlases are offered beside the built-in ones.
+                widget, getter = _widget_for(key, value if found else key.default,
+                                             self._atlas_names(cfg))
+                self.atlas_combo = widget
             else:
                 widget, getter = _widget_for(key, value if found else key.default)
             self.rows[key.path] = (key, getter)
@@ -153,6 +165,12 @@ class ConfigDialog(QDialog):
             hint.setStyleSheet("color:#9aa0a8;font-size:11px")
             hint.setWordWrap(True)
             form.addRow("", hint)
+            if key.path == "atlas_source":
+                btn = QPushButton("Import atlas...")
+                btn.setToolTip("add an atlas you made elsewhere: a folder of plate "
+                               "images with plates.csv and polygons.csv or seeds.csv")
+                btn.clicked.connect(self._import_atlas)
+                form.addRow("", btn)
 
         inner = QWidget()
         inner.setLayout(form)
@@ -173,6 +191,79 @@ class ConfigDialog(QDialog):
         lay.addWidget(scroll, 1)
         lay.addWidget(note)
         lay.addWidget(buttons)
+
+    @staticmethod
+    def _atlas_names(cfg):
+        """Every atlas the study can use; the built-ins if its own block is bad."""
+        try:
+            return list(AR.names(cfg))
+        except ValueError:
+            return list(AR.BUILTIN)
+
+    def _import_atlas(self):
+        """Pick a folder, have it judged, and register it as an atlas.
+
+        All the rules live in ls_atlas_import; this only asks the questions and
+        shows its answer, so what the dialog accepts is what the command line
+        accepts.
+        """
+        if not os.path.exists(self.path):
+            QMessageBox.information(
+                self, "Save the study first",
+                "The study has no config file yet. Save it, then import the atlas.")
+            return
+        folder = QFileDialog.getExistingDirectory(
+            self, "Folder with the atlas's plates.csv, images and polygons.csv or seeds.csv")
+        if not folder:
+            return
+        kinds = ["polygons - each region is a closed outline",
+                 "seeds - each region is marked by dots"]
+        pick, ok = QInputDialog.getItem(self, "How are its regions marked?",
+                                        "Region markings:", kinds, 0, False)
+        if not ok:
+            return
+        kind = pick.split(" ", 1)[0]
+        name, ok = QInputDialog.getText(
+            self, "Name this atlas",
+            "A short name (lower-case letters, digits and _, e.g. mouse_brain):")
+        name = (name or "").strip()
+        if not ok or not name:
+            return
+        half = QMessageBox.question(
+            self, "Micrograph beside the drawing?",
+            "Does each plate draw the atlas beside a micrograph of the other half "
+            "(as the Wullimann plates do)?\n\nChoose No if the whole plate is the atlas.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No) == QMessageBox.Yes
+        mirror = False
+        if kind == "polygons":
+            mirror = QMessageBox.question(
+                self, "Mirror the outlines?",
+                "Do the outlines cover one hemisphere only, so they can be mirrored "
+                "to the other side?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No) == QMessageBox.Yes
+        rep = AI.check(folder, kind, half)
+        if not rep.ok:
+            QMessageBox.warning(self, "This folder cannot be imported yet", rep.text())
+            return
+        if QMessageBox.question(
+                self, "Import this atlas?",
+                rep.text() + "\n\nImport it as '%s' and use it for this study?" % name,
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes) != QMessageBox.Yes:
+            return
+        try:
+            AI.import_atlas(self.path, folder, name, kind, label=name,
+                            micrograph_half=half, mirror_allowed=mirror)
+        except ValueError as e:
+            QMessageBox.warning(self, "Not imported", str(e))
+            return
+        # The file now names the atlas; refresh what this dialog offers and select it.
+        names = self._atlas_names(self._load())
+        self.atlas_combo.clear()
+        self.atlas_combo.addItems(names)
+        self.atlas_combo.setCurrentText(name)
+        QMessageBox.information(
+            self, "Atlas imported",
+            "'%s' is registered and selected. Press Save to keep your other changes." % name)
 
     def _load(self):
         """The study being edited, or the template for one that is new."""

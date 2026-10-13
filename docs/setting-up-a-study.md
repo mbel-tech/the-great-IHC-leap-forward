@@ -81,6 +81,25 @@ Studies whose filenames carry less degrade on their own:
 | subject, slide | `AB12_s03_sc05` |
 | subject only | `Fish07_sc05` |
 
+## The project file
+
+A study's config file is also its project file. Besides the settings it carries one
+extra block, `project`, that only the app reads (no stage does, so editing or
+deleting it never changes a result):
+
+| field | what it holds |
+|---|---|
+| `project_version`, `id`, `created`, `modified`, `app_version`, `notes` | who and when |
+| `detected` | what was read from CZI files (channel names, dyes, wavelengths): evidence, not input |
+| `decisions` | changes made in the app: the key, old and new value, who, when. The animal-to-treatment key (`groups.*`) is recorded by name only, never by value |
+| `runs` | stages that ran: times, success, a hash of the config, the code version |
+
+The lists are capped (200 runs, 500 decisions, 20 detected files). Saving writes the
+file atomically and keeps the last three versions beside it as `.bak1`-`.bak3`; a
+file written by a newer version of the app opens read-only and is never rewritten.
+The logic is in `scripts/ls_project.py` (`Project.new / open / set / save / save_as /
+revert / record_run`), which the app's File menu is built on.
+
 ## Channels, markers and their colours
 
 In the app, **Settings → Channels and markers…** edits all of this as a table, so

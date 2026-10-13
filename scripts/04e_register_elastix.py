@@ -98,13 +98,16 @@ def parameter_maps(itk, bspline_spacing):
 
 
 def micrograph_x0(plate, whole_plate=False):
-    """Pixel column where the micrograph half of a Wullimann plate starts, else 0.
+    """Pixel column where the micrograph half of a plate starts, else 0.
+
+    Only for atlases whose registry entry says a plate carries a micrograph beside
+    its drawing (Wullimann); every other atlas is registered whole.
 
     Registration reads only this half: the other half is a line drawing, which
     has no tissue texture for mutual information to match against a section. 0
     means the whole plate, which is what salmon plates and `--whole-plate` get.
     """
-    if whole_plate or AT.source(CONFIG) != AT.WULLIMANN:
+    if whole_plate or not AT.entry(CONFIG).micrograph_half:
         return 0
     mid = plate.get("midline_frac")
     if not mid:

@@ -5535,7 +5535,7 @@ def plate_rows(plate_dir=None, polygon_statuses=("reviewed",), mirror=None):
     status is in `polygon_statuses` are shown - by default just the reviewed
     ones, because an OCR-named polygon is a guess and the name becomes a
     measurement key. `mirror` reflects them about the plate midline; None takes
-    `atlas_polygon_mirror` from the study, for the Wullimann atlas only.
+    `atlas_polygon_mirror` from the study, for atlases whose registry entry allows it.
 
     Calls `ls_atlas.fingerprints`, which maintains `<plate_dir>/fingerprints.csv`
     - the one sanctioned on-disk write under a plate set's directory. Building
@@ -5554,7 +5554,7 @@ def plate_rows(plate_dir=None, polygon_statuses=("reviewed",), mirror=None):
     seeds = load_seeds(plate_dir)
     polys = AP.read_polygons(os.path.join(plate_dir, "polygons.csv"))
     if mirror is None:
-        mirror = bool(CONFIG.get("atlas_polygon_mirror")) and AT.source(CONFIG) == AT.WULLIMANN
+        mirror = bool(CONFIG.get("atlas_polygon_mirror")) and AT.entry(CONFIG).mirror_allowed
     prints = AT.fingerprints(plate_dir, plates)
 
     out = []

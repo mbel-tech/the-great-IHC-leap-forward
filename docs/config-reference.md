@@ -37,8 +37,9 @@ A key marked *required* has to be present before any stage will run.
 | `detection.abercrombie.enabled` | bool | `true` | `06a` | Correct counted nuclear profiles to nuclei. |
 | `detection.threshold.mad_k` | float | `3.0` | `05c` | How many robust standard deviations above the background median a pixel must be to count as signal, for the `threshold` backend. |
 | `detection.threshold.min_area_um2` | float | `5.0` | `05c` | The smallest object the `threshold` backend will report, in square micrometres. |
-| `atlas_source` | str | `"salmon"` | `04e`, `04k`, `04l`, `04w`, `04x` | Which atlas the run uses: salmon (the default) or wullimann1996. |
-| `atlas_polygon_mirror` | bool | `false` | `04l` | Wullimann only: mirror the plate outlines about the midline. |
+| `atlas_source` | str | `"salmon"` | `04e`, `04k`, `04l`, `04w`, `04x` | Which atlas the run uses: salmon (the default), wullimann1996, or one you imported. |
+| `atlas_polygon_mirror` | bool | `false` | `04l` | Mirror the plate outlines about the midline, for an atlas whose outlines cover one hemisphere (Wullimann). |
+| `atlases` | raw | `{}` | `04e`, `04k`, `04l` | Atlases this study registered itself, beside the built-in salmon and wullimann1996: {name: {set_dir, region_kind, ...}}. |
 | `atlas_plate_set.dir` | str | `"plates"` | `04e`, `04k`, `04l` | Which plate set the ROI curator and the registration use. |
 | `atlas_figure_sections.two_sections` | str_opt |  | `04a3b` | Inclusive figure-number range, as a string, of merged figures holding two sections each - e.g. "31-47". Empty leaves every figure at whatever 04a2 detected. |
 | `atlas_figure_sections.drop_inset_boxes` | raw | `{}` | `04a3b` | Merged figure id -> the 1-based index of the box to drop, counted top to bottom. |

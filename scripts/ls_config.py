@@ -471,7 +471,8 @@ SPEC = [
 
     # ---- atlas -----------------------------------------------------------
     Key("atlas_source", "str",
-        "Which atlas the run uses: salmon (the default) or wullimann1996.",
+        "Which atlas the run uses: salmon (the default), wullimann1996, or one "
+        "you imported.",
         default="salmon", label="Atlas", choices=list(ATLAS_SOURCES),
         note="salmon takes its plates from atlas_pdf and atlas_plate_set. "
              "wullimann1996 is the zebrafish cross-section atlas: 04w builds "
@@ -479,17 +480,36 @@ SPEC = [
              "outlines into numbered polygons, and atlas_plate_set is then "
              "ignored. Plate ids differ between the two (wplate_NNN), and the "
              "plate fingerprint the importers already check catches rows made "
-             "against another plate set.",
+             "against another plate set. An atlas made elsewhere is brought in "
+             "with `python scripts/ls_atlas_import.py` or the Import atlas "
+             "button, which registers it under `atlases` and is then a valid "
+             "value here.",
         consumers=["04e", "04k", "04l", "04w", "04x"]),
 
     Key("atlas_polygon_mirror", "bool",
-        "Wullimann only: mirror the plate outlines about the midline.",
+        "Mirror the plate outlines about the midline, for an atlas whose "
+        "outlines cover one hemisphere (Wullimann).",
         default=False, label="Mirror atlas polygons",
         note="Each Wullimann plate draws one hemisphere beside the micrograph "
              "of the other, so the outlines cover half the brain. Mirroring "
              "gives the numbered guide on both sides in 04l. Registration "
              "(04e) always mirrors, because it reads the micrograph half.",
         consumers=["04l"]),
+
+    Key("atlases", "raw",
+        "Atlases this study registered itself, beside the built-in salmon and "
+        "wullimann1996: {name: {set_dir, region_kind, ...}}.",
+        default={}, ui=False, example={},
+        note="Written by `python scripts/ls_atlas_import.py` (or the app's "
+             "Import atlas button), not by hand. Each entry names a plate set "
+             "under <out_root>/atlas/ - its own folder, never one a built-in "
+             "uses - and says how its regions are marked (`region_kind`: seeds "
+             "or polygons), whether each plate carries a micrograph half "
+             "(`micrograph_half`) and whether its polygons can be mirrored "
+             "(`mirror_allowed`). `atlas_source` then accepts the entry's name. "
+             "An entry is judged strictly when read: a bad one is an error, not "
+             "a quiet fall back to salmon.",
+        consumers=["04e", "04k", "04l"]),
 
     Key("atlas_plate_set.dir", "str",
         "Which plate set the ROI curator and the registration use.",
@@ -610,6 +630,19 @@ RETIRED = {
 
 def _is_num(v):
     return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _check_atlas_source(cfg, value):
+    """`atlas_source` against the registry, which also knows the study's own atlases."""
+    if not isinstance(value, str):
+        return f"expected a string, got {type(value).__name__}"
+    try:
+        atlas_registry.names(cfg)
+    except ValueError:
+        return None                       # a bad `atlases` block is reported on its own
+    if value not in atlas_registry.names(cfg):
+        return f"must be one of {', '.join(atlas_registry.names(cfg))}"
+    return None
 
 
 def _check(key, value):
@@ -765,9 +798,22 @@ def validate(cfg, path="<config>", strict_paths=False):
                     f"its default - the Fiji stages read this file directly "
                     f"and cannot see Python defaults")
             continue
-        problem = _check(key, value)
+        if key.path == "atlas_source" and atlas_registry is not None:
+            problem = _check_atlas_source(cfg, value)
+        else:
+            problem = _check(key, value)
         if problem:
             errors.append(f"{path}: `{key.path}` {problem}\n    {key.doc}")
+
+    # The study's own atlases are judged by the registry, which owns the rules
+    # (own folder, no shadowing, no path tricks). Reported here as a config error
+    # so a bad entry is read as one rather than surfacing as a traceback in
+    # whichever stage first asks which atlas it is.
+    if atlas_registry is not None and isinstance(cfg, dict):
+        try:
+            atlas_registry.entries(cfg)
+        except ValueError as e:
+            errors.append(f"{path}: `atlases` {e}")
 
     # The channel table's rules live in ls_channels, which owns the concept.
     # Restating them here would let the validator and the reader disagree

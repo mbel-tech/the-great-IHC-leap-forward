@@ -88,6 +88,18 @@ Interaction
   provide is now the residual per landmark, shown for each one so a mis-clicked
   pair is visible as a large error rather than quietly degrading the fit.
 
+Choosing which regions to draw
+------------------------------
+
+  The first time the page opens it asks which regions will be drawn, in a pop-up
+  that `o` (or the ROIs... button) reopens. The choice is study-wide, kept under
+  its own localStorage key (`ls_roi_curator_v1_rois`, mirrored by the app) and
+  not inside the curation record, which holds only sections. Selected outlines
+  are highlighted in distinct colours and numbered 1..N in pick order on the
+  plate; the rest are dimmed grey and cannot be aimed at. The stored `roi` -
+  what a polygon records and what `roi_n` exports - is NEVER renumbered: only
+  what is shown is. With nothing chosen the page behaves as it always did.
+
 Regions, drawn rather than sampled
 ----------------------------------
 
@@ -880,6 +892,29 @@ canvas{display:block;width:100%;height:100%;object-fit:contain;cursor:crosshair;
 .btn-region{border-color:#2d6a3e;color:#7ee787}
 .btn-region:hover{border-color:#3fb950;color:#7ee787}
 .reg-on{border-color:#3fb950 !important;background:#10261a;color:#7ee787 !important}
+/* The "which ROIs will you draw" pop-up. A fixed overlay toggled by display, the
+   same approach as #revImgCard.imgmax: it needs no browser feature that a
+   WebEngine view might lack. */
+.seldlg{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.62);
+        display:none;align-items:center;justify-content:center}
+.selcard{width:min(560px,92vw);max-height:84vh;display:flex;flex-direction:column;
+         gap:8px;background:#0e1014;border:1px solid var(--line);border-radius:12px;
+         padding:14px}
+.selcard h2{margin:0;font-size:15px}
+.selcard p{margin:0;color:var(--dim);font-size:12.5px}
+#selFilter{background:#1c2027;color:var(--fg);border:1px solid var(--line);
+           border-radius:7px;padding:6px 10px;font:inherit}
+#selList{overflow:auto;flex:1 1 auto;min-height:140px;border:1px solid var(--line);
+         border-radius:8px}
+.selrow{display:flex;gap:9px;align-items:center;padding:5px 9px;cursor:pointer;
+        border-bottom:1px solid #161a20}
+.selrow:hover{background:#151922}
+.selrow .sw{width:24px;height:24px;border-radius:50%;flex:0 0 auto;display:flex;
+        align-items:center;justify-content:center;font:700 11px system-ui;
+        color:#04121f;border:2px solid #3a424d;background:#222831}
+.selrow.on .sw{border-color:transparent}
+.selrow .nm{flex:1 1 auto}.selrow .ct{color:var(--dim);font-size:12px}
+.selbar{display:flex;gap:8px;align-items:center}.selbar .grow{flex:1}
 #cSec.rotating{cursor:ew-resize}
 button[disabled]{opacity:.4;cursor:default}
 button[disabled]:hover{border-color:var(--line)}
@@ -1124,6 +1159,8 @@ kbd{display:inline-block;padding:1px 5px;border:1px solid var(--line);border-rad
   <button id="dapiBtn" class="btn-plate" onclick="toggleDapi()">__NUCLEAR__</button>
   <button id="bgBtn" class="btn-bg" onclick="toggleBgMode()">Background</button>
   <button id="hullBtn" class="btn-region" onclick="toggleHulls()">Hulls</button>
+  <button id="selBtn" class="btn-region" onclick="selOpen()"
+          title="choose which regions you will draw (o)">ROIs...</button>
   <button id="undoPolyBtn" class="btn-edit" onclick="undoPoly()">Undo region</button>
   <button id="guideBtn" class="btn-guide" onclick="toggleGuided()">Guided</button>
   <button id="skipBtn" class="btn-guide" onclick="skipRoi()">Skip ROI</button>
@@ -1304,6 +1341,25 @@ kbd{display:inline-block;padding:1px 5px;border:1px solid var(--line);border-rad
   faded = marked no-ROI &middot; autosaves &middot;
   filters (sample, channel, favourites, excluded) are top left, actions top right
 </footer>
+<div id="selDlg" class="seldlg" onclick="if(event.target===this) selCancel()">
+  <div class="selcard">
+    <h2>Which ROIs will you draw?</h2>
+    <p>Tick the regions in the order you want them numbered. Only these are
+       highlighted and numbered on the atlas plate; the rest are dimmed and
+       cannot be clicked. The choice applies to every section and animal, and
+       you can reopen this with <b>o</b> at any time. It never deletes a
+       polygon you have already drawn.</p>
+    <input id="selFilter" placeholder="filter regions..." oninput="selRender()">
+    <div id="selList" onclick="selPick(event)"></div>
+    <div class="selbar">
+      <span id="selCount" class="row"></span><span class="grow"></span>
+      <button onclick="selAll()">All</button>
+      <button onclick="selNone()">None</button>
+      <button onclick="selCancel()">Cancel</button>
+      <button id="selOk" class="primary" onclick="selConfirm()">Confirm</button>
+    </div>
+  </div>
+</div>
 <script>
 const DATA = __DATA__;      // [{uid, animal, order, img}]
 const PLATES = __PLATES__;  // [{id, img, w, h, labelled, seeds:[{region,xf,yf,hex}],
@@ -1932,8 +1988,8 @@ function drawSec(){
     x.font="bold "+(NUM_PX_SEED*ns*u)+"px system-ui";
     x.textAlign="center"; x.textBaseline="middle";
     x.lineWidth=4*u; x.strokeStyle="#04121f"; x.lineJoin="round";
-    x.strokeText(pg.roi||"", CX, CY);
-    x.fillStyle=col; x.fillText(pg.roi||"", CX, CY);
+    x.strokeText(polyLabel(Ppl, pg), CX, CY);
+    x.fillStyle=col; x.fillText(polyLabel(Ppl, pg), CX, CY);
     x.restore();
     // The CORNERS, but only while no new ring is being drawn. That is the whole
     // of the editing rule: with a draft open every click belongs to it, and
@@ -1955,7 +2011,7 @@ function drawSec(){
   // The ring being clicked out. Left OPEN, and dashed, so an unfinished polygon
   // never looks like a finished one.
   if(draft && draft.length){
-    const col = (gRoi() || {}).hex || "#d29922";
+    const col = gRoi() ? selColour(gRoi()) : "#d29922";
     x.save(); x.setLineDash([6*u, 4*u]);
     x.beginPath();
     for(let i=0;i<draft.length;i+=2){
@@ -1985,7 +2041,7 @@ function drawSec(){
     else        mark(x,X,Y,++nLm,"#4da3ff",u,3*u,ns);
   });
   const nextLabel = bgMode ? "B"+(bgPairs(s).length+1)
-                  : guided ? gTarget : roiPairs(s).length+1;
+                  : guided ? (dispLabel(gRoi()) || gTarget) : roiPairs(s).length+1;
   const nextCol = bgMode ? BG_COL : "#d29922";
   if(pending){ const [X,Y]=img2can(pending[0],pending[1],g);
                mark(x,X,Y,nextLabel,nextCol,u,pending[2]||defaultR(),ns); }
@@ -2037,49 +2093,54 @@ function drawPl(){
     h.v.forEach((v,i) => { const X=v[0]*c.width, Y=v[1]*c.height;
                            i ? x.lineTo(X,Y) : x.moveTo(X,Y); });
     x.closePath();
-    const tgt = isTgtRoi(h), dn = done.has(h.roi);
+    const on = isSel(h), col = on ? selColour(h) : SEL_GREY;
+    const tgt = on && isTgtRoi(h), dn = done.has(h.roi);
     // Colour off the seed, never a table - the same rule the region key follows,
     // and the reason the two panes cannot drift apart.
-    x.fillStyle = h.hex || "#4da3ff";
-    x.globalAlpha = tgt ? .34 : dn ? .07 : .15; x.fill();
+    x.fillStyle = col;
+    x.globalAlpha = !on ? .05 : tgt ? .34 : dn ? .07 : .15; x.fill();
     x.globalAlpha = 1;
     // Cased: a dark stroke under the colour. The atlas draws Dl in pure yellow
     // and prints its own yellow markers on these plates, so an uncased yellow
     // line on pale tissue is close to invisible - measured on this pane.
     x.lineJoin = "round";
-    x.lineWidth = (tgt ? 6 : 3.6) * u;
+    x.globalAlpha = on ? 1 : .55;                // dimmed, not gone
+    x.lineWidth = (tgt ? 6 : on ? 3.6 : 1.6) * u;
     x.strokeStyle = "rgba(4,18,31,.75)"; x.stroke();
-    x.lineWidth = (tgt ? 3.5 : 1.8) * u;
-    x.strokeStyle = tgt ? "#7ee787" : (h.hex || "#4da3ff"); x.stroke();
+    x.lineWidth = (tgt ? 3.5 : on ? 1.8 : 0.9) * u;
+    x.strokeStyle = tgt ? "#7ee787" : col; x.stroke();
+    x.globalAlpha = 1;
   });
   // One- and two-seed ROIs are ordinary - Vs and Vc carry four seeds in the
   // whole atlas - and a one-vertex shape strokes no pixels at all, so both are
   // drawn as what they are rather than silently skipped.
   HL.forEach(h => {
     if(h.v.length > 2) return;
-    const tgt = isTgtRoi(h);
+    const on = isSel(h), col = on ? selColour(h) : SEL_GREY;
+    const tgt = on && isTgtRoi(h);
     x.lineCap = "round";
     if(h.v.length === 2){
       x.beginPath();
       x.moveTo(h.v[0][0]*c.width, h.v[0][1]*c.height);
       x.lineTo(h.v[1][0]*c.width, h.v[1][1]*c.height);
       x.lineWidth = 9*u; x.strokeStyle = "rgba(4,18,31,.75)"; x.stroke();
-      x.lineWidth = 6*u; x.strokeStyle = tgt ? "#7ee787" : (h.hex || "#4da3ff");
+      x.lineWidth = 6*u; x.strokeStyle = tgt ? "#7ee787" : col;
       x.globalAlpha = .8; x.stroke(); x.globalAlpha = 1;
     } else {
       x.beginPath(); x.arc(h.v[0][0]*c.width, h.v[0][1]*c.height, 9*u, 0, 6.284);
       x.lineWidth = 4*u; x.strokeStyle = "rgba(4,18,31,.75)"; x.stroke();
-      x.lineWidth = 2*u; x.strokeStyle = tgt ? "#7ee787" : (h.hex || "#4da3ff");
+      x.lineWidth = 2*u; x.strokeStyle = tgt ? "#7ee787" : col;
       x.stroke();
     }
     x.lineCap = "butt";
   });
   P.seeds.forEach(sd=>{
+    if(!isSel(sd)) return;                     // dimmed outlines carry no dots
     const N=sd.roi, X=sd.xf*c.width, Y=sd.yf*c.height;
     const isDone=done.has(N), isTgt=guided && N===gTarget;
     const base = HL.length ? 3.5 : 5;          // smaller once a shape carries the meaning
     x.beginPath(); x.arc(X,Y,(isTgt?7:base)*u,0,6.284);
-    x.fillStyle=sd.hex||"#4da3ff"; x.globalAlpha=isDone?.25:.85; x.fill();
+    x.fillStyle=selColour(sd); x.globalAlpha=isDone?.25:.85; x.fill();
     x.globalAlpha=1; x.lineWidth=(isTgt?3:1.2)*u;
     x.strokeStyle=isTgt?"#3fb950":"#000"; x.stroke();
   });
@@ -2088,8 +2149,9 @@ function drawPl(){
   // six times over the anatomy it is meant to label. Once, at the shape's
   // centre, says the same thing and covers five sixths less tissue.
   HL.forEach(h => {
-    const N = h.roi;
-    const isDone = done.has(N), isTgt = guided && N === gTarget;
+    if(!isSel(h)) return;                      // dimmed outlines are unnumbered
+    const N = dispLabel(h);
+    const isDone = done.has(h.roi), isTgt = guided && h.roi === gTarget;
     const cx = h.v.reduce((a,v)=>a+v[0],0)/h.v.length*c.width;
     const cy = h.v.reduce((a,v)=>a+v[1],0)/h.v.length*c.height;
     x.save();
@@ -2107,7 +2169,7 @@ function drawPl(){
   // is number 3 is not the same as knowing it is Dl. One label per lobe, so a
   // bilateral region says its name twice and reads as two.
   HL.forEach(h => {
-    if(h.v.length < 3) return;
+    if(h.v.length < 3 || !isSel(h)) return;
     const cx = h.v.reduce((a,v)=>a+v[0],0)/h.v.length*c.width;
     const cy = h.v.reduce((a,v)=>a+v[1],0)/h.v.length*c.height
              + NUM_PX_SEED*ns*0.85*u;         // clear of the number above it
@@ -2119,7 +2181,7 @@ function drawPl(){
     // and POA cannot be told apart at this level and the pane must not claim
     // they can. `?` is the atlas's own doubt, kept separate from ours.
     const nm = (h.amb || h.region) + (h.unk ? "?" : "");
-    x.strokeText(nm, cx, cy); x.fillStyle = h.hex || "#4da3ff";
+    x.strokeText(nm, cx, cy); x.fillStyle = selColour(h);
     x.fillText(nm, cx, cy);
     x.restore();
   });
@@ -2359,6 +2421,165 @@ addEventListener("mouseup", ()=>{
 // correspondence is still there behind the button for the cases where the
 // useful matching feature is not a region centre, but it is no longer what you
 // get by accident on first load.
+// ---- WHICH ROIs THE OPERATOR WILL DRAW ---------------------------------------
+//
+// A study-wide choice, made once up front: a plate carries every region the atlas
+// has, and most studies only quantify some of them. Choosing them first means the
+// plate shows exactly the ROIs being asked for, in distinct colours, numbered
+// 1..N in the order they were picked.
+//
+// THE STORED `roi` NEVER CHANGES. It is the identity inside every curated polygon
+// and the `roi_n` column of the export, and the importers read it back. What
+// changes is the number SHOWN: `dispLabel`. A region is identified by its NAME,
+// which is stable across plates; `part` is plate-local and `amb` is a group.
+// Both lobes of a two-lobed region therefore share its number and are told apart
+// by a letter (3a, 3b).
+//
+// Kept in its own localStorage key, not in `S`: `decided()` drops anything that
+// is not a section record, and the importers read the curation file as
+// {scene_uid: record}, where an extra key would count as an orphan.
+//
+// null means nothing was chosen, and then every region is selected and the
+// numbers are the stored `roi`, i.e. exactly what this page did before.
+const SEL_KEY = "ls_roi_curator_v1_rois";
+const SEL_SEED = __ROISEL__;
+const SEL_GREY = "#7d8590";
+// Twelve colours that stay apart for the common colour-vision deficiencies and
+// show on both pale tissue and a dark casing; they cycle past twelve.
+const SEL_PALETTE = ["#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00",
+                     "#CC79A7", "#FF6B6B", "#7BDFF2", "#8FD14F", "#B28DFF", "#FFB4A2"];
+const PART_LETTERS = "abcdefghijklmnopqrstuvwxyz";
+function parseSel(raw){
+  try {
+    const a = typeof raw === "string" ? JSON.parse(raw) : raw;
+    if(!Array.isArray(a)) return null;
+    const out = [];
+    for(const n of a) if(typeof n === "string" && n && !out.includes(n)) out.push(n);
+    return out.length ? out : null;      // [] is "asked, chose all"
+  } catch(e){ return null; }
+}
+let SEL = (() => {
+  let v = null;
+  try { const raw = localStorage.getItem(SEL_KEY); if(raw) v = parseSel(raw); } catch(e){}
+  return v || parseSel(SEL_SEED);
+})();
+const isSel     = h => SEL === null || SEL.includes(h.region);
+const selRank   = h => SEL === null ? 0 : SEL.indexOf(h.region) + 1;
+const selColour = h => !h ? "#4da3ff"
+  : SEL === null ? (h.hex || "#4da3ff")
+  : isSel(h) ? SEL_PALETTE[(selRank(h) - 1) % SEL_PALETTE.length] : SEL_GREY;
+// What is printed for a hull: its stored roi when nothing was chosen, otherwise
+// its rank in the selection, with a letter when the region has more than one lobe.
+const dispLabel = h => {
+  if(!h) return "";
+  if(SEL === null) return String(h.roi);
+  const r = selRank(h);
+  if(!r) return "";
+  return String(r) + ((h.n_parts || 1) > 1 ? (PART_LETTERS[(h.part || 1) - 1] || "") : "");
+};
+// The selected hulls, in the order they are walked: pick order, then lobe. With
+// nothing chosen, by stored roi, i.e. the order the cursor always walked.
+function selectedHulls(hulls){
+  return (hulls || []).filter(isSel).sort((a, b) => SEL === null
+    ? a.roi - b.roi
+    : (selRank(a) - selRank(b)) || ((a.part || 0) - (b.part || 0)) || (a.roi - b.roi));
+}
+// A polygon already drawn keeps showing whatever the selection says now: the
+// selection decides what is asked for, never what has been answered.
+const polyLabel = (P, pg) => {
+  const h = hullOf(P, pg);
+  if(SEL === null || !h) return pg.roi || "";
+  return isSel(h) ? dispLabel(h) : "-";
+};
+const selNote = s => {
+  if(SEL === null) return "";
+  const P = plateAt(s);
+  const out = polysOf(s).filter(pg => { const h = hullOf(P, pg); return !h || !isSel(h); }).length;
+  return out ? `<div style="color:#9aa0a8;margin-top:4px">${out} drawn outside the `
+             + `current selection</div>` : "";
+};
+
+// Every region the atlas has, once, in plate order - what the pop-up lists.
+function selRegions(){
+  const seen = new Map();
+  PLATES.forEach(P => (P.hulls || []).forEach(h => {
+    let r = seen.get(h.region);
+    if(!r){
+      r = {name: h.region, plates: new Set(), unk: !!h.unk};
+      seen.set(h.region, r);
+    }
+    r.plates.add(P.id);
+  }));
+  return [...seen.values()].map(r => ({name: r.name, plates: r.plates.size, unk: r.unk}));
+}
+const selEsc = t => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+  .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+let selDraft = null;                    // pick-ordered names while the pop-up is open
+const selIsOpen = () => selDraft !== null;
+function selOpen(){
+  const all = selRegions().map(r => r.name);
+  if(!all.length) return;
+  selDraft = (SEL ? SEL.filter(n => all.includes(n)) : all).slice();
+  el("selFilter").value = "";
+  el("selDlg").style.display = "flex";
+  selRender();
+}
+function selRender(){
+  if(!selIsOpen()) return;
+  const f = (el("selFilter").value || "").trim().toLowerCase();
+  const rows = selRegions().filter(r => !f || r.name.toLowerCase().includes(f));
+  el("selList").innerHTML = rows.map(r => {
+    const k = selDraft.indexOf(r.name), on = k >= 0;
+    const bg = on ? ` style="background:${SEL_PALETTE[k % SEL_PALETTE.length]}"` : "";
+    return `<div class="selrow${on ? " on" : ""}" data-n="${selEsc(r.name)}">`
+         + `<span class="sw"${bg}>${on ? k + 1 : ""}</span>`
+         + `<span class="nm">${selEsc(r.name)}${r.unk ? "?" : ""}</span>`
+         + `<span class="ct">${r.plates} plate${r.plates === 1 ? "" : "s"}</span></div>`;
+  }).join("") || `<div class="selrow"><span class="nm" style="color:var(--dim)">`
+               + `no regions match</span></div>`;
+  el("selCount").textContent = `${selDraft.length} selected`;
+  el("selOk").disabled = !selDraft.length;
+}
+function selPick(e){
+  let t = e && e.target;
+  while(t && !(t.getAttribute && t.getAttribute("data-n") !== null)) t = t.parentNode;
+  if(t) selToggle(t.getAttribute("data-n"));
+}
+function selToggle(name){
+  if(!selIsOpen()) return;
+  const i = selDraft.indexOf(name);
+  if(i >= 0) selDraft.splice(i, 1); else selDraft.push(name);
+  selRender();
+}
+function selAll(){
+  if(!selIsOpen()) return;
+  for(const r of selRegions()) if(!selDraft.includes(r.name)) selDraft.push(r.name);
+  selRender();
+}
+function selNone(){ if(selIsOpen()){ selDraft = []; selRender(); } }
+function selClose(){ selDraft = null; el("selDlg").style.display = "none"; }
+function selStore(v){ try { localStorage.setItem(SEL_KEY, JSON.stringify(v)); } catch(e){} }
+function selConfirm(){
+  if(!selIsOpen() || !selDraft.length) return;
+  SEL = selDraft.slice();
+  selStore(SEL);
+  selClose();
+  draft = null; gSync(); drawPl(); drawSec(); status();
+}
+function selCancel(){
+  // The first time it is asked, closing without choosing means "all of them" and
+  // is remembered, so the question does not come back on every reload.
+  let first = false;
+  try { first = localStorage.getItem(SEL_KEY) === null; } catch(e){}
+  if(first && SEL === null) selStore([]);
+  selClose();
+}
+function selAsk(){
+  let none = false;
+  try { none = localStorage.getItem(SEL_KEY) === null; } catch(e){}
+  if(none && SEL === null) selOpen();
+}
+
 let guided=true, gTarget=0;
 const seedsOf   = s => plateAt(s).seeds;
 // ---- the guided walk is over ROIs, not seeds ------------------------------
@@ -2370,24 +2591,28 @@ const seedsOf   = s => plateAt(s).seeds;
 //
 // The seeds keep their own numbering underneath; see `region_hulls`. Only what
 // is DRAWN and what a polygon RECORDS is the ROI number.
-const roisOf = s => (plateAt(s).hulls || []);
+const allHullsOf = s => (plateAt(s).hulls || []);
+const roisOf = s => selectedHulls(allHullsOf(s));
 // Which ROIs this section already answers. Derived from the polygons rather than
 // kept as a separate fact that could disagree with them - the same reason the
 // seed cursor was derived from the pairs.
 const usedRois = s => new Set(polysOf(s).map(pg => pg.roi).filter(n => n));
 // Resume where the section was left off.
 function firstUnusedRoi(s){
-  const u = usedRois(s), n = roisOf(s).length;
-  for(let i = 1; i <= n; i++) if(!u.has(i)) return i;
+  const u = usedRois(s);
+  for(const h of roisOf(s)) if(!u.has(h.roi)) return h.roi;
   return 0;                                  // 0 = nothing left on this plate
 }
 function gSync(){ gTarget = active ? firstUnusedRoi(st(active)) : 0; }
 function gAdvance(){
-  // Bounded by the ROI count, not the seed count. Bounding on seeds would run
-  // the cursor from 1 to 356 over a list of 134 and point it at nothing.
-  const s = st(active), n = roisOf(s).length, u = usedRois(s);
-  let t = gTarget + 1; while(t <= n && u.has(t)) t++;
-  gTarget = t <= n ? t : 0;
+  // Walks the SELECTED ROIs in their order, not the seeds and not 1..n: bounding
+  // on seeds ran the cursor from 1 to 356 over a list of 134, and counting up
+  // would land on regions the operator chose not to draw.
+  const s = st(active), L = roisOf(s), u = usedRois(s);
+  for(let i = L.findIndex(h => h.roi === gTarget) + 1; i < L.length; i++){
+    if(!u.has(L[i].roi)){ gTarget = L[i].roi; return; }
+  }
+  gTarget = 0;
 }
 // The ROI the cursor is on, or null once the plate is finished.
 const gRoi = () => {
@@ -2554,7 +2779,11 @@ function polyArea(v){
 // leaves the polygon intact and unhulled; it is still the operator's region.
 const hullOf = (P, pg) => ((P && P.hulls) || []).find(
   h => h.region === pg.region && h.part === pg.part) || null;
-const polyCol = (P, pg) => (hullOf(P, pg) || {}).hex || "#4da3ff";
+const polyCol = (P, pg) => {
+  const h = hullOf(P, pg);
+  if(!h) return "#4da3ff";
+  return isSel(h) ? selColour(h) : (h.hex || "#4da3ff");
+};
 
 let draft = null;        // flat [x,y,x,y,...] of the ring being clicked out
 // {pi, vi} while a corner of a FINISHED polygon is being dragged. Editing and
@@ -2756,14 +2985,15 @@ function clickPl(e){
     const c=el("cPl"), P=plateAt(st(active)), fx=px/c.width, fy=py/c.height;
     let hit=null;
     for(const h of (P.hulls||[])){
-      if(h.v.length>=3 && inPoly(fx, fy, h.v.flat())){ hit=h; break; }
+      if(isSel(h) && h.v.length>=3 && inPoly(fx, fy, h.v.flat())){ hit=h; break; }
     }
     // Falling back to the nearest hull matters more than it looks: a one- or
     // two-seed ROI has no interior to click into at all, and Vl, Vc and Vs are
     // nothing but those. Without this they could never be aimed at.
-    if(!hit && (P.hulls||[]).length){
+    const pool = (P.hulls||[]).filter(isSel);
+    if(!hit && pool.length){
       let bd=Infinity;
-      for(const h of P.hulls){
+      for(const h of pool){
         for(const v of h.v){
           const d=Math.hypot(v[0]-fx, v[1]-fy);
           if(d<bd){ bd=d; hit=h; }
@@ -2896,14 +3126,16 @@ function status(){
   // exactly the bookkeeping the numbers are there to remove.
   const nextN = nRoi + 1;
   const roiList = roisOf(s), tgt = gRoi();
-  const nRois = roiList.length, nDone = usedRois(s).size;
+  const nRois = roiList.length, nDone = roiList.filter(h => usedRois(s).has(h.roi)).length;
   const nPoly = polysOf(s).length;
 
   el("guideBtn").textContent = guided ? "Guided ✓" : "Guided";
   el("guideBtn").classList.toggle("guide-on", guided);
   el("guideBtn").disabled = !nRois;
   el("guideBtn").title = nRois ? ""
-    : "this plate carries no regions, so there is no list to walk";
+    : allHullsOf(s).length
+      ? "none of the ROIs you chose is on this plate (press o to change the choice)"
+      : "this plate carries no regions, so there is no list to walk";
   el("skipBtn").disabled = !(guided && gTarget);
   if(guided){
     // The ambiguity group, not the atlas name, wherever there is one: Vd, Vv and
@@ -2913,14 +3145,14 @@ function status(){
                           + (h.n_parts > 1 ? " lobe " + h.part : "") : "";
     const nv = draft ? draft.length / 2 : 0;
     el("secTitle").textContent = tgt
-      ? (draft ? `SECTION - drawing ROI ${gTarget} (${nameOf(tgt)}) - ${nv} corners`
-               : `SECTION - draw ROI ${gTarget} (${nameOf(tgt)})`)
+      ? (draft ? `SECTION - drawing ROI ${dispLabel(tgt)} (${nameOf(tgt)}) - ${nv} corners`
+               : `SECTION - draw ROI ${dispLabel(tgt)} (${nameOf(tgt)})`)
       : "SECTION - every ROI on this plate is drawn";
     el("plTitle").textContent = tgt
-      ? `ATLAS PLATE - ROI ${gTarget} of ${nRois} is the target`
+      ? `ATLAS PLATE - ROI ${dispLabel(tgt)} (${nDone + 1} of ${nRois}) is the target`
       : "ATLAS PLATE - list finished; click an ROI to go back to it";
     el("lmHint").innerHTML = tgt
-      ? `<b style="color:${tgt.hex||"#4da3ff"}">ROI ${gTarget}</b> &middot; `
+      ? `<b style="color:${selColour(tgt)}">ROI ${dispLabel(tgt)}</b> &middot; `
         + `<b>${nameOf(tgt)}</b> &middot; ${nDone} of ${nRois} drawn`
         + `<br><span style="color:#9aa0a8">click each corner &middot; `
         + `<b>Enter</b>, a double-click or the first corner closes it &middot; `
@@ -2987,13 +3219,14 @@ function status(){
     // read as covering the whole list. It covers exactly one entry. Dl, Dm and
     // the rest are distinct locations and are not qualified by anything -
     // colouring the ambiguous entry is what makes that visible.
-    const names = [...new Set(P.seeds.map(x => x.amb || x.region))];
+    const names = [...new Set(P.seeds.filter(isSel).map(x => x.amb || x.region))];
     const gold = new Set(P.seeds.filter(x => x.amb).map(x => x.amb));
     const shown = names.map(n => gold.has(n)
       ? `<span style="color:#e3b341">${n}</span>` : n).join(", ");
     el("regInfo").innerHTML = P.seeds.length
-      ? `<b>${usedRois(s).size}</b> of <b>${(P.hulls||[]).length}</b> drawn: ${shown}`
-        + bgLine(s)
+      ? `<b>${roisOf(s).filter(h => usedRois(s).has(h.roi)).length}</b> of `
+        + `<b>${roisOf(s).length}</b> drawn: ${shown}`
+        + selNote(s) + bgLine(s)
         + (gold.size ? `<div style="color:#9aa0a8;margin-top:4px">`
                   + `<span style="color:#e3b341">gold</span> is ONE group whose members`
                   + ` cannot be told apart without the rostrocaudal level.`
@@ -3266,7 +3499,7 @@ function bgLine(s){
 function regionKey(P, s){
   const box = el("regKey");
   if(!box) return;
-  const HL = (P && P.hulls) || [];
+  const HL = selectedHulls((P && P.hulls) || []);
   if(!HL.length){ box.innerHTML = ""; return; }
   // One row per ROI, because an ROI is the thing being drawn. It used to be one
   // row per region with a count of its seeds, which answered "how many dots does
@@ -3279,14 +3512,14 @@ function regionKey(P, s){
   const done = s ? usedRois(s) : new Set();
   box.innerHTML = HL.map(h => {
     const isDone = done.has(h.roi);
-    const tip = `ROI ${h.roi} - ${h.region}`
+    const tip = `ROI ${dispLabel(h)} - ${h.region}`
               + (h.n_parts > 1 ? `, lobe ${h.part} of ${h.n_parts}` : "")
               + (h.amb ? `  -  one of ${h.amb}, which cannot be told apart`
                        + ` without the rostrocaudal level` : "")
               + (isDone ? "  -  drawn" : "  -  not drawn yet");
-    return `<div title="${tip}"><i style="background:${h.hex}"></i>`
+    return `<div title="${tip}"><i style="background:${selColour(h)}"></i>`
          + `<b style="${h.amb ? "color:#e3b341" : ""}${isDone ? ";opacity:.45" : ""}">`
-         + `${h.roi}. ${h.region}${h.unk ? "?" : ""}`
+         + `${dispLabel(h)}. ${h.region}${h.unk ? "?" : ""}`
          + `${h.n_parts > 1 ? " /" + h.part : ""}</b>`
          + `<span>${isDone ? "\u2713" : ""}</span>`
          + (h.amb ? `<span style="color:#e3b341">&#9670;</span>` : "")
@@ -3397,6 +3630,12 @@ addEventListener("keydown", e=>{
   // and a chord must never read as the bare letter. Shift is a real modifier
   // here (Shift+drag snaps), so it is left alone.
   if(e.ctrlKey || e.metaKey || e.altKey) return;
+  // The pop-up owns the keyboard while it is open: Escape closes it, and the
+  // letters go to its filter box rather than to the shortcuts underneath.
+  if(selIsOpen()){
+    if(e.key === "Escape"){ selCancel(); e.preventDefault(); }
+    return;
+  }
   // A focused control eats its own keys - but only the ones it actually uses.
   //
   // This used to bail on ANY input, which killed the arrows for good: tick
@@ -3468,6 +3707,7 @@ addEventListener("keydown", e=>{
     e.preventDefault();
   }
   else if(e.key==="h" || e.key==="H"){ toggleHulls(); }
+  else if(e.key==="o" || e.key==="O"){ selOpen(); e.preventDefault(); }
   // u is the general undo, d is the background DISC, and b is deliberately
   // unbound: it was the disc for long enough to be muscle memory, and a key
   // that used to place something and now undoes is the worst of both. Leaving
@@ -5199,6 +5439,7 @@ render();
 if(!window.showDirectoryPicker){ const b = el("expDirBtn"); if(b) b.style.display = "none"; }
 expShow();
 expRestoreDir();
+selAsk();
 </script>
 """
 
@@ -5458,8 +5699,19 @@ def main():
         except (OSError, ValueError):
             seed = {}
 
+    # The ROIs the operator chose to draw, if the app has one on file. Same rule
+    # as the seed above: the browser's own copy wins, this only fills an empty one.
+    roisel = None
+    if not args.no_seed:
+        try:
+            with open(os.path.join(OUT_ROOT, "curation", "ls_roi_curator_v1_rois.json"),
+                      encoding="utf-8") as fh:
+                roisel = json.load(fh)
+        except (OSError, ValueError):
+            roisel = None
+
     page = IO.fill(PAGE, {
-        "__SEED__": seed, "__PROV__": load_provenance(), "__DATA__": data,
+        "__SEED__": seed, "__ROISEL__": roisel, "__PROV__": load_provenance(), "__DATA__": data,
         "__PLATES__": pl, "__PLATESET__": PLATE_SET, "__MARKERS__": markers,
         # The page compares aspect ratios exactly as `ls_atlas.plate_status`
         # does, so it is handed THAT number rather than repeating it. A literal
@@ -5514,8 +5766,11 @@ def main():
     # against 0.90 without the split.
     hulls = [h for p in pl for h in p["hulls"]]
     if hulls:
-        wide = max((max(v[0] for v in h["v"]) - min(v[0] for v in h["v"]), h)
-                   for h in hulls)
+        # key= on the width: two hulls of equal width (a mirrored polygon and its
+        # original always are) would otherwise be compared as dicts, which raises
+        # after the page has been written and makes the run exit non-zero.
+        wide = max(((max(v[0] for v in h["v"]) - min(v[0] for v in h["v"]), h)
+                    for h in hulls), key=lambda t: t[0])
         multi = sorted({h["region"] for h in hulls if h["n_parts"] > 1})
         one = sorted({h["region"] for h in hulls if h["n_parts"] == 1})
         print(f"  {len(hulls)} region hulls, widest {wide[0]:.2f} of a plate "

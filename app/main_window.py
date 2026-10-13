@@ -186,7 +186,13 @@ class MainWindow(QMainWindow):
         add("save", "&Save", lambda: self.session.save(self), "Ctrl+S")
         add("save_as", "Save &As...", lambda: self.session.save_as(self), "Ctrl+Shift+S")
         add("revert", "&Revert", lambda: self.session.revert(self))
+        self._file_menu.addSeparator()
+        add("history", "Project &history...", self._history)
         self._fill_recent()
+
+    def _history(self):
+        from project_history import ProjectHistory
+        ProjectHistory(self.session, self).exec()
 
     def _fill_recent(self):
         import ls_config as LC

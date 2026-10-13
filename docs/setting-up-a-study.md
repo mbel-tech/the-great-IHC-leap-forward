@@ -107,6 +107,7 @@ The **File** menu is the project's own:
 - **New project...** asks for a name and where the file should live, opens Settings, and writes nothing until the settings are valid.
 - **Open project...** and **Open Recent** open any project file, from any folder. One the pipeline would refuse opens with the reasons listed; one written by a newer app opens read-only.
 - **Save** (Ctrl+S), **Save As...**, **Revert**.
+- **Project history...** shows what the project remembers, newest first: every setting changed (was and now), every stage run (result, config hash, code version), the CZI files read and what they said, and a Notes box. The animal-to-treatment key appears only as "changed", never its values.
 
 Settings and the channel editor change the open project **in memory**: the title shows `name*` until you choose Save, and every change is added to the project's decision trail. Stages read the *saved* file, so running one asks to save first. Closing or switching with unsaved changes asks Save / Discard / Cancel. Each finished stage is added to the project's run history without saving your other unsaved edits. Detecting channels from a CZI keeps what the file said under `detected`, separate from what you decided.
 

@@ -583,7 +583,10 @@ SPEC = [
              "read from CZI files (evidence, not input), `decisions` the changes "
              "made in the app (the animal-to-treatment key is recorded by name "
              "only, never by value), `runs` the stages that ran with a hash of "
-             "the config and the code version. The lists are capped.",
+             "the config and the code version. `portable` records each path setting that "
+             "lies inside the project's folder, relative to it, so the project can "
+             "find its data again after the folder is moved (the settings themselves "
+             "stay absolute). The lists are capped.",
         consumers=["app"]),
 
     # ---- unblinding (replaced by the metadata-join sub-project) ----------
@@ -713,6 +716,15 @@ def _check_project(value):
         v = value.get(field)
         if v is not None and not isinstance(v, str):
             out.append(f"`{field}` must be text")
+    portable = value.get("portable")
+    if portable is not None:
+        if not isinstance(portable, dict) or not all(isinstance(k, str) and isinstance(v, str)
+                                                     for k, v in portable.items()):
+            out.append("`portable` must map setting names to relative paths")
+        else:
+            for k, v in portable.items():
+                if os.path.isabs(v) or v.startswith(("/", "\\")) or ".." in v.replace("\\", "/").split("/"):
+                    out.append(f"`portable` path for {k} must stay inside the project's folder: {v!r}")
     for field, cap in PROJECT_CAPS.items():
         v = value.get(field)
         if v is None:

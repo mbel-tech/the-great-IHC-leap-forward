@@ -189,6 +189,22 @@ answers["Unsaved changes"] = QMessageBox.Cancel
 chk("opening while unsaved asks first; Cancel keeps the project", (o.open_project(None, good), o.project.path), (False, os.path.abspath(bp)))
 o.project.revert(); o.touch()
 
+import shutil                                                   # noqa: E402
+
+mv_a = os.path.join(TMP, "pm_a")
+os.makedirs(os.path.join(mv_a, "slides"))
+os.makedirs(os.path.join(mv_a, "out"))
+open(os.path.join(mv_a, "atlas.pdf"), "wb").close()
+LP.Project.open(write_study(mv_a)).save()
+mv_b = os.path.join(TMP, "pm_b")
+shutil.move(mv_a, mv_b)
+asked.clear()
+pm = session_on("pm_host")
+chk("opening a moved project says its paths were updated, and leaves it unsaved",
+    (pm.open_project(None, os.path.join(mv_b, "study.json"), confirmed=True), "info:Paths updated for this location" in asked, pm.dirty),
+    (True, True, True))
+chk("...and the settings point at the new place", pm.project.get("out_root"), os.path.join(mv_b, "out"))
+
 print("--- the run history ---")
 r = session_on("e")
 chk("a run is recorded and the project stays clean", (r.record_run("05c", True, "a", "b"), r.dirty), (None, False))

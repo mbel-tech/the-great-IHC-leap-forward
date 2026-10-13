@@ -94,11 +94,15 @@ deleting it never changes a result):
 | `decisions` | changes made in the app: the key, old and new value, who, when. The animal-to-treatment key (`groups.*`) is recorded by name only, never by value |
 | `runs` | stages that ran: times, success, a hash of the config, the code version |
 
-The lists are capped (200 runs, 500 decisions, 20 detected files). Saving writes the
+The lists are capped (200 runs, 500 decisions, 20 detected files). `portable` records each path setting that lies inside the project's folder, relative to it. Saving writes the
 file atomically and keeps the last three versions beside it as `.bak1`-`.bak3`; a
 file written by a newer version of the app opens read-only and is never rewritten.
 The logic is in `scripts/ls_project.py` (`Project.new / open / set / save / save_as /
 revert / record_run`), which the app's File menu is built on.
+
+### Moving a project
+
+The path settings (`source_dir`, `out_root`, `atlas_pdf`, `export_dir`) stay absolute in the file, because the stages - including the Fiji ones that read the JSON directly - need them that way. When a project is saved, those that lie **inside the project file's folder** are also recorded, relative to it, under `project.portable`. If you then move the whole folder (say from `D:` to `E:`), the stored absolute paths no longer exist; on opening, any setting whose recorded place exists beside the project file is re-pointed there, the change is listed, and the project is left unsaved for you to confirm with File > Save. A path that still exists is never changed (it may be a deliberate choice), and a path outside the project's folder stays as written.
 
 ### Working with projects in the app
 

@@ -216,6 +216,12 @@ class ProjectSession(QObject):
             BTN.warning(parent, "Opened with problems",
                         "This project has settings the pipeline would refuse:\n\n"
                         + "\n\n".join(errors[:5]) + "\n\nFix them in Settings before running a stage.")
+        if project.reanchored:
+            BTN.information(parent, "Paths updated for this location",
+                            "This project's data was not where it was last saved, but was found beside "
+                            "the project file, so these settings now point there:\n\n"
+                            + "\n".join("  %s: %s" % (k, new) for k, _old, new in project.reanchored)
+                            + "\n\nChoose File > Save to keep this.")
         if project.read_only:
             BTN.information(parent, "Read-only",
                             "This project was written by a newer version of the app. You can look "

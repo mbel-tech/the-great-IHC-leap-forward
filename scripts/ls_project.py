@@ -51,6 +51,15 @@ BRIEF_LIMIT = 1500
 #: Keys whose values are never written into the trail.
 REDACTED_PREFIXES = ("groups.",)
 
+#: Keys whose value is a single path. Taken from the spec, so a path key added there is
+#: portable without anyone remembering to list it here.
+PATH_TYPES = ("path_dir", "path_dir_create", "path_dir_opt", "path_file")
+
+
+def path_keys():
+    return [k.path for k in LC.SPEC if k.type in PATH_TYPES]
+
+
 #: {from_version: fn(block) -> block} - each step lifts a `project` block by one version.
 UPGRADES = {}
 
@@ -157,6 +166,18 @@ def _upgrade(block):
     return block
 
 
+def _norm(path):
+    return os.path.normcase(os.path.normpath(os.path.abspath(path)))
+
+
+def _inside(path, folder):
+    """True if `path` is `folder` or below it (same drive; never raises across drives)."""
+    try:
+        return os.path.commonpath([_norm(path), _norm(folder)]) == _norm(folder)
+    except ValueError:
+        return False
+
+
 def _stamp(path):
     try:
         st = os.stat(path)
@@ -167,6 +188,7 @@ def _stamp(path):
 
 class Project:
     def __init__(self, cfg, path=None, read_only=False):
+        self.reanchored = []          # path settings re-pointed on open, as [(key, old, new)]
         self.cfg = cfg
         self.path = path
         self.read_only = read_only
@@ -217,7 +239,10 @@ class Project:
             block = _upgrade(block)
         if not read_only:
             cfg["project"] = block
-        return cls(cfg, path, read_only)
+        project = cls(cfg, path, read_only)
+        if not read_only:
+            project.reanchored = project.reanchor()
+        return project
 
     # ---- reading --------------------------------------------------------------
 
@@ -315,6 +340,62 @@ class Project:
         self._check_writable()
         self.block["notes"] = str(text)
 
+    # ---- portable paths -------------------------------------------------------
+
+    def folder(self):
+        return os.path.dirname(self.path) if self.path else None
+
+    def portable_record(self, folder=None):
+        """{key: path relative to the project's folder} for every path setting that lies inside it.
+
+        The settings themselves stay absolute - the stages, including the Fiji ones that
+        read this JSON directly, never see anything else. This is the record that lets
+        the project find its data again after the whole folder has moved.
+        """
+        folder = folder or self.folder()
+        if not folder:
+            return {}
+        out = {}
+        for key in path_keys():
+            value = self.get(key)
+            if isinstance(value, str) and value.strip() and os.path.isabs(value) and _inside(value, folder):
+                out[key] = os.path.relpath(value, folder).replace("\\", "/")
+        return out
+
+    def reanchor(self):
+        """Re-point absolute paths that no longer exist, using the portable record.
+
+        For each recorded key: if the stored path is gone but the same place relative to
+        this file exists, the project (and its data) was moved together, so the setting
+        follows. A stored path that still exists is never touched - it may be a different
+        copy on purpose. Returns [(key, old, new)]; each is a recorded decision, and the
+        project is unsaved until the person saves.
+        """
+        folder = self.folder()
+        record = self.block.get("portable")
+        if not folder or not isinstance(record, dict):
+            return []
+        moved = []
+        for key, rel in record.items():
+            if key not in path_keys() or not isinstance(rel, str) or os.path.isabs(rel):
+                continue
+            current = self.get(key)
+            candidate = os.path.normpath(os.path.join(folder, rel))
+            if not _inside(candidate, folder):
+                continue
+            if isinstance(current, str) and current and os.path.exists(current):
+                continue
+            if os.path.exists(candidate) and (not isinstance(current, str) or _norm(current) != _norm(candidate)):
+                self.set(key, candidate, by="portable paths")
+                moved.append((key, current, candidate))
+        return moved
+
+    def _stamp_portable(self, folder):
+        record = self.portable_record(folder)
+        block = self.block
+        if record or "portable" in block:
+            block["portable"] = record
+
     # ---- saving ---------------------------------------------------------------
 
     def _check_disk_unchanged(self):
@@ -332,6 +413,7 @@ class Project:
         block = self.block
         block["modified"] = _now()
         block["app_version"] = code_version()
+        self._stamp_portable(self.folder())
         ls_jsonio.write_json_atomic(self.path, self.cfg, backups=BACKUPS)
         self._snapshot = copy.deepcopy(self.cfg)
         self._stamp = _stamp(self.path)
@@ -361,6 +443,7 @@ class Project:
         fresh = Project.open(self.path)
         self.cfg, self.read_only = fresh.cfg, fresh.read_only
         self._snapshot, self._stamp = fresh._snapshot, fresh._stamp
+        self.reanchored = fresh.reanchored
 
     # ---- the run history ------------------------------------------------------
 

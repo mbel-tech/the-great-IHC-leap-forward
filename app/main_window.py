@@ -57,6 +57,9 @@ class MainWindow(QMainWindow):
         # The open project: the study config plus the app's record of working on it.
         # Held in memory; stages read the saved file, so a run asks to save first.
         self.session = ProjectSession(LP.Project.open(self.config_path), self)
+        for key, _old, new in self.session.project.reanchored:
+            self._pending_log = getattr(self, "_pending_log", []) + [
+                f"paths updated for this location: {key} -> {new} (File > Save to keep)"]
         self.session.changed.connect(self._update_title)
         self.session.opened.connect(self._project_opened)
         self.session.saved.connect(self._project_saved)
@@ -127,6 +130,8 @@ class MainWindow(QMainWindow):
             f"{self._study_name()}   out_root  {self.out_root}")
         self._build_list()
         self.refresh()
+        for line in getattr(self, "_pending_log", []):
+            self._log(line)
         self._log(f"repo    {repo_root}")
         self._log(f"out     {self.out_root}")
         self._log(f"serving {self.out_root} on 127.0.0.1:{self.server.port}")

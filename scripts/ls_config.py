@@ -554,16 +554,22 @@ SPEC = [
         consumers=["04a3b"]),
 
     Key("atlas_scope", "raw",
-        "Which regions the atlas already labels, and which are still wanted.",
-        default=None, status=DOCUMENTED,
+        "Which regions this study cares about: the ones the atlas already "
+        "labels, and the ones still wanted.",
+        default=None, ui=False,
         example={"mode": "sbn_nodes", "existing_regions": [],
                  "regions_to_add": []},
-        note="Read by no stage. Names are recorded exactly as the atlas writes "
-             "them - no abbreviating, no reinterpreting - so the anatomy stays "
-             "the atlas author's statement rather than this file's. Kept "
-             "because it is the only written record of that scope decision; "
-             "the replaceable-atlas sub-project wires it.",
-        consumers=[]),
+        note="Names are matched EXACTLY as the atlas writes them - no "
+             "abbreviating, no reinterpreting - so the anatomy stays the atlas "
+             "author's statement rather than this file's. In the ROI curator, "
+             "`existing_regions` is the pre-ticked list (in that order) the first "
+             "time the 'Which ROIs will you draw?' window opens; one that no "
+             "plate of the atlas carries is flagged, since it is a typo or the "
+             "wrong atlas. `regions_to_add` are regions you want that this atlas "
+             "does not have: they are listed, greyed, under 'not in this atlas' "
+             "so the gap is visible instead of silent. `mode` is a recorded "
+             "label only.",
+        consumers=["04l"]),
 
     # ---- unblinding (replaced by the metadata-join sub-project) ----------
     Key("groups.order", "list_str",
@@ -643,6 +649,35 @@ def _check_atlas_source(cfg, value):
     if value not in atlas_registry.names(cfg):
         return f"must be one of {', '.join(atlas_registry.names(cfg))}"
     return None
+
+
+def _check_atlas_scope(value):
+    """Problems with an `atlas_scope` block, as a list of strings."""
+    if value is None:
+        return []
+    if not isinstance(value, dict):
+        return [f"must be a block of settings, not a {type(value).__name__}"]
+    out = []
+    mode = value.get("mode")
+    if mode is not None and not isinstance(mode, str):
+        out.append("`mode` must be text")
+    lists = {}
+    for k in ("existing_regions", "regions_to_add"):
+        v = value.get(k)
+        if v is None:
+            continue
+        if not isinstance(v, list) or not all(isinstance(n, str) and n.strip() for n in v):
+            out.append(f"`{k}` must be a list of region names (non-empty text)")
+            continue
+        dup = sorted({n for n in v if v.count(n) > 1})
+        if dup:
+            out.append(f"`{k}` lists {', '.join(dup)} more than once")
+        lists[k] = set(v)
+    both = sorted(lists.get("existing_regions", set()) & lists.get("regions_to_add", set()))
+    if both:
+        out.append(f"{', '.join(both)} is in both `existing_regions` and "
+                   f"`regions_to_add` - a region is either in the atlas or wanted")
+    return out
 
 
 def _check(key, value):
@@ -804,6 +839,10 @@ def validate(cfg, path="<config>", strict_paths=False):
             problem = _check(key, value)
         if problem:
             errors.append(f"{path}: `{key.path}` {problem}\n    {key.doc}")
+
+    if isinstance(cfg, dict):
+        for problem in _check_atlas_scope(cfg.get("atlas_scope")):
+            errors.append(f"{path}: `atlas_scope` {problem}")
 
     # The study's own atlases are judged by the registry, which owns the rules
     # (own folder, no shadowing, no path tricks). Reported here as a config error

@@ -22,7 +22,7 @@ const X = load(`{PLATES, S, st, plateAt, roisOf, allHullsOf, usedRois, polysOf,
   hullOf, firstUnusedRoi, gAdvance, gSync, gRoi, commitPoly,
   isSel, selRank, selColour, dispLabel, selectedHulls, parseSel, polyLabel, selNote,
   selRegions, selOpen, selToggle, selAll, selNone, selConfirm, selCancel, selAsk,
-  selIsOpen, SEL_KEY, SEL_PALETTE, SEL_GREY,
+  selIsOpen, SEL_KEY, SCOPE, SEL_PALETTE, SEL_GREY,
   get SEL(){return SEL}, set SEL(v){SEL=v},
   get selDraft(){return selDraft},
   get gTarget(){return gTarget}, set gTarget(v){gTarget=v},
@@ -166,5 +166,28 @@ chk("a stored answer is not asked again", X.selIsOpen(), false);
 X.SEL = ["A"]; X.selOpen(); X.selConfirm();
 chk("the curation store is untouched by the selection",
     "ls_roi_curator_v1_rois" in JSON.parse(env.store.ls_roi_curator_v1 || "{}"), false);
+
+// ---- atlas_scope: the study's own list ----------------------------------------
+
+chk("with no scope the page carries empty lists", JSON.stringify(X.SCOPE), '{"existing":[],"toAdd":[]}');
+X.SCOPE.existing.push("A", "Zz", "C");           // Zz: no plate carries it
+X.SCOPE.toAdd.push("Vs", "B");                   // B the atlas already has
+X.SEL = null; X.selOpen();
+chk("first open ticks the scope's regions, in its order, atlas-held only",
+    X.selDraft.join(), "A,C");
+const listing = env.els.selList.innerHTML;
+chk("a region the scope lists but no plate carries is flagged", /Zz[\s\S]*typo/.test(listing), true);
+chk("a wanted region the atlas lacks is listed, greyed", /Vs[\s\S]*wanted, not in this atlas/.test(listing), true);
+chk("a wanted region the atlas HAS is not listed as missing", /miss[^>]*>[\s\S]{0,80}>B</.test(listing), false);
+chk("missing regions cannot be ticked (no data-n)", /miss"[^>]*data-n/.test(listing), false);
+X.selCancel();
+X.SEL = ["B"]; X.selOpen();
+chk("a saved choice wins over the scope", X.selDraft.join(), "B");
+X.selCancel();
+X.SCOPE.existing.length = 0;
+X.SEL = null; X.selOpen();
+chk("a scope none of whose regions is in the atlas falls back to all", X.selDraft.join(), "C,B,A");
+X.selCancel();
+X.SCOPE.toAdd.length = 0;
 
 done();

@@ -88,7 +88,7 @@
     "_drop_inset_boxes_note": "Boxes that are labelled INSETS, not sections - a detached callout of a structure that is also shown attached and labelled inside a section elsewhere in the atlas. An inset is not a plate, and holds no region seed. Empty by default on purpose: an entry is a claim about a figure in YOUR atlas, and a copied one would drop a real section box. Note that listing a figure here also exempts it from the two_sections count above, so list only the figures that really carry an inset.",
     "drop_inset_boxes": {}
   },
-  "_atlas_scope_note": "Read by no stage. Names are recorded exactly as the atlas writes them - no abbreviating, no reinterpreting - so the anatomy stays the atlas author's statement rather than this file's. Kept because it is the only written record of that scope decision; the replaceable-atlas sub-project wires it.",
+  "_atlas_scope_note": "Names are matched EXACTLY as the atlas writes them - no abbreviating, no reinterpreting - so the anatomy stays the atlas author's statement rather than this file's. In the ROI curator, `existing_regions` is the pre-ticked list (in that order) the first time the 'Which ROIs will you draw?' window opens; one that no plate of the atlas carries is flagged, since it is a typo or the wrong atlas. `regions_to_add` are regions you want that this atlas does not have: they are listed, greyed, under 'not in this atlas' so the gap is visible instead of silent. `mode` is a recorded label only.",
   "atlas_scope": {
     "mode": "sbn_nodes",
     "existing_regions": [],

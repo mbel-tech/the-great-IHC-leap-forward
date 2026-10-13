@@ -48,6 +48,8 @@ chk("the curation store key is a different key", "ls_roi_curator_v1" != key, Tru
 
 chk("the page reads its seed from a placeholder", len(re.findall(r"const SEL_SEED = __ROISEL__;", page)), 1)
 chk("04l fills that placeholder when it builds the page", len(re.findall(r'"__ROISEL__": roisel', page)), 1)
+chk("the page reads the study's atlas_scope from a placeholder", len(re.findall(r"const SCOPE = __ATLASSCOPE__;", page)), 1)
+chk("04l fills that placeholder when it builds the page", len(re.findall(r'"__ATLASSCOPE__": scope', page)), 1)
 chk("the seed file is the key's own file under curation/", f'"{key}.json"' in page, True)
 chk("--no-seed leaves the seed out, like the curation seed", "if not args.no_seed:" in page.split("roisel = None")[1][:80], True)
 

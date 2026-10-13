@@ -15,11 +15,13 @@ from PySide6.QtWidgets import (
     QMessageBox, QPlainTextEdit, QPushButton, QSplitter, QStackedWidget,
     QVBoxLayout, QWidget)
 
+import ls_project as LP
 import stages as S
 import state as ST
 from config_dialog import ConfigDialog
 from curator_view import CuratorView, LocalServer
 from import_slides import ImportScreen
+from project_session import ProjectSession, now_iso
 from runner import Runner
 
 DOT = {"done": "#3fb950", "todo": "#8b949e", "cli": "#6e4d99",
@@ -52,12 +54,17 @@ class MainWindow(QMainWindow):
         # the executable, so the two roots are not the same folder.
         self.scripts_dir = scripts_dir or os.path.join(repo_root, "scripts")
         self.runner = Runner(self.scripts_dir, self.config_path)
+        # The open project: the study config plus the app's record of working on it.
+        # Held in memory; stages read the saved file, so a run asks to save first.
+        self.session = ProjectSession(LP.Project.open(self.config_path), self)
+        self.session.changed.connect(self._update_title)
+        self.session.opened.connect(self._project_opened)
+        self.session.saved.connect(self._project_saved)
         self.out_root = self._config()["out_root"]
         self.server = LocalServer(self.out_root)
         self._thread = None
         self._states = {}
 
-        self.setWindowTitle("LS IHC pipeline")
         self.resize(1360, 860)
 
         # ---- left: the pipeline ------------------------------------------
@@ -115,6 +122,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(split)
 
         self._build_menu()
+        self._update_title()
         self.statusBar().showMessage(
             f"{self._study_name()}   out_root  {self.out_root}")
         self._build_list()
@@ -142,6 +150,7 @@ class MainWindow(QMainWindow):
         wrapper is collected and the underlying C++ menu goes with it, so the
         menu bar ends up holding a deleted object. Same for the actions.
         """
+        self._build_file_menu()
         self._menu = self.menuBar().addMenu("&Pipeline")
         self._actions = []
         for label, slot in (("Studies…", self._studies),
@@ -156,16 +165,79 @@ class MainWindow(QMainWindow):
             act.triggered.connect(slot)
             self._actions.append(act)
 
+    def _build_file_menu(self):
+        """New / Open / Open Recent / Save / Save As / Revert - the project's own verbs."""
+        self._file_menu = self.menuBar().addMenu("&File")
+        self._file_actions = {}
+
+        def add(key, label, slot, shortcut=None):
+            act = self._file_menu.addAction(label)
+            if shortcut:
+                act.setShortcut(shortcut)
+            act.triggered.connect(slot)
+            self._file_actions[key] = act
+            return act
+
+        add("new", "&New project...", lambda: self.session.new_project(self.repo_root, self), "Ctrl+N")
+        add("open", "&Open project...", lambda: self.session.open_project(self), "Ctrl+O")
+        self._recent_menu = self._file_menu.addMenu("Open &Recent")
+        self._file_menu.aboutToShow.connect(self._fill_recent)
+        self._file_menu.addSeparator()
+        add("save", "&Save", lambda: self.session.save(self), "Ctrl+S")
+        add("save_as", "Save &As...", lambda: self.session.save_as(self), "Ctrl+Shift+S")
+        add("revert", "&Revert", lambda: self.session.revert(self))
+        self._fill_recent()
+
+    def _fill_recent(self):
+        import ls_config as LC
+        self._recent_menu.clear()
+        self._recent_actions = []
+        paths = LC.recent_projects()
+        for path in paths:
+            act = self._recent_menu.addAction(os.path.basename(path))
+            act.setToolTip(path)
+            act.triggered.connect(lambda _=False, p=path: self.session.open_project(self, p))
+            self._recent_actions.append(act)
+        self._recent_menu.setEnabled(bool(paths))
+        ro = self.session.project.read_only
+        self._file_actions["save"].setEnabled(not ro)
+        self._file_actions["revert"].setEnabled(self.session.dirty)
+
+    def _update_title(self):
+        self.setWindowTitle("LS IHC pipeline  -  " + self.session.title())
+        if hasattr(self, "_file_actions"):
+            self._fill_recent()
+
+    def _project_opened(self, path):
+        """A different project file is now open: point the stages and the screens at it."""
+        if not path or os.path.normcase(os.path.abspath(path)) == os.path.normcase(self.config_path):
+            return
+        self.config_path = os.path.abspath(path)
+        self.runner.rebind(self.config_path)
+        self.importer.config_path = self.config_path
+        self._rebase()
+        self._log(f"project is now {self.config_path}")
+
+    def _project_saved(self):
+        """After a save the stages see the new settings; re-root only if out_root moved."""
+        new_root = self._config()["out_root"]
+        if new_root != self.out_root:
+            self._rebase()
+            self._log(f"saved - out_root {self.out_root}, serving on 127.0.0.1:{self.server.port}; "
+                      "stage modules reload on next run")
+        else:
+            self.refresh()
+        self.statusBar().showMessage(f"{self._study_name()}   out_root  {self.out_root}")
+
     def _studies(self):
         """Switch to another study, or make one."""
         from study_picker import StudyPicker
+        if not self.session.confirm_discard(self, "switch study"):
+            return
         dlg = StudyPicker(self.repo_root, self)
-        if dlg.exec() and dlg.chosen and os.path.normcase(dlg.chosen) !=                 os.path.normcase(self.config_path):
-            self.config_path = dlg.chosen
-            self.runner.rebind(dlg.chosen)
-            self.importer.config_path = dlg.chosen
-            self._rebase()
-            self._log(f"study is now {self.config_path}")
+        if dlg.exec() and dlg.chosen and os.path.normcase(dlg.chosen) != \
+                os.path.normcase(self.config_path):
+            self.session.open_project(self, dlg.chosen, confirmed=True)
 
     def _rebase(self):
         """Re-root everything that was pointed at the previous out_root."""
@@ -186,11 +258,17 @@ class MainWindow(QMainWindow):
             return "?"
 
     def _settings(self):
-        if ConfigDialog(self.repo_root, path=self.config_path,
-                        parent=self).exec():
-            self._rebase()
-            self._log(f"config updated - out_root {self.out_root}, serving on "
-                      f"127.0.0.1:{self.server.port}; stage modules reload on next run")
+        if self.session.project.read_only:
+            QMessageBox.information(self, "Read-only project",
+                                    "This project was written by a newer version of the app and "
+                                    "cannot be changed here.")
+            return
+        dlg = ConfigDialog(self.repo_root, path=self.config_path, parent=self,
+                           project=self.session.project)
+        if dlg.exec():
+            self.session.touch()
+            self._log("settings applied to the project - choose File > Save to write them; "
+                      "stages read the saved file")
 
     def _import_state(self):
         """Take over curation done in a browser, once.
@@ -381,6 +459,9 @@ class MainWindow(QMainWindow):
         st = self._current_stage()
         if not st or self._thread:
             return
+        if not self.session.ensure_saved_for_run(self):
+            return
+        self._run_started = now_iso()
         self._states[st.sid] = "running"
         self.refresh()
         self.run_btn.setEnabled(False)
@@ -399,6 +480,9 @@ class MainWindow(QMainWindow):
         self._thread.wait()
         self._thread = None
         self._states[st.sid] = "done" if res.ok else "failed"
+        problem = self.session.record_run(st.sid, res.ok, getattr(self, "_run_started", None), now_iso())
+        if problem:
+            self._log(f"could not record the run in the project: {problem}")
         if res.ok:
             self._log(f"--- {st.title}: done in {res.seconds:.1f}s")
         else:
@@ -411,5 +495,8 @@ class MainWindow(QMainWindow):
         self.run_btn.setEnabled(True)
 
     def closeEvent(self, e):
+        if not self.session.confirm_discard(self, "close"):
+            e.ignore()
+            return
         self.server.stop()
         super().closeEvent(e)

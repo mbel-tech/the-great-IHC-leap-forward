@@ -11,6 +11,7 @@ the validator uses when it rejects a value, and the dialog cannot offer a key
 the pipeline does not read.
 """
 
+import copy
 import json
 import os
 
@@ -23,6 +24,7 @@ import atlas_registry as AR
 import ls_channel_edit as CE
 import ls_atlas_import as AI
 import ls_config as LC
+import ls_jsonio
 from channel_editor import ChannelEditor
 
 
@@ -52,7 +54,10 @@ class _PathRow(QWidget):
             self.edit.setText(p)
 
     def value(self):
-        return self.edit.text().strip()
+        # Blank is "not set", like every other optional field: `_save` drops an
+        # optional key that is None. Returning "" made a blank export folder an
+        # empty-path error, so a study without one could never be applied.
+        return self.edit.text().strip() or None
 
 
 class _PatternRow(QWidget):
@@ -132,10 +137,17 @@ def _widget_for(key, value, choices=None):
 class ConfigDialog(QDialog):
     """Edit one study's config. `path` names it; default is the active one."""
 
-    def __init__(self, repo_root, path=None, study_name=None, parent=None):
+    def __init__(self, repo_root, path=None, study_name=None, parent=None, project=None):
         super().__init__(parent)
         self.repo_root = repo_root
-        self.path = os.path.abspath(path or LC.resolve_path())
+        # With a project, this edits the project IN MEMORY: Apply changes it and
+        # marks it unsaved, and File > Save is what writes. Without one it is the
+        # old behaviour - validate, then write the file - which the study picker's
+        # "new study" still uses.
+        self.project = project
+        self.detected = []                  # CZI readings made in the channel editor, kept on Apply
+        self.path = os.path.abspath(path or (project.path if project and project.path else None)
+                                    or LC.resolve_path())
         self.study_name = study_name
         self.channel_edits = None           # {key: value} from the channel editor
         self.channel_layout = None          # the layout those edits were made for
@@ -188,12 +200,16 @@ class ConfigDialog(QDialog):
         scroll.setWidget(inner)
         scroll.setWidgetResizable(True)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Save
+        buttons = QDialogButtonBox((QDialogButtonBox.Apply if self.project else QDialogButtonBox.Save)
                                    | QDialogButtonBox.Cancel)
+        self.ok_button = buttons.button(QDialogButtonBox.Apply if self.project else QDialogButtonBox.Save)
         buttons.accepted.connect(self._save)
         buttons.rejected.connect(self.reject)
+        if self.project:                    # Apply is not an AcceptRole button
+            self.ok_button.clicked.connect(self._save)
 
-        note = QLabel(f"Writing to {self.path}")
+        note = QLabel("Changes apply to the open project and are written when you choose "
+                      "File > Save." if self.project else f"Writing to {self.path}")
         note.setStyleSheet("color:#9aa0a8;font-size:11px")
         note.setWordWrap(True)
 
@@ -220,7 +236,7 @@ class ConfigDialog(QDialog):
         cfg = self._load()
         if self.channel_edits is not None and self.channel_layout == layout:
             cfg = CE.apply(cfg, self.channel_edits)         # carry on from earlier edits
-        dlg = ChannelEditor(cfg, layout, self)
+        dlg = ChannelEditor(cfg, layout, self, on_detected=lambda f, ch: self.detected.append((f, ch)))
         if dlg.exec() == QDialog.Accepted and dlg.result_edits is not None:
             self.channel_edits, self.channel_layout = dlg.result_edits, layout
 
@@ -235,6 +251,14 @@ class ConfigDialog(QDialog):
             QMessageBox.information(
                 self, "Save the study first",
                 "The study has no config file yet. Save it, then import the atlas.")
+            return
+        if self.project and self.project.dirty:
+            # The importer writes the config file itself, so unsaved changes would
+            # be overwritten by it or make the next Save look like a conflict.
+            QMessageBox.information(
+                self, "Save the project first",
+                "Importing an atlas changes the project file directly. Apply your "
+                "changes here, close Settings, choose File > Save, then import the atlas.")
             return
         folder = QFileDialog.getExistingDirectory(
             self, "Folder with the atlas's plates.csv, images and polygons.csv or seeds.csv")
@@ -281,6 +305,8 @@ class ConfigDialog(QDialog):
             QMessageBox.warning(self, "Not imported", str(e))
             return
         # The file now names the atlas; refresh what this dialog offers and select it.
+        if self.project:
+            self.project.reload()
         names = self._atlas_names(self._load())
         self.atlas_combo.clear()
         self.atlas_combo.addItems(names)
@@ -291,6 +317,8 @@ class ConfigDialog(QDialog):
 
     def _load(self):
         """The study being edited, or the template for one that is new."""
+        if self.project:
+            return copy.deepcopy(self.project.cfg)
         for candidate in (self.path,
                           os.path.join(self.repo_root, "config.example.json")):
             try:
@@ -354,11 +382,81 @@ class ConfigDialog(QDialog):
         if out_root:
             os.makedirs(out_root, exist_ok=True)
 
-        os.makedirs(os.path.dirname(self.path), exist_ok=True)
-        tmp = self.path + ".tmp"
-        with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
-            json.dump(cfg, fh, indent=2, ensure_ascii=False)
-            fh.write("\n")
-        os.replace(tmp, self.path)
+        if self.project:
+            try:
+                self._apply_to_project(cfg)
+            except Exception as exc:                        # noqa: BLE001
+                QMessageBox.warning(self, "Not applied", str(exc))
+                return
+            self.accept()
+            return
+
+        ls_jsonio.write_json_atomic(self.path, cfg)
         LC.clear_cache()
         self.accept()
+
+    def _touched(self):
+        """Dotted keys the person actually edited here, as opposed to defaults filled in."""
+        touched = [path for path in self.rows]
+        if self.channel_edits:
+            touched += list(self.channel_edits)
+        if getattr(getattr(self, "pattern_row", None), "built", None):
+            touched += ["slide_naming"]
+        return touched
+
+    def _apply_to_project(self, cfg):
+        """Move the validated settings into the open project, key by key.
+
+        Each changed key is a decision in the project's trail. Keys that only
+        changed because a default was filled in are applied without being
+        recorded: they are the program's doing, not the person's.
+        """
+        touched = self._touched()
+
+        def mine(key):
+            return any(key == t or key.startswith(t + ".") or t.startswith(key + ".")
+                       for t in touched)
+
+        for op, key, value in _diff(self.project.cfg, cfg):
+            if key == "project" or key.startswith("project."):
+                continue
+            if op == "set":
+                self.project.set(key, value, by="settings", record=mine(key))
+            else:
+                self.project.unset(key, by="settings", record=mine(key))
+        for file, channels in self.detected:
+            self.project.note_detected(file, channels)
+        self.detected = []
+
+
+def _canon(v):
+    return json.dumps(v, sort_keys=True, ensure_ascii=False)
+
+
+def _diff(old, new, prefix=""):
+    """[(op, dotted key, value)] turning dict `old` into dict `new`.
+
+    Recurses into blocks so a decision names the setting that changed, not the
+    whole block it sits in. A block with a "." in any key (a marker called
+    "Ki.67" is legal) is replaced whole, because a dotted path could not say
+    which dot is the separator.
+    """
+    out = []
+    for k, v in new.items():
+        key = prefix + k
+        if k not in old:
+            out.append(("set", key, v))
+        elif isinstance(old[k], dict) and isinstance(v, dict):
+            if any("." in str(x) for x in list(old[k]) + list(v)):
+                if _canon(old[k]) != _canon(v):
+                    out.append(("set", key, v))
+            else:
+                out += _diff(old[k], v, key + ".")
+        elif _canon(old[k]) != _canon(v):
+            out.append(("set", key, v))
+    for k in old:
+        # A null that the form leaves out is not a change: the template ships
+        # optional settings as null, and Apply with nothing edited must be a no-op.
+        if k not in new and old[k] is not None:
+            out.append(("unset", prefix + k, None))
+    return out

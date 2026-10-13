@@ -44,6 +44,19 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def _active_config():
+    """The study in use (LS_CONFIG, else the last one opened, else the repo's config.json).
+
+    These two used to open the repo-root config.json directly, which is the wrong
+    study - or no file at all - once studies live in their own folder.
+    """
+    scripts = os.path.join(os.path.dirname(HERE), "scripts")
+    if scripts not in sys.path:
+        sys.path.append(scripts)
+    import ls_config as LC
+    return LC.resolve_path()
 sys.path.insert(0, HERE)
 # Appended, not inserted: the app's own modules keep priority, and this is only
 # here so `ls_paths` can be reached. That module is a table and os.path -
@@ -301,7 +314,7 @@ def main():
         print(f"no plates CSV at {plates}")
         return 1
 
-    cfg_path = os.path.join(os.path.dirname(HERE), "config.json")
+    cfg_path = _active_config()
     with open(cfg_path, encoding="utf-8") as fh:
         cfg = json.load(fh)
     out_root = cfg["out_root"]

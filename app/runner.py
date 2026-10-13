@@ -184,7 +184,19 @@ class Runner:
         """
         try:
             with open(self.config_path, "rb") as fh:
-                stamp = hashlib.sha256(fh.read()).hexdigest()
+                raw = fh.read()
+            try:
+                # The `project` block is the app's own record (run history, decision
+                # trail). It changes every time a stage finishes, and no stage reads
+                # it, so a hash that included it would call every run "a config change"
+                # and reload every stage module for nothing.
+                doc = json.loads(raw.decode("utf-8"))
+                if isinstance(doc, dict):
+                    doc.pop("project", None)
+                    raw = json.dumps(doc, sort_keys=True).encode("utf-8")
+            except (ValueError, UnicodeDecodeError):
+                pass                      # not JSON: hash the bytes, as before
+            stamp = hashlib.sha256(raw).hexdigest()
         except OSError:
             stamp = None
         if stamp != self._config_stamp:

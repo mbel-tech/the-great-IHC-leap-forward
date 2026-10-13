@@ -20,8 +20,10 @@ from PySide6.QtWidgets import (
     QScrollArea, QVBoxLayout, QWidget)
 
 import atlas_registry as AR
+import ls_channel_edit as CE
 import ls_atlas_import as AI
 import ls_config as LC
+from channel_editor import ChannelEditor
 
 
 class _PathRow(QWidget):
@@ -135,6 +137,8 @@ class ConfigDialog(QDialog):
         self.repo_root = repo_root
         self.path = os.path.abspath(path or LC.resolve_path())
         self.study_name = study_name
+        self.channel_edits = None           # {key: value} from the channel editor
+        self.channel_layout = None          # the layout those edits were made for
         self.setWindowTitle(f"Settings — {os.path.basename(self.path)}")
         self.resize(760, 620)
 
@@ -165,6 +169,12 @@ class ConfigDialog(QDialog):
             hint.setStyleSheet("color:#9aa0a8;font-size:11px")
             hint.setWordWrap(True)
             form.addRow("", hint)
+            if key.path == "acquisition.layout":
+                cb = QPushButton("Channels and markers...")
+                cb.setToolTip("name each channel, say which are markers, and choose "
+                              "the colour each marker is drawn in")
+                cb.clicked.connect(self._edit_channels)
+                form.addRow("", cb)
             if key.path == "atlas_source":
                 btn = QPushButton("Import atlas...")
                 btn.setToolTip("add an atlas you made elsewhere: a folder of plate "
@@ -199,6 +209,20 @@ class ConfigDialog(QDialog):
             return list(AR.names(cfg))
         except ValueError:
             return list(AR.BUILTIN)
+
+    def _layout_now(self):
+        row = self.rows.get("acquisition.layout")
+        return (row[1]() if row else None) or CE.layout_of(self._load())
+
+    def _edit_channels(self):
+        """Open the channel table on the study as it would be saved right now."""
+        layout = self._layout_now()
+        cfg = self._load()
+        if self.channel_edits is not None and self.channel_layout == layout:
+            cfg = CE.apply(cfg, self.channel_edits)         # carry on from earlier edits
+        dlg = ChannelEditor(cfg, layout, self)
+        if dlg.exec() == QDialog.Accepted and dlg.result_edits is not None:
+            self.channel_edits, self.channel_layout = dlg.result_edits, layout
 
     def _import_atlas(self):
         """Pick a folder, have it judged, and register it as an atlas.
@@ -299,6 +323,16 @@ class ConfigDialog(QDialog):
                     node.pop(parts[-1], None)
                 continue
             LC._set(cfg, key.parts, value)
+
+        if self.channel_edits is not None:
+            if self.channel_layout != self._layout_now():
+                QMessageBox.warning(
+                    self, "Channels need another look",
+                    "The channels were edited for the %s layout, and the layout has "
+                    "since changed. Open 'Channels and markers...' again." % self.channel_layout)
+                return
+            for path, value in self.channel_edits.items():
+                LC._set(cfg, path.split("."), value)
 
         built = getattr(getattr(self, "pattern_row", None), "built", None)
         if built:

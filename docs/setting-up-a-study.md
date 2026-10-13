@@ -81,6 +81,40 @@ Studies whose filenames carry less degrade on their own:
 | subject, slide | `AB12_s03_sc05` |
 | subject only | `Fish07_sc05` |
 
+## Channels, markers and their colours
+
+In the app, **Settings → Channels and markers…** edits all of this as a table, so
+the config file does not have to be written by hand. Under `multiplex` each row is a
+channel: its name (what the outputs call it), its role (nuclear, marker,
+registration, ignore), the name the CZI file gives it, its plane as a fallback,
+and for a marker where its objects come from (see below). Under `paired`, where
+each scan carries the counterstain plus one marker, the table is just the marker
+names.
+
+**Detect from a CZI file…** reads what the scan records about each channel (its
+name, dye, excitation and emission) and fills in the CZI channel name, plane,
+role and colour: a blue channel is suggested as the counterstain, and a marker
+channel is coloured by its band (blue, green, red; far-red is drawn magenta). The
+file records the dye, not the antibody, so the **marker name is your choice**: each
+Name box is a drop-down that opens with *Custom (type your own)*, then the markers
+usually seen in that channel's colour band, then every other marker in
+[`docs/channel-markers.md`](channel-markers.md); you can also just type a name.
+Detecting never overwrites a name, colour or role you have already set, and a
+channel that is already in the table only gets its detection note refreshed.
+
+Each marker also gets a **Colour** and a **Show** box. *Show* controls whether it
+is drawn in the composite and the curator's Review pane; *(default)* means the
+first shown marker is red, the second green, and any further one has no colour
+and is not drawn, which the pipeline says rather than guessing. The counterstain's
+colour is the separate **Counterstain colour** setting.
+
+The table is judged by the same rules the pipeline applies when it loads the
+config, live, and OK stays disabled while it would be refused. Nothing is written
+until you press Save in Settings. A marker's name becomes folder and file names in
+every output, so renaming asks you to confirm; colours and the composite follow a
+rename. The same keys (`acquisition.channels`, `acquisition.markers`,
+`display.colours`, `display.composite`) can still be edited by hand.
+
 ## Choosing a segmentation backend
 
 Under `multiplex`, `acquisition.channels` says what each channel is. For a

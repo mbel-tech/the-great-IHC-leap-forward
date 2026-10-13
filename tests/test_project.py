@@ -400,6 +400,19 @@ chk("whitespace-only differences are not differences",
 chk("a project opened elsewhere (no marker, same content) is simply in sync",
     bool(P.Project.open(rp).reconcile_curation(rout)), False)
 
+print("--- the project file stays readable ---")
+rp2, _d2 = fresh("compact")
+q2 = P.Project.open(rp2)
+q2.write_curation("ls_roi_curator_v1", json.dumps({"S%d" % i: {"pairs": [[0.1, 0.2]] * 30} for i in range(50)}), out_root=read(rp2)["out_root"])
+q2.save()
+txt = open(rp2, encoding="utf-8").read()
+chk("curation is one line per state, not tens of thousands", txt.count("\n") < 400, True)
+chk("the settings around it are still indented", '\n  "pixel_size_um"' in txt, True)
+chk("it parses back to exactly the same project", json.loads(txt)["curation"], q2.cfg["curation"])
+chk("a string that looks like our placeholder in a setting is left alone",
+    (lambda t: json.loads(t)["study"]["name"])(ls_jsonio._dump({"study": {"name": "\u0001LSCOMPACT0\u0001"}, "curation": {"k": [1]}}, ("curation",))), "\u0001LSCOMPACT0\u0001")
+chk("with no compact blocks it is plain indented JSON", ls_jsonio._dump({"a": {"b": 1}}, ()), json.dumps({"a": {"b": 1}}, indent=2))
+
 print("--- recent projects ---")
 LC.remember_project(target)
 LC.remember_project(path)

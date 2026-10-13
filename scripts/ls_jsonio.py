@@ -16,9 +16,44 @@ import json
 import os
 
 
-def write_json_atomic(path, obj, backups=0):
+_TOKEN = "\u0001LSCOMPACT%s_%%d\u0001"
+
+
+def _dump(obj, compact):
+    """Indented JSON, except the values under `compact` top-level keys, each on one line.
+
+    A project carries the curation decisions inside it: hundreds of KB of nested coordinates that
+    `indent=2` would spread over tens of thousands of lines (slow to write on every save, and
+    useless to read). The settings stay readable; the bulky blocks stay compact.
+    """
+    if not compact or not isinstance(obj, dict):
+        return json.dumps(obj, indent=2, ensure_ascii=False)
+    shallow, swaps = dict(obj), {}
+    # A token no setting could already contain: a random nonce, checked against the settings text.
+    import uuid
+    rest = json.dumps({k: v for k, v in obj.items() if k not in compact}, ensure_ascii=False)
+    nonce = uuid.uuid4().hex
+    while nonce in rest:
+        nonce = uuid.uuid4().hex
+    token_fmt = _TOKEN % nonce
+    for top in compact:
+        block = obj.get(top)
+        if isinstance(block, dict):
+            shallow[top] = {}
+            for k, v in block.items():
+                token = token_fmt % len(swaps)
+                swaps[json.dumps(token)] = json.dumps(v, ensure_ascii=False, separators=(",", ":"))
+                shallow[top][k] = token
+    text = json.dumps(shallow, indent=2, ensure_ascii=False)
+    for quoted, compact_text in swaps.items():
+        text = text.replace(quoted, compact_text, 1)
+    return text
+
+
+def write_json_atomic(path, obj, backups=0, compact=()):
     """Write `obj` to `path` as indented UTF-8 JSON with a trailing newline.
 
+    `compact` names top-level blocks whose values are written one per line, unindented.
     `backups` keeps that many previous versions beside the file as `<path>.bak1`
     (newest) ... `<path>.bakN`, rotated before the replace so a failed write
     leaves the old file and its backups as they were. The temp file is removed if
@@ -30,7 +65,7 @@ def write_json_atomic(path, obj, backups=0):
     tmp = path + ".tmp"
     try:
         with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
-            json.dump(obj, fh, indent=2, ensure_ascii=False)
+            fh.write(_dump(obj, compact))
             fh.write("\n")
             fh.flush()
             os.fsync(fh.fileno())

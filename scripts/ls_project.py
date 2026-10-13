@@ -44,6 +44,9 @@ PROJECT_VERSION = 1
 CAPS = LC.PROJECT_CAPS                      # {"detected": 20, "decisions": 500, "runs": 200}
 BACKUPS = 3
 
+#: Top-level blocks written compactly (one value per line): the curation is bulky, machine-made data.
+COMPACT = ("curation",)
+
 #: Longest value recorded verbatim in a decision; a bigger one (a channel table)
 #: is recorded as its size and a hash, so the trail stays readable and bounded.
 BRIEF_LIMIT = 1500
@@ -165,6 +168,10 @@ def _upgrade(block):
         block = step(block)
         version = block["project_version"] = version + 1
     return block
+
+
+def _core(cfg):
+    return {k: v for k, v in cfg.items() if k != "curation"}
 
 
 def _norm(path):
@@ -351,7 +358,15 @@ class Project:
 
     @property
     def dirty(self):
-        return self._snapshot is None or _canon(self.cfg) != _canon(self._snapshot)
+        """Whether the settings differ from what is saved.
+
+        Curation is left out of the comparison: it is written to the file as each decision is made
+        (and to memory with it), so it can never be the unsaved part - and comparing a few hundred
+        KB of it every time a title or menu asks would be slow.
+        """
+        if self._snapshot is None:
+            return True
+        return _canon(_core(self.cfg)) != _canon(_core(self._snapshot))
 
     def get(self, key, default=None):
         found, value = _get(self.cfg, key.split("."))
@@ -508,7 +523,7 @@ class Project:
         block["modified"] = _now()
         block["app_version"] = code_version()
         self._stamp_portable(self.folder())
-        ls_jsonio.write_json_atomic(self.path, self.cfg, backups=BACKUPS)
+        ls_jsonio.write_json_atomic(self.path, self.cfg, backups=BACKUPS, compact=COMPACT)
         self._snapshot = copy.deepcopy(self.cfg)
         self._stamp = _stamp(self.path)
         LC.clear_cache()
@@ -561,22 +576,27 @@ class Project:
         value = curation_value(text)
         out_text = curation_text(value)
         sha = curation_hash(out_text)
-        # `synced` is the value the project and its plain copy last AGREED on, so it moves only
-        # when the copy is written too; a write that leaves the copy behind is exactly how a
-        # stale copy is told from an edited one.
         cur = self.cfg.get("curation")
-        unchanged = isinstance(cur, dict) and key in cur and _canon(cur[key]) == _canon(value)
-        if not unchanged:
-            if self.path and os.path.exists(self.path):
-                self._patch_disk_curation(key, value)
-            else:
-                self.cfg.setdefault("curation", {})[key] = copy.deepcopy(value)
+        unchanged = isinstance(cur, dict) and key in cur and curation_text(cur[key]) == out_text
+        # The plain copy first, then ONE write of the project file that records both the value and
+        # (if the copy was written) that they agree. `synced` is the value the project and its copy
+        # last AGREED on, so it moves only when the copy is written too; a write that leaves the
+        # copy behind is exactly how a stale copy is told from an edited one.
         if out_root:
             _write_text_atomic(os.path.join(_curation_dir(out_root), key + ".json"), out_text)
-            self._mark_synced(key, sha)
+        mark = sha if out_root else None
+        if mark is not None and self._synced().get(key) == mark:
+            mark = None
+        if not unchanged or mark is not None:
+            if self.path and os.path.exists(self.path):
+                self._patch_disk_curation(key, value, mark, unchanged)
+            else:
+                self.cfg.setdefault("curation", {})[key] = value
+                if mark is not None:
+                    self.block.setdefault("synced", {})[key] = mark
         return not unchanged
 
-    def _patch_disk_curation(self, key, value):
+    def _patch_disk_curation(self, key, value, mark, unchanged):
         try:
             with open(self.path, encoding="utf-8") as fh:
                 disk = json.load(fh)
@@ -590,11 +610,20 @@ class Project:
             block = disk["project"] = copy.deepcopy(seed) if isinstance(seed, dict) else _new_block()
         elif not isinstance(block, dict) or (block.get("project_version") or 1) > PROJECT_VERSION:
             raise ProjectError("%s: its project block cannot be extended by this version" % self.path)
-        disk.setdefault("curation", {})[key] = value
-        ls_jsonio.write_json_atomic(self.path, disk)
+        if not unchanged:
+            disk.setdefault("curation", {})[key] = value
+        if mark is not None:
+            block.setdefault("synced", {})[key] = mark
+        ls_jsonio.write_json_atomic(self.path, disk, compact=COMPACT)
+        # Memory follows disk. The value object is shared between the working copy and the snapshot
+        # on purpose (copying a few hundred KB per decision is the slow part); nothing edits a curation
+        # value in place - it is only ever replaced whole.
         for target in (self.cfg, self._snapshot):
             if target is not None:
-                target.setdefault("curation", {})[key] = copy.deepcopy(value)
+                if not unchanged:
+                    target.setdefault("curation", {})[key] = value
+                if mark is not None:
+                    target.setdefault("project", _new_block()).setdefault("synced", {})[key] = mark
         self._stamp = _stamp(self.path)
         LC.clear_cache()
 
@@ -609,7 +638,7 @@ class Project:
                 blk = disk.get("project")
                 if isinstance(blk, dict) and (blk.get("project_version") or 1) <= PROJECT_VERSION:
                     blk.setdefault("synced", {})[key] = sha
-                    ls_jsonio.write_json_atomic(self.path, disk)
+                    ls_jsonio.write_json_atomic(self.path, disk, compact=COMPACT)
                     self._stamp = _stamp(self.path)
             except (OSError, ValueError):
                 return
@@ -762,7 +791,7 @@ class Project:
             raise ProjectError("%s: its project block cannot be extended by this version" % self.path)
         block.setdefault("runs", []).append(rec)
         _cap(block)
-        ls_jsonio.write_json_atomic(self.path, disk)
+        ls_jsonio.write_json_atomic(self.path, disk, compact=COMPACT)
         # Memory follows disk for runs only; everything else the person has not saved stays unsaved.
         for target in (self.cfg, self._snapshot):
             if target is not None:

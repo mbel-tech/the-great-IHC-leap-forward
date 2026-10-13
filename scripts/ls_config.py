@@ -99,12 +99,15 @@ class Key:
     def __init__(self, path, type, doc, required=False, default=None,
                  note=None, consumers=(), status=LIVE, choices=None,
                  materialise=False, example=_UNSET, consumers_pending=False,
-                 ui=None, label=None):
+                 ui=None, label=None, in_example=True):
         # How the settings dialog offers this key. None infers it from `type`;
         # False keeps it out of the dialog entirely, for a key the app writes
         # itself or one whose value is a table rather than a setting.
         self._ui = ui
         self._label = label
+        # False keeps a key the app writes itself out of the generated template:
+        # a new study must not start with someone else's record in it.
+        self.in_example = in_example
         # Declared, with the stages that WILL read it named, but not consumed
         # yet. Such a key must not be required: requiring one before anything
         # reads it only breaks configs that were working.
@@ -571,6 +574,18 @@ SPEC = [
              "label only.",
         consumers=["04l"]),
 
+    Key("project", "raw",
+        "The app's record of this project: when it was made, what the CZI files "
+        "said, what was decided and when, and which stages have run.",
+        default=None, ui=False, in_example=False,
+        note="Written and read by the app only; no stage reads it, so editing "
+             "or deleting it never changes a result. `detected` holds what was "
+             "read from CZI files (evidence, not input), `decisions` the changes "
+             "made in the app (the animal-to-treatment key is recorded by name "
+             "only, never by value), `runs` the stages that ran with a hash of "
+             "the config and the code version. The lists are capped.",
+        consumers=["app"]),
+
     # ---- unblinding (replaced by the metadata-join sub-project) ----------
     Key("groups.order", "list_str",
         "Which treatment is the LEFT half of every Shotgun slide, and the "
@@ -677,6 +692,35 @@ def _check_atlas_scope(value):
     if both:
         out.append(f"{', '.join(both)} is in both `existing_regions` and "
                    f"`regions_to_add` - a region is either in the atlas or wanted")
+    return out
+
+
+PROJECT_CAPS = {"detected": 20, "decisions": 500, "runs": 200}
+
+
+def _check_project(value):
+    """Problems with a `project` block, as a list of strings."""
+    if value is None:
+        return []
+    if not isinstance(value, dict):
+        return [f"must be a block of settings, not a {type(value).__name__}"]
+    out = []
+    version = value.get("project_version")
+    if version is not None and (not isinstance(version, int) or isinstance(version, bool)
+                                or version < 1):
+        out.append("`project_version` must be a whole number from 1")
+    for field in ("id", "created", "modified", "app_version", "notes"):
+        v = value.get(field)
+        if v is not None and not isinstance(v, str):
+            out.append(f"`{field}` must be text")
+    for field, cap in PROJECT_CAPS.items():
+        v = value.get(field)
+        if v is None:
+            continue
+        if not isinstance(v, list) or not all(isinstance(r, dict) for r in v):
+            out.append(f"`{field}` must be a list of records")
+        elif len(v) > cap:
+            out.append(f"`{field}` holds {len(v)} records; the most kept is {cap}")
     return out
 
 
@@ -843,6 +887,8 @@ def validate(cfg, path="<config>", strict_paths=False):
     if isinstance(cfg, dict):
         for problem in _check_atlas_scope(cfg.get("atlas_scope")):
             errors.append(f"{path}: `atlas_scope` {problem}")
+        for problem in _check_project(cfg.get("project")):
+            errors.append(f"{path}: `project` {problem}")
 
     # The study's own atlases are judged by the registry, which owns the rules
     # (own folder, no shadowing, no path tricks). Reported here as a config error
@@ -1018,14 +1064,30 @@ def write_settings(changes):
     settings = read_settings()
     settings.update(changes)
     settings.setdefault("schema_version", SCHEMA_VERSION)
-    path = settings_path()
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
-        json.dump(settings, fh, indent=2, ensure_ascii=False)
-        fh.write("\n")
-    os.replace(tmp, path)
+    import ls_jsonio
+    ls_jsonio.write_json_atomic(settings_path(), settings)
     return settings
+
+
+#: How many project files "Open Recent" remembers.
+RECENT_PROJECTS = 10
+
+
+def recent_projects():
+    """Project files opened lately, newest first, those that still exist."""
+    listed = read_settings().get("recent_projects")
+    if not isinstance(listed, list):
+        return []
+    return [p for p in listed if isinstance(p, str) and os.path.isfile(p)][:RECENT_PROJECTS]
+
+
+def remember_project(path):
+    """Put `path` at the head of the recent list (and make it the last-used one)."""
+    path = os.path.abspath(path)
+    rest = [p for p in (read_settings().get("recent_projects") or [])
+            if isinstance(p, str) and os.path.abspath(p) != path]
+    write_settings({"recent_projects": ([path] + rest)[:RECENT_PROJECTS],
+                    "last_project": path})
 
 
 def slugify(name):
@@ -1089,12 +1151,8 @@ def migrate(name, source=None):
     cfg["study"]["name"] = str(name)
     cfg["schema_version"] = SCHEMA_VERSION
 
-    os.makedirs(os.path.dirname(target), exist_ok=True)
-    tmp = target + ".tmp"
-    with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
-        json.dump(cfg, fh, indent=2, ensure_ascii=False)
-        fh.write("\n")
-    os.replace(tmp, target)
+    import ls_jsonio
+    ls_jsonio.write_json_atomic(target, cfg)
 
     write_settings({"active_study": slug,
                     "recent": [slug] + [s for s in read_settings().get("recent", [])
@@ -1242,6 +1300,8 @@ def to_example():
     """
     out = {"_comment": EXAMPLE_HEADER}
     for key in SPEC:
+        if not key.in_example:
+            continue
         parts = key.parts
         node = out
         for part in parts[:-1]:

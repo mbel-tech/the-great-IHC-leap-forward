@@ -250,6 +250,64 @@ u.reload()
 chk("...and sees what another writer put there, without a conflict on the next save",
     (u.get("pixel_size_um"), u.set("pixel_size_um", 6.6), u.save() is not None), (6.5, True, True))
 
+print("--- portable paths ---")
+import shutil                                                   # noqa: E402
+
+A = os.path.join(TMP, "mv_a")
+os.makedirs(os.path.join(A, "slides"))
+os.makedirs(os.path.join(A, "out"))
+open(os.path.join(A, "atlas.pdf"), "wb").close()
+elsewhere = os.path.join(TMP, "mv_outside_exports")
+os.makedirs(elsewhere)
+mp = write_study(A, export_dir=elsewhere)
+m = P.Project.open(mp)
+m.save()
+disk = read(mp)
+chk("the record lists the paths inside the project's folder",
+    disk["project"]["portable"], {"source_dir": "slides", "out_root": "out", "atlas_pdf": "atlas.pdf"})
+chk("a path outside the folder is not recorded (it stays absolute)", "export_dir" in disk["project"]["portable"], False)
+chk("the settings themselves stay absolute (the Fiji stages read them as they are)",
+    all(os.path.isabs(disk[k]) for k in ("source_dir", "out_root", "atlas_pdf", "export_dir")), True)
+chk("the record validates", LC.validate(disk, "x")[0], [])
+
+Bdir = os.path.join(TMP, "mv_b")
+shutil.move(A, Bdir)
+moved = P.Project.open(os.path.join(Bdir, "study.json"))
+chk("moved together, the settings follow", [(k, os.path.relpath(n, Bdir).replace("\\", "/")) for k, o, n in moved.reanchored],
+    [("source_dir", "slides"), ("out_root", "out"), ("atlas_pdf", "atlas.pdf")])
+chk("...to absolute paths at the new place", moved.get("source_dir"), os.path.join(Bdir, "slides"))
+chk("...the outside path is left alone", moved.get("export_dir"), elsewhere)
+chk("...the project is unsaved until the person saves", moved.dirty, True)
+chk("...each is a recorded decision", sorted(d["by"] for d in moved.block["decisions"][-3:]), ["portable paths"] * 3)
+chk("...and it now validates against the real folders", moved.validate()[0], [])
+moved.save()
+chk("saving keeps the record, and a second open changes nothing", (P.Project.open(moved.path).reanchored, P.Project.open(moved.path).dirty), ([], False))
+
+keep = P.Project.open(moved.path)
+other = os.path.join(TMP, "mv_other_slides")
+os.makedirs(other)
+keep.set("source_dir", other)
+keep.save()
+chk("a path that exists elsewhere is a choice, not stale: left as it is",
+    (P.Project.open(keep.path).get("source_dir"), "source_dir" in read(keep.path)["project"]["portable"]), (other, False))
+
+sa = P.Project.open(moved.path)
+C = os.path.join(TMP, "mv_c")
+sa.save_as(os.path.join(C, "copy.json"))
+chk("save as to another folder re-records relative to it (data stays where it was, so nothing is inside)",
+    read(os.path.join(C, "copy.json"))["project"]["portable"], {})
+
+gone = P.Project.open(os.path.join(Bdir, "study.json"))
+shutil.rmtree(os.path.join(Bdir, "slides"))
+shutil.move(Bdir, Bdir + "_again")
+chk("a recorded place that does not exist is not invented", [k for k, o, n in P.Project.open(os.path.join(Bdir + "_again", "study.json")).reanchored], ["out_root", "atlas_pdf"])
+for bad in ({"source_dir": "/abs/slides"}, {"source_dir": "../up"}, {"source_dir": 5}, ["x"]):
+    chk("an unsafe record is a config error: %r" % (bad,),
+        any("portable" in e for e in LC.validate(dict(read(mp if os.path.exists(mp) else os.path.join(Bdir + "_again", "study.json")), project={"portable": bad}), "x")[0]), True)
+legacy = P.Project.open(write_study(os.path.join(TMP, "mv_legacy")))
+chk("a legacy file with no record opens untouched", (legacy.reanchored, legacy.dirty), ([], False))
+chk("the keys come from the spec", P.path_keys(), ["source_dir", "out_root", "atlas_pdf", "export_dir"])
+
 print("--- recent projects ---")
 LC.remember_project(target)
 LC.remember_project(path)

@@ -76,8 +76,9 @@ class ChannelEditor(QDialog):
     currently chosen in settings. `result_edits` is {dotted key: value} after OK.
     """
 
-    def __init__(self, cfg, layout, parent=None):
+    def __init__(self, cfg, layout, parent=None, on_detected=None):
         super().__init__(parent)
+        self.on_detected = on_detected      # called (file, channels) after a CZI is read
         self.cfg = copy.deepcopy(cfg)
         self.layout = layout
         self.paired = layout == CH.LAYOUT_PAIRED
@@ -320,6 +321,10 @@ class ChannelEditor(QDialog):
         except (ValueError, ImportError) as exc:
             QMessageBox.warning(self, "Could not read the file", str(exc))
             return
+        if self.on_detected:
+            self.on_detected(path, [{"name": f["czi_name"], "plane": f["index"], "role": f["role"],
+                                     "band": f["band"], "description": f["detected"]}
+                                    for f in found])
         rows, added = E.merge_detected(self.rows(), found, self.layout)
         self._populate(rows)
         lines = ["  plane %d  %s  ->  %s" % (f["index"], f["czi_name"] or "?", f["detected"])

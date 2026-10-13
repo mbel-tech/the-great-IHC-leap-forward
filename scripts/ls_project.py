@@ -252,8 +252,8 @@ class Project:
             raise ProjectError("this project was written by a newer version of the app and "
                                "is open read-only; update the app to edit it")
 
-    def set(self, key, value, by="app"):
-        """Set one dotted key. Returns True if it changed; records the decision."""
+    def set(self, key, value, by="app", record=True):
+        """Set one dotted key. Returns True if it changed; records the decision unless `record` is False."""
         self._check_writable()
         parts = key.split(".")
         found, old = _get(self.cfg, parts)
@@ -266,6 +266,8 @@ class Project:
             if not isinstance(node, dict):
                 raise ProjectError("%s is not a block, so %s cannot be set" % (p, key))
         node[parts[-1]] = value
+        if not record:
+            return True
         rec = {"at": _now(), "key": key, "by": by}
         if _redacted(key):
             rec["redacted"] = True
@@ -275,6 +277,25 @@ class Project:
         block = self.block
         block.setdefault("decisions", []).append(rec)
         _cap(block)
+        return True
+
+    def unset(self, key, by="app", record=True):
+        """Remove one dotted key. Returns True if it was there."""
+        self._check_writable()
+        parts = key.split(".")
+        found, old = _get(self.cfg, parts)
+        if not found:
+            return False
+        _, parent = _get(self.cfg, parts[:-1]) if len(parts) > 1 else (True, self.cfg)
+        del parent[parts[-1]]
+        if record:
+            rec = {"at": _now(), "key": key, "by": by}
+            if _redacted(key):
+                rec["redacted"] = True
+            else:
+                rec["from"], rec["to"] = _brief(old), None
+            self.block.setdefault("decisions", []).append(rec)
+            _cap(self.block)
         return True
 
     def apply_edits(self, edits, by="app"):
@@ -331,6 +352,15 @@ class Project:
         if self._snapshot is None:
             raise ProjectError("this project has never been saved, so there is nothing to revert to")
         self.cfg = copy.deepcopy(self._snapshot)
+
+    def reload(self):
+        """Read the file again, dropping anything unsaved. For when something else wrote it
+        on purpose (the atlas import writes the config itself)."""
+        if not self.path:
+            raise ProjectError("this project has no file to reload")
+        fresh = Project.open(self.path)
+        self.cfg, self.read_only = fresh.cfg, fresh.read_only
+        self._snapshot, self._stamp = fresh._snapshot, fresh._stamp
 
     # ---- the run history ------------------------------------------------------
 

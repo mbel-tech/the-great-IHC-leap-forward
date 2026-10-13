@@ -231,6 +231,25 @@ chk("a missing file is refused", raises(lambda: P.Project.open(os.path.join(d, "
 open(bad, "w").write(json.dumps({"project": 5}))
 chk("a non-block project key is refused", raises(lambda: P.Project.open(bad), P.ProjectError, "block"), True)
 
+print("--- unset, unrecorded sets, reload ---")
+u = P.Project.open(target)
+n0 = len(u.block["decisions"])
+chk("set with record=False changes the config but not the trail",
+    (u.set("section_thickness_um", 33.0, record=False), len(u.block["decisions"])), (True, n0))
+chk("unset removes a key and records it", (u.unset("section_thickness_um", by="t"), u.get("section_thickness_um"),
+    u.block["decisions"][-1]["key"], u.block["decisions"][-1]["to"]), (True, None, "section_thickness_um", None))
+chk("unsetting what is not there is a no-op", u.unset("no.such.key"), False)
+u.unset("groups.by_animal", by="t")
+chk("unsetting groups.* records the name only", u.block["decisions"][-1].get("redacted"), True)
+u.set("pixel_size_um", 12.0)
+u.reload()
+chk("reload drops unsaved changes and re-reads the file", (u.get("pixel_size_um"), u.dirty), (read(target)["pixel_size_um"], False))
+with open(target, "r+", encoding="utf-8") as fh:
+    t = json.load(fh); t["pixel_size_um"] = 6.5; fh.seek(0); json.dump(t, fh, indent=2); fh.truncate()
+u.reload()
+chk("...and sees what another writer put there, without a conflict on the next save",
+    (u.get("pixel_size_um"), u.set("pixel_size_um", 6.6), u.save() is not None), (6.5, True, True))
+
 print("--- recent projects ---")
 LC.remember_project(target)
 LC.remember_project(path)

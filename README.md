@@ -128,6 +128,35 @@ Things that differ from salmon, so they are not a surprise later:
 - Needs tesseract for the name proposals: `requirements-wullimann.txt`.
 - The plates come from a book that is not ours to redistribute; `atlas/` is ignored by git.
 
+### Using an atlas of your own
+
+An atlas the pipeline can use is a **plate set**: a folder of plate images plus the tables that say where
+the regions are on them. If you already have one (from another species, or drawn by hand), nothing needs
+extracting; it only needs checking and filing. It needs three things:
+
+| file | columns | what it holds |
+|---|---|---|
+| `plates.csv` | `plate_id`, `image_file`, `px_w`, `px_h` (+ `midline_frac` if each plate draws the atlas beside a micrograph) | one row per plate; `image_file` is a path inside the folder and the size must match the image |
+| `polygons.csv` | `plate_id`, `roi_number`, `region`, `status`, `label_conf`, `vertices` | closed outlines, `vertices` as `x y;x y;...` in **fractions of the plate** (0 to 1); only `reviewed` outlines are shown |
+| `seeds.csv` (instead of `polygons.csv`) | `plate_id`, `region`, `x_frac`, `y_frac` | one dot per sample of a region, grouped into regions by `04l` |
+
+```bash
+python scripts/ls_atlas_import.py PLATE_SET_DIR --kind polygons --check             # judge only
+python scripts/ls_atlas_import.py PLATE_SET_DIR --kind polygons --name mouse_brain  # check, copy, register
+```
+
+or **Settings > Atlas > Import atlas...** in the app, which asks the same questions and runs the same check.
+The folder is judged first and nothing is copied unless it passes; each problem is named with its file and
+line (a vertex off the plate, an image whose size disagrees with `plates.csv`, a polygon on a plate that is
+not listed, and so on). A passing folder is copied to `<out_root>/atlas/plates_<name>/` and registered under
+`atlases` in the study's config, after which `atlas_source: "<name>"` works in every stage.
+
+Nothing is ever overwritten: a name that is already registered, or a folder that already exists, is refused,
+because curation made against a plate set is keyed to its images. Give plates ids of your own (`mouse_001`,
+not `plate_001`) so they are not mistaken for the salmon plates, and number them so they sort in atlas order.
+`--micrograph-half` is for plates that draw the atlas beside a micrograph of the same section (registration then
+reads only that half) and `--mirror` for outlines that cover one hemisphere.
+
 ### Reviewing the decisions made before the ROI curator
 
 Four stages decide a section's fate before it reaches the ROI curator, which loads only the

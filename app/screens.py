@@ -128,6 +128,11 @@ class StageListScreen(QWidget):
         self.plan_note.setStyleSheet(QUIET)
         bar.addWidget(self.plan_note, 1)
         lay.addLayout(bar)
+        self.notice = QLabel("")
+        self.notice.setWordWrap(True)
+        self.notice.setStyleSheet(f"color:{COLOUR['waiting']};padding:4px 0")
+        self.notice.setVisible(False)
+        lay.addWidget(self.notice)
         self._plan = []
         # All stages spans the whole pipeline, unblinding included; running all of
         # it from one button is not something to offer.
@@ -187,6 +192,9 @@ class StageListScreen(QWidget):
             names = ", ".join(W.display_title(S.BY_ID[w], study) for w in waits)
             bits.append(f"{len(held)} waiting for: {names}")
         self.plan_note.setText(" · ".join(bits))
+        shown = W.notices(self.screen.sid, study)
+        self.notice.setText("\n\n".join(shown))
+        self.notice.setVisible(bool(shown))
 
 
 class CurateScreen(QWidget):

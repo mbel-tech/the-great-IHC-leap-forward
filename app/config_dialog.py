@@ -30,6 +30,64 @@ from channel_editor import ChannelEditor
 from widgets import InfoButton
 
 
+#: How a paired study finds the objects each marker is measured in, as Set up
+#: offers it: the words shown, and the `acquisition.marker_segmentation` entry
+#: written (None: the marker is not listed, so it takes the nuclear route).
+NUCLEAR_ROUTE = "On the counterstain (DAPI)"
+OWN_ROUTE = "On this marker's own channel"
+OWN_ENTRY = {"segment": "own", "backend": "stardist", "nucleus_shaped": True}
+
+
+class _SegmentationRow(QWidget):
+    """Per marker of a paired study: are its nuclei found on DAPI or on itself?
+
+    The LS PCNA (AF488) scans carry a DAPI plane that is noise, so PCNA has to be
+    segmented on its own green channel. Without this row that was only possible
+    by editing config.json. An entry already in the file with settings of its
+    own (another backend) is kept as it is while its marker stays on its own
+    channel.
+    """
+
+    def __init__(self, markers, block, parent=None):
+        super().__init__(parent)
+        self.block = dict(block) if isinstance(block, dict) else {}
+        self.lay = QFormLayout(self)
+        self.lay.setContentsMargins(0, 0, 0, 0)
+        self.combos = {}
+        self.set_markers(markers)
+
+    def set_markers(self, markers):
+        current = (self.value() or {}) if self.combos else self.block
+        while self.lay.rowCount():
+            self.lay.removeRow(0)
+        self.combos = {}
+        for m in markers:
+            combo = QComboBox()
+            combo.addItems([NUCLEAR_ROUTE, OWN_ROUTE])
+            entry = current.get(m)
+            own = isinstance(entry, dict) and (entry.get("segment") or "own") == "own"
+            combo.setCurrentText(OWN_ROUTE if own else NUCLEAR_ROUTE)
+            self.combos[m] = combo
+            self.lay.addRow(m, combo)
+        if not markers:
+            note = QLabel("No markers declared yet (Channels and markers...).")
+            note.setStyleSheet("color:#9aa0a8")
+            self.lay.addRow(note)
+
+    def value(self):
+        out = {}
+        for m, combo in self.combos.items():
+            if combo.currentText() == OWN_ROUTE:
+                kept = self.block.get(m)
+                out[m] = dict(kept) if isinstance(kept, dict) and \
+                    (kept.get("segment") or "own") == "own" else dict(OWN_ENTRY)
+        return out or None
+
+    def reset(self):
+        for combo in self.combos.values():
+            combo.setCurrentText(NUCLEAR_ROUTE)
+
+
 class _PathRow(QWidget):
     """A line edit with a Browse button, for the three path kinds."""
 
@@ -138,7 +196,9 @@ def _widget_for(key, value, choices=None):
 
 def _set_widget(widget, value):
     """Put `value` into an editor made by `_widget_for` - the Reset button's half."""
-    if isinstance(widget, (_PathRow, _PatternRow)):
+    if isinstance(widget, _SegmentationRow):
+        widget.reset()
+    elif isinstance(widget, (_PathRow, _PatternRow)):
         widget.edit.setText("" if value is None else str(value))
     elif isinstance(widget, QCheckBox):
         widget.setChecked(bool(value))
@@ -251,12 +311,61 @@ class SettingsForm(QWidget):
                               "the colour each marker is drawn in")
                 cb.clicked.connect(self._edit_channels)
                 form.addRow("", cb)
+                self._add_segmentation_row(form, cfg)
             if key.path == "atlas_source":
                 btn = QPushButton("Import atlas...")
                 btn.setToolTip("add an atlas you made elsewhere: a folder of plate "
                                "images with plates.csv and polygons.csv or seeds.csv")
                 btn.clicked.connect(self._import_atlas)
                 form.addRow("", btn)
+
+    def _add_segmentation_row(self, form, cfg):
+        """Where each marker's nuclei are found - shown for a paired study only."""
+        key = LC.BY_PATH["acquisition.marker_segmentation"]
+        found, value = LC._get(cfg, key.parts)
+        self.seg_row = _SegmentationRow(self._markers_now(), value if found else {})
+        line = QHBoxLayout()
+        line.setContentsMargins(0, 0, 0, 0)
+        line.addWidget(self.seg_row, 1)
+        reset = QToolButton()
+        reset.setText("↺")
+        reset.setToolTip("Back to the default: every marker on the counterstain")
+        reset.clicked.connect(self.seg_row.reset)
+        line.addWidget(reset)
+        line.addWidget(InfoButton("Where nuclei are found", key_info(key)))
+        holder = QWidget()
+        holder.setLayout(line)
+        label = QLabel("Find nuclei")
+        form.addRow(label, holder)
+        hint = QLabel("For a marker whose scan has no usable DAPI (the LS PCNA scans), "
+                      "find its nuclei on the marker itself. Its fraction positive and "
+                      "total cell density are then not reported; positive density is.")
+        hint.setStyleSheet("color:#9aa0a8;font-size:11px")
+        hint.setWordWrap(True)
+        form.addRow("", hint)
+        self._seg_parts = (label, holder, hint)
+        self.rows[key.path] = (key, self._segmentation_value)
+        self.widgets[key.path] = self.seg_row
+        layout_widget = self.widgets.get("acquisition.layout")
+        if isinstance(layout_widget, QComboBox):
+            layout_widget.currentTextChanged.connect(lambda _t: self._show_segmentation())
+        self._show_segmentation()
+
+    def _segmentation_value(self):
+        # Only a paired study may carry the block; anywhere else it is dropped.
+        return self.seg_row.value() if self._layout_now() == "paired" else None
+
+    def _show_segmentation(self):
+        on = self._layout_now() == "paired"
+        for w in self._seg_parts:
+            w.setVisible(on)
+
+    def _markers_now(self):
+        cfg = self._load()
+        if self.channel_edits is not None:
+            cfg = CE.apply(cfg, self.channel_edits)
+        markers = (cfg.get("acquisition") or {}).get("markers") or []
+        return [m for m in markers if isinstance(m, str)]
 
     def _source_dir(self):
         """The slides folder as it would be applied: this form's, else the study's."""
@@ -295,6 +404,8 @@ class SettingsForm(QWidget):
         dlg = ChannelEditor(cfg, layout, self, on_detected=lambda f, ch: self.detected.append((f, ch)))
         if dlg.exec() == QDialog.Accepted and dlg.result_edits is not None:
             self.channel_edits, self.channel_layout = dlg.result_edits, layout
+            if getattr(self, "seg_row", None) is not None:
+                self.seg_row.set_markers(self._markers_now())
 
     def _import_atlas(self):
         """Pick a folder, have it judged, and register it as an atlas.

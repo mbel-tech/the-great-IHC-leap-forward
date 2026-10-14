@@ -10,8 +10,8 @@ import html
 from PySide6.QtCore import QPoint, Qt, Signal
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QFrame, QHBoxLayout, QLabel,
-    QPushButton, QSizePolicy, QSpinBox, QToolButton, QVBoxLayout, QWidget)
+    QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout, QFrame, QHBoxLayout,
+    QLabel, QLineEdit, QPushButton, QSizePolicy, QSpinBox, QToolButton, QVBoxLayout, QWidget)
 
 #: Status colours, shared by every screen so one state is one colour everywhere.
 COLOUR = {"done": "#3fb950", "todo": "#8b949e", "manual": "#a371f7",
@@ -132,8 +132,42 @@ class PartHeader(QWidget):
             lay.addWidget(line)
 
 
+class FileField(QWidget):
+    """A file path with a Browse button, for a stage option that names a file."""
+
+    valueChanged = Signal(str)
+
+    def __init__(self, value="", parent=None):
+        super().__init__(parent)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        self.edit = QLineEdit(value or "")
+        self.edit.setPlaceholderText("(the stage's default)")
+        self.edit.setMinimumWidth(280)
+        self.edit.editingFinished.connect(lambda: self.valueChanged.emit(self.value()))
+        row.addWidget(self.edit, 1)
+        browse = QPushButton("Browse...")
+        browse.clicked.connect(self._browse)
+        row.addWidget(browse)
+
+    def _browse(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Choose a file", self.edit.text())
+        if path:
+            self.setValue(path)
+            self.valueChanged.emit(self.value())
+
+    def value(self):
+        return self.edit.text().strip()
+
+    def setValue(self, value):
+        self.edit.setText(value or "")
+
+
 def option_widget(opt, value):
     """(widget, getter) for one stage option."""
+    if opt.kind == "file":
+        field = FileField(value or "")
+        return field, field.value
     if opt.kind == "bool":
         box = QCheckBox(opt.label)
         box.setChecked(bool(value))
@@ -221,6 +255,8 @@ class OptionsPanel(QFrame):
                 w.setChecked(bool(v))
             elif opt.kind == "choice":
                 w.setCurrentText(str(v))
+            elif opt.kind == "file":
+                w.setValue(v or "")
             elif opt.kind == "int":
                 w.setValue(int(v or 0))
             else:

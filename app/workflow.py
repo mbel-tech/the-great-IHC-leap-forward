@@ -593,6 +593,12 @@ OPTIONS = {
         _force("sections"),
         _limit(),
     ],
+    "join_sampling": [
+        Opt("--xlsx", "file", "Sampling spreadsheet",
+            "The experiment's sampling workbook: one row per fish with its tanks and "
+            "treatment. Empty uses 'large scale exp sampling data.xlsx' in the slide "
+            "folder."),
+    ],
     "recensor": [Opt("--dry-run", "bool", "Report only", "Says what would change and "
                      "writes nothing.")],
     "off_tissue": [Opt("--dry-run", "bool", "Report only", "Says what would change and "
@@ -939,6 +945,9 @@ SHORTFALL = {
 #: that folder is. The scene pictures may sit outside the study (Set up says).
 FOLDERS = {
     "scene_renders": ("Open pictures", lambda cfg: _scene_dir(cfg)),
+    "overviews": ("Open pictures", lambda cfg: os.path.join(cfg["out_root"], "overviews")),
+    "contactsheets": ("Open sheets", lambda cfg: os.path.join(cfg["out_root"], "contactsheets")),
+    "build_results": ("Open results", lambda cfg: os.path.join(cfg["out_root"], "results")),
 }
 
 
@@ -966,6 +975,45 @@ def shortfall(sid, output):
         return None
     n = int(m.group(1))
     return "%d %s%s %s" % (n, rule[1], "" if n == 1 else "s", rule[2])
+
+
+#: When the ROI fixes reached main (PRs #21 and #24, 2026-10-14 12:37 UTC): 05c
+#: decides `censored` on the native pixels, and 05a/05c move curated shapes half
+#: a grid pixel onto pixel centres. Nuclei measured before then keep the old
+#: flag and the old boundary until ROI placement and detection run again.
+ROI_FIX_AT = 1791981478   # 2026-10-14T12:37:58Z
+
+
+def stale_results(study):
+    """Why this study's nuclei need measuring again, or None.
+
+    Read off the file's age: nothing inside roi_nuclei.csv says which 05c wrote
+    it. A file copied since then would hide an old run, so this is a reminder,
+    not a guarantee.
+    """
+    if not study.out_root:
+        return None
+    path = os.path.join(study.out_root, "results", "roi_nuclei.csv")
+    try:
+        when = os.path.getmtime(path)
+    except OSError:
+        return None
+    if when >= ROI_FIX_AT:
+        return None
+    return ("These nuclei were measured before the 14 Oct fixes to ROI placement (half a "
+            "pixel) and to the saturated-nucleus flag (now read from the scan's own "
+            "pixels). Run Place the ROIs on the slide again, then Detect and measure "
+            "nuclei with Options > Redo sections already done, then rebuild Results.")
+
+
+def notices(screen_sid, study):
+    """Warnings a screen shows above its stages."""
+    out = []
+    if screen_sid in ("measure", "results"):
+        stale = stale_results(study)
+        if stale:
+            out.append(stale)
+    return out
 
 
 def next_up(study, setup_ok=True, setup_missing=()):

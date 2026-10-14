@@ -617,29 +617,20 @@ STAGES = [
                 "advanced to the same fraction, spread across each brain."),
 
     Stage("rgb_perk", "04o  Colour composites - pERK", "Normalisation and curation",
-          script="04o_section_rgb.py", argv=["--marker", "{marker0}", "--all"],
-          outputs=[Art("sections", 0, "_rgb")],
+          script="04o_section_rgb.py",
+          argv=["--marker", "{marker0}", "--all", "--thumbs"],
+          outputs=[Art("sections", 0, "_rgb"), Art("sections", 0, "_rgb_thumb")],
           needs=["reformat_perk_final"],
           blurb="DAPI blue plus the marker, in the reformatted frame, so the "
-                "curator shows the channel being quantified."),
+                "curator shows the channel being quantified, and the 256 px "
+                "thumbnails of them for the Review grid in the same run."),
 
     Stage("rgb_pcna", "04o  Colour composites - PCNA", "Normalisation and curation",
-          script="04o_section_rgb.py", argv=["--marker", "{marker1}", "--all"],
-          outputs=[Art("sections", 1, "_rgb")],
+          script="04o_section_rgb.py",
+          argv=["--marker", "{marker1}", "--all", "--thumbs"],
+          outputs=[Art("sections", 1, "_rgb"), Art("sections", 1, "_rgb_thumb")],
           needs=["reformat_pcna_final"],
           blurb="The same for the PCNA channel."),
-
-    Stage("thumbs_perk", "04o  Review thumbnails - pERK", "Normalisation and curation",
-          script="04o_section_rgb.py", argv=["--marker", "{marker0}", "--thumbs"],
-          outputs=[Art("sections", 0, "_rgb_thumb")],
-          needs=["rgb_perk"],
-          blurb="256 px colour thumbnails for the curator's Review grid."),
-
-    Stage("thumbs_pcna", "04o  Review thumbnails - PCNA", "Normalisation and curation",
-          script="04o_section_rgb.py", argv=["--marker", "{marker1}", "--thumbs"],
-          outputs=[Art("sections", 1, "_rgb_thumb")],
-          needs=["rgb_pcna"],
-          blurb="The same for PCNA."),
 
     Stage("provenance", "04p  Trace every scanned section", "Normalisation and curation",
           script="04p_section_provenance.py", argv=["--tissue-masks"],

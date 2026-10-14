@@ -145,7 +145,9 @@ class StageListScreen(QWidget):
                 body.addWidget(PartHeader(heading, text))
             for sid in ids:
                 st = S.BY_ID[sid]
-                row = StageRow(st, W.options_for(sid))
+                folder = W.FOLDERS.get(sid)
+                row = StageRow(st, W.options_for(sid),
+                               open_label=folder[0] if folder else None)
                 row.run_clicked.connect(lambda s: self.run_requested.emit([s]))
                 row.open_clicked.connect(self.open_requested.emit)
                 row.options_changed.connect(self.options_changed.emit)

@@ -26,6 +26,7 @@ from curator_view import CuratorView, LocalServer
 from import_slides import ImportScreen
 from project_session import ProjectSession, now_iso
 from runner import Runner
+from study_picker import reveal
 from screens import CurateScreen, HomeScreen, SetupScreen, StageListScreen
 from widgets import COLOUR, QUIET
 
@@ -496,8 +497,23 @@ class MainWindow(QMainWindow):
                 self.run_stages(plan)
 
     def open_curator(self, sid):
+        if sid in W.FOLDERS:
+            self.open_folder(sid)
+            return
         self.curate.show_curator(sid)
         self.goto("curate")
+
+    def open_folder(self, sid):
+        """Show the folder of pictures a stage made, in the file manager."""
+        got = W.output_folder(sid, self._config())
+        if not got or not os.path.isdir(got[1]):
+            QMessageBox.information(
+                self, "Nothing to open yet",
+                "%s has not made any pictures yet%s." % (
+                    W.display_title(S.BY_ID[sid]),
+                    " (they will go to %s)" % got[1] if got else ""))
+            return
+        reveal(got[1])
 
     # ---- status -------------------------------------------------------------
 

@@ -2,7 +2,7 @@
 
 `stages.py` says what the pipeline IS, in the order and the bands of the methods
 figure. That order is right for a paper and wrong for a working day: the four
-places a person decides are spread among 55 automatic steps, and the one-time
+places a person decides are spread among dozens of automatic steps, and the one-time
 instrument work sits between QC and the atlas. This file lays the same stages out
 by job - Set up, Prepare, Curate, Measure, Results - and says in plain words what
 each one is for.
@@ -244,8 +244,9 @@ PLAIN = {
     "verify": "Checks that every slide file was copied or unzipped completely.",
     "czi_selftest": "Checks the slide files for the few things that would make every later "
                     "measurement wrong, such as images shifted between zoom levels.",
-    "overviews": "Saves a picture of every section at one fixed size and brightness, and "
-                 "scores each for focus and saturation.",
+    "overviews": "Saves a picture of every section at one fixed size and brightness, "
+                 "scores each for focus and saturation, and marks where the camera hit "
+                 "its maximum.",
     "contactsheets": "Puts each animal's sections side by side in brain order, so you can "
                      "browse the whole dataset quickly.",
     "scene_renders": "A picture of every scene on every slide, drawn from the scan files for "
@@ -263,8 +264,8 @@ PLAIN = {
     "artifact_before": "Measures how strong the tile pattern is before correction.",
     "artifact_after": "Measures the tile pattern again after correction, for comparison.",
     "tilefield_raw": "A second illumination measurement from the raw tiles, for checking only.",
-    "saturation_raw": "Finds pixels where the camera hit its maximum, and saves a mask of them "
-                      "per section.",
+    "saturation_raw": "Repair for older studies: saves the per-section mask of pixels where the "
+                      "camera hit its maximum. New studies get it from the overviews step.",
     "saturation_map": "Tells harmless saturation (edges, debris) apart from saturation inside "
                       "the tissue.",
     "atlas_extract": "Pulls the plate pictures and region markers out of the atlas PDF.",
@@ -437,7 +438,9 @@ def _force(what):
 
 _RGB = [
     Opt("--scale", "int", "Picture size (x 256 px)",
-        "How large the colour pictures are drawn. 3 gives 768 px. Only the sampling "
+        "How large the colour pictures are drawn when Set up > Curation pictures takes "
+        "them from the overviews; 3 gives 768 px. Pictures drawn from the scan files "
+        "use the resolution set there instead, and ignore this. Only the sampling "
         "changes; the section's frame and rotation stay exactly the same.",
         default=3, cli_default=3, minimum=1, maximum=8),
     Opt("--include-excluded", "bool", "Include excluded sections",
@@ -529,18 +532,8 @@ OPTIONS = {
             "when dragging a rotation.", default=170, cli_default=170, minimum=80,
             maximum=600),
     ],
-    "artifact_pcna": [
-        Opt("--include-excluded", "bool", "Also mask excluded sections",
-            "Masks the excluded sections too, so Review shows them like every other.",
-            default=True),
-        _limit(),
-    ],
-    "artifact_perk": [
-        Opt("--include-excluded", "bool", "Also mask excluded sections",
-            "Masks the excluded sections too, so Review shows them like every other.",
-            default=True),
-        _limit(),
-    ],
+    "artifact_pcna": [_limit()],
+    "artifact_perk": [_limit()],
     "censor_pcna": [
         Opt("--tolerance", "float", "Set aside above this saturated fraction",
             "A section with at least this fraction of its tissue saturated is set aside. "
@@ -694,7 +687,8 @@ SETTING_SECTIONS = [
       "channels.marker_index"]),
     ("curation", "Curation pictures",
      "How sharp the colour pictures in the ROI curator are, and where their pixels come "
-     "from. Measuring always reads the scan's own pixels, whatever this says.",
+     "from. Measuring always reads the scan's own pixels, whatever this says. Pictures "
+     "already made keep their old look until the colour pictures run again with Redo.",
      ["curation_render.source", "curation_render.um_per_px"]),
     ("scene_pictures", "Scene pictures",
      "Where the pictures of every scene go, how sharp they are and how they are "
@@ -935,7 +929,31 @@ def curators(study):
 #: would read as a full run.
 SHORTFALL = {
     "scene_renders": (re.compile(r"^\s*(\d+) not drawn:", re.M), "scene", "not drawn"),
+    # 04o: a section whose CZI or scene is missing, or with no tissue mask.
+    "rgb_perk": (re.compile(r"^\s*(\d+) not built:", re.M), "picture", "not built"),
+    "rgb_pcna": (re.compile(r"^\s*(\d+) not built:", re.M), "picture", "not built"),
 }
+
+
+#: Stages whose real output is a folder of pictures to look through, and where
+#: that folder is. The scene pictures may sit outside the study (Set up says).
+FOLDERS = {
+    "scene_renders": ("Open pictures", lambda cfg: _scene_dir(cfg)),
+}
+
+
+def _scene_dir(cfg):
+    import ls_config as LC
+    return LC.scene_render_dir(cfg)
+
+
+def output_folder(sid, cfg):
+    """(button label, folder) for a stage in FOLDERS, else None."""
+    entry = FOLDERS.get(sid)
+    if not entry or not cfg or not cfg.get("out_root"):
+        return None
+    folder = entry[1](cfg)
+    return (entry[0], folder) if folder else None
 
 
 def shortfall(sid, output):

@@ -147,6 +147,15 @@ chk("skipped scenes are counted", W.shortfall("scene_renders", _out), "3 scenes 
 chk("one skipped scene", W.shortfall("scene_renders", "  1 not drawn:\n"), "1 scene not drawn")
 chk("a full run has no shortfall", W.shortfall("scene_renders", "wrote 40 scenes\n"), None)
 chk("other stages are not read for it", W.shortfall("manifest", _out), None)
+chk("colour pictures not built are counted",
+    W.shortfall("rgb_perk", "wrote 9 composites\n  2 not built:\n"), "2 pictures not built")
+chk("the artifact masks always include excluded sections (no option to break it)",
+    [o.flag for o in W.options_for("artifact_pcna")], ["--limit"])
+chk("the scene pictures folder follows Set up",
+    W.output_folder("scene_renders", {"out_root": "/s", "scene_render": {"out_dir": "/p"}}),
+    ("Open pictures", "/p"))
+chk("...and defaults inside the study",
+    W.output_folder("scene_renders", {"out_root": "/s"})[1], os.path.join("/s", "scene_renders"))
 
 print("--- names and words for this study ---")
 s0 = study()
@@ -256,6 +265,12 @@ if MW:
     chk("running the unblinding stage asks first, and Cancel stops it",
         (started, "Unblind the analysis?" in asked), (False, True))
     chk("nothing is left queued", (w._queue, w._thread), ([], None))
+    chk("the scene pictures row has an Open pictures button",
+        (w.lists["prepare"].rows["scene_renders"].open_btn.text(),
+         w.lists["prepare"].rows["scene_renders"].open_btn.isVisibleTo(w.lists["prepare"])),
+        ("Open pictures", True))
+    w.open_curator("scene_renders")
+    chk("opening it before any pictures exist says so", "Nothing to open yet" in asked, True)
     import runner as RN
     from PySide6.QtCore import QCoreApplication
     import time as _t

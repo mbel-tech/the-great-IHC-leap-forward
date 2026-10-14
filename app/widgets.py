@@ -242,7 +242,7 @@ class StageRow(QFrame):
     open_clicked = Signal(str)
     options_changed = Signal(str, dict)
 
-    def __init__(self, stage, options=(), parent=None):
+    def __init__(self, stage, options=(), parent=None, open_label=None):
         super().__init__(parent)
         self.stage = stage
         self.setObjectName("stageRow")
@@ -279,8 +279,10 @@ class StageRow(QFrame):
         self.opt_btn.toggled.connect(self._toggle_options)
         self.opt_btn.setVisible(bool(options))
         top.addWidget(self.opt_btn)
-        self.open_btn = QPushButton("Open")
-        self.open_btn.setVisible(bool(stage.curator))
+        # A curator opens its page; a stage named in workflow.FOLDERS opens the
+        # folder of pictures it made.
+        self.open_btn = QPushButton(open_label or "Open")
+        self.open_btn.setVisible(bool(stage.curator or open_label))
         self.open_btn.clicked.connect(lambda: self.open_clicked.emit(stage.sid))
         top.addWidget(self.open_btn)
         self.run_btn = QPushButton("Build page" if stage.curator else "Run")

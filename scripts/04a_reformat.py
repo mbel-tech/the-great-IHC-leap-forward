@@ -574,17 +574,49 @@ def frames_for(rows, marker):
     return [r for r in rows if r["marker_channel"] == marker]
 
 
-def load_overrides(paths=None, write=False):
-    """Manual rotation corrections from 04d_rotation_curator.py.
+CANDIDATES_CSV = os.path.join(REFORMAT_DIR, "exclusion_candidates.csv")
 
-    Stored as a correction *on top of* the automatic angle rather than as an
-    absolute orientation, so improving the auto-rotation later does not
-    invalidate the manual work.
+
+def proposed_exclusions(paths):
+    """04f's proposals as decision "auto", for a source pass with no override
+    file - what an untouched export of the old rotation curator said.
+
+    The rotation curator is gone: orientation is the ROI curator's viewing
+    rotation, and a proposal it got wrong is reinstated in that page's Review
+    mode (section_review.csv, merged over this by apply_review). Only the
+    source pass: a pERK pass takes its exclusions from 04i, which writes its
+    override file, so for that pass a missing file means 04i has not run.
+    """
+    if paths["uid_col"] != "scene_uid" or not os.path.exists(CANDIDATES_CSV):
+        return {}
+    with open(CANDIDATES_CSV, newline="", encoding="utf-8") as fh:
+        return {r["uid"]: ("auto", r.get("reason") or "proposed by 04f")
+                for r in csv.DictReader(fh) if r.get("proposed") == "1"}
+
+
+def load_overrides(paths=None, write=False):
+    """Rotation corrections and exclusions for one pass.
+
+    The file is the old rotation curator's export (04d, now removed) for the
+    source pass, and 04i's for a pERK pass. Rotations are stored as a
+    correction *on top of* the automatic angle, so a study curated in 04d
+    keeps every frame - and every ROI placed in it - exactly as it was.
+
+    **A file that exists is the complete record**, and 04f is not consulted:
+    re-running 04f on a curated study must not exclude a section somebody
+    already placed ROIs on. With no file, the 04f proposals are the
+    exclusions (see proposed_exclusions) and there are no rotations.
     """
     paths = paths or marker_paths(DEFAULT_MARKER)
     path, uid_col = paths["overrides"], paths["uid_col"]
     if not os.path.exists(path):
-        return {}, {}
+        excluded = proposed_exclusions(paths)
+        if excluded:
+            print(f"no {os.path.basename(path)}: {len(excluded)} 04f proposal(s) "
+                  f"applied as exclusions")
+        if write:
+            write_excluded(paths["excluded"], excluded)
+        return {}, excluded
     out, excluded = {}, {}
     for r in csv.DictReader(open(path, newline="", encoding="utf-8")):
         if r.get("excluded") == "1":
@@ -720,7 +752,8 @@ def main():
     ap.add_argument("--mask-artifacts", action="store_true",
                     help="blank 04g artifact pixels in the reformatted output")
     ap.add_argument("--apply-overrides", action="store_true",
-                    help="apply manual rotations from rotation_overrides.csv")
+                    help="apply the curation: rotation_overrides.csv when it exists, "
+                         "else 04f's proposals, then section_review.csv")
     ap.add_argument("--render-excluded", action="store_true",
                     help="also render excluded sections, so they can be LOOKED at "
                          "in the ROI curator's Review mode. They are never added "

@@ -157,6 +157,30 @@ chk("the scene pictures folder follows Set up",
 chk("...and defaults inside the study",
     W.output_folder("scene_renders", {"out_root": "/s"})[1], os.path.join("/s", "scene_renders"))
 
+print("--- older results are flagged for measuring again ---")
+_res = os.path.join(CFG["out_root"], "results")
+os.makedirs(_res, exist_ok=True)
+_nuc = os.path.join(_res, "roi_nuclei.csv")
+open(_nuc, "w").write("uid\n")
+chk("fresh nuclei need nothing", W.stale_results(study()), None)
+os.utime(_nuc, (W.ROI_FIX_AT - 3600, W.ROI_FIX_AT - 3600))
+chk("nuclei measured before the ROI fixes are flagged on Measure",
+    "Redo sections already done" in " ".join(W.notices("measure", study())), True)
+chk("...and on Results", bool(W.notices("results", study())), True)
+chk("...but not on Prepare", W.notices("prepare", study()), [])
+os.remove(_nuc)
+
+print("--- outputs and inputs the screens offer ---")
+chk("overviews open their folder", W.output_folder("overviews", {"out_root": "/s"}),
+    ("Open pictures", os.path.join("/s", "overviews")))
+chk("results open their folder", W.output_folder("build_results", {"out_root": "/s"})[0],
+    "Open results")
+chk("the sampling workbook can be chosen",
+    W.build_argv(S.BY_ID["join_sampling"], {"--xlsx": "C:/data/sampling.xlsx"})[-2:],
+    ["--xlsx", "C:/data/sampling.xlsx"])
+chk("...and left empty runs the stage's default",
+    W.clean_options("join_sampling", {"--xlsx": ""}), {})
+
 print("--- names and words for this study ---")
 s0 = study()
 chk("titles lose their script number", W.display_title(S.BY_ID["manifest"]), "Read slide headers")
@@ -171,23 +195,22 @@ plan, held = W.run_plan("prepare", s0)
 chk("a fresh study starts with the slide headers", plan[:1], ["manifest"])
 chk("the plan keeps the table's order",
     plan, [st.sid for st in S.STAGES if st.sid in plan])
-chk("nothing after the rotation curator runs before you export",
-    "reformat_pcna_final" in plan, False)
-chk("...it is held, and says what for", held.get("reformat_pcna_final"), "rotation_curator")
-chk("the curator page itself is built", "rotation_curator" in plan, True)
+chk("no rotation step holds Prepare: the final images are planned",
+    ("reformat_pcna_final" in plan, "reformat_pcna_final" in held), (True, False))
+chk("...and nothing waits on a curator that is gone",
+    "rotation_curator" in set(held.values()) | set(plan), False)
+chk("the ROI curator page itself is built",
+    "roi_curator" in plan or held.get("roi_curator") == "atlas_reframe", True)
 chk("stages for another atlas are left out",
     "atlas_wullimann_plates" in plan, s0.atlas_source == "wullimann1996")
 chk("stages run outside the app are left out", "fiji_export" in W.run_plan("instrument", s0)[0], False)
 chk("the superseded level curator is never planned",
     "level_curator" in plan + W.run_plan("all", s0)[0], False)
 os.makedirs(os.path.join(OUT, "reformatted"), exist_ok=True)
-chk("no export, not decided", W.decided("rotation_curator", s0), False)
-open(os.path.join(OUT, "reformatted", "rotation_overrides.csv"), "w").write("uid\n")
-chk("an export decides it", W.decided("rotation_curator", s0), True)
-plan2, held2 = W.run_plan("prepare", s0)
-chk("...and the stages behind it are planned",
-    ("reformat_pcna_final" in plan2, "reformat_pcna_final" in held2), (True, False))
-chk("the artifact masks run before the rotation curator",
+measure, mheld = W.run_plan("measure", s0)
+chk("Measure waits on the ROI curator's export",
+    mheld.get("roi_geometry"), "roi_curator")
+chk("the artifact masks run first, with the first images",
     [m for m in ("artifact_pcna", "artifact_perk") if m in W.PREPARE.parts[2][2]],
     ["artifact_pcna", "artifact_perk"])
 chk("repairs for older files are never part of Run all remaining",
@@ -265,6 +288,33 @@ if MW:
     chk("running the unblinding stage asks first, and Cancel stops it",
         (started, "Unblind the analysis?" in asked), (False, True))
     chk("nothing is left queued", (w._queue, w._thread), ([], None))
+    open(_nuc, "w").write("uid\n")
+    os.utime(_nuc, (W.ROI_FIX_AT - 3600, W.ROI_FIX_AT - 3600))
+    w.refresh()
+    chk("Measure shows the redo notice for old nuclei",
+        (w.lists["measure"].notice.isVisibleTo(w.lists["measure"]),
+         "Place the ROIs" in w.lists["measure"].notice.text()), (True, True))
+    os.remove(_nuc)
+    w.refresh()
+    chk("...and drops it once they are measured again",
+        w.lists["measure"].notice.isVisibleTo(w.lists["measure"]), False)
+    import config_dialog as CD
+    _cfg = dict(CFG, acquisition={"layout": "paired", "markers": ["AF568", "AF488"]})
+    _p = os.path.join(TMP, "paired.json")
+    json.dump(_cfg, open(_p, "w"))
+    form = CD.SettingsForm(REPO, path=_p, keys=["acquisition.layout"])
+    chk("Set up offers where each marker's nuclei are found",
+        list(form.seg_row.combos), ["AF568", "AF488"])
+    chk("...on the counterstain unless chosen", form._segmentation_value(), None)
+    form.seg_row.combos["AF488"].setCurrentText(CD.OWN_ROUTE)
+    chk("PCNA on its own channel writes the block 05c reads",
+        form._segmentation_value(), {"AF488": CD.OWN_ENTRY})
+    _out = json.loads(json.dumps(_cfg))
+    LC._set(_out, ["acquisition", "marker_segmentation"], form._segmentation_value())
+    chk("...which validates", [e for e in LC.validate(_out, _p)[0] if "segment" in e], [])
+    form.widgets["acquisition.layout"].setCurrentText("multiplex")
+    chk("a multiplex study hides it and writes nothing",
+        (form._segmentation_value(), form.seg_row.isVisibleTo(form)), (None, False))
     chk("the scene pictures row has an Open pictures button",
         (w.lists["prepare"].rows["scene_renders"].open_btn.text(),
          w.lists["prepare"].rows["scene_renders"].open_btn.isVisibleTo(w.lists["prepare"])),

@@ -12,7 +12,7 @@
 # --no-seed matters for the ROI curator. The page normally embeds whatever
 # curation is in out_root/curation; a suite reading that would start with
 # hundreds of sections it knows nothing about, and its counts would change every
-# time someone curated. --no-proposals does the same for the rotation curator.
+# time someone curated.
 # Tests must not depend on the operator's data.
 #
 # What these cover: state, ordering and what reaches the exports. What they do
@@ -100,7 +100,6 @@ if [ "$SKIP_PAGES" = "0" ]; then
   # first declared marker, which for this study IS AF568. Checked, not
   # assumed - the page built with and without the flag is byte-identical.
   build_page 04l_roi_curator.py curator --worklist --rgb --no-seed
-  build_page 04d_rotation_curator.py rotation_curator --no-proposals
   build_page 04k_level_curator.py level_curator
 fi
 

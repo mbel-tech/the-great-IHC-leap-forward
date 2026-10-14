@@ -312,7 +312,7 @@ screens, each with its progress read from disk:
 | **Project** | Where the study stands, and a **Next up** card naming the one thing to do now |
 | **Set up** | Slides, then the study's settings as cards: folders, file names, microscope and channels, atlas, nucleus detection |
 | **Prepare** | The automatic stages, from slide headers to the images the curators show |
-| **Curate** | The curator pages as tabs: atlas plates, rotation and exclusion, ROIs |
+| **Curate** | The curator pages as tabs: atlas plates and ROIs |
 | **Measure** | ROIs back onto the slides, nucleus detection, the per-ROI dataset. Still blind |
 | **Results** | Unblinding (it asks first), the spreadsheets and figures |
 

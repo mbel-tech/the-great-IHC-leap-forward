@@ -87,9 +87,9 @@ PREPARE = Screen(
     "<p><b>Goes in:</b> the slide files and the settings from Set up.</p>"
     "<p><b>Comes out:</b> one standard image per section, the list of sections "
     "that can be measured, and the pages the curators show you.</p>"
-    "<p>Prepare runs in two halves. The first stops at the rotation and "
-    "exclusion curator; once you have exported your decisions there, the "
-    "second half carries them through.</p>"
+    "<p>Prepare runs straight through to the ROI curator. You turn sections "
+    "upright there, and bring back any section the program set aside in its "
+    "Review mode.</p>"
     "<p>Every stage can be re-run on its own. Stages skip work already done, so "
     "re-running is cheap.</p>",
     parts=[
@@ -103,14 +103,13 @@ PREPARE = Screen(
          "stages for the atlas chosen in Set up are used.",
          ["atlas_extract", "atlas_remerge", "atlas_enforce", "atlas_rebuild",
           "atlas_wullimann_plates", "atlas_wullimann_polygons"]),
-        ("Before rotation curation",
+        ("Make the section images",
          "Masks bubbles and debris in both scans, makes a first standard image of "
-         "every section, and proposes which sections to drop and how to rotate the "
-         "rest.",
-         ["artifact_pcna", "artifact_perk", "reformat_pcna", "exclusion", "symmetry"]),
-        ("After rotation curation",
-         "Carries your rotation and exclusion decisions into the final images of "
-         "both scans and sets aside saturated sections.",
+         "every section, and sets aside the ones that cannot be measured.",
+         ["artifact_pcna", "artifact_perk", "reformat_pcna", "exclusion"]),
+        ("Final images",
+         "Builds the final images of both scans with the exclusions applied and "
+         "sets aside saturated sections.",
          ["censor_pcna", "reformat_pcna_final", "propagate_perk", "censor_perk",
           "reformat_perk_final", "sections_dataset"]),
         ("Get ready for the ROI curator",
@@ -129,7 +128,7 @@ CURATE = Screen(
     "<p>The ROI curator's own <b>Review</b> button shows every scanned section and "
     "what happened to it, including the ones the pipeline excluded.</p>",
     parts=[
-        ("Decisions", "", ["atlas_reframe", "rotation_curator", "roi_curator",
+        ("Decisions", "", ["atlas_reframe", "roi_curator",
                            "import_curation"]),
     ])
 
@@ -281,22 +280,19 @@ PLAIN = {
                                 "shapes and guesses their names. A person reviews the names.",
     "reformat_pcna": "Makes a first standard image of every {m1} section: cleaned, turned "
                      "upright, centred and cropped.",
-    "exclusion": "Proposes sections that cannot be measured, such as torn or empty ones. "
-                 "Only proposals; you decide.",
-    "symmetry": "Proposes a small rotation for each section so its midline is vertical.",
-    "rotation_curator": "You check each section's rotation and accept or overrule the "
-                        "proposed exclusions.",
+    "exclusion": "Finds sections that cannot be measured, such as torn or empty ones, "
+                 "and sets them aside. You can bring any back in the ROI curator's Review.",
     "artifact_pcna": "Finds bubbles, clumps and fibres inside the {m1} sections and masks them "
                      "out. Works on the overviews, so it runs before you curate.",
     "censor_pcna": "Sets aside {m1} sections with too many saturated pixels and flags the "
                    "rest.",
-    "reformat_pcna_final": "The final {m1} images: your decisions applied, artifacts masked, "
+    "reformat_pcna_final": "The final {m1} images: exclusions applied, artifacts masked, "
                            "saturation flagged.",
-    "propagate_perk": "Copies your {m1} decisions onto the matching {m0} scans.",
+    "propagate_perk": "Copies the {m1} exclusions and framing onto the matching {m0} scans.",
     "artifact_perk": "Finds and masks artifacts in the {m0} sections.",
     "censor_perk": "Sets aside {m0} sections with too many saturated pixels and writes the "
                    "list of measurable sections.",
-    "reformat_perk_final": "The final {m0} images with your decisions carried over, ready "
+    "reformat_perk_final": "The final {m0} images with the exclusions carried over, ready "
                            "for measuring. Excluded sections are drawn too, for Review.",
     "sections_dataset": "A table of every {m0} section and what happened to it.",
     "worklist": "Orders the ROI curation queue so that stopping part way still leaves every "
@@ -339,16 +335,12 @@ CURATOR_HELP = {
                      "figures with several sections usually need a look.</p>"
                      "<p><b>Export</b> writes <code>atlas/plate_boxes.csv</code>. Then press "
                      "<b>Continue Prepare</b> to render the final plates.</p>",
-    "rotation_curator": "<p>Every section is shown with the program's proposed rotation "
-                        "already applied. Drag any that are not upright, and accept or "
-                        "overrule each proposed exclusion.</p>"
-                        "<p><b>Export</b> writes <code>reformatted/rotation_overrides.csv</code>. "
-                        "Then press <b>Continue Prepare</b> to carry your decisions into "
-                        "the final images.</p>",
     "roi_curator": "<p>For each section: choose the matching atlas plate, place the "
                    "numbered landmarks, draw each region as an outline, and place "
-                   "background discs. The queue is ordered so stopping part way still "
-                   "covers every animal.</p>"
+                   "background discs. Press <b>Rotate</b> and drag to turn a section "
+                   "upright; that only changes the view, never where a region lands. "
+                   "The queue is ordered so stopping part way still covers every "
+                   "animal.</p>"
                    "<p><b>Review</b> in the page shows every scanned section and every "
                    "decision made about it. <b>Export</b> writes the three CSV files "
                    "Measure reads.</p>",
@@ -359,7 +351,6 @@ CURATOR_HELP = {
 #: export, which lands beside the page (or, stamped, under the export folder).
 DECISION_FILES = {
     "atlas_reframe": ["atlas/plate_boxes.csv"],
-    "rotation_curator": ["reformatted/rotation_overrides.csv"],
     "roi_curator": ["reformatted/roi_regions*.csv", "reformatted/*/roi_regions*.csv",
                     "{export}/roi_regions*.csv", "{export}/*/roi_regions*.csv"],
 }
@@ -523,15 +514,6 @@ OPTIONS = {
             "How many proposed exclusions are shown in the summary picture.",
             default=32, cli_default=32, minimum=0),
     ],
-    "symmetry": [_limit()],
-    "rotation_curator": [
-        Opt("--no-proposals", "bool", "Start without proposals",
-            "Builds the page with no rotation or exclusion pre-marked, so every "
-            "section is judged from scratch."),
-        Opt("--thumb", "int", "Picture size (px)", "Bigger pictures give finer control "
-            "when dragging a rotation.", default=170, cli_default=170, minimum=80,
-            maximum=600),
-    ],
     "artifact_pcna": [_limit()],
     "artifact_perk": [_limit()],
     "censor_pcna": [
@@ -592,6 +574,12 @@ OPTIONS = {
             "found but outside the region."),
         _force("sections"),
         _limit(),
+    ],
+    "join_sampling": [
+        Opt("--xlsx", "file", "Sampling spreadsheet",
+            "The experiment's sampling workbook: one row per fish with its tanks and "
+            "treatment. Empty uses 'large scale exp sampling data.xlsx' in the slide "
+            "folder."),
     ],
     "recensor": [Opt("--dry-run", "bool", "Report only", "Says what would change and "
                      "writes nothing.")],
@@ -919,7 +907,7 @@ def progress(screen_sid, study):
 
 def curators(study):
     """The Curate tabs this study uses, in order."""
-    return [sid for sid in ("atlas_reframe", "rotation_curator", "roi_curator")
+    return [sid for sid in ("atlas_reframe", "roi_curator")
             if applies(S.BY_ID[sid], study)[0]]
 
 
@@ -939,6 +927,9 @@ SHORTFALL = {
 #: that folder is. The scene pictures may sit outside the study (Set up says).
 FOLDERS = {
     "scene_renders": ("Open pictures", lambda cfg: _scene_dir(cfg)),
+    "overviews": ("Open pictures", lambda cfg: os.path.join(cfg["out_root"], "overviews")),
+    "contactsheets": ("Open sheets", lambda cfg: os.path.join(cfg["out_root"], "contactsheets")),
+    "build_results": ("Open results", lambda cfg: os.path.join(cfg["out_root"], "results")),
 }
 
 
@@ -966,6 +957,45 @@ def shortfall(sid, output):
         return None
     n = int(m.group(1))
     return "%d %s%s %s" % (n, rule[1], "" if n == 1 else "s", rule[2])
+
+
+#: When the ROI fixes reached main (PRs #21 and #24, 2026-10-14 12:37 UTC): 05c
+#: decides `censored` on the native pixels, and 05a/05c move curated shapes half
+#: a grid pixel onto pixel centres. Nuclei measured before then keep the old
+#: flag and the old boundary until ROI placement and detection run again.
+ROI_FIX_AT = 1791981478   # 2026-10-14T12:37:58Z
+
+
+def stale_results(study):
+    """Why this study's nuclei need measuring again, or None.
+
+    Read off the file's age: nothing inside roi_nuclei.csv says which 05c wrote
+    it. A file copied since then would hide an old run, so this is a reminder,
+    not a guarantee.
+    """
+    if not study.out_root:
+        return None
+    path = os.path.join(study.out_root, "results", "roi_nuclei.csv")
+    try:
+        when = os.path.getmtime(path)
+    except OSError:
+        return None
+    if when >= ROI_FIX_AT:
+        return None
+    return ("These nuclei were measured before the 14 Oct fixes to ROI placement (half a "
+            "pixel) and to the saturated-nucleus flag (now read from the scan's own "
+            "pixels). Run Place the ROIs on the slide again, then Detect and measure "
+            "nuclei with Options > Redo sections already done, then rebuild Results.")
+
+
+def notices(screen_sid, study):
+    """Warnings a screen shows above its stages."""
+    out = []
+    if screen_sid in ("measure", "results"):
+        stale = stale_results(study)
+        if stale:
+            out.append(stale)
+    return out
 
 
 def next_up(study, setup_ok=True, setup_missing=()):

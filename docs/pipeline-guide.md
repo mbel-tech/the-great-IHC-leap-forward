@@ -634,12 +634,12 @@ patch inside an otherwise good section can be unusable, or an individual pixel's
 Third, an operator places the **anatomical regions**.
 
 The order of the steps reflects one more thing. Every curation decision is made on the **PCNA pass**,
-and then carried across onto the pERK pass. So the part runs: mask artifacts on both passes, prepare PCNA, curate
-PCNA, censor and reformat PCNA once with everything folded in, propagate to pERK, censor and reformat
+and then carried across onto the pERK pass. So the part runs: mask artifacts on both passes, prepare PCNA, propose
+exclusions on PCNA, censor and reformat PCNA once with everything folded in, propagate to pERK, censor and reformat
 pERK once, then build the tables and pages the region curator reads. That is why the two markers are
 not treated symmetrically, and why the reformatting step appears three times rather than once.
 
-Three of the pipeline's four operator steps are in this part.
+Two of the pipeline's three operator steps are in this part.
 
 ## 04g  Mask artifacts — PCNA {#stage-artifact_pcna}
 
@@ -749,7 +749,14 @@ Judging them all by eye is slow and, worse, inconsistent — the twelfth animal 
 tired standard than the first.
 
 So this step proposes, and a person disposes. **It proposes only the unambiguous cases**, which
-turns the manual pass from a search into an adjudication.
+turns the manual pass from a search into an adjudication. The proposals are applied by the final
+reformat, and any the step got wrong is reinstated in the ROI curator's Review mode.
+
+There is no separate rotation step before the ROI curator. Each section keeps the angle the reformat
+gave it, and the ROI curator's **Rotate** tool turns it on screen when matching it to a plate. That
+rotation is for viewing only: every coordinate stays in the reformatted frame, so it cannot move an
+ROI. A study curated before this change keeps its `rotation_overrides.csv`, and the final reformat
+still applies it exactly as before, so its frames and ROIs stay where they were.
 
 The conservatism is deliberate and asymmetric. A wrongly *included* section adds a little noise to a
 group mean and stays visible in the data, where anyone can find it. A wrongly *excluded* section
@@ -771,45 +778,13 @@ times that and up. Every proposal carries the numbers that produced it, and ever
 > The threshold is in square millimetres because the pixel size is fixed and known, which is what
 > makes it a statement about tissue rather than about image size.
 
-## 04h  Propose symmetry-axis rotations {#stage-symmetry}
-
-*`scripts/04h_symmetry_axis.py` → `reformatted/symmetry_proposals.csv`*
-
-Reformatting rotates each section by the long axis of its tissue, which gets it approximately
-upright but not reliably so — a transverse brain section is not much longer than it is wide, so the
-long axis is a weak cue. This step proposes a small extra rotation that puts each section's midline
-vertical, using the brain's own left-right symmetry, which is a far stronger signal.
-
-The proposals are pre-applied in the curator that follows, so the operator's manual pass is spent
-correcting the failures rather than rotating everything from scratch.
-
-## 04d  Rotation and exclusion curator {#stage-rotation_curator}
-
-*`scripts/04d_rotation_curator.py` → `reformatted/rotation_curator.html`* · **an operator decides here**
-
-The first of the pipeline's four operator steps, and it settles two questions per section: is this
-section upright, and is it measurable at all.
-
-It runs as a page in an ordinary web browser. Each section appears already rotated by the automatic
-proposals of 04a and 04h, with an atlas plate underlaid for reference, and the operator drags it to
-correct anything the proposals got wrong. Alongside that, each exclusion proposal from 04f is shown
-with the numbers that produced it, to be accepted or overruled.
-
-The visual vocabulary is worth knowing because the ROI curator later reuses it: **a dashed amber
-border is a proposal the program made; a solid red one is a decision a person made.** The two are
-never confused, and the distinction survives into the exported files.
-
-Exclusions decided here drop a section out of everything downstream, which is why the step exports
-its decisions to a file rather than editing anything in place: the decisions are data, they are
-reviewable, and they can be re-applied or revised without re-deriving them.
-
 ## 04j  Censor clipped pixels — PCNA {#stage-censor_pcna}
 
 *`scripts/04j_censor_clipped.py --marker AF488` → `reformatted/pcna_analysis_set.csv`*
 
-The same censoring described under the pERK entry below, run for PCNA, straight after the rotation
-curator. It checks every scanned PCNA section the curation has not excluded, which it reads from the
-curator's export and the Review mode's decisions through the reformatting script's own loaders, so
+The same censoring described under the pERK entry below, run for PCNA, straight after the exclusion
+proposals. It checks every scanned PCNA section the curation has not excluded, which it reads from the
+exclusions and the Review mode's decisions through the reformatting script's own loaders, so
 it needs no reformat in front of it.
 
 This step is worth a note, because it corrects an earlier assumption. Censoring used to be run for
@@ -824,7 +799,7 @@ the worst. A clipped PCNA pixel is lost for exactly the same reasons a clipped p
 
 *`scripts/04a_reformat.py --apply-overrides --mask-artifacts --censor` → `reformatted/sections/`*
 
-The PCNA analysis frame, and the only reformat after curation: the operator's rotations applied,
+The PCNA analysis frame, and the only reformat after the exclusion proposals: the curation applied,
 exclusions recorded as flags in `reformatted/excluded_sections.csv` rather than by deleting anything,
 artifact pixels blanked, and the clipping masks carried into the 256-pixel frame. An excluded section
 can be reinstated later without re-reading a single scan. Re-run whenever a mask or a curation

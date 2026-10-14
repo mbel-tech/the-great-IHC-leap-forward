@@ -128,6 +128,11 @@ class StageListScreen(QWidget):
         self.plan_note.setStyleSheet(QUIET)
         bar.addWidget(self.plan_note, 1)
         lay.addLayout(bar)
+        self.notice = QLabel("")
+        self.notice.setWordWrap(True)
+        self.notice.setStyleSheet(f"color:{COLOUR['waiting']};padding:4px 0")
+        self.notice.setVisible(False)
+        lay.addWidget(self.notice)
         self._plan = []
         # All stages spans the whole pipeline, unblinding included; running all of
         # it from one button is not something to offer.
@@ -187,6 +192,9 @@ class StageListScreen(QWidget):
             names = ", ".join(W.display_title(S.BY_ID[w], study) for w in waits)
             bits.append(f"{len(held)} waiting for: {names}")
         self.plan_note.setText(" · ".join(bits))
+        shown = W.notices(self.screen.sid, study)
+        self.notice.setText("\n\n".join(shown))
+        self.notice.setVisible(bool(shown))
 
 
 class CurateScreen(QWidget):
@@ -213,7 +221,7 @@ class CurateScreen(QWidget):
         self.row_holder = QVBoxLayout()
         lay.addLayout(self.row_holder)
         self.rows = {}
-        for sid in ("atlas_reframe", "rotation_curator", "roi_curator"):
+        for sid in ("atlas_reframe", "roi_curator"):
             row = StageRow(S.BY_ID[sid], W.options_for(sid))
             row.open_btn.setVisible(False)
             row.run_clicked.connect(lambda s: self.run_requested.emit([s]))
@@ -279,7 +287,7 @@ class CurateScreen(QWidget):
                     "yet.</span> Work in the page below, then press its Export button.")
         else:
             self.decision.setText(W.plain(S.BY_ID[sid], study))
-        self.continue_btn.setVisible(sid in ("atlas_reframe", "rotation_curator"))
+        self.continue_btn.setVisible(sid == "atlas_reframe")
         self.continue_btn.setEnabled(bool(latest))
         self.import_btn.setVisible(sid == "roi_curator")
         self.measure_btn.setVisible(sid == "roi_curator")

@@ -1,16 +1,17 @@
 """Stage 4f - propose sections that cannot be measured.
 
-The curator lets you exclude sections by hand. Doing that by eye across 1,381
-sections is slow and, worse, inconsistent: the twelfth animal gets judged by a
-tireder standard than the first. This proposes the unambiguous cases so the
-manual pass becomes *adjudication* rather than *search*.
+Excluding sections by eye across 1,381 of them is slow and, worse,
+inconsistent: the twelfth animal gets judged by a tireder standard than the
+first. This proposes the unambiguous cases, `04a_reformat.py --apply-overrides`
+applies them, and the ROI curator's Review mode reinstates any it got wrong, so
+the manual pass is *adjudication* rather than *search*.
 
 **The proposal is deliberately conservative, and the asymmetry is the reason.**
 A wrongly *included* section adds a little noise to a group mean and stays
 visible in the data. A wrongly *excluded* section vanishes silently and takes
 its evidence with it. So this flags only sections with no tissue worth the name,
-carries the numbers that produced each call, and every one is reversible with a
-right-click. Torn-but-substantial sections are *not* proposed - that is a
+carries the numbers that produced each call, and every one is reversible in
+Review mode. Torn-but-substantial sections are *not* proposed - that is a
 judgement about how much damage is too much, and it belongs to the eye.
 
 Two failure modes, kept separate
@@ -111,7 +112,7 @@ SURVEY_CSV = os.path.join(OUT_ROOT, "qc", "exclusion", "survey.csv")
 
 def output_path(survey):
     """--survey measures and proposes nothing, so it must not overwrite the
-    proposals 04d reads. It gets its own file under qc/."""
+    proposals 04a applies. It gets its own file under qc/."""
     return SURVEY_CSV if survey else CANDIDATES_CSV
 
 

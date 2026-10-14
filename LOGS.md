@@ -9,6 +9,31 @@ where things landed, not which plausible-looking route was tried and abandoned, 
 
 ---
 
+## 2026-10-14 - One rotation step: the rotation curator is removed
+
+**Changed:** removed `scripts/04d_rotation_curator.py`, `scripts/04h_symmetry_axis.py` and their
+stages. `scripts/04a_reformat.py` (`proposed_exclusions`, `load_overrides`) applies 04f's proposals
+as `auto` exclusions when the source pass has no `rotation_overrides.csv`. `app/stages.py`,
+`app/workflow.py`, `app/screens.py`: Prepare runs straight through to the ROI curator. New suite:
+`tests/test_proposed_exclusions.py`.
+
+**Why.** The operator asked for one rotation step, the one inside the ROI curator. Orientation in
+the 256 px frame never reaches a measurement: 05a maps every ROI back to the slide through the
+frame's own affine, so a frame turned a few degrees differently measures the same pixels. The ROI
+curator's Rotate is a viewing aid that leaves every coordinate in the reformatted frame, so it
+cannot move an ROI either.
+
+**What it keeps.** A study curated in 04d keeps its `rotation_overrides.csv`, read exactly as
+before, and 04f is not consulted for it, so no existing frame, exclusion or ROI moves. The 04f
+proposals were already applied by default in 04d; overruling one now happens in the ROI curator's
+Review mode (`section_review.csv`), which 04a already merged.
+
+**What it costs.** A new study gets no symmetry-axis pre-rotation and no flip, only 04a's
+principal-axis angle. A section mounted face down now shows mirrored in the ROI curator, which
+has no flip.
+
+---
+
 ## 2026-10-14 - PCNA has no usable DAPI: segment the marker, report positive density
 
 **Changed:** `scripts/ls_channels.py` (`paired_overrides`, validation), `scripts/ls_config.py`

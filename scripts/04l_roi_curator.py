@@ -1273,7 +1273,8 @@ kbd{display:inline-block;padding:1px 5px;border:1px solid var(--line);border-rad
 </div>
 <div id="panes">
   <div class="pane"><h2 id="secTitle">SECTION - click to place a point</h2>
-    <canvas id="cSec" tabindex="0" onmousedown="secDown(event)"
+    <canvas id="cSec" tabindex="0" onmousedown="secPanStart(event); secDown(event)"
+            onwheel="secWheel(event)" oncontextmenu="return false"
             ondblclick="if(draft) commitPoly()"></canvas>
     <button class="nav l" id="secPrev" tabindex="-1" title="Previous section (up arrow)"
             onclick="stepSection(-1)">&lsaquo;</button>
@@ -1922,12 +1923,90 @@ function markerOnly(img){
   return c;
 }
 
+// ---- zoom and pan on the section -----------------------------------------
+//
+// The section is drawn from a composite that can be rendered at the scan's own
+// resolution (04o, curation_render.um_per_px), which is far more pixels than a
+// pane shows. So the pane is a VIEW: wheel zooms about the cursor, the middle or
+// right button drags to pan, + / - zoom about the centre and 0 fits the whole
+// section again. The view is a transform applied on top of the canvas
+// coordinates every point is already stored and mapped in, so nothing that is
+// saved or exported depends on it - the same rule the viewing rotation keeps.
+//
+// The canvas itself is sized to the pane in device pixels rather than to the
+// image: a canvas the size of a native composite would be hundreds of
+// megapixels and every redraw would repaint all of it.
+const SEC_ZMAX = 64;
+let secView = {z: 1, cx: 0.5, cy: 0.5, uid: null};   // centre as a fraction of D
+let SV = {D: 1, P: 1, k: 1, ox: 0, oy: 0};          // the view as last drawn
+let panDrag = null;
+const viewK = c => (c && c === el("cSec")) ? SV.k : 1;
+function secViewFor(c, D){
+  if(secView.uid !== active) secView = {z: 1, cx: 0.5, cy: 0.5, uid: active};
+  const b = c.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  const pane = Math.ceil(Math.max(b.width || 0, b.height || 0) * dpr);
+  // No bigger than the pane (or than the image at this zoom), never zero. A
+  // pane with no size yet - before layout - falls back to the old 1:1 canvas.
+  const P = Math.max(1, Math.round(pane ? Math.min(pane, D * secView.z) : D));
+  const z = secView.z, half = 0.5 / z;
+  secView.cx = Math.min(1 - half, Math.max(half, secView.cx));
+  secView.cy = Math.min(1 - half, Math.max(half, secView.cy));
+  const k = P * z / D;
+  SV = {D, P, k, ox: (secView.cx - half) * D, oy: (secView.cy - half) * D};
+  return SV;
+}
+// Zoom by `f`, keeping the canvas point (X, Y) - default the view's centre -
+// where it is on screen.
+function secZoom(f, X, Y){
+  if(!active || !secImg.naturalWidth) return;
+  const z0 = secView.z, z1 = Math.min(SEC_ZMAX, Math.max(1, z0 * f));
+  if(z1 === z0) return;
+  const D = SV.D;
+  if(X === undefined){ X = secView.cx * D; Y = secView.cy * D; }
+  // The point stays put: its offset from the view's centre shrinks by z0/z1.
+  secView.cx = (X + (secView.cx * D - X) * z0 / z1) / D;
+  secView.cy = (Y + (secView.cy * D - Y) * z0 / z1) / D;
+  secView.z = z1;
+  drawSec(); status();
+}
+function secFit(){ secView = {z: 1, cx: 0.5, cy: 0.5, uid: active}; drawSec(); status(); }
+function secZoomLabel(){ return secView.z > 1.001 ? " · zoom " + secView.z.toFixed(1) + "x (0 fits)" : ""; }
+function secWheel(e){
+  if(!active || !secImg.naturalWidth) return;
+  e.preventDefault();
+  const [X, Y] = canvasXY(el("cSec"), e);
+  secZoom(Math.pow(1.0015, -e.deltaY), X, Y);
+}
+function secPanStart(e){
+  if(!active || (e.button !== 1 && e.button !== 2) || secView.z <= 1) return;
+  e.preventDefault();
+  panDrag = {x: e.clientX, y: e.clientY, cx: secView.cx, cy: secView.cy};
+}
+function secPanMove(e){
+  if(!panDrag) return false;
+  // Screen pixels to canvas units, through the same scale the annotations use.
+  const u = uiScale(el("cSec"));
+  secView.cx = panDrag.cx - (e.clientX - panDrag.x) * u / SV.D;
+  secView.cy = panDrag.cy - (e.clientY - panDrag.y) * u / SV.D;
+  drawSec();
+  return true;
+}
+
 function drawSec(){
   const c=el("cSec"), x=c.getContext("2d"); if(!secImg.naturalWidth) return;
   syncFrame(active);          // pairs drawn in the frame of the image on screen
   const g=secGeom();
-  c.width=g.D; c.height=g.D;
-  x.clearRect(0,0,g.D,g.D);
+  // The view: the canvas is the pane's size in device pixels, and the zoom is a
+  // transform on top, so everything below still draws in the same canvas
+  // coordinates it always has (the diagonal frame, 0..D). See secZoom.
+  const V=secViewFor(c, g.D);
+  c.width=V.P; c.height=V.P;
+  x.setTransform(1,0,0,1,0,0);
+  x.clearRect(0,0,V.P,V.P);
+  x.setTransform(V.k,0,0,V.k,-V.ox*V.k,-V.oy*V.k);
+  // Past two screen pixels per image pixel, show the pixels as they are rather
+  // than smoothed: zooming in is for seeing what the scan actually holds.
+  x.imageSmoothingEnabled = 1 / uiScale(c) < 2;
   x.save(); x.translate(g.D/2,g.D/2); x.rotate(g.a);
   // Hiding DAPI means drawing the blue-stripped copy instead - see markerOnly().
   x.drawImage((hasRgb(active) && !dapiOn) ? markerOnly() : secImg, -g.w/2, -g.h/2);
@@ -2218,7 +2297,7 @@ function drawPl(){
 // Every annotation is therefore given in screen pixels and divided back through.
 function uiScale(c){
   const b=c.getBoundingClientRect();
-  const k=Math.min(b.width/c.width, b.height/c.height);
+  const k=Math.min(b.width/c.width, b.height/c.height) * viewK(c);
   return k>0 ? 1/k : 1;
 }
 // A landmark is its ring plus its NUMBER, and the number is the half that says
@@ -2243,7 +2322,8 @@ const NUM_PX_SEED = 30;                 // plate seeds, of which there can be 30
 const NUM_TARGET = 55;
 function numScale(P, c, u){
   if(!P || !P.nn) return 1;
-  const nnScreen = P.nn * Math.hypot(c.width, c.height) / u;
+  const nnScreen = P.nn * (c === el("cSec") ? Math.SQRT2 * SV.D
+                                             : Math.hypot(c.width, c.height)) / u;
   return Math.max(0.5, Math.min(1, nnScreen / NUM_TARGET));
 }
 // A landmark now has a RADIUS as well as a position - see secDown(). It is drawn
@@ -2270,7 +2350,11 @@ function mark(x,X,Y,n,col,u,rad,ns){
 const canvasXY = (c,e) => {
   const r=c.getBoundingClientRect(), k=Math.min(r.width/c.width, r.height/c.height);
   const ox=r.left+(r.width-c.width*k)/2, oy=r.top+(r.height-c.height*k)/2;
-  return [(e.clientX-ox)/k, (e.clientY-oy)/k];
+  const px=(e.clientX-ox)/k, py=(e.clientY-oy)/k;
+  // The section canvas is zoomed: undo the view to get back to the canvas
+  // coordinates every stored point is mapped through. Identity everywhere else.
+  if(c !== el("cSec")) return [px, py];
+  return [px/SV.k + SV.ox, py/SV.k + SV.oy];
 };
 
 // Rotating and placing a landmark are separated by the MODE, not by watching how
@@ -2343,6 +2427,7 @@ function secDown(e){
 // question, so it is remembered here rather than guessed at.
 let lastSec = null;
 addEventListener("mousemove", e=>{
+  if(secPanMove(e)) return;
   if(active && secImg.naturalWidth){
     try { lastSec = can2img(...canvasXY(el("cSec"), e), secGeom()); } catch(err){}
   }
@@ -2379,6 +2464,7 @@ addEventListener("mousemove", e=>{
 // turned. It is stored per section like every other decision, so returning to a
 // section shows it at the angle it was left at.
 addEventListener("mouseup", ()=>{
+  if(panDrag){ panDrag = null; return; }
   if(vDrag){
     vDrag = null;
     save(); drawSec(); status(); paintCell(active);
@@ -2818,7 +2904,9 @@ function toggleHulls(){ hullsOn = !hullsOn; drawPl(); status(); }
 // How near the first vertex counts as closing the ring, and how near a corner
 // counts as grabbing it. In image pixels, so it is the same distance on screen
 // whatever frame the section is rendered at.
-const closeR = () => 6 * imgK();
+// 6 canonical pixels, or 16 screen pixels once zoomed in far enough that 6
+// canonical pixels would be a target the size of a region.
+const closeR = () => Math.min(6 * imgK(), 16 * uiScale(el("cSec")));
 
 function addVertex(ix, iy){
   if(!draft) draft = [];
@@ -3201,6 +3289,9 @@ function status(){
       + `<br><span style="color:#9aa0a8">click tissue you judge to carry no real`
       + ` signal &middot; 2-3 per section &middot; b to leave</span>`;
   }
+  // Zoomed in, the title says so, and how to get back: a section that looks
+  // cropped with nothing saying why reads as a broken image.
+  el("secTitle").textContent += secZoomLabel();
   // The guided hint says the one thing the picture cannot: WHICH ROI is being
   // asked for, and how far through the plate you are.
   el("hullBtn").textContent = hullsOn ? "Hulls \u2713" : "Hulls";
@@ -3625,8 +3716,9 @@ function showEmpty(){
   el("plName").textContent = "-";
   el("plLab").innerHTML = "";
   for(const id of ["cSec", "cPl"]){
-    const c = el(id);
-    c.getContext("2d").clearRect(0, 0, c.width, c.height);
+    const c = el(id), x = c.getContext("2d");
+    x.setTransform(1, 0, 0, 1, 0, 0);       // the section's view transform, if any
+    x.clearRect(0, 0, c.width, c.height);
   }
   navState();
 }
@@ -3708,6 +3800,9 @@ addEventListener("keydown", e=>{
   // one a trap for the other.
   else if(e.key==="ArrowDown"){ stepSection(1); e.preventDefault(); }
   else if(e.key==="ArrowUp"){ stepSection(-1); e.preventDefault(); }
+  else if(e.key==="+" || e.key==="="){ secZoom(1.5); e.preventDefault(); }
+  else if(e.key==="-" || e.key==="_"){ secZoom(1/1.5); e.preventDefault(); }
+  else if(e.key==="0"){ secFit(); e.preventDefault(); }
   else if(e.key==="a" || e.key==="A"){ markAssigned(); }
   else if(e.key==="f" || e.key==="F"){ toggleFav(); }
   else if(e.key==="x" || e.key==="X"){ toggleExcl(); }

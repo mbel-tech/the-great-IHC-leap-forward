@@ -20,7 +20,20 @@ cost is exactly the one named above and is not avoidable for such a marker:
 the count and the positivity cut both come off one channel. Which route each
 marker took is recorded per row in `segmented_on` / `backend` /
 `nucleus_shaped`, so a reader can tell them apart without the config that made
-them. No study declares `segment: own` today.
+them.
+
+**The one exception that is declared today: PCNA on the LS slides.** The AF488
+scans carry a DAPI plane that is noise at native resolution, so there is no
+counterstain to segment. `acquisition.marker_segmentation` declares that marker
+`segment: own` with StarDist, which is defensible only because PCNA is a
+nuclear antigen: its objects ARE nuclei, which is what StarDist is trained on.
+The costs of the argument above stand and are not hidden: there is no count of
+all cells, so 06a withholds the fraction positive and the total cell density
+for such a marker and reports positive density instead. And because the marker
+is now the thing being segmented, each crop is NOT stretched to its own
+percentiles (which would make a background disc's noise look like signal and a
+bright zone's dim nuclei vanish): every crop of a section takes one intensity
+range, recorded in `results/roi_normalisation.csv`.
 
 **StarDist, not threshold-and-watershed.** Not a general preference: watershed
 under-segments where nuclei touch, and Vv, Vd and POA are periventricular. The
@@ -114,6 +127,17 @@ BACKGROUND_COLUMNS = ["scene_uid", "roi_index", "marker", "segmented_on",
                       "backend", "n_objects", "cut", "above_cut",
                       "below_background"]
 
+#: The intensity range a marker-segmented section's crops were scaled by, one
+#: row per (section, marker). Provenance for numbers that depend on it, kept in
+#: a file of its own rather than as two more columns of roi_nuclei.csv: that
+#: file is ~900,000 rows shared with 06g/06h, and widening its header is a
+#: migration with no benefit over a table whose rows are per section. Written
+#: only when a marker needs one, for the reason BACKGROUND_CSV is, and dropped
+#: with the measurements it describes.
+NORM_CSV = os.path.join(RESULTS, "roi_normalisation.csv")
+NORM_COLUMNS = ["scene_uid", "marker", "segmented_on", "norm_lo", "norm_hi",
+                "n_crops"]
+
 BASE_PX_UM = CONFIG["pixel_size_um"]
 DAPI_C = CONFIG["channels"]["dapi_index"]
 MARK_C = CONFIG["channels"]["marker_index"]
@@ -134,6 +158,10 @@ _ACQ = CONFIG.get("acquisition") or {}
 _CHANNELS = CH.parse(_ACQ.get("channels"))
 _NUCLEAR = CH.nuclear(_CHANNELS)
 _BY_NAME = {c.name: c for c in _CHANNELS}
+# A paired study has no table, but may say per marker that its counterstain is
+# unusable and the marker has to be segmented on its own channel. Entered here
+# so every helper below answers from one place whichever layout declared it.
+_BY_NAME.update({c.name: c for c in CH.paired_overrides(CONFIG)})
 
 #: The declared nuclear channel's name, or None when there is no channel table.
 NUCLEAR_NAME = _NUCLEAR.name if _NUCLEAR else None
@@ -200,6 +228,17 @@ def nucleus_shaped_for(marker):
     if not _segments_own(marker):
         return True
     return bool(_BY_NAME[marker].nucleus_shaped)
+
+
+def needs_shared_norm(marker):
+    """Whether this marker's crops must share one intensity range.
+
+    True for a marker StarDist segments on its own channel. Stretching each
+    crop to its own percentiles is right for a counterstain, where every crop
+    has nuclei in it, and wrong for a marker: see ls_segment.percentile_range.
+    The threshold backend measures its own background and has no use for one.
+    """
+    return _segments_own(marker) and backend_for(marker) == "stardist"
 
 
 def plane_index_for(marker):
@@ -379,6 +418,46 @@ def bg_row(uid, roi_index, marker, seg_on, backend, labels, report):
             round(float(report.get("cut", 0.0)), 2),
             round(float(report.get("above_cut", 0.0)), 4),
             round(float(report.get("below_background", 0.0)), 4)]
+
+
+MANIFEST_FILES_CSV = os.path.join(OUT_ROOT, "manifest", "manifest_files.csv")
+#: What a file with no recorded ceiling is assumed to clip at - the same
+#: fallback, with the same warning, as 01_overviews.ceiling_for().
+DEFAULT_CEILING = 65535
+
+
+def load_ceilings(path=None):
+    """CZI file name -> the value its marker plane clips at, from the manifest.
+
+    Recorded per file by 00_manifest rather than assumed: 65535 is right only
+    while every channel of every file is genuinely 16-bit.
+    """
+    path = path or MANIFEST_FILES_CSV
+    out = {}
+    if os.path.exists(path):
+        with open(path, newline="", encoding="utf-8") as fh:
+            for r in csv.DictReader(fh):
+                try:
+                    out[r["file"]] = int(r["clip_ceiling"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+    if not out:
+        print(f"  !! no clip_ceiling in {path} - assuming {DEFAULT_CEILING}; "
+              f"re-run 00_manifest.py to record it")
+    return out
+
+
+def clipped(vals, ceiling):
+    """Whether any of this object's own marker pixels sits at the ceiling.
+
+    The `censored` flag, decided on the native 16-bit pixels under the object's
+    mask, before any tile field. It used to be read off 04j's mask on the 256
+    grid - about 31 um a cell against a 7 um nucleus, at one point per nucleus -
+    which is why 06f had to re-derive it after every run. A nucleus is censored
+    if its value is lost anywhere inside it: one clipped pixel already means its
+    mean and p90 are lower bounds, not measurements.
+    """
+    return bool(np.size(vals)) and float(np.max(vals)) >= ceiling
 
 
 def point_in_poly(px, py, v):
@@ -916,6 +995,17 @@ def main():
         if dropped:
             print(f"  --force: dropped {dropped} background-assumption rows")
 
+    # The normalisation record describes the sections about to be measured, so
+    # those sections' rows go before the new ones are written - on a plain
+    # resume as well as on --force, because a section that found no nuclei has
+    # no row in roi_nuclei.csv, is not "done", and is segmented again here.
+    norm_exists = os.path.exists(NORM_CSV)
+    if norm_exists:
+        check_header(NORM_CSV, NORM_COLUMNS)
+        drop_rows(NORM_CSV, args.marker, todo)
+    nfh = nw = None
+    no_norm = []
+
     fh = open(NUCLEI_CSV, "a" if exists else "w", newline="", encoding="utf-8")
     w = csv.writer(fh)
     if not exists:
@@ -939,6 +1029,7 @@ def main():
 
     px_area = BASE_PX_UM ** 2
     min_area_px = min_area_px_for()
+    ceilings = load_ceilings()
     total_nuc = 0
     total_rel = 0
     total_bg = 0
@@ -949,7 +1040,7 @@ def main():
                       [float(g["m10"]), float(g["m11"]), float(g["m12"])]])
         Minv = G5.invert_affine(M)              # CZI px -> 256 grid
         art = mask_at(uid, "artifact")
-        cen = mask_at(uid, "censor")
+        ceiling = ceilings.get(g["czi_file"], DEFAULT_CEILING)
         # The DAPI tissue silhouette 04a_reformat.py carried into this same 256
         # frame - the tissue definition every other stage and the curator use.
         # Without it there is no way to tell a nucleus on the section from one
@@ -964,13 +1055,48 @@ def main():
         rows = []
         coloc_rows = []
         bg_rows = []
+        norm_rows = []
+        section_norm = {}
         with pyczi.open_czi(path) as doc:
+            # ONE INTENSITY RANGE PER SECTION for a marker segmented on its own
+            # channel, taken from every crop of it - ROIs and background discs
+            # alike - before any of them is segmented. That is a second read
+            # of those crops, paid only by such a marker: the reads are local
+            # and small beside a StarDist call of seconds, and the alternative
+            # is holding every crop in memory at once.
+            for mk in sorted({b["marker"] for b in by_sec[uid]
+                              if needs_shared_norm(b["marker"])}):
+                crops = []
+                for b in by_sec[uid]:
+                    if b["marker"] != mk:
+                        continue
+                    crop_w, crop_h = int(b["czi_w"]), int(b["czi_h"])
+                    if crop_w < 8 or crop_h < 8:
+                        continue
+                    crops.append(CR.read_plane(
+                        doc, _Rect(int(b["czi_x0"]), int(b["czi_y0"]),
+                                   crop_w, crop_h),
+                        plane_index_for(mk), scene=int(g["scene_index"])
+                    ).astype(np.float32))
+                try:
+                    lo, hi = SG.percentile_range(crops)
+                except SG.SegmentError as exc:
+                    # A section whose marker plane is flat or empty has no
+                    # range to share. Skipped with the reason, never measured
+                    # on a range made up for it.
+                    no_norm.append((uid, mk, str(exc)))
+                    continue
+                section_norm[mk] = (lo, hi)
+                norm_rows.append([uid, mk, segment_plane_for(mk), repr(lo),
+                                  repr(hi), len(crops)])
             for bi, b in enumerate(by_sec[uid], 1):
                 x0, y0 = int(b["czi_x0"]), int(b["czi_y0"])
                 bw, bh = int(b["czi_w"]), int(b["czi_h"])
                 if bw < 8 or bh < 8:
                     continue
                 marker = b["marker"]
+                if needs_shared_norm(marker) and marker not in section_norm:
+                    continue
                 partners = coloc_by_marker.get(marker, ())
                 # One read call, so every plane of this ROI comes off the same
                 # scene rectangle. A partner's plane is only in here when this
@@ -1004,7 +1130,8 @@ def main():
                 report = {}
                 labels = SG.segment(seg_img, seg_backend, model=model,
                                     k=MAD_K, min_area_px=min_area_px,
-                                    report=report)
+                                    report=report,
+                                    norm=section_norm.get(marker))
                 # BEFORE the `continue`, which is the whole point of it being
                 # here: the frames this fires on are usually the ones that
                 # report no objects, an ROI with no objects writes no rows, and
@@ -1064,7 +1191,7 @@ def main():
                         round(float(vals.mean()), 1),
                         round(float(np.median(vals)), 1),
                         round(float(np.percentile(vals, 90)), 1),
-                        int(inb(cen)), int(inb(art)), off_tis,
+                        int(clipped(vals, ceiling)), int(inb(art)), off_tis,
                         seg_on, seg_backend, seg_shaped])
 
                 # CO-LOCALISATION, while both label images exist for this ROI.
@@ -1112,6 +1239,16 @@ def main():
                     write_overlay(uid, bi, b, seg_img, labels, kept)
         w.writerows(rows)
         fh.flush()
+        if norm_rows:
+            if nfh is None:
+                os.makedirs(RESULTS, exist_ok=True)
+                nfh = open(NORM_CSV, "a" if norm_exists else "w", newline="",
+                           encoding="utf-8")
+                nw = csv.writer(nfh)
+                if not norm_exists:
+                    nw.writerow(NORM_COLUMNS)
+            nw.writerows(norm_rows)
+            nfh.flush()
         if bg_rows:
             if bfh is None:
                 os.makedirs(os.path.dirname(BACKGROUND_CSV), exist_ok=True)
@@ -1137,7 +1274,14 @@ def main():
         cfh.close()
     if bfh is not None:
         bfh.close()
+    if nfh is not None:
+        nfh.close()
     print(f"\n{total_nuc} nuclei -> {NUCLEI_CSV}")
+    if no_norm:
+        print(f"!! {len(no_norm)} section/marker pairs SKIPPED for want of an "
+              f"intensity range to share between their crops: "
+              f"{[(u, m) for u, m, _ in no_norm[:5]]}")
+        print(f"   first reason: {no_norm[0][2]}")
     if coloc_wanted:
         print(f"{total_rel} co-localisation pairs -> {COLOC_CSV}")
     if total_bg:

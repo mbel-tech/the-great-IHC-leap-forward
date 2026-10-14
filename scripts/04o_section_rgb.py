@@ -66,6 +66,38 @@ would put a second code path between the picture and the frame it was built in,
 and the only thing that makes these safe to show next to landmark work is that
 they are the same image, smaller.
 
+Rendering from the CZI
+----------------------
+
+The route above starts from the 01 overview, and every step of it loses
+something: the overview is 5.20 um/px against the scan's 0.65 (64x fewer
+pixels), it is 8-bit through a frozen display range that clips the top 0.5% of
+tissue, 04a squashes it SQUARE (anisotropically) and then resamples it three
+times - into the working grid, through the rotation, onto the output grid - and
+the result is shown at about 8 um per pixel.
+
+`curation_render.source: czi` (the default) skips all of it. The frame is still
+decided exactly as before - 04a's mask, angle and crop at WORK_SIZE, which is
+what every stored landmark means - but the PIXELS are fetched from the CZI's
+own 16-bit planes through the same grid -> slide map 05a uses to put ROIs back
+on the slide, in one resampling, at `curation_render.um_per_px`. Binned by
+block mean first where that is coarser than native, so a downsample cannot
+alias. Tile field applied as 01 applies it, stretched by 04a's own rule
+(median - 1 MAD up to median + 4 MAD) on the 16-bit values, with the top
+raised where needed so no more than 0.1% of the tissue saturates (see
+`stretch`).
+
+Same frame, so the curator needs nothing new: it lifts landmarks placed on a
+768 composite into the larger picture by the width ratio (`syncFrame`), and
+every export is already divided back to the canonical 256 grid. And because
+the picture is built FROM 05a's map, a point on it is where 05a will measure
+(the 768 composite agreed with it to about 0.1 grid pixel).
+
+What it does not undo: the scan's own JPEG-XR tile compression (fixed at
+acquisition, see docs/pipeline-guide.md), and the brightest 0.1% of tissue,
+which the display range still saturates. Measurement never
+saw any of this - 05c reads native pixels from the CZI.
+
 Run:  python 04o_section_rgb.py
       python 04o_section_rgb.py --tier core
       python 04o_section_rgb.py --verify
@@ -80,6 +112,7 @@ import os
 
 import numpy as np
 from PIL import Image
+from scipy import ndimage
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -90,6 +123,7 @@ if _HERE not in sys.path:
 # lines copy-pasted into every stage.
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
 import ls_channels as CH  # noqa: E402
+import czi_read as CR  # noqa: E402
 
 # The markers this study measures, in declared order. ls_channels is the
 # single source of that list; naming a fluorophore here would pin the stage
@@ -105,7 +139,26 @@ _lsio = importlib.util.spec_from_file_location(
 IO = importlib.util.module_from_spec(_lsio)
 _lsio.loader.exec_module(IO)
 
+# 05a owns the map from the canonical grid back to the slide. It is borrowed,
+# not restated: a second copy of six chained transforms is six chances for the
+# picture and the measurement to disagree.
+_geo = importlib.util.spec_from_file_location(
+    "_geo", os.path.join(_HERE, "05a_roi_geometry.py"))
+GEO = importlib.util.module_from_spec(_geo)
+_geo.loader.exec_module(GEO)
+
 OUT_ROOT = RF.OUT_ROOT
+MANIFEST_CSV = os.path.join(OUT_ROOT, "manifest", "manifest_scenes.csv")
+FIELD_DIR = os.path.join(OUT_ROOT, "qc", "flatfield")
+
+_RENDER = CONFIG.get("curation_render") or {}
+RENDER_SOURCE = _RENDER.get("source", "czi")
+RENDER_UM_PX = float(_RENDER.get("um_per_px", 2.6))
+
+# The tile field's fold, as 01_overviews applies it: tiles start on exact
+# multiples of the pitch from the scene origin.
+PITCH_PX = 1836
+FIELD_DIVISOR = 12
 REFORMAT_DIR = RF.REFORMAT_DIR
 WORKLIST_CSV = os.path.join(REFORMAT_DIR, "roi_worklist.csv")
 FOCUS_CSV = os.path.join(OUT_ROOT, "qc", "focus.csv")
@@ -150,6 +203,260 @@ def composite(marker_img, dapi_img, colour, nuclear=(0., 0., 1.)):
         plane = np.maximum(colour[p] * mark, nuclear[p] * dapi)
         rgb[..., p] = np.clip(np.rint(plane), 0, 255).astype(np.uint8)
     return rgb
+
+
+def plane_indices(marker):
+    """(nuclear plane, marker plane) in the CZI, resolved as 05c resolves them.
+
+    The channel table when the study has one, `channels.dapi_index` and
+    `channels.marker_index` when it does not - which is the paired LS study,
+    and gives 0 and 1, the planes 01 drew the overviews from.
+    """
+    chans = CH.parse((CONFIG.get("acquisition") or {}).get("channels"))
+    legacy = CONFIG.get("channels") or {}
+    nuc = CH.nuclear(chans)
+    n_idx = (int(nuc.index) if nuc is not None and nuc.index is not None
+             else int(legacy.get("dapi_index", 0)))
+    by_name = {c.name: c for c in chans}
+    c = by_name.get(marker)
+    m_idx = (int(c.index) if c is not None and c.index is not None
+             else int(legacy.get("marker_index", 1)))
+    return n_idx, m_idx
+
+
+def czi_frame(rep, scene_rect, overview_um_px, native_um_px):
+    """The 2x3 map canonical grid (u, v) -> absolute CZI pixel (x, y).
+
+    Built exactly as 05a builds the matrix it writes to roi_geometry.csv, from
+    the same `report` of the same 04a call, so the picture rendered through it
+    and the boxes 05c measures are one geometry.
+    """
+    g2o = GEO.grid_to_overview(rep)
+    scale = overview_um_px / native_um_px
+    rx, ry = scene_rect[0], scene_rect[1]
+    return GEO.affine_from(lambda u, v: (lambda p: (rx + p[0] * scale,
+                                                    ry + p[1] * scale))(g2o(u, v)))
+
+
+def render_side(M, native_um_px, out_um_px, grid=None):
+    """Output edge in pixels, so that NO direction is sampled coarser than asked.
+
+    The canonical frame is anisotropic - 04a squashes a rectangular overview
+    square - so one grid step is a different length along its two axes. Sizing
+    by the larger singular value puts `out_um_px` on the stretched axis and
+    oversamples the other, rather than undersampling either.
+    """
+    grid = grid or RF.GRID
+    s_max = float(np.linalg.svd(np.asarray(M, float)[:, :2], compute_uv=False)[0])
+    return max(grid, int(np.ceil(grid * s_max * native_um_px / out_um_px)))
+
+
+def output_grid(side, grid=None):
+    """Canonical (u, v) of every output pixel centre, as two (side, side) arrays.
+
+    The same pixel-centre convention as PIL's resize, which is what 05a's map
+    assumes of the canonical grid: output pixel i is canonical (i + 0.5) * grid
+    / side - 0.5. So this picture IS the canonical frame scaled by side/grid,
+    which is the relation the curator's syncFrame and every export rely on.
+    """
+    grid = grid or RF.GRID
+    t = (np.arange(side, dtype=np.float64) + 0.5) * grid / side - 0.5
+    return np.meshgrid(t, t)
+
+
+def bin_factor(native_um_px, out_um_px):
+    """Whole native pixels averaged per sample: the anti-aliasing for a downsample."""
+    return max(1, int(np.floor(out_um_px / native_um_px + 1e-9)))
+
+
+def read_region(read, bounds, scene_rect, b):
+    """The native rectangle covering `bounds` = (xmin, ymin, xmax, ymax), read
+    once and block-averaged b x b. Returns (array, x0, y0), or None when the
+    bounds miss the scene.
+
+    Kept as the scanner's uint16 when b == 1: a float copy of a whole native
+    section is the allocation that ran a 12.7 GB laptop out of memory.
+    """
+    rx, ry, rw, rh = scene_rect
+    xmin, ymin, xmax, ymax = bounds
+    x0 = int(max(rx, np.floor(xmin) - b))
+    y0 = int(max(ry, np.floor(ymin) - b))
+    x1 = int(min(rx + rw, np.ceil(xmax) + b + 1))
+    y1 = int(min(ry + rh, np.ceil(ymax) + b + 1))
+    if x1 - x0 < b or y1 - y0 < b:
+        return None
+    w = (x1 - x0) // b * b
+    h = (y1 - y0) // b * b
+    raw = np.asarray(read(x0, y0, w, h))
+    if b > 1:
+        raw = raw.reshape(h // b, b, w // b, b).mean(axis=(1, 3), dtype=np.float32)
+    return raw, x0, y0
+
+
+def sample_region(region, X, Y, scene_rect, b, field=None):
+    """`region` (from read_region) sampled at absolute native (X, Y), float32.
+
+    Bilinear on the block-averaged pixels - a single resampling of the
+    scanner's values. Points outside the scene rectangle are 0, which is what
+    01 writes for a corner that was never scanned.
+
+    The tile field is divided out AFTER sampling, at each sample's own
+    position in the tile fold. It is smooth across a 12 px field cell, so the
+    order does not matter to the picture, and this way it costs one lookup per
+    output pixel instead of a pass over the whole native rectangle.
+    """
+    rx, ry, rw, rh = scene_rect
+    if region is None:
+        return np.zeros(X.shape, np.float32)
+    raw, x0, y0 = region
+    # A block covers native [x0 + j*b, x0 + (j+1)*b); its centre, in the
+    # pixel-centre coordinates X is in, is x0 + j*b + (b - 1)/2.
+    cx = (X - x0 - (b - 1) / 2.0) / b
+    cy = (Y - y0 - (b - 1) / 2.0) / b
+    out = ndimage.map_coordinates(raw, [cy, cx], order=1, mode="nearest",
+                                  output=np.float32)
+    outside = (X < rx - 0.5) | (X > rx + rw - 0.5) | (Y < ry - 0.5) | (Y > ry + rh - 0.5)
+    out[outside] = 0.0
+    if field is not None:
+        n = field.shape[0]
+        fx = (np.round(((X - rx) % PITCH_PX) / FIELD_DIVISOR).astype(np.int64)) % n
+        fy = (np.round(((Y - ry) % PITCH_PX) / FIELD_DIVISOR).astype(np.int64)) % n
+        gain = field[fy, fx].astype(np.float32)
+        ok = gain > 0.05
+        out[ok] /= gain[ok]
+        np.clip(out, 0, 65535, out=out)
+    return out
+
+
+def sample_plane(read, X, Y, scene_rect, b, field=None):
+    """One CZI plane sampled at the absolute native coordinates (X, Y)."""
+    region = read_region(read, (X.min(), Y.min(), X.max(), Y.max()), scene_rect, b)
+    return sample_region(region, X, Y, scene_rect, b, field)
+
+
+def work_mask(dapi_overview):
+    """04a's tissue mask, in 04a's working frame, exactly as reformat() forms it."""
+    img = Image.open(dapi_overview).convert("L")
+    work = np.asarray(img.resize((RF.WORK_SIZE, RF.WORK_SIZE), Image.BILINEAR)).astype(np.float32)
+    return RF.tissue_mask(work, False), img.size
+
+
+def frame_masks(rep, U, V, wmask, artifact=None):
+    """(tissue, artifact) on the output grid, both from 04a's own masks.
+
+    The tissue mask is 04a's, so the picture is blanked where the 256 frame is
+    and nowhere else; it is interpolated and cut at one half so its edge is not
+    a staircase of WORK_SIZE cells. The artifact mask is 04g's, in the overview
+    frame, read nearest - a mask is a decision, not a signal to smooth.
+    """
+    g2o = GEO.grid_to_overview(rep)
+    px, py = g2o(U, V)
+    ws = float(rep["work_size"])
+    wx = (px + 0.5) * ws / rep["src_w"] - 0.5
+    wy = (py + 0.5) * ws / rep["src_h"] - 0.5
+    tissue = ndimage.map_coordinates(wmask.astype(np.float32), [wy, wx],
+                                     order=1, mode="constant", cval=0.0) > 0.5
+    art = None
+    if artifact is not None:
+        ah, aw = artifact.shape
+        ax = (px + 0.5) * aw / rep["src_w"] - 0.5
+        ay = (py + 0.5) * ah / rep["src_h"] - 0.5
+        art = ndimage.map_coordinates(artifact.astype(np.uint8), [ay, ax],
+                                      order=0, mode="constant", cval=0) > 0
+    return tissue, art
+
+
+#: The top of the display range is never below this percentile of in-tissue
+#: pixels, so no more than this fraction of the tissue saturates.
+STRETCH_TOP_PCT = 99.9
+#: At most this many in-tissue pixels go into the statistics (an even stride).
+STRETCH_SAMPLE = 4_000_000
+
+
+def stretch(values, tissue, art=None):
+    """In-tissue display range, to uint8, IN PLACE on `values` (float32).
+
+    The bottom is 04a's: median - 1 MAD of in-tissue, non-artifact pixels. The
+    top is 04a's median + 4 MAD OR the 99.9th percentile, whichever is higher.
+
+    04a's top alone was tuned on 8-bit pictures at about 8 um per pixel, where
+    a nucleus is averaged with the neuropil around it. Rendered at 2.6 um on
+    real sections it saturated 16-23% of the in-tissue DAPI - every nucleus a
+    flat disc - and filled bright marker regions solid. Saturation is detail
+    lost, so the top is lifted until at most 0.1% of the tissue reaches it.
+    Where 04a's top already saturates less than that (the 768 route did), it is
+    kept, so a picture is never dimmer than it needs to be.
+    """
+    keep = tissue if art is None else (tissue & ~art)
+    inside = values[keep]
+    if inside.size > STRETCH_SAMPLE:
+        inside = inside[:: inside.size // STRETCH_SAMPLE + 1]
+    if inside.size > 50:
+        med = float(np.median(inside))
+        mad = float(np.median(np.abs(inside - med))) * 1.4826
+        if mad <= 0:
+            mad = max(float(inside.std()), 1.0)
+        lo = med - mad
+        hi = max(med + 4.0 * mad, float(np.percentile(inside, STRETCH_TOP_PCT)))
+    else:
+        lo, hi = float(values.min()), float(values.max())
+    del inside
+    values -= lo
+    values *= 255.0 / max(hi - lo, 1e-6)
+    np.clip(values, 0, 255, out=values)
+    np.rint(values, out=values)
+    out = values.astype(np.uint8)
+    out[~tissue] = 0
+    if art is not None:
+        out[art] = 0
+    return out
+
+
+#: Output rows sampled per pass. Bounds the coordinate arrays, which are
+#: float64 and would otherwise be four times the size of the picture.
+STRIP_ROWS = 512
+
+
+def render_from_czi(read_dapi, read_mark, rep, scene_rect, overview_um_px,
+                    native_um_px, out_um_px, wmask, artifact=None,
+                    dapi_field=None, mark_field=None):
+    """(dapi8, mark8) for one section on the canonical frame at `out_um_px`.
+
+    One plane at a time, sampled in strips of output rows, so the peak is one
+    native read of the section plus one float32 picture - not the whole output
+    grid's coordinates in float64, which is what ran native out of memory.
+    """
+    M = czi_frame(rep, scene_rect, overview_um_px, native_um_px)
+    side = render_side(M, native_um_px, out_um_px)
+    b = bin_factor(native_um_px, out_um_px)
+    t = (np.arange(side, dtype=np.float64) + 0.5) * RF.GRID / side - 0.5
+    # The output square's corners bound everything it maps to (affine).
+    cu = np.array([t[0], t[-1], t[0], t[-1]])
+    cv = np.array([t[0], t[0], t[-1], t[-1]])
+    CX, CY = GEO.apply_affine(M, cu, cv)
+    bounds = (CX.min(), CY.min(), CX.max(), CY.max())
+
+    tissue = np.zeros((side, side), bool)
+    art = np.zeros((side, side), bool) if artifact is not None else None
+    for r0 in range(0, side, STRIP_ROWS):
+        U, V = np.meshgrid(t, t[r0:r0 + STRIP_ROWS])
+        ts, ar = frame_masks(rep, U, V, wmask, artifact)
+        tissue[r0:r0 + STRIP_ROWS] = ts
+        if art is not None:
+            art[r0:r0 + STRIP_ROWS] = ar
+
+    planes = []
+    for read, field in ((read_dapi, dapi_field), (read_mark, mark_field)):
+        region = read_region(read, bounds, scene_rect, b)
+        vals = np.zeros((side, side), np.float32)
+        for r0 in range(0, side, STRIP_ROWS):
+            U, V = np.meshgrid(t, t[r0:r0 + STRIP_ROWS])
+            X, Y = GEO.apply_affine(M, U, V)
+            vals[r0:r0 + STRIP_ROWS] = sample_region(region, X, Y, scene_rect, b, field)
+        del region
+        planes.append(stretch(vals, tissue, art))
+        del vals
+    return planes[0], planes[1]
 
 
 def worklist_uid_column(marker, fields):
@@ -220,6 +527,140 @@ def write_thumbs(rgb_dir, size=RF.GRID, force=False):
     return made, existing, failed
 
 
+class CziUnavailable(Exception):
+    """This section cannot be rendered from its CZI; the reason says why."""
+
+
+def load_artifact_native(uid):
+    """04g's mask at its own size - the overview frame - or None."""
+    p = os.path.join(OUT_ROOT, "artifacts", uid + "_artifact.png")
+    if not os.path.exists(p):
+        return None
+    return np.asarray(Image.open(p).convert("L")) > 0
+
+
+def refresh_thumb(rgb_dir, uid, size):
+    """Re-shrink one composite's thumbnail, if that marker has thumbnails.
+
+    A thumbnail is a downscale of the composite (see write_thumbs), so one
+    left from the old composite would be a picture of a different render.
+    """
+    tdir = rgb_dir + "_thumb"
+    if not os.path.isdir(tdir):
+        return
+    with Image.open(os.path.join(rgb_dir, uid + ".png")) as im:
+        im.convert("RGB").resize((size, size), Image.LANCZOS).save(
+            os.path.join(tdir, uid + ".png"))
+
+
+class CziSource:
+    """Everything a CZI render needs that is per study, plus the open file."""
+
+    def __init__(self, marker):
+        try:
+            from pylibCZIrw import czi as pyczi     # noqa: F401
+        except ImportError:
+            raise SystemExit(
+                "rendering from the CZI needs pylibCZIrw, which this Python does "
+                "not have - run this stage with work/czienv (the interpreter 01 "
+                "runs on), or pass --source overview for the old 8-bit route.")
+        self._pyczi = pyczi
+        self.n_idx, self.m_idx = plane_indices(marker)
+        with open(MANIFEST_CSV, newline="", encoding="utf-8") as fh:
+            self.man = {r["scene_uid"]: r for r in csv.DictReader(fh)}
+        self.fields = {}
+        for idx in {self.n_idx, self.m_idx}:
+            p = os.path.join(FIELD_DIR, f"tilefield_c{idx}.npy")
+            if os.path.exists(p):
+                self.fields[idx] = np.load(p)
+        if not self.fields:
+            print("  no tile fields found - rendering UNCORRECTED, as 01 would")
+        self.native = float(GEO.BASE_PX_UM)
+        self._path = None
+        self._cm = None
+        self._doc = None
+        self._rects = None
+        self.rows = []
+
+    def file_of(self, uid):
+        m = self.man.get(uid)
+        return m["file"] if m else None
+
+    def _open(self, fname):
+        if fname == self._path:
+            return
+        self._close_doc()
+        path = os.path.join(CONFIG["source_dir"], fname)
+        if not os.path.exists(path):
+            raise CziUnavailable(f"CZI not found: {path}")
+        # open_czi is a context manager; the document is what __enter__ returns.
+        self._cm = self._pyczi.open_czi(path)
+        self._doc = self._cm.__enter__()
+        self._rects = {int(k): (int(r.x), int(r.y), int(r.w), int(r.h))
+                       for k, r in self._doc.scenes_bounding_rectangle.items()}
+        self._path = fname
+
+    def _close_doc(self):
+        if self._doc is not None:
+            self._cm.__exit__(None, None, None)
+        self._cm = self._doc = self._path = self._rects = None
+
+    def render(self, uid, focus_row, dapi_png, extra, flip, art, cen, art_native, um_px):
+        m = self.man.get(uid)
+        if m is None:
+            raise CziUnavailable("not in manifest_scenes.csv")
+        self._open(m["file"])
+        si = int(m["scene_index"])
+        if si not in self._rects:
+            raise CziUnavailable(f"scene {si} absent from {m['file']}")
+        rect = self._rects[si]
+
+        # The geometry, decided exactly as 04a and 05a decide it - S = 1.
+        rep = {}
+        if RF.reformat(dapi_png, light_background=False, extra_angle=extra, flip=flip,
+                       artifact=art, censor=cen, report=rep) is None:
+            return None
+        ov_um = float(focus_row["um_px"])
+        # 05a's own consistency check: the overview must be this scene
+        # rectangle at the recorded scale, or the frame would be offset.
+        scale = ov_um / self.native
+        exp_w, exp_h = round(rect[2] / scale), round(rect[3] / scale)
+        if abs(exp_w - rep["src_w"]) > 2 or abs(exp_h - rep["src_h"]) > 2:
+            raise CziUnavailable(
+                f"overview {rep['src_w']}x{rep['src_h']} does not match scene "
+                f"rect {exp_w}x{exp_h} at {ov_um} um/px")
+        wmask, _ = work_mask(dapi_png)
+        if wmask is None:
+            return None
+
+        doc = self._doc
+
+        def reader(idx):
+            return lambda x, y, w, h: CR.read_plane(doc, GEO._Rect(x, y, w, h), idx, scene=si)
+
+        return render_from_czi(reader(self.n_idx), reader(self.m_idx), rep, rect,
+                               ov_um, self.native, um_px, wmask, art_native,
+                               self.fields.get(self.n_idx), self.fields.get(self.m_idx))
+
+    def log(self, uid, side, um_px):
+        self.rows.append({"scene_uid": uid, "source": "czi", "um_per_px": um_px,
+                          "side_px": side, "czi_file": self.file_of(uid),
+                          "reader": "pylibCZIrw"})
+
+    def close(self, out_dir):
+        """Append this run's renders to `<out_dir>_render.csv`: which picture is which."""
+        self._close_doc()
+        if not self.rows:
+            return
+        path = out_dir + "_render.csv"
+        new = not os.path.exists(path)
+        with open(path, "a", newline="", encoding="utf-8") as fh:
+            w = csv.DictWriter(fh, fieldnames=list(self.rows[0]))
+            if new:
+                w.writeheader()
+            w.writerows(self.rows)
+
+
 def main():
     ap = argparse.ArgumentParser()
     _default = MARKERS[0] if MARKERS else None
@@ -246,11 +687,22 @@ def main():
     ap.add_argument("--force", action="store_true",
                     help="rebuild composites that already exist (default is to skip "
                          "them, so topping a set up costs only the missing ones)")
+    ap.add_argument("--source", choices=["czi", "overview"], default=RENDER_SOURCE,
+                    help="where the pixels come from (default from config "
+                         f"curation_render.source: {RENDER_SOURCE}). czi renders "
+                         "from the scan's own 16-bit planes in one resampling; "
+                         "overview is the old 8-bit 5.2 um/px route")
+    ap.add_argument("--um-px", type=float, default=RENDER_UM_PX, metavar="UM",
+                    help="resolution of a czi render (default from config "
+                         f"curation_render.um_per_px: {RENDER_UM_PX}); 0.65 is native")
     ap.add_argument("--verify", action="store_true",
                     help="check the blue plane still equals the existing greyscale section")
     ap.add_argument("--thumbs", action="store_true",
-                    help="downscale the composites already built for this marker to "
-                         f"{RF.GRID}px for the review grid, and do nothing else")
+                    help=f"also write the {RF.GRID}px review-grid thumbnails. With "
+                         "--all, --include-excluded or --tier it builds the "
+                         "composites first and then thumbnails them, so one run "
+                         "does both; on its own it only shrinks the composites "
+                         "already built")
     ap.add_argument("--thumb-size", type=int, default=RF.GRID, metavar="N",
                     help=f"thumbnail edge in pixels (default {RF.GRID})")
     args = ap.parse_args()
@@ -262,7 +714,10 @@ def main():
 
     # Thumbnails are a resize of what is already on disk, so they need none of
     # the overrides, focus table or worklist below.
-    if args.thumbs:
+    # --thumbs alone is the old thumbnails-only run. Named together with a set
+    # to build, it is a rider on that build instead.
+    build_too = args.all or args.include_excluded or args.tier
+    if args.thumbs and not build_too:
         if not os.path.isdir(out_dir):
             print(f"no composites to shrink: {out_dir} does not exist")
             return
@@ -318,6 +773,20 @@ def main():
         return
     made = skipped = mismatched = existing = 0
     missing = []
+    if args.thumbs and not args.verify:
+        os.makedirs(out_dir + "_thumb", exist_ok=True)
+
+    # --verify is a statement about the 256 greyscale, which only the overview
+    # route reproduces; it never renders from the CZI.
+    czi = None
+    if args.source == "czi" and not args.verify:
+        if args.um_px <= 0:
+            raise SystemExit("--um-px must be greater than zero")
+        czi = CziSource(args.marker)
+        # One file open per CZI rather than one per section.
+        uids = sorted(uids, key=lambda u: czi.file_of(u) or "")
+        print(f"rendering from the CZI at {args.um_px} um/px "
+              f"(native {GEO.BASE_PX_UM}); --source overview for the old route")
 
     for uid in uids:
         out_path = os.path.join(out_dir, uid + ".png")
@@ -341,6 +810,24 @@ def main():
         excluded_here = uid not in in_index
         art = None if excluded_here else RF.load_artifact(uid, (RF.WORK_SIZE, RF.WORK_SIZE))
         cen = None if excluded_here else RF.load_censor(uid, (RF.WORK_SIZE, RF.WORK_SIZE))
+        if czi is not None:
+            try:
+                got = czi.render(uid, r, dapi, extra, flip, art, cen,
+                                 None if excluded_here else load_artifact_native(uid),
+                                 args.um_px)
+            except CziUnavailable as exc:
+                missing.append((uid, str(exc)))
+                continue
+            if got is None:
+                missing.append((uid, "no tissue mask could be formed"))
+                continue
+            img, comp = got
+            Image.fromarray(composite(comp, img, colour, NUCLEAR_COLOUR)).save(out_path)
+            refresh_thumb(out_dir, uid, args.thumb_size)
+            czi.log(uid, img.shape[0], args.um_px)
+            made += 1
+            continue
+
         out = RF.reformat(dapi, light_background=False, extra_angle=extra, flip=flip,
                           artifact=art, censor=cen, companion=mark,
                           render_scale=1 if args.verify else args.scale)
@@ -362,8 +849,11 @@ def main():
                 continue
 
         Image.fromarray(composite(comp, img, colour, NUCLEAR_COLOUR)).save(out_path)
+        refresh_thumb(out_dir, uid, args.thumb_size)
         made += 1
 
+    if czi is not None:
+        czi.close(out_dir)
     if args.verify:
         print(f"verified {skipped} sections, {mismatched} mismatched")
     else:
@@ -374,6 +864,10 @@ def main():
         print(f"  {len(missing)} not built:")
         for uid, why in missing[:10]:
             print(f"    {uid}  {why}")
+    # Every composite rebuilt above already re-shrank its own thumbnail; this
+    # fills in the ones that were left alone and never had one.
+    if args.thumbs and not args.verify:
+        write_thumbs(out_dir, args.thumb_size, force=False)
 
 
 if __name__ == "__main__":

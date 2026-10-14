@@ -271,6 +271,27 @@ SPEC = [
         required=True, default=5.2, materialise=True,
         consumers=["01_overviews", "01_overviews.groovy"]),
 
+    Key("curation_render.source", "str",
+        "Where the curation composites take their pixels from.",
+        default="czi", choices=["czi", "overview"], label="Curation images from",
+        note="`czi` renders each composite from the CZI's own 16-bit pixels "
+             "in ONE resampling, onto the same frame the landmarks are stored "
+             "in. `overview` is the old route: the 8-bit 5.2 um/px overview, "
+             "squashed square and resampled three times, which shows about "
+             "8 um per screen pixel. Existing composites are kept until 04o "
+             "runs with --force.",
+        consumers=["04o"]),
+
+    Key("curation_render.um_per_px", "float",
+        "Resolution of the curation composites rendered from the CZI.",
+        default=2.6, label="Curation image resolution (um/px)",
+        note="0.65 is the scan's native pixel and loses nothing. The ROI "
+             "curator draws the whole section on one canvas and has no zoom, "
+             "so below about 1.3 it gets slow to redraw without showing more "
+             "on a normal screen. Measurement (05c) always reads native "
+             "pixels, whatever this says.",
+        consumers=["04o"]),
+
     # ---- channels (replaced by the channels/markers sub-project) ---------
     # ---- acquisition ------------------------------------------------------
     Key("acquisition.layout", "str",
@@ -335,6 +356,30 @@ SPEC = [
         consumers=["01k_saturation_raw", "04a_reformat", "04g_artifact_mask",
                    "04j_censor_clipped", "04l_roi_curator", "04o_section_rgb",
                    "05a_roi_geometry"]),
+
+    Key("acquisition.marker_segmentation", "raw",
+        "Per marker, how a `paired` study finds the objects it measures: "
+        "`segment` (`nuclear` or `own`), and for `own` a `backend` and whether "
+        "the objects are `nucleus_shaped`. A marker not listed here is "
+        "measured inside the nuclear mask, as always. Not used under "
+        "`multiplex`.",
+        default={}, ui=False,
+        note="A paired study declares no channel table, so every marker takes "
+             "the nuclear route: StarDist on the counterstain, the marker "
+             "measured inside the mask. That is wrong for a pass whose "
+             "counterstain plane is unusable. The LS PCNA (AF488) scans carry "
+             "a DAPI plane that is noise at native resolution, so there is "
+             "nothing to segment. Declaring `{\"AF488\": {\"segment\": "
+             "\"own\", \"backend\": \"stardist\", \"nucleus_shaped\": true}}` "
+             "segments PCNA on its own channel. Use it only for a marker whose "
+             "signal is nuclear (PCNA is): StarDist is a nucleus detector. The "
+             "cost is real and 06a records it: with no counterstain there is "
+             "no count of all cells, so the fraction positive and the total "
+             "cell density are withheld for that marker and the readout is "
+             "positive density. See docs/nuclei-detection-after-roi-curation.md "
+             "section 4.8.",
+        example={},
+        consumers=["05c", "06a"]),
 
     # ---- display ----------------------------------------------------------
     Key("display.composite", "raw",

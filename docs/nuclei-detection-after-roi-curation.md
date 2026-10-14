@@ -113,7 +113,8 @@ From `config.json`:
 |---|---|---|
 | `pixel_size_um` | `0.65` | native slide resolution; every area and diameter is in these units |
 | `channels.dapi_index` | `0` | the counterstain channel — what nuclei are segmented on |
-| `channels.marker_index` | `1` | pERK (AF568) or PCNA (AF488) — measured, never segmented on |
+| `channels.marker_index` | `1` | pERK (AF568) or PCNA (AF488) — the plane the marker is measured on |
+| `acquisition.marker_segmentation` | `{"AF488": {"segment": "own", ...}}` for PCNA | per marker, segment on its **own** channel instead of the counterstain — see §4.8 |
 | `source_dir` | the slide folder | where the `.czi` files live |
 | `groups.by_animal` | 12 animals | **only** used to choose the processing order (see §4.3) |
 
@@ -434,6 +435,78 @@ It is **not** a negative control. The primary antibody is on that tissue too, so
 measures non-specific binding plus autofluorescence, not zero.
 
 ---
+
+### 4.8 PCNA: segmenting the marker, because there is no counterstain
+
+> **Status: implemented and tested on synthetic data; not yet run on real PCNA sections.** The
+> numbers a pilot has to produce are listed at the end of this section and are left blank rather
+> than guessed.
+
+**The problem.** The AF488 (PCNA) scans carry a DAPI plane (5 ms, plane 0) that is noise at native
+0.65 µm/px: the green channel obliterates the nuclear counterstain. At overview scale it still gives
+a tissue silhouette, which is why every curation step (rotation, exclusion, artifact masks, the 05a
+geometry) is unaffected. But §4.2 would segment that plane with StarDist and find noise.
+
+**What it does.** The study declares the marker as segmented on its own channel:
+
+```json
+"acquisition": {
+  "layout": "paired",
+  "markers": ["AF568", "AF488"],
+  "marker_segmentation": {
+    "AF488": {"segment": "own", "backend": "stardist", "nucleus_shaped": true}
+  }
+}
+```
+
+05c then runs StarDist on the AF488 plane, and records `segmented_on = AF488` in every row. pERK
+has no entry, so it keeps the route in §4.2 and is byte-identical to before.
+
+**Why §4.5 is relaxed for this one marker, and what is not.** §4.5 rejects segmenting on the marker
+for pERK mainly because pERK is "a poor silhouette" for a nucleus detector. PCNA is a nuclear
+antigen, so what StarDist outlines on it is a nucleus — star-convex and nucleus-sized — which is
+what `2D_versatile_fluo` is trained on. The other costs in §4.5 are real and are handled, not
+ignored:
+
+| §4.5 cost | What happens for PCNA |
+|---|---|
+| (1) No denominator | There is no count of all cells. 06a **withholds `frac_positive` and `cell_density_per_mm2`** for such a marker and writes why in `denominator_withheld_reason`; 06c and 06d carry it. The readout is **positive density** (`positive_density_per_mm2`, `positive_cells_per_mm2`). |
+| (2) Size follows staining | Abercrombie's `h` is measured on the objects **counted as positive** (above their section's cut), not on everything StarDist outlined — `h` is the size of the thing being counted. It must still be checked (pilot, below). |
+| (3) Background discs stop being a check | Positivity is still decided in 06a against each section's background discs (median + 3·MAD of `marker_median`), so the cut is not the segmentation's threshold. But the false-positive **rate** is withheld for such a marker — its denominator is "blobs StarDist outlined on noise", which depends on StarDist's sensitivity, not the antibody — and **false positives per mm² of background** (`bg_false_positives_per_mm2` in `detector_specificity.csv`) stands in. The positivity figures are captioned with it. |
+| (4) Cut unrevisable | Unchanged: the cut is a table operation. |
+
+**One intensity range per section, not per crop.** StarDist's default is to stretch each crop to its
+own 1st–99.8th percentile (§10.2). That is harmless on a counterstain; on a marker it is a bias: a
+crop with a bright proliferative zone stretches its own range so its dim PCNA+ nuclei fall below
+what the model sees, while a background disc — only noise — has that noise stretched to full range.
+Sensitivity would then depend on the crop's own content, and that is region-correlated: the
+periventricular zones where PCNA lives are the bright ones. So for a marker segmented on itself,
+05c reads all of a section's crops (ROIs and background discs alike), takes **one** (1st, 99.8th)
+percentile range over them (`ls_segment.percentile_range`; each crop subsampled at a regular
+stride, so a re-run gives the same range), and scales every crop by it. The range is recorded in
+**`results/roi_normalisation.csv`** — `scene_uid, marker, segmented_on, norm_lo, norm_hi, n_crops`,
+one row per section and marker. It is a file of its own rather than two more columns of
+`roi_nuclei.csv`, which is ~900,000 rows shared with 06g/06h. A section whose marker plane is flat
+has no range to share; it is skipped with the reason, not measured on an invented one.
+
+**Running it.**
+
+```bash
+work/appenv/Scripts/python.exe scripts/05c_detect_rois.py --marker AF488 --limit 3 --qc
+```
+
+**Pilot before the full run — to be done on real sections, and the numbers written here:**
+
+1. Inspect the `--qc` overlays (§8.1) for missed and false nuclei, in periventricular ROIs and in
+   background discs especially.
+2. Hand-count PCNA+ nuclei in about six ROIs (a mix of regions plus two background discs) and
+   compare with 06a's `n_positive`. *Result: not yet measured.*
+3. Median `equiv_diam_um` of positive objects — expect roughly 7–9 µm (pERK's DAPI nuclei: 8.3 µm,
+   §5.2) — and Pearson r between `equiv_diam_um` and `marker_median` (pERK: 0.026, §4.5). *Result:
+   not yet measured.* A clearly positive r means `h` follows staining and the density correction
+   inherits that; say so in the limits (§9) rather than hide it.
+
+Only then run `--marker AF488` over all sections.
 
 ## 5. The output: `results/roi_nuclei.csv`
 
@@ -986,6 +1059,11 @@ rather than written to the wrong file. An export that mixes markers is refused o
 work/appenv/Scripts/python.exe scripts/05c_detect_rois.py --marker AF488 --limit 2 --qc
 work/appenv/Scripts/python.exe scripts/05c_detect_rois.py --marker AF488
 ```
+
+**PCNA needs `acquisition.marker_segmentation` in `config.json` before this step** (§4.8): its
+DAPI plane is noise, so without that block 05c would segment noise. With it, the run segments the
+green channel, `roi_normalisation.csv` is written, and 06a reports positive density with the
+fraction withheld.
 
 Smoke-test first and check `equiv_diam_um` lands near 7–8.5 µm as it did for pERK (§5.2), and
 look at a couple of the `--qc` overlays (§8.1). A distribution far from that means the wrong

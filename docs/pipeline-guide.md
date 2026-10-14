@@ -918,7 +918,7 @@ The sections are the same either way. What changes is what stopping early is wor
 
 ## 04o  Colour composites — pERK {#stage-rgb_perk}
 
-*`scripts/04o_section_rgb.py --marker AF568 --all` → `reformatted/sections_AF568_rgb/`*
+*`scripts/04o_section_rgb.py --marker AF568 --all --thumbs` → `reformatted/sections_AF568_rgb/`, `reformatted/sections_AF568_rgb_thumb/`*
 
 The curator has to show the channel being quantified, not just the counterstain, so this writes a
 colour composite of DAPI plus the marker for each section.
@@ -928,24 +928,15 @@ reformatted section, pixel for pixel, because ROIs drawn on one are measured on 
 marker is not reformatted separately — it is passed through the same reformat as a passenger,
 carried by the same rotation and crop that the DAPI silhouette determined.
 
+The same run writes small copies of each composite, so the curator's review grid can show every
+section at once without loading full-size images. A thumbnail is only a downscale of its composite,
+so making both in one run keeps the two from drifting apart.
+
 ## 04o  Colour composites — PCNA {#stage-rgb_pcna}
 
-*`scripts/04o_section_rgb.py --marker AF488 --all` → `reformatted/sections_rgb/`*
+*`scripts/04o_section_rgb.py --marker AF488 --all --thumbs` → `reformatted/sections_rgb/`, `reformatted/sections_rgb_thumb/`*
 
-The same for the PCNA channel.
-
-## 04o  Review thumbnails — pERK {#stage-thumbs_perk}
-
-*`scripts/04o_section_rgb.py --marker AF568 --thumbs` → `reformatted/sections_AF568_rgb_thumb/`*
-
-Small colour thumbnails, so the curator's review grid can show every section at once without loading
-full-size images.
-
-## 04o  Review thumbnails — PCNA {#stage-thumbs_pcna}
-
-*`scripts/04o_section_rgb.py --marker AF488 --thumbs` → `reformatted/sections_rgb_thumb/`*
-
-The same for PCNA.
+The same for the PCNA channel, thumbnails included.
 
 ## 04p  Trace every scanned section {#stage-provenance}
 

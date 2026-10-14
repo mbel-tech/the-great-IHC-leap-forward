@@ -126,7 +126,7 @@ class _FakeDoc:
 
 
 _doc = _FakeDoc()
-K.measure(_doc, _Rect(0, 0, 6, 4), {}, 1.0, False, scene=9)
+K.measure(_doc, _Rect(0, 0, 6, 4), {}, 1.0, scene=9)
 chk("both channels are read from the named scene",
     sorted({c["scene"] for c in _doc.calls}), [9])
 chk("...and they are the two channels it measures",

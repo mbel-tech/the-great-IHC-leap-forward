@@ -285,11 +285,13 @@ SPEC = [
     Key("curation_render.um_per_px", "float",
         "Resolution of the curation composites rendered from the CZI.",
         default=2.6, label="Curation image resolution (um/px)",
-        note="0.65 is the scan's native pixel and loses nothing. The ROI "
-             "curator draws the whole section on one canvas and has no zoom, "
-             "so below about 1.3 it gets slow to redraw without showing more "
-             "on a normal screen. Measurement (05c) always reads native "
-             "pixels, whatever this says.",
+note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
+             "section at that resolution is one picture of 10,000+ px a "
+             "side - several GB to render and more than a browser holds "
+             "comfortably - so 04o refuses anything finer than 1.3. 2.6 is "
+             "already twice as sharp per pixel as the overview route, and the "
+             "curator's zoom shows every pixel of it. Measurement (05c) always "
+             "reads native pixels, whatever this says.",
         consumers=["04o"]),
 
     # ---- channels (replaced by the channels/markers sub-project) ---------

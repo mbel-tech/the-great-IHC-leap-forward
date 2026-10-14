@@ -332,10 +332,56 @@ def build_parser():
     ap.add_argument("--marker", default=_default, choices=MARKERS,
                     help=f"which marker to process (default {_default})")
     ap.add_argument("--include-excluded", action="store_true",
-                    help="also mask sections in excluded_sections_<marker>.csv, so "
-                         "they can be reviewed with a mask like every other "
-                         "section. They are marked excluded=1 in the summary.")
+                    help="mask every scanned section of the marker, from "
+                         "focus.csv, excluded ones included, so they can be "
+                         "reviewed with a mask like every other section. Needs "
+                         "no reformat first. Excluded ones are marked excluded=1 "
+                         "in the summary.")
     return ap
+
+
+def indexed_sections(paths):
+    """The sections in this marker's reformat index - the curated survivors.
+
+    04a WROTE that file, so 04a says what it is called. This used to rebuild
+    the name against the literal "AF488", which agreed with 04a only because
+    AF488 happens to be this study's DEFAULT_MARKER: for markers ['Mk1', 'Mk2'],
+    04a writes Mk2's index as reformat_index.csv while this read
+    reformat_index_Mk2.csv and failed - or worse, under a study whose second
+    marker is called AF488, read the other pass.
+    """
+    with open(paths["index"], newline="", encoding="utf-8") as fh:
+        return [{"id": r["id"], "animal": r["animal"],
+                 "section_order": r["section_order"], "excluded": 0}
+                for r in csv.DictReader(fh) if r["kind"] == "section"]
+
+
+def every_section(marker, paths):
+    """Every scanned section of this marker, from focus.csv, with `excluded`
+    recording what the curation says about it at the time of the run.
+
+    **Why this needs no reformat in front of it.** The detector reads the DAPI
+    overview and writes its mask in the overview frame; nothing about a
+    section's rotation or crop reaches it. With --include-excluded the set is
+    every scanned section anyway - the index's survivors plus the excluded
+    ones, which was always the whole of focus.csv for this marker - so asking
+    for the index first only made this stage wait for a reformat pass. Taken
+    from focus.csv it runs straight after the export, before the rotation
+    curator, and is finished by the time anyone needs it.
+
+    Excluded sections get a mask too, and that is the point of the flag: the
+    ROI curator's Review mode offers a with/without-mask comparison, and
+    reviewing an exclusion is exactly when you want to know whether an artifact
+    drove it. Masking one changes nothing downstream: 04a reads the mask only
+    for sections it reformats, and excluded ones are not in its index.
+    """
+    _, excluded = _RF.load_overrides(paths)
+    excluded, _ = _RF.apply_review(excluded, marker)
+    with open(QC_CSV, newline="", encoding="utf-8") as fh:
+        frames = _RF.frames_for(csv.DictReader(fh), marker)
+    return [{"id": r["scene_uid"], "animal": r["animal"],
+             "section_order": r["section_order"],
+             "excluded": int(r["scene_uid"] in excluded)} for r in frames]
 
 
 def main():
@@ -356,52 +402,14 @@ def main():
             except (KeyError, ValueError):
                 pass
 
-    # 04a WROTE these files, so 04a says what they are called. This used to
-    # rebuild the names against the literal "AF488", which agreed with 04a
-    # only because AF488 happens to be this study's DEFAULT_MARKER: for
-    # markers ['Mk1', 'Mk2'], 04a writes Mk2's index as reformat_index.csv
-    # while this read reformat_index_Mk2.csv and failed - or worse, under a
-    # study whose second marker is called AF488, read the other pass.
     paths = _RF.marker_paths(args.marker)
-    index_csv = paths["index"]
-    with open(index_csv, newline="", encoding="utf-8") as fh:
-        index = [{"id": r["id"], "animal": r["animal"],
-                  "section_order": r["section_order"], "excluded": 0}
-                 for r in csv.DictReader(fh) if r["kind"] == "section"]
-
-    # EXCLUDED SECTIONS GET A MASK TOO, on request.
-    #
-    # They are not in the index - that is what excluded means - so this stage
-    # never saw them, and the ROI curator's Review mode could offer a
-    # with/without-mask comparison for a kept section and nothing for a rejected
-    # one. Reviewing an exclusion is exactly when you want to know whether an
-    # artifact is what drove it.
-    #
-    # The identity comes from focus.csv, the only table that covers every
-    # scanned section; the index does not have them by construction. Masking one
-    # changes nothing downstream: 04a reads the mask only for sections it
-    # reformats, and these are not in its index either.
     if args.include_excluded:
-        exc_csv = paths["excluded"]
-        have = {r["id"] for r in index}
-        meta = {}
-        with open(QC_CSV, newline="", encoding="utf-8") as fh:
-            for r in csv.DictReader(fh):
-                meta[r["scene_uid"]] = r
-        n_add = 0
-        if os.path.exists(exc_csv):
-            with open(exc_csv, newline="", encoding="utf-8") as fh:
-                for r in csv.DictReader(fh):
-                    uid = r["scene_uid"]
-                    m = meta.get(uid)
-                    if uid in have or not m:
-                        continue
-                    index.append({"id": uid, "animal": m["animal"],
-                                  "section_order": m["section_order"],
-                                  "excluded": 1})
-                    n_add += 1
-        print(f"  including {n_add} excluded section(s) from "
-              f"{os.path.basename(exc_csv)}")
+        index = every_section(args.marker, paths)
+        n_exc = sum(r["excluded"] for r in index)
+        print(f"  masking all {len(index)} scanned section(s), {n_exc} of them "
+              f"excluded by the curation so far")
+    else:
+        index = indexed_sections(paths)
 
     if args.limit:
         index = index[: args.limit]
@@ -437,7 +445,8 @@ def main():
     # A preview that found no artifact in its first few sections reports; only
     # a full run with nothing masked is a missing-input error.
     if not rows and not args.preview:
-        raise SystemExit("nothing masked - run 04a_reformat.py first")
+        raise SystemExit("nothing masked - run 01_overviews.py first, or "
+                         "04a_reformat.py when running without --include-excluded")
 
     if previews:
         overlay(previews)

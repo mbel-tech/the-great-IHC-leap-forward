@@ -347,6 +347,30 @@ chk("one run with --thumbs builds the composite AND its thumbnail",
     os.path.exists(th) and Image.open(th).size == (256, 256)
     and Image.open(out).size[0] == O.render_side(M, NATIVE, 2.6))
 
+# Memory: the native rectangle is read in bands, not in one piece.
+calls = []
+def counting(x, y, w, h):
+    calls.append(h)
+    return reader(1)(x, y, w, h)
+whole = O.read_region(reader(1), (RX, RY, RX + RW - 1, RY + RH - 1), (RX, RY, RW, RH), 4,
+                      band_rows=10 ** 9)
+banded = O.read_region(counting, (RX, RY, RX + RW - 1, RY + RH - 1), (RX, RY, RW, RH), 4,
+                       band_rows=256)
+chk("a banded read gives exactly the single read's pixels",
+    np.array_equal(whole[0], banded[0]) and whole[1:] == banded[1:])
+chk("...fetching no more than one band of native rows at a time",
+    len(calls) > 1 and max(calls) <= 256, (len(calls), max(calls)))
+
+sys.argv = ["04o", "--marker", "AF568", "--include-excluded", "--force",
+            "--um-px", "0.65"]
+try:
+    O.main()
+    refused = False
+except SystemExit as e:
+    refused = "1.3" in str(e)
+chk("a whole-section render finer than 1.3 um/px is refused, with the reason",
+    refused)
+
 print()
 print("FAILED: %d" % fails if fails else "all passed")
 sys.exit(1 if fails else 0)

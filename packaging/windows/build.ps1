@@ -153,6 +153,13 @@ if (-not $NoR) {
 # test fixtures that are deliberately not valid Python.
 & $Py -m compileall -q -j 0 $Out | Out-Null
 
+# Where the size goes, so slimming is done from numbers.
+$sp = Join-Path $Runtime "Lib\site-packages"
+$dirs = @(Get-ChildItem $Out -Directory | Where-Object Name -ne "runtime") + @(Get-ChildItem $sp -Directory)
+$dirs | ForEach-Object {
+    [pscustomobject]@{ MB = [int]((Get-ChildItem $_.FullName -Recurse -File | Measure-Object Length -Sum).Sum / 1MB); Folder = $_.FullName.Substring($Out.Length + 1) }
+} | Sort-Object MB -Descending | Select-Object -First 25 | Format-Table -AutoSize | Out-String | Write-Host
+
 $size = (Get-ChildItem $Out -Recurse -File | Measure-Object Length -Sum).Sum / 1MB
 Write-Host ("Built {0} ({1:N0} MB)" -f $Out, $size)
 

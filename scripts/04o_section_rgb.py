@@ -83,18 +83,19 @@ own 16-bit planes through the same grid -> slide map 05a uses to put ROIs back
 on the slide, in one resampling, at `curation_render.um_per_px`. Binned by
 block mean first where that is coarser than native, so a downsample cannot
 alias. Tile field applied as 01 applies it, stretched by 04a's own rule
-(median - 1 MAD to median + 4 MAD of in-tissue pixels) but on the 16-bit
-values, so there is no second quantisation.
+(median - 1 MAD up to median + 4 MAD) on the 16-bit values, with the top
+raised where needed so no more than 0.1% of the tissue saturates (see
+`stretch`).
 
 Same frame, so the curator needs nothing new: it lifts landmarks placed on a
 768 composite into the larger picture by the width ratio (`syncFrame`), and
 every export is already divided back to the canonical 256 grid. And because
-the picture is built FROM 05a's map, a point on it is where 05a will measure;
-the 768 composite only approximated that.
+the picture is built FROM 05a's map, a point on it is where 05a will measure
+(the 768 composite agreed with it to about 0.1 grid pixel).
 
 What it does not undo: the scan's own JPEG-XR tile compression (fixed at
-acquisition, see docs/pipeline-guide.md), and the display stretch, which
-saturates the brightest in-tissue pixels exactly as before. Measurement never
+acquisition, see docs/pipeline-guide.md), and the brightest 0.1% of tissue,
+which the display range still saturates. Measurement never
 saw any of this - 05c reads native pixels from the CZI.
 
 Run:  python 04o_section_rgb.py
@@ -268,14 +269,36 @@ def bin_factor(native_um_px, out_um_px):
     return max(1, int(np.floor(out_um_px / native_um_px + 1e-9)))
 
 
-def sample_plane(read, X, Y, scene_rect, b, field=None):
-    """One CZI plane sampled at the absolute native coordinates (X, Y).
+def read_region(read, bounds, scene_rect, b):
+    """The native rectangle covering `bounds` = (xmin, ymin, xmax, ymax), read
+    once and block-averaged b x b. Returns (array, x0, y0), or None when the
+    bounds miss the scene.
 
-    `read(x, y, w, h)` returns that native rectangle of the plane. Only the
-    bounding box of the points is read, then block-averaged b x b and
-    interpolated bilinearly - a single resampling of the scanner's pixels.
-    Points outside the scene rectangle are 0, which is what 01 writes for a
-    corner that was never scanned.
+    Kept as the scanner's uint16 when b == 1: a float copy of a whole native
+    section is the allocation that ran a 12.7 GB laptop out of memory.
+    """
+    rx, ry, rw, rh = scene_rect
+    xmin, ymin, xmax, ymax = bounds
+    x0 = int(max(rx, np.floor(xmin) - b))
+    y0 = int(max(ry, np.floor(ymin) - b))
+    x1 = int(min(rx + rw, np.ceil(xmax) + b + 1))
+    y1 = int(min(ry + rh, np.ceil(ymax) + b + 1))
+    if x1 - x0 < b or y1 - y0 < b:
+        return None
+    w = (x1 - x0) // b * b
+    h = (y1 - y0) // b * b
+    raw = np.asarray(read(x0, y0, w, h))
+    if b > 1:
+        raw = raw.reshape(h // b, b, w // b, b).mean(axis=(1, 3), dtype=np.float32)
+    return raw, x0, y0
+
+
+def sample_region(region, X, Y, scene_rect, b, field=None):
+    """`region` (from read_region) sampled at absolute native (X, Y), float32.
+
+    Bilinear on the block-averaged pixels - a single resampling of the
+    scanner's values. Points outside the scene rectangle are 0, which is what
+    01 writes for a corner that was never scanned.
 
     The tile field is divided out AFTER sampling, at each sample's own
     position in the tile fold. It is smooth across a 12 px field cell, so the
@@ -283,36 +306,32 @@ def sample_plane(read, X, Y, scene_rect, b, field=None):
     output pixel instead of a pass over the whole native rectangle.
     """
     rx, ry, rw, rh = scene_rect
-    x0 = int(max(rx, np.floor(X.min()) - b))
-    y0 = int(max(ry, np.floor(Y.min()) - b))
-    x1 = int(min(rx + rw, np.ceil(X.max()) + b + 1))
-    y1 = int(min(ry + rh, np.ceil(Y.max()) + b + 1))
-    out = np.zeros(X.shape, np.float32)
-    if x1 - x0 < b or y1 - y0 < b:
-        return out
-    w = (x1 - x0) // b * b
-    h = (y1 - y0) // b * b
-    raw = np.asarray(read(x0, y0, w, h))
-    if b > 1:
-        raw = raw.reshape(h // b, b, w // b, b).mean(axis=(1, 3), dtype=np.float32)
-    else:
-        raw = raw.astype(np.float32)
+    if region is None:
+        return np.zeros(X.shape, np.float32)
+    raw, x0, y0 = region
     # A block covers native [x0 + j*b, x0 + (j+1)*b); its centre, in the
     # pixel-centre coordinates X is in, is x0 + j*b + (b - 1)/2.
     cx = (X - x0 - (b - 1) / 2.0) / b
     cy = (Y - y0 - (b - 1) / 2.0) / b
-    inside = (X >= rx - 0.5) & (X <= rx + rw - 0.5) & (Y >= ry - 0.5) & (Y <= ry + rh - 0.5)
-    vals = ndimage.map_coordinates(raw, [cy, cx], order=1, mode="nearest")
-    out = np.where(inside, vals, 0.0).astype(np.float32)
+    out = ndimage.map_coordinates(raw, [cy, cx], order=1, mode="nearest",
+                                  output=np.float32)
+    outside = (X < rx - 0.5) | (X > rx + rw - 0.5) | (Y < ry - 0.5) | (Y > ry + rh - 0.5)
+    out[outside] = 0.0
     if field is not None:
         n = field.shape[0]
         fx = (np.round(((X - rx) % PITCH_PX) / FIELD_DIVISOR).astype(np.int64)) % n
         fy = (np.round(((Y - ry) % PITCH_PX) / FIELD_DIVISOR).astype(np.int64)) % n
-        gain = field[fy, fx]
-        with np.errstate(divide="ignore", invalid="ignore"):
-            out = np.where(gain > 0.05, out / gain, out)
-        out = np.clip(out, 0, 65535).astype(np.float32)
+        gain = field[fy, fx].astype(np.float32)
+        ok = gain > 0.05
+        out[ok] /= gain[ok]
+        np.clip(out, 0, 65535, out=out)
     return out
+
+
+def sample_plane(read, X, Y, scene_rect, b, field=None):
+    """One CZI plane sampled at the absolute native coordinates (X, Y)."""
+    region = read_region(read, (X.min(), Y.min(), X.max(), Y.max()), scene_rect, b)
+    return sample_region(region, X, Y, scene_rect, b, field)
 
 
 def work_mask(dapi_overview):
@@ -347,45 +366,97 @@ def frame_masks(rep, U, V, wmask, artifact=None):
     return tissue, art
 
 
-def stretch(values, tissue, art=None):
-    """04a's display rule - median - 1 MAD to median + 4 MAD of in-tissue,
-    non-artifact pixels - applied to 16-bit values, to uint8.
+#: The top of the display range is never below this percentile of in-tissue
+#: pixels, so no more than this fraction of the tissue saturates.
+STRETCH_TOP_PCT = 99.9
+#: At most this many in-tissue pixels go into the statistics (an even stride).
+STRETCH_SAMPLE = 4_000_000
 
-    The rule is 04a's (`_stretch_to_grid`), so the picture reads the way the
-    curator is used to; what changes is that it is applied once, to the
-    scanner's values, instead of to an 8-bit image that already went through
-    01's display range.
+
+def stretch(values, tissue, art=None):
+    """In-tissue display range, to uint8, IN PLACE on `values` (float32).
+
+    The bottom is 04a's: median - 1 MAD of in-tissue, non-artifact pixels. The
+    top is 04a's median + 4 MAD OR the 99.9th percentile, whichever is higher.
+
+    04a's top alone was tuned on 8-bit pictures at about 8 um per pixel, where
+    a nucleus is averaged with the neuropil around it. Rendered at 2.6 um on
+    real sections it saturated 16-23% of the in-tissue DAPI - every nucleus a
+    flat disc - and filled bright marker regions solid. Saturation is detail
+    lost, so the top is lifted until at most 0.1% of the tissue reaches it.
+    Where 04a's top already saturates less than that (the 768 route did), it is
+    kept, so a picture is never dimmer than it needs to be.
     """
     keep = tissue if art is None else (tissue & ~art)
     inside = values[keep]
+    if inside.size > STRETCH_SAMPLE:
+        inside = inside[:: inside.size // STRETCH_SAMPLE + 1]
     if inside.size > 50:
         med = float(np.median(inside))
         mad = float(np.median(np.abs(inside - med))) * 1.4826
         if mad <= 0:
             mad = max(float(inside.std()), 1.0)
-        lo, hi = med - mad, med + 4.0 * mad
+        lo = med - mad
+        hi = max(med + 4.0 * mad, float(np.percentile(inside, STRETCH_TOP_PCT)))
     else:
         lo, hi = float(values.min()), float(values.max())
-    norm = np.clip((values - lo) / max(hi - lo, 1e-6), 0, 1) * 255.0
-    norm[~tissue] = 0
+    del inside
+    values -= lo
+    values *= 255.0 / max(hi - lo, 1e-6)
+    np.clip(values, 0, 255, out=values)
+    np.rint(values, out=values)
+    out = values.astype(np.uint8)
+    out[~tissue] = 0
     if art is not None:
-        norm[art] = 0
-    return np.rint(norm).astype(np.uint8)
+        out[art] = 0
+    return out
+
+
+#: Output rows sampled per pass. Bounds the coordinate arrays, which are
+#: float64 and would otherwise be four times the size of the picture.
+STRIP_ROWS = 512
 
 
 def render_from_czi(read_dapi, read_mark, rep, scene_rect, overview_um_px,
                     native_um_px, out_um_px, wmask, artifact=None,
                     dapi_field=None, mark_field=None):
-    """(dapi8, mark8) for one section on the canonical frame at `out_um_px`."""
+    """(dapi8, mark8) for one section on the canonical frame at `out_um_px`.
+
+    One plane at a time, sampled in strips of output rows, so the peak is one
+    native read of the section plus one float32 picture - not the whole output
+    grid's coordinates in float64, which is what ran native out of memory.
+    """
     M = czi_frame(rep, scene_rect, overview_um_px, native_um_px)
     side = render_side(M, native_um_px, out_um_px)
-    U, V = output_grid(side)
-    X, Y = GEO.apply_affine(M, U, V)
     b = bin_factor(native_um_px, out_um_px)
-    dapi = sample_plane(read_dapi, X, Y, scene_rect, b, dapi_field)
-    mark = sample_plane(read_mark, X, Y, scene_rect, b, mark_field)
-    tissue, art = frame_masks(rep, U, V, wmask, artifact)
-    return stretch(dapi, tissue, art), stretch(mark, tissue, art)
+    t = (np.arange(side, dtype=np.float64) + 0.5) * RF.GRID / side - 0.5
+    # The output square's corners bound everything it maps to (affine).
+    cu = np.array([t[0], t[-1], t[0], t[-1]])
+    cv = np.array([t[0], t[0], t[-1], t[-1]])
+    CX, CY = GEO.apply_affine(M, cu, cv)
+    bounds = (CX.min(), CY.min(), CX.max(), CY.max())
+
+    tissue = np.zeros((side, side), bool)
+    art = np.zeros((side, side), bool) if artifact is not None else None
+    for r0 in range(0, side, STRIP_ROWS):
+        U, V = np.meshgrid(t, t[r0:r0 + STRIP_ROWS])
+        ts, ar = frame_masks(rep, U, V, wmask, artifact)
+        tissue[r0:r0 + STRIP_ROWS] = ts
+        if art is not None:
+            art[r0:r0 + STRIP_ROWS] = ar
+
+    planes = []
+    for read, field in ((read_dapi, dapi_field), (read_mark, mark_field)):
+        region = read_region(read, bounds, scene_rect, b)
+        vals = np.zeros((side, side), np.float32)
+        for r0 in range(0, side, STRIP_ROWS):
+            U, V = np.meshgrid(t, t[r0:r0 + STRIP_ROWS])
+            X, Y = GEO.apply_affine(M, U, V)
+            vals[r0:r0 + STRIP_ROWS] = sample_region(region, X, Y, scene_rect, b, field)
+        del region
+        planes.append(stretch(vals, tissue, art))
+        del vals
+    return planes[0], planes[1]
 
 
 def worklist_uid_column(marker, fields):
@@ -506,6 +577,7 @@ class CziSource:
             print("  no tile fields found - rendering UNCORRECTED, as 01 would")
         self.native = float(GEO.BASE_PX_UM)
         self._path = None
+        self._cm = None
         self._doc = None
         self._rects = None
         self.rows = []
@@ -521,16 +593,17 @@ class CziSource:
         path = os.path.join(CONFIG["source_dir"], fname)
         if not os.path.exists(path):
             raise CziUnavailable(f"CZI not found: {path}")
-        self._doc = self._pyczi.open_czi(path)
-        self._doc.__enter__()
+        # open_czi is a context manager; the document is what __enter__ returns.
+        self._cm = self._pyczi.open_czi(path)
+        self._doc = self._cm.__enter__()
         self._rects = {int(k): (int(r.x), int(r.y), int(r.w), int(r.h))
                        for k, r in self._doc.scenes_bounding_rectangle.items()}
         self._path = fname
 
     def _close_doc(self):
         if self._doc is not None:
-            self._doc.__exit__(None, None, None)
-        self._doc = self._path = self._rects = None
+            self._cm.__exit__(None, None, None)
+        self._cm = self._doc = self._path = self._rects = None
 
     def render(self, uid, focus_row, dapi_png, extra, flip, art, cen, art_native, um_px):
         m = self.man.get(uid)
@@ -625,8 +698,11 @@ def main():
     ap.add_argument("--verify", action="store_true",
                     help="check the blue plane still equals the existing greyscale section")
     ap.add_argument("--thumbs", action="store_true",
-                    help="downscale the composites already built for this marker to "
-                         f"{RF.GRID}px for the review grid, and do nothing else")
+                    help=f"also write the {RF.GRID}px review-grid thumbnails. With "
+                         "--all, --include-excluded or --tier it builds the "
+                         "composites first and then thumbnails them, so one run "
+                         "does both; on its own it only shrinks the composites "
+                         "already built")
     ap.add_argument("--thumb-size", type=int, default=RF.GRID, metavar="N",
                     help=f"thumbnail edge in pixels (default {RF.GRID})")
     args = ap.parse_args()
@@ -638,7 +714,10 @@ def main():
 
     # Thumbnails are a resize of what is already on disk, so they need none of
     # the overrides, focus table or worklist below.
-    if args.thumbs:
+    # --thumbs alone is the old thumbnails-only run. Named together with a set
+    # to build, it is a rider on that build instead.
+    build_too = args.all or args.include_excluded or args.tier
+    if args.thumbs and not build_too:
         if not os.path.isdir(out_dir):
             print(f"no composites to shrink: {out_dir} does not exist")
             return
@@ -694,6 +773,8 @@ def main():
         return
     made = skipped = mismatched = existing = 0
     missing = []
+    if args.thumbs and not args.verify:
+        os.makedirs(out_dir + "_thumb", exist_ok=True)
 
     # --verify is a statement about the 256 greyscale, which only the overview
     # route reproduces; it never renders from the CZI.
@@ -768,6 +849,7 @@ def main():
                 continue
 
         Image.fromarray(composite(comp, img, colour, NUCLEAR_COLOUR)).save(out_path)
+        refresh_thumb(out_dir, uid, args.thumb_size)
         made += 1
 
     if czi is not None:
@@ -782,6 +864,10 @@ def main():
         print(f"  {len(missing)} not built:")
         for uid, why in missing[:10]:
             print(f"    {uid}  {why}")
+    # Every composite rebuilt above already re-shrank its own thumbnail; this
+    # fills in the ones that were left alone and never had one.
+    if args.thumbs and not args.verify:
+        write_thumbs(out_dir, args.thumb_size, force=False)
 
 
 if __name__ == "__main__":

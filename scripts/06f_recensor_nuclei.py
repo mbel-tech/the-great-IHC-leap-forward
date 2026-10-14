@@ -1,5 +1,13 @@
 """Stage 6f - recompute the per-nucleus `censored` flag from the RAW clipping mask.
 
+**A repair tool for older files now.** `05c_detect_rois.py` decides `censored`
+itself, from the native 16-bit marker pixels under each nucleus's own mask
+against the file's clip_ceiling - finer than anything this script can sample.
+Run this only on a `roi_nuclei.csv` written by an older 05c; on a current one it
+would REPLACE the native flag with a coarser one: a 5.2 um cell at the centroid
+misses a clipped pixel on a nucleus's rim, and flags a clean nucleus whose
+centroid shares a cell with a clipped neighbour (tests/test_native_censor.py).
+
 `04j_censor_clipped.py` used to build its censor mask by thresholding the
 exported 8-bit `_MARK.png` at 255. That image has already been through
 `apply_tile_field()`, and dividing by a gain above 1 lifts a pixel off the 16-bit

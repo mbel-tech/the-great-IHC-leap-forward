@@ -13,14 +13,15 @@ import json
 import os
 
 from PySide6.QtCore import QObject, Qt, QThread, Signal
-from PySide6.QtGui import QFont, QKeySequence
+from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
-    QFileDialog, QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMainWindow,
+    QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel, QListWidgetItem, QMainWindow,
     QMessageBox, QPlainTextEdit, QPushButton, QStackedWidget, QVBoxLayout, QWidget)
 
 import ls_project as LP
 import stages as S
 import state as ST
+import theme as T
 import workflow as W
 from curator_view import CuratorView, LocalServer
 from import_slides import ImportScreen
@@ -28,7 +29,7 @@ from project_session import ProjectSession, now_iso
 from runner import Runner
 from study_picker import reveal
 from screens import CurateScreen, HomeScreen, SetupScreen, StageListScreen
-from widgets import COLOUR, QUIET
+from widgets import COLOUR, QUIET, StepList, UnblindDialog
 
 
 class _Job(QObject):
@@ -51,7 +52,6 @@ class ActivityDrawer(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("drawer")
-        self.setStyleSheet("#drawer{border-top:1px solid rgba(128,128,128,0.4)}")
         lay = QVBoxLayout(self)
         lay.setContentsMargins(10, 4, 10, 4)
         top = QHBoxLayout()
@@ -73,8 +73,9 @@ class ActivityDrawer(QFrame):
         top.addWidget(self.toggle)
         lay.addLayout(top)
         self.log = QPlainTextEdit()
+        self.log.setObjectName("log")
         self.log.setReadOnly(True)
-        self.log.setFont(QFont("Consolas", 9))
+        self.log.setFont(T.font(12, mono=True))
         self.log.setMaximumBlockCount(20000)
         self.log.setMinimumHeight(180)
         self.log.setVisible(False)
@@ -158,18 +159,42 @@ class MainWindow(QMainWindow):
         for scr in self.lists.values():
             scr.open_requested.connect(self.open_curator)
 
-        # ---- the step bar --------------------------------------------------
-        self.nav = QListWidget()
-        self.nav.setFixedWidth(220)
-        self.nav.setSpacing(2)
+        # ---- the step list ---------------------------------------------------
+        # The six steps, then the two screens most people never need under
+        # Advanced at the foot. Between 236 and 280 px: narrower and the
+        # descriptions wrap to three lines, wider and the screens lose room.
+        self.nav = StepList()
         for i, scr in enumerate(W.STEPS):
             it = QListWidgetItem(scr.title)
             it.setData(Qt.UserRole, scr.sid)
-            f = it.font()
-            f.setPointSize(f.pointSize() + 1)
-            it.setFont(f)
             self.nav.addItem(it)
+            self.nav.set_step(i, title=scr.title, badge=str(i) if i else "⌂",
+                              sub=scr.subtitle)
         self.nav.currentItemChanged.connect(self._nav_changed)
+        steps = QFrame()
+        steps.setObjectName("stepColumn")
+        steps.setMinimumWidth(236)
+        steps.setMaximumWidth(280)
+        sl = QVBoxLayout(steps)
+        sl.setContentsMargins(0, 8, 0, 10)
+        sl.setSpacing(2)
+        sl.addWidget(self.nav, 1)
+        adv = QLabel("ADVANCED")
+        adv.setObjectName("groupLabel")
+        adv.setContentsMargins(16, 6, 0, 2)
+        sl.addWidget(adv)
+        self.advanced = {}
+        for sid, label in (("all", "All stages"), ("instrument", "Instrument characterisation")):
+            b = QPushButton(label)
+            b.setObjectName("advButton")
+            b.setCheckable(True)
+            b.setToolTip(W.SCREENS[sid].intro)
+            b.clicked.connect(lambda _=False, s=sid: self.goto(s))
+            box = QHBoxLayout()
+            box.setContentsMargins(6, 0, 6, 0)
+            box.addWidget(b)
+            sl.addLayout(box)
+            self.advanced[sid] = b
 
         # ---- the activity drawer -------------------------------------------
         self.drawer = ActivityDrawer()
@@ -180,7 +205,7 @@ class MainWindow(QMainWindow):
         hb = QHBoxLayout(body)
         hb.setContentsMargins(0, 0, 0, 0)
         hb.setSpacing(0)
-        hb.addWidget(self.nav)
+        hb.addWidget(steps)
         hb.addWidget(self.stack, 1)
         central = QWidget()
         vb = QVBoxLayout(central)
@@ -190,6 +215,7 @@ class MainWindow(QMainWindow):
         vb.addWidget(self.drawer)
         self.setCentralWidget(central)
 
+        self._build_status_bar()
         self._build_menu()
         self._update_title()
         self.nav.setCurrentRow(0)
@@ -208,6 +234,31 @@ class MainWindow(QMainWindow):
             self._log(f"could not write the state export page: {e}")
         held = ST.CurationStore(self.out_root, lambda: self.session.project).all_present()
         self._log("curation state on disk: " + (", ".join(held) if held else "none yet"))
+
+    # ---- status bar -------------------------------------------------------
+
+    def _build_status_bar(self):
+        """Study on the left, what is running in the middle, outputs on the right."""
+        bar = self.statusBar()
+        self.sb_study = QLabel("")
+        self.sb_state = QLabel("Idle")
+        self.sb_state.setAlignment(Qt.AlignCenter)
+        self.sb_out = QLabel("")
+        self.sb_out.setFont(T.font(12, mono=True))
+        self.sb_out.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        for w in (self.sb_study, self.sb_state, self.sb_out):
+            w.setContentsMargins(8, 0, 8, 0)
+        bar.addWidget(self.sb_study)
+        bar.addWidget(self.sb_state, 1)
+        bar.addPermanentWidget(self.sb_out)
+        self._set_run_state("Idle")
+
+    def _set_run_state(self, text, state=None):
+        """The status bar's middle: Idle in grey, or what runs in the running colour."""
+        if not hasattr(self, "sb_state"):
+            return
+        self.sb_state.setText(text)
+        self.sb_state.setStyleSheet(f"color:{COLOUR[state]}" if state else QUIET)
 
     # ---- menus ------------------------------------------------------------
 
@@ -473,6 +524,8 @@ class MainWindow(QMainWindow):
         page = self.pages.get(sid)
         if page is not None:
             self.stack.setCurrentWidget(page)
+        for key, b in self.advanced.items():
+            b.setChecked(key == sid)
         if sid == "curate":
             self.curate.ensure_page()
 
@@ -532,17 +585,17 @@ class MainWindow(QMainWindow):
         sd, st = self.setup.completion()
         self.home.refresh(study, project, sd, st, busy, self.setup.missing())
         for i, scr in enumerate(W.STEPS):
-            it = self.nav.item(i)
             if scr.sid == "home":
-                text = scr.title
-            elif scr.sid == "setup":
-                text = f"{scr.title}\n   {sd} of {st} cards"
+                words, complete = "", False
             else:
-                done, total = W.progress(scr.sid, study)
-                text = f"{scr.title}\n   {done} of {total} done"
-            it.setText(f"{i}   {text}" if i else f"⌂   {text}")
-            it.setToolTip(scr.intro)
-        self.statusBar().showMessage(f"{self._study_name()}   ·   outputs  {self.out_root}")
+                done, total = (sd, st) if scr.sid == "setup" else W.step_progress(scr.sid, study)
+                words = W.progress_words(scr.sid, done, total)
+                complete = bool(total) and done >= total
+            self.nav.set_step(i, title=scr.title, badge=str(i) if i else "⌂",
+                              sub=scr.subtitle, progress=words, complete=complete)
+        self.sb_study.setText(f"Study: {self._study_name()}")
+        self.sb_out.setText(self.out_root)
+        self.sb_out.setToolTip(f"Outputs are written to {self.out_root}")
 
     # ---- running ----------------------------------------------------------
 
@@ -557,16 +610,8 @@ class MainWindow(QMainWindow):
         if not stages:
             return False
         unblinding = [st for st in stages if st.unblinds]
-        if unblinding:
-            names = ", ".join(W.display_title(st) for st in unblinding)
-            ans = QMessageBox.warning(
-                self, "Unblind the analysis?",
-                f"{names} reads the treatment groups for the first time.\n\n"
-                "Everything before it is blind by construction. Once it has run, the "
-                "results carry group labels.\n\nRun it now?",
-                QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
-            if ans != QMessageBox.Yes:
-                return False
+        if unblinding and not self._confirm_unblind(unblinding):
+            return False
         if not self.session.ensure_saved_for_run(self, auto=True):
             return False
         line = self.session.sync_curation(self)
@@ -580,6 +625,28 @@ class MainWindow(QMainWindow):
             self._running[sid] = "queued"
         self.drawer.stop_btn.setVisible(len(self._queue) > 1)
         self._run_next()
+        return True
+
+    def _confirm_unblind(self, unblinding):
+        """Ask before the treatment groups are read, and which workbook to read.
+
+        The workbook is the unblinding stage's own --xlsx option, so what is
+        chosen here is what its Options panel shows, and is kept in the project.
+        """
+        names = ", ".join(W.display_title(st, self.study()) for st in unblinding)
+        sid = "join_sampling" if any(st.sid == "join_sampling" for st in unblinding) else None
+        project = self.session.project
+        before = project.stage_options(sid).get("--xlsx", "") if sid else ""
+        dlg = UnblindDialog(names, before, self)
+        if not sid:
+            dlg.field.setEnabled(False)
+        if dlg.exec() != QDialog.Accepted:
+            return False
+        chosen = dlg.workbook()
+        if sid and chosen != (before or ""):
+            values = dict(project.stage_options(sid))
+            values["--xlsx"] = chosen
+            self._options_changed(sid, values)
         return True
 
     def _request_stop(self):
@@ -596,6 +663,7 @@ class MainWindow(QMainWindow):
             self.drawer.stop_btn.setVisible(False)
             self.drawer.stop_btn.setEnabled(True)
             self.drawer.state.setText("Stopped" if stopped else "Idle")
+            self._set_run_state("Stopped" if stopped else "Idle")
             self.refresh()
             return
         sid = self._queue.pop(0)
@@ -612,6 +680,9 @@ class MainWindow(QMainWindow):
         self.drawer.state.setText(f"Running {title}"
                                   + (f"  ({n} of {self._queue_total})" if self._queue_total > 1 else ""))
         self.drawer.state.setStyleSheet(f"color:{COLOUR['running']}")
+        self._set_run_state(f"Running: {title}"
+                            + (f"  ({n} of {self._queue_total})" if self._queue_total > 1 else ""),
+                            "running")
         self._log(f"\n=== {base.title} ===")
         if values:
             self._log(f"options: {values}")
@@ -655,6 +726,7 @@ class MainWindow(QMainWindow):
                     done += " (" + "; ".join(self._shortfalls) + ", see log)"
                     self.drawer.state.setStyleSheet(f"color:{COLOUR['waiting']}")
                 self.drawer.state.setText(done)
+                self._set_run_state("Idle")
             return
         self._running[st.sid] = "failed"
         for sid in self._queue:
@@ -663,6 +735,7 @@ class MainWindow(QMainWindow):
         self.drawer.stop_btn.setVisible(False)
         self.drawer.state.setText(f"{W.display_title(st)} failed")
         self.drawer.state.setStyleSheet(f"color:{COLOUR['failed']}")
+        self._set_run_state(f"Failed: {W.display_title(st)}", "failed")
         self._log(f"--- {st.title}: FAILED\n{res.error}")
         self.refresh()
         QMessageBox.warning(self, f"{W.display_title(st)} failed",

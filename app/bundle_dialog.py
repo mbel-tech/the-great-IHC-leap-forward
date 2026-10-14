@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QCheckBox, QDialog, QDialogButtonBox, QLabel, QMessageBox, QVBoxLayout)
 
 import ls_bundle as LB
+import theme as T
 
 
 def _human(n):
@@ -33,7 +34,7 @@ class ExportCopyDialog(QDialog):
         self.operator = QCheckBox("Also include operator CSVs (layout, rotations, exclusions)")
         self.atlases = QCheckBox("Also include this study's imported atlases")
         self.size = QLabel("")
-        self.size.setStyleSheet("color:#9aa0a8;font-size:11px")
+        self.size.setStyleSheet(T.HINT)
         self.size.setWordWrap(True)
         for box in (self.operator, self.atlases):
             box.stateChanged.connect(self._refresh)

@@ -98,6 +98,9 @@ def main():
 
     app = QApplication(sys.argv)
     app.setApplicationName("LS IHC pipeline")
+    # Before any window exists, so the study picker is drawn light too.
+    import theme
+    theme.apply(app)
 
     try:
         from study_picker import ensure_study

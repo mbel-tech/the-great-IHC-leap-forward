@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 import slides as SL
+import theme as T
 
 
 class ImportScreen(QWidget):
@@ -45,7 +46,7 @@ class ImportScreen(QWidget):
         self.summary.setWordWrap(True)
         self.note = QLabel("")
         self.note.setWordWrap(True)
-        self.note.setStyleSheet("color:#9aa0a8")
+        self.note.setStyleSheet(T.QUIET)
 
         self.table = QTableWidget(0, 5)
         self.table.setHorizontalHeaderLabels(
@@ -112,7 +113,7 @@ class ImportScreen(QWidget):
                     it.setForeground(Qt.red)
                 self.table.setItem(i, c, it)
 
-        bad = f" &nbsp; <span style='color:#f85149'><b>{s['n_bad']} not "\
+        bad = f" &nbsp; <span style='color:{T.DANGER}'><b>{s['n_bad']} not "\
               f"recognised</b> - these would be ignored by every stage</span>" \
               if s["n_bad"] else ""
         self.summary.setText(

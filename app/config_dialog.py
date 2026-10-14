@@ -27,6 +27,7 @@ import ls_atlas_import as AI
 import ls_config as LC
 import ls_jsonio
 from channel_editor import ChannelEditor
+import theme as T
 from widgets import InfoButton
 
 
@@ -36,6 +37,8 @@ from widgets import InfoButton
 NUCLEAR_ROUTE = "On the counterstain (DAPI)"
 OWN_ROUTE = "On this marker's own channel"
 OWN_ENTRY = {"segment": "own", "backend": "stardist", "nucleus_shaped": True}
+#: Said under a marker whose nuclei are found on its own channel: what that costs.
+OWN_CONSEQUENCE = "Total cell density is withheld for this marker."
 
 
 class _SegmentationRow(QWidget):
@@ -60,18 +63,31 @@ class _SegmentationRow(QWidget):
         current = (self.value() or {}) if self.combos else self.block
         while self.lay.rowCount():
             self.lay.removeRow(0)
-        self.combos = {}
+        self.combos, self.notes = {}, {}
         for m in markers:
             combo = QComboBox()
             combo.addItems([NUCLEAR_ROUTE, OWN_ROUTE])
             entry = current.get(m)
             own = isinstance(entry, dict) and (entry.get("segment") or "own") == "own"
             combo.setCurrentText(OWN_ROUTE if own else NUCLEAR_ROUTE)
-            self.combos[m] = combo
-            self.lay.addRow(m, combo)
+            # The choice changes what the results can report, so say so beside
+            # it rather than only in the (i).
+            note = QLabel(OWN_CONSEQUENCE)
+            note.setStyleSheet(f"color:{T.WARN};font-size:12px")
+            note.setVisible(own)
+            combo.currentTextChanged.connect(
+                lambda text, n=note: n.setVisible(text == OWN_ROUTE))
+            cell = QWidget()
+            cl = QVBoxLayout(cell)
+            cl.setContentsMargins(0, 0, 0, 0)
+            cl.setSpacing(2)
+            cl.addWidget(combo)
+            cl.addWidget(note)
+            self.combos[m], self.notes[m] = combo, note
+            self.lay.addRow(m, cell)
         if not markers:
             note = QLabel("No markers declared yet (Channels and markers...).")
-            note.setStyleSheet("color:#9aa0a8")
+            note.setStyleSheet(T.QUIET)
             self.lay.addRow(note)
 
     def value(self):
@@ -220,14 +236,14 @@ def key_info(key):
         parts.append(f"<p>{_esc(key.note)}</p>")
     if key.default is not None:
         shown = json.dumps(key.default) if not isinstance(key.default, str) else key.default
-        parts.append(f"<p style='color:#8b949e'>Default: {_esc(shown)}</p>")
+        parts.append(f"<p style='{T.QUIET}'>Default: {_esc(shown)}</p>")
     elif key.required:
-        parts.append("<p style='color:#8b949e'>Required: there is no default.</p>")
+        parts.append(f"<p style='{T.QUIET}'>Required: there is no default.</p>")
     if getattr(key, "minimum", None) is not None:
-        parts.append("<p style='color:#8b949e'>Smallest allowed: %s</p>" % _esc(key.minimum))
+        parts.append(f"<p style='{T.QUIET}'>Smallest allowed: %s</p>" % _esc(key.minimum))
     if key.consumers:
-        parts.append("<p style='color:#8b949e'>Read by: %s</p>" % _esc(", ".join(key.consumers)))
-    parts.append(f"<p style='color:#8b949e'>Stored as <code>{_esc(key.path)}</code></p>")
+        parts.append(f"<p style='{T.QUIET}'>Read by: %s</p>" % _esc(", ".join(key.consumers)))
+    parts.append(f"<p style='{T.QUIET}'>Stored as <code>{_esc(key.path)}</code></p>")
     return "".join(parts)
 
 
@@ -242,7 +258,7 @@ class SettingsForm(QWidget):
     """
 
     def __init__(self, repo_root, path=None, study_name=None, parent=None, project=None,
-                 keys=None):
+                 keys=None, headings=None):
         super().__init__(parent)
         self.repo_root = repo_root
         # With a project, this edits the project IN MEMORY: Apply changes it and
@@ -272,6 +288,14 @@ class SettingsForm(QWidget):
         self.rows = {}
         self.widgets = {}
         for key in fields:
+            # A sub-heading inside a card that holds two groups of settings.
+            if headings and key.path in headings:
+                title, line = headings[key.path]
+                head = QLabel(f"<b>{_esc(title)}</b><br><span style='{T.QUIET}'>"
+                              f"{_esc(line)}</span>")
+                head.setWordWrap(True)
+                head.setContentsMargins(0, 10 if self.rows else 0, 0, 4)
+                form.addRow(head)
             found, value = LC._get(cfg, key.parts)
             if key.path == "slide_naming.pattern":
                 widget = _PatternRow(
@@ -302,7 +326,7 @@ class SettingsForm(QWidget):
             holder.setLayout(line)
             form.addRow(key.label + ("  *" if key.required else ""), holder)
             hint = QLabel(key.doc)
-            hint.setStyleSheet("color:#9aa0a8;font-size:11px")
+            hint.setStyleSheet(T.HINT)
             hint.setWordWrap(True)
             form.addRow("", hint)
             if key.path == "acquisition.layout":
@@ -340,7 +364,7 @@ class SettingsForm(QWidget):
         hint = QLabel("For a marker whose scan has no usable DAPI (the LS PCNA scans), "
                       "find its nuclei on the marker itself. Its fraction positive and "
                       "total cell density are then not reported; positive density is.")
-        hint.setStyleSheet("color:#9aa0a8;font-size:11px")
+        hint.setStyleSheet(T.HINT)
         hint.setWordWrap(True)
         form.addRow("", hint)
         self._seg_parts = (label, holder, hint)
@@ -629,7 +653,7 @@ class ConfigDialog(QDialog):
         note = QLabel("Changes apply to the open project and are saved with it, or "
                       "automatically before a stage runs." if self.project
                       else f"Writing to {self.path}")
-        note.setStyleSheet("color:#9aa0a8;font-size:11px")
+        note.setStyleSheet(T.HINT)
         note.setWordWrap(True)
 
         lay = QVBoxLayout(self)

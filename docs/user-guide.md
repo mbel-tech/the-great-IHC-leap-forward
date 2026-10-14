@@ -17,7 +17,7 @@ The step list on the left shows six screens in the order you work, each with a o
 | 2 | **Prepare** | Press **Run all remaining**. It runs straight through to the ROI curator. | The step list shows Prepare done and Next up sends you to Curate. |
 | 3 | **Curate** | In the ROI curator, bring back any section that was set aside by mistake, match each section to its atlas plate and draw the brain regions. Then press **Done: export and go to Measure**. | The curator is exported. |
 | 4 | **Measure** | Press **Run all remaining**. Nucleus detection takes hours and can be stopped and resumed. | Every section is measured. |
-| 5 | **Results** | Press **Unblind**, check the sampling workbook, confirm, then build the spreadsheets and figures. | `roi_dataset.xlsx` is in your results folder. |
+| 5 | **Results** | Press **Run** on *Join the experiment*, check the sampling workbook in the box that opens and press **Unblind and run**. Then press **Run all remaining** for the spreadsheets and figures. | `roi_dataset.xlsx` is in your results folder. |
 
 Three habits will save you trouble:
 
@@ -82,12 +82,14 @@ Nucleus detection needs StarDist. The installer and `work/appenv` both have it. 
 - **Screen header.** The screen's title and (i), a short sentence on what it is for, and a blue **Your part** box saying what you do there.
 - **Notices.** An amber box above the stages warns you about something to fix first, for example results measured before a fix (section 10).
 - **Stage rows.** Each stage shows a status dot (green done, grey to do, purple waiting for you, blue running, red failed, amber waiting), its name, its number (for example `04g`) and one plain sentence on what it does. Its buttons are:
-  - **Run** runs that stage on its own. On a curator stage the button says **Build page**.
+  - **Run** runs that stage on its own; once a stage is done the button says Redo. On a curator stage the button says **Build page**.
   - **Open** shows a curator page. Stages that make pictures or results have their own Open button instead: *Open pictures*, *Open sheets* or *Open results* opens that folder.
   - **Options** lists the stage's switches. It says *Options (2 changed)* when you have changed any.
   - **(i)** explains what the stage needs first, what it leaves behind, when it last ran, and the technical detail underneath.
 - **Run all remaining.** On Prepare, Measure and Results, runs every stage on that screen that has not finished, in order. It stops at the first failure and never runs past a curator you have not exported. It never unblinds: that always waits for you to press it and confirm. It also leaves out the scene pictures, which you run on their own.
 - **Status bar (bottom).** Shows what is running and its last log line. When a run finishes, it says if a stage could not make everything (for example *3 scenes not drawn, see log*). **Show log** opens the full log; **Stop after this stage** finishes the current stage cleanly and stops.
+
+![The step list: six steps with their descriptions and progress, and the Advanced group at the foot](img/user-guide/10-step-list.png)
 
 ### Menus
 
@@ -108,6 +110,8 @@ A **project** is one study in one file: its settings, every decision you made in
 
 To hand a study to someone else, use **File > Export a copy**. The output folder holds the images and results and is not part of the project file.
 
+![The Project screen: the study strip, the Next up card with Go, progress for each step and recent activity](img/user-guide/01-project.png)
+
 ## 4. Set up: telling the app about your study
 
 Set up is where you describe the study once: where the slides are, how their files are named, how they were imaged, which atlas to use and how nuclei are counted. On a new study, do the tabs left to right: Slides, then six cards of settings (Study and folders, Slide file names, Microscope and channels, Pictures, Atlas, Nucleus detection). Come back any time to change a setting; stages read the new value the next time they run.
@@ -122,6 +126,8 @@ Every field has a short hint, an **(i)** with the full reasoning and which stage
 2. Read the table. It shows what the app read from each file name: animal, slide and replicate.
 3. **Fix every red row before you go on.** A red row is a file whose name does not fit the naming pattern, and every stage would silently ignore it. Fix the pattern on the *Slide file names* card, or rename the file.
 4. Press **Use these slides**.
+
+![The Slides tab: one file whose name does not fit the pattern is shown in red and would be ignored](img/user-guide/02-setup-slides.png)
 
 Once a folder is set, the top of the Slides tab says which folder the study reads and how many files the slide headers list, and the tab gets a ✓. For the LS study that is 444 files from `D:\SLIDES HE DEC 2025 LS`. Use the buttons only to change it.
 
@@ -164,9 +170,13 @@ In the LS study the pattern also accepts a suffix after a dash, so a name such a
 
 **Find nuclei** (paired studies only) has one row per marker. Leave it on *On the counterstain (DAPI)* unless a marker's scan has no usable DAPI. For such a marker, choose *On this marker's own channel*. The LS study needs this for PCNA (AF488), because its DAPI plane is noise at full resolution. Use it only for a marker whose signal is in the nucleus, as PCNA's is. Its fraction positive and total cell density are then not reported; positive density is. Section 7 explains why.
 
+![Microscope and channels, with Find nuclei set to the marker's own channel for AF488 (PCNA)](img/user-guide/03-setup-microscope.png)
+
 ### Pictures
 
 This card has two parts: the pictures the ROI curator shows, and the optional pictures of whole scenes.
+
+![The Pictures card, with its Curation pictures and Scene pictures parts](img/user-guide/04-setup-pictures.png)
 
 **Curation pictures.** How sharp the colour pictures in the ROI curator are, and where their pixels come from. Measuring always reads the scan's own pixels, whatever you set here.
 
@@ -217,6 +227,8 @@ Markers whose nuclei are found on their own channel (PCNA in the LS study) are s
 Prepare reads the slides, checks them, builds the atlas, and turns every section into a clean, upright, masked picture ready for curation. Press **Run all remaining** and let it go. It runs straight through to the ROI curator, with one short stop for the atlas plate boxes if you use the salmon atlas.
 
 **Goes in:** the slide files and your Set up settings. **Comes out:** one standard picture per section, the list of sections that can be measured, and the pages the curators show you. Everything is written under your Analysis output folder; the paths below are relative to it.
+
+![The Prepare screen: Your part, Run all remaining, and the first stages with their Options, Open and Redo buttons](img/user-guide/05-prepare.png)
 
 > In the LS study the first marker is pERK and the second is PCNA. Stage names in the app use your own marker names. All curation is done on the PCNA scans first and then copied onto the matching pERK scans.
 
@@ -313,6 +325,8 @@ The buttons above the page are:
 
 The Curate screen also offers **Continue Prepare** after the atlas plate boxes, and **Bring in browser exports** if you curated in a web browser.
 
+![The Curate screen with the ROI curator inside the app. Done: export and go to Measure is in the bar above the page](img/user-guide/06-curate.png)
+
 In every curator, **a dashed amber border is a proposal the program made; a solid red border is a decision a person made.**
 
 ### Atlas plate boxes (salmon atlas only)
@@ -333,6 +347,8 @@ This is the main curation job, and the only stop in a normal run. For each secti
 - **Two panes.** The section on the left, the atlas plate on the right. On a narrow screen they stack, and the page scrolls.
 - **Info cards (right or below).** The section, the plate, its landmarks, the regions placed, and the background discs, each with a short count or advice.
 - **Section strip (bottom).** Every section, grouped by animal, as small pictures you click to jump to.
+
+![The ROI curator: top bar, tool rail, coach line, section and plate panes, info cards and the section strip](img/user-guide/11-roi-curator.png)
 
 **The first time you open it**, a pop-up asks which regions you will draw. The choice applies to the whole study; press **o** or **ROIs…** to change it. Chosen regions are numbered 1, 2, 3 on the plate in the order you picked them; the rest are greyed out.
 
@@ -385,7 +401,9 @@ Measure puts your regions back onto the original slides, finds every nucleus ins
 
 **Goes in:** the regions you drew in the ROI curator. **Comes out:** `results/roi_nuclei.csv`, one row per nucleus, and the per-region numbers built from it.
 
-> **The amber "measured before the 14 Oct fixes" notice.** If your nuclei were measured before the fixes to region placement (half a pixel) and to the saturated-nucleus flag (now read from the scan's own pixels), Measure and Results show an amber notice. Do what it says: run *Place the ROIs on the slide* again, then *Detect and measure nuclei* with **Options > Redo … already done**, then rebuild Results. The notice goes away once the nuclei are measured again.
+> **The amber "These results are older than the ROI fixes" notice.** If your nuclei were measured before the fixes to region placement (half a pixel) and to the saturated-nucleus flag (now read from the scan's own pixels), Measure and Results show an amber notice. Do what it says: run *Place the ROIs on the slide* again, then *Detect and measure nuclei* with **Options > Redo … already done**, then rebuild Results. The notice goes away once the nuclei are measured again; Dismiss hides it until then.
+
+![The Measure screen with the amber notice about results measured before the fixes](img/user-guide/07-measure.png)
 
 | Stage | What it does | Makes | Options |
 | --- | --- | --- | --- |
@@ -455,7 +473,7 @@ For PCNA, only the positive density is reported; see *PCNA: counted on its own c
 
 **What good looks like.** The check pictures show nuclei outlined one by one, with few red ones. The false-positive rate is low and similar across animals.
 
-**Common problems.** "Detection greyed out" means the app was started without StarDist; use `the installed app, or run_app.bat with work/appenv`. A section with no background disc is left out of positivity; go back to the ROI curator and add one. A section refused in 05a has geometry that cannot be rebuilt; check it in the curator's Review.
+**Common problems.** "Detection greyed out" means the app was started without StarDist; use the installed app, or `run_app.bat` with `work/appenv`. A section with no background disc is left out of positivity; go back to the ROI curator and add one. A section refused in 05a has geometry that cannot be rebuilt; check it in the curator's Review.
 
 ### Repair older outputs
 
@@ -471,7 +489,11 @@ Three tools fix results files written by older versions of the pipeline. They ar
 
 Results joins the measurements to the experiment's treatment groups and writes the spreadsheets and figures. **The first stage unblinds the analysis.** When the measurements are in, Next up says *Measurements are in. Unblind and build the results.* **Run all remaining never unblinds**; it always waits for you.
 
-Pressing **Run** on *Join the treatment groups* opens a box titled **Unblind the analysis?** It explains that this stage reads the treatment groups for the first time, and that everything before it was keyed by animal only. The **Sampling workbook (.xlsx)** field shows which workbook will be read; leave it empty to use the one in the slide folder, or press **Choose…** to pick another. Do this once the regions and detection settings are final. Press **Unblind and run** to go ahead, or **Cancel**.
+Pressing **Run** on *Join the experiment (06b, marked ⚠ unblinds; its button reads Run…)* opens a box titled **Unblind the analysis?** It explains that this stage reads the treatment groups for the first time, and that everything before it was keyed by animal only. The **Sampling workbook (.xlsx)** field shows which workbook will be read; leave it empty to use the one in the slide folder, or press **Choose…** to pick another. Do this once the regions and detection settings are final. Press **Unblind and run** to go ahead, or **Cancel**.
+
+![The Unblind the analysis? box, with the sampling workbook field](img/user-guide/09-unblind-dialog.png)
+
+![The Results screen: Join the experiment is marked as unblinding, then the spreadsheet and figure stages](img/user-guide/08-results.png)
 
 | Stage | What it does | Makes |
 | --- | --- | --- |

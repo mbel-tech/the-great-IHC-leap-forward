@@ -60,7 +60,7 @@ class Screen:
 #: Ids only one of the two stage tables (older, streamlined) defines. Listed
 #: so a typo in a screen part is still caught by the tests.
 OTHER_TABLE = {"reformat_pcna_curated", "reformat_perk", "render_excluded_perk",
-               "thumbs_pcna", "thumbs_perk", "build_results"}
+               "thumbs_pcna", "thumbs_perk", "build_results", "scene_renders"}
 
 _MASKS = ("artifact_pcna", "artifact_perk")
 _EARLY_MASKS = [m for m in _MASKS if m in S.BY_ID and S.BY_ID[m].needs == ["overviews"]]
@@ -117,7 +117,7 @@ PREPARE = Screen(
         ("Read and check the slides",
          "Reads every slide file, checks it, exports a picture of every section and "
          "measures where the camera saturated.",
-         ["manifest", "verify", "czi_selftest", "overviews", "contactsheets", "pair",
+         ["manifest", "verify", "czi_selftest", "overviews", "contactsheets", "scene_renders", "pair",
           "channel_identity", "saturation_raw", "saturation_map"]),
         ("Build the atlas",
          "Turns the atlas into a set of plates with the regions marked. Only the "
@@ -227,6 +227,14 @@ SCREENS = {s.sid: s for s in STEPS + EXTRA}
 #: older version wrote up to date, and is run by hand when that is the case.
 REPAIRS = {"recensor", "off_tissue", "seg_provenance"}
 
+#: Pictures for looking at that nothing downstream reads. Rendering every scene
+#: takes long, so they get their own Run button instead of joining Run all
+#: remaining, and they do not count towards a screen's progress.
+VIEW_ONLY = {"scene_renders"}
+
+#: Never planned by Run all remaining.
+BY_HAND = REPAIRS | VIEW_ONLY
+
 #: Where the table has the one-pass Build results stage, Run all remaining uses
 #: it instead of the spreadsheet stages it already runs. They keep their own
 #: Run buttons.
@@ -262,6 +270,9 @@ PLAIN = {
                  "scores each for focus and saturation.",
     "contactsheets": "Puts each animal's sections side by side in brain order, so you can "
                      "browse the whole dataset quickly.",
+    "scene_renders": "A picture of every scene on every slide, drawn from the scan files for "
+                     "looking at. Each marker gets two folders: the stain with the nuclei, and "
+                     "the stain alone in grey. Nothing is measured from them.",
     "pair": "Works out which {m0} scan and which {m1} scan show the same physical section.",
     "channel_identity": "Suggests which dye carries which marker from how the signal looks. "
                         "It only reports; it changes no setting.",
@@ -472,6 +483,21 @@ OPTIONS = {
         _limit("files"),
     ],
     "overviews": [_force("sections"), _limit()],
+    "scene_renders": [
+        Opt("--um-px", "choice", "Picture resolution (um per pixel)",
+            "How sharp the pictures are. 2.6 shows single nuclei clearly. 1.3 is twice as "
+            "sharp and four times the file size. Full scan resolution (0.65) is not offered "
+            "because it runs out of memory on the laptop. The pictures are made by averaging "
+            "the scan's own pixels, so nothing is skipped.",
+            default="2.6", cli_default="2.6", choices=["2.6", "1.3"]),
+        Opt("--range", "choice", "Brightness",
+            "Same for all (dataset): every picture uses the brightness range of the "
+            "overviews, so a brighter picture means more signal. Per scene (section): each "
+            "scene is stretched to its own tissue, so every picture is well exposed but "
+            "brightness no longer compares between pictures.",
+            default="dataset", cli_default="dataset", choices=["dataset", "section"]),
+        _force("pictures"), _limit("scenes"),
+    ],
     "contactsheets": [
         Opt("--kind", "choice", "Which picture",
             "RGB shows nuclei and marker together; MARK only the marker; DAPI only the "
@@ -885,7 +911,7 @@ def run_plan(screen_sid, study, include_curator_pages=True):
         wanted |= {st.sid for st in S.STAGES if st.curator and st.sid not in HIDDEN}
     plan, held, planned = [], {}, set()
     for st in S.STAGES:
-        if st.sid not in wanted or st.sid in HIDDEN or st.sid in REPAIRS | COVERED:
+        if st.sid not in wanted or st.sid in HIDDEN or st.sid in BY_HAND | COVERED:
             continue
         ok, _ = applies(st, study)
         if not ok or st.cli_reason():
@@ -922,7 +948,7 @@ def progress(screen_sid, study):
     done = total = 0
     for sid in SCREENS[screen_sid].stage_ids():
         st = S.BY_ID[sid]
-        if sid in REPAIRS or not applies(st, study)[0] or st.cli_reason():
+        if sid in BY_HAND or not applies(st, study)[0] or st.cli_reason():
             continue
         total += 1
         if st.operator:

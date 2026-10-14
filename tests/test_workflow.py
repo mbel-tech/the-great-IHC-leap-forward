@@ -165,6 +165,8 @@ chk("the artifact masks sit in the half of Prepare their needs put them",
         for m in ("artifact_pcna", "artifact_perk")), True)
 chk("repairs for older files are never part of Run all remaining",
     [s for s in W.run_plan("measure", s0)[0] if s in W.REPAIRS], [])
+chk("...nor are pictures only for looking at",
+    [s for s in W.run_plan("prepare", s0)[0] if s in W.VIEW_ONLY], [])
 os.makedirs(os.path.join(s0.export_root, "01.02.2026_10.00"), exist_ok=True)
 chk("an ROI export is found in a stamped folder too", W.decided("roi_curator", s0), False)
 open(os.path.join(s0.export_root, "01.02.2026_10.00", "roi_regions_01.02.2026_10.00.csv"), "w").write("x\n")

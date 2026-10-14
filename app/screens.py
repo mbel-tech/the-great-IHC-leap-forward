@@ -713,6 +713,8 @@ class SetupScreen(QWidget):
                                 headings=W.SECTION_HEADINGS)
             form.setEnabled(not project.read_only)
             pl.addWidget(_scroll(form), 1)
+            if sid == "atlas":
+                self._add_fiji_row(pl, project)
             foot = QHBoxLayout()
             status = QLabel("")
             status.setWordWrap(True)
@@ -728,6 +730,39 @@ class SetupScreen(QWidget):
             self.forms[sid] = (form, status, title)
             self.tabs.addTab(page, title)
         self.update_marks()
+
+    def _add_fiji_row(self, layout, project):
+        """'Add atlas from Fiji…', when this copy of the pipeline has the importer."""
+        import atlas_dialog as AD
+        if not AD.available():
+            return
+        row = QHBoxLayout()
+        note = QLabel("Your own atlas: draw its regions in Fiji's ROI Manager, then add "
+                      "it here.")
+        note.setWordWrap(True)
+        note.setStyleSheet(QUIET)
+        row.addWidget(note, 1)
+        row.addWidget(InfoButton(
+            "Adding your own atlas",
+            "<p>Put one image per plate in a folder, open each in Fiji, outline every "
+            "region with the polygon or freehand tool, name it in the ROI Manager and "
+            "save the ROI Manager as a .zip beside the image.</p>"
+            "<p>The step-by-step guide is <code>docs/adding-your-own-atlas.md</code> in "
+            "the pipeline folder; the dialog links to it.</p>"))
+        self.fiji_btn = QPushButton("Add atlas from Fiji…")
+        self.fiji_btn.setEnabled(not project.read_only)
+        self.fiji_btn.clicked.connect(self.add_fiji_atlas)
+        row.addWidget(self.fiji_btn)
+        layout.addLayout(row)
+
+    def add_fiji_atlas(self):
+        import atlas_dialog as AD
+        dlg = AD.FijiAtlasDialog(self.session, self)
+        dlg.exec()
+        if dlg.imported:
+            self.build()
+            self.logged.emit("atlas added from Fiji and selected")
+            self.applied.emit()
 
     def apply(self, sid):
         form, status, title = self.forms[sid]

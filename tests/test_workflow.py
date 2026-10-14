@@ -195,23 +195,22 @@ plan, held = W.run_plan("prepare", s0)
 chk("a fresh study starts with the slide headers", plan[:1], ["manifest"])
 chk("the plan keeps the table's order",
     plan, [st.sid for st in S.STAGES if st.sid in plan])
-chk("nothing after the rotation curator runs before you export",
-    "reformat_pcna_final" in plan, False)
-chk("...it is held, and says what for", held.get("reformat_pcna_final"), "rotation_curator")
-chk("the curator page itself is built", "rotation_curator" in plan, True)
+chk("no rotation step holds Prepare: the final images are planned",
+    ("reformat_pcna_final" in plan, "reformat_pcna_final" in held), (True, False))
+chk("...and nothing waits on a curator that is gone",
+    "rotation_curator" in set(held.values()) | set(plan), False)
+chk("the ROI curator page itself is built",
+    "roi_curator" in plan or held.get("roi_curator") == "atlas_reframe", True)
 chk("stages for another atlas are left out",
     "atlas_wullimann_plates" in plan, s0.atlas_source == "wullimann1996")
 chk("stages run outside the app are left out", "fiji_export" in W.run_plan("instrument", s0)[0], False)
 chk("the superseded level curator is never planned",
     "level_curator" in plan + W.run_plan("all", s0)[0], False)
 os.makedirs(os.path.join(OUT, "reformatted"), exist_ok=True)
-chk("no export, not decided", W.decided("rotation_curator", s0), False)
-open(os.path.join(OUT, "reformatted", "rotation_overrides.csv"), "w").write("uid\n")
-chk("an export decides it", W.decided("rotation_curator", s0), True)
-plan2, held2 = W.run_plan("prepare", s0)
-chk("...and the stages behind it are planned",
-    ("reformat_pcna_final" in plan2, "reformat_pcna_final" in held2), (True, False))
-chk("the artifact masks run before the rotation curator",
+measure, mheld = W.run_plan("measure", s0)
+chk("Measure waits on the ROI curator's export",
+    mheld.get("roi_geometry"), "roi_curator")
+chk("the artifact masks run first, with the first images",
     [m for m in ("artifact_pcna", "artifact_perk") if m in W.PREPARE.parts[2][2]],
     ["artifact_pcna", "artifact_perk"])
 chk("repairs for older files are never part of Run all remaining",

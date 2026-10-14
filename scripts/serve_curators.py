@@ -38,7 +38,6 @@ _REPO = os.path.dirname(_HERE)
 
 CURATORS = {
     "roi": "reformatted/roi_curator.html",
-    "rotation": "reformatted/rotation_curator.html",
     "level": "reformatted/level_curator.html",
     "reframe": "atlas/plate_reframe.html",
 }

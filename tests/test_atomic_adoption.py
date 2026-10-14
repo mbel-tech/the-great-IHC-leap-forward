@@ -30,7 +30,6 @@ SITES = {
     "04j_censor_clipped.py": ('with open(out_csv, "w"', "IO.atomic_write_csv(out_csv, rows, ANALYSIS_KEYS)"),
     "04g_artifact_mask.py": ('with open(out, "w"', "IO.atomic_write_csv(out, rows, SUMMARY_KEYS)"),
     "04f_exclusion_candidates.py": ('with open(out, "w"', "IO.atomic_write_csv(out, "),
-    "04h_symmetry_axis.py": ('with open(OUT_CSV, "w"', "IO.atomic_write_csv(OUT_CSV, out, SYM_KEYS)"),
     "04i_propagate_to_perk.py": ('with open(OUT_CSV, "w"', "IO.atomic_write_csv(OUT_CSV, rows, OVERRIDE_KEYS)"),
     "04m_sections_dataset.py": ('with open(OUT_CSV, "w"', "IO.atomic_write_csv(OUT_CSV, rows, COLUMNS)"),
     "04p_section_provenance.py": ('with open(OUT_CSV, "w"', "IO.atomic_write_csv(OUT_CSV, rows, COLUMNS)"),

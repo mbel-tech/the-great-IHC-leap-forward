@@ -221,7 +221,7 @@ class CurateScreen(QWidget):
         self.row_holder = QVBoxLayout()
         lay.addLayout(self.row_holder)
         self.rows = {}
-        for sid in ("atlas_reframe", "rotation_curator", "roi_curator"):
+        for sid in ("atlas_reframe", "roi_curator"):
             row = StageRow(S.BY_ID[sid], W.options_for(sid))
             row.open_btn.setVisible(False)
             row.run_clicked.connect(lambda s: self.run_requested.emit([s]))
@@ -287,7 +287,7 @@ class CurateScreen(QWidget):
                     "yet.</span> Work in the page below, then press its Export button.")
         else:
             self.decision.setText(W.plain(S.BY_ID[sid], study))
-        self.continue_btn.setVisible(sid in ("atlas_reframe", "rotation_curator"))
+        self.continue_btn.setVisible(sid == "atlas_reframe")
         self.continue_btn.setEnabled(bool(latest))
         self.import_btn.setVisible(sid == "roi_curator")
         self.measure_btn.setVisible(sid == "roi_curator")

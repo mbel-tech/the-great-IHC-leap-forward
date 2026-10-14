@@ -119,9 +119,22 @@ if (file.exists(SPEC)) {
   sp <- filter_marker(sp, "detector_specificity.csv")
   fr <- suppressWarnings(as.numeric(sp$false_positive_rate))
   fr <- fr[is.finite(fr)]
-  if (length(fr)) fp_note <- sprintf(
-    "detector false-positives on background discs: median %.1f%% (range %.1f-%.1f%%, n=%d)",
-    100 * median(fr), 100 * min(fr), 100 * max(fr), length(fr))
+  if (length(fr)) {
+    fp_note <- sprintf(
+      "detector false-positives on background discs: median %.1f%% (range %.1f-%.1f%%, n=%d)",
+      100 * median(fr), 100 * min(fr), 100 * max(fr), length(fr))
+  } else if ("bg_false_positives_per_mm2" %in% names(sp)) {
+    # A marker segmented on its own channel has no false-positive RATE (06a
+    # withholds it: there is no count of all cells to divide by), and without
+    # this the figure would carry no caption at all - which reads as "no
+    # false positives measured" rather than "the rate is not defined". The
+    # per-area count has no such denominator.
+    fd <- suppressWarnings(as.numeric(sp$bg_false_positives_per_mm2))
+    fd <- fd[is.finite(fd)]
+    if (length(fd)) fp_note <- sprintf(
+      "detector false-positives on background discs: median %.1f per mm2 (range %.1f-%.1f, n=%d)",
+      median(fd), min(fd), max(fd), length(fd))
+  }
 } else {
   message("  no detector_specificity.csv - run 06a_roi_dataset.py; ",
           "positivity figures will carry no false-positive rate")

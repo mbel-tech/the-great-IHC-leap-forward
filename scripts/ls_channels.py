@@ -134,6 +134,44 @@ def marker_names(cfg):
     return [c.name for c in markers(parse(table))]
 
 
+def paired_overrides(cfg):
+    """Channels for the markers a `paired` study segments differently.
+
+    A paired study declares no channel table, so every marker takes the nuclear
+    route: segment the counterstain, measure the marker inside the mask. That
+    is wrong for a pass whose counterstain plane is unusable - the LS PCNA scans
+    carry a DAPI plane that is noise at native resolution - and
+    `acquisition.marker_segmentation` is where a study says so, per marker.
+
+    Returns Channel objects (role marker, no index) so 05c can treat them
+    exactly like entries of a multiplex channel table: the plane to read still
+    comes from `channels.marker_index`, and only the segmentation route moves.
+
+    Empty for multiplex, where the channel table already says it, and empty for
+    a malformed block rather than raising: this runs at import of 05c, where a
+    traceback would take the stage down - validate() is what says what is wrong.
+    """
+    cfg = cfg if isinstance(cfg, dict) else {}
+    acq = cfg.get("acquisition")
+    if not isinstance(acq, dict) or acq.get("layout") != LAYOUT_PAIRED:
+        return []
+    block = acq.get("marker_segmentation")
+    if not isinstance(block, dict):
+        return []
+    out = []
+    for name, entry in block.items():
+        if not isinstance(entry, dict):
+            continue
+        segment = entry.get("segment") or SEGMENT_OWN
+        backend = entry.get("backend")
+        if segment == SEGMENT_OWN and not backend:
+            backend = "stardist"
+        out.append(Channel(
+            name=str(name), role=MARKER, segment=segment, backend=backend,
+            nucleus_shaped=entry.get("nucleus_shaped", True)))
+    return out
+
+
 #: The colours a marker may be drawn in. A CLOSED set, on purpose: the
 #: settings dialog needs a choice widget and the generated docs need to list
 #: what is on offer, and an arbitrary string is a typo that renders black.
@@ -513,6 +551,57 @@ def validate(block, layout):
             "`acquisition.markers` applies to `paired` studies only. Under "
             "`multiplex` the channel table already says which channels are "
             "markers, and two sources for one fact is how they drift.")
+
+    seg_block = block.get("marker_segmentation")
+    if seg_block is not None:
+        if layout != LAYOUT_PAIRED:
+            if seg_block:
+                errors.append(
+                    "`acquisition.marker_segmentation` applies to `paired` "
+                    "studies only. Under `multiplex` the channel table already "
+                    "carries each marker's `segment`, and two sources for one "
+                    "fact is how they drift.")
+        elif not isinstance(seg_block, dict):
+            errors.append(
+                f"`acquisition.marker_segmentation` must be a block of "
+                f"marker -> settings, not a {type(seg_block).__name__}.")
+        else:
+            named = {str(m) for m in (declared or [])
+                     if isinstance(m, str)}
+            for name, entry in seg_block.items():
+                if name not in named:
+                    errors.append(
+                        f"`acquisition.marker_segmentation` names {name!r}, "
+                        f"which is not in `acquisition.markers` "
+                        f"({', '.join(sorted(named)) or 'none declared'}).")
+                if not isinstance(entry, dict):
+                    errors.append(
+                        f"`acquisition.marker_segmentation.{name}` must be a "
+                        f"block of settings, not a {type(entry).__name__}.")
+                    continue
+            # The layout is the ARGUMENT's, which is what got us into this
+            # branch; paired_overrides reads it off the block, so say it there.
+            for chan in paired_overrides(
+                    {"acquisition": dict(block, layout=LAYOUT_PAIRED)}):
+                if chan.segment not in SEGMENTS:
+                    errors.append(
+                        f"marker {chan.name!r} has segment {chan.segment!r} "
+                        f"in `acquisition.marker_segmentation`; it must be "
+                        f"one of {', '.join(SEGMENTS)}.")
+                elif chan.segment == SEGMENT_OWN:
+                    if chan.backend not in BACKENDS:
+                        errors.append(
+                            f"marker {chan.name!r} has backend "
+                            f"{chan.backend!r}; it must be one of "
+                            f"{', '.join(BACKENDS)}.")
+                    elif chan.backend == "stardist" and not chan.nucleus_shaped:
+                        errors.append(
+                            f"marker {chan.name!r} asks for the stardist "
+                            f"backend but is declared not nucleus_shaped. "
+                            f"StarDist is a nucleus detector: on cytoplasmic "
+                            f"or fibre staining it would under-detect and "
+                            f"report no error. Use the threshold backend, or "
+                            f"say the objects are nucleus-shaped.")
 
     table = block.get("channels")
     if table is not None and not isinstance(table, list):

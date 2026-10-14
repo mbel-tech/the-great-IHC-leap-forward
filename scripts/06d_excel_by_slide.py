@@ -75,6 +75,7 @@ def group_rows(meas, keyfn, keyname, groups, envs):
     p_by, pos_known = collections.Counter(), collections.Counter()
     sec_by = collections.defaultdict(set)
     h_by, ab_by, animal_of = {}, {}, {}
+    den_by = {}          # key -> why frac/cells are withheld, carried from 06a
     # The marker is part of the key for the same reason it is in 06c: without it
     # a row would be AF568 + AF488 summed under one n_nuclei, and the single
     # (h, factor) pair stored per key would be whichever marker happened to come
@@ -93,6 +94,8 @@ def group_rows(meas, keyfn, keyname, groups, envs):
         h_by[k] = float(r["mean_nucleus_diam_um"]) if r["mean_nucleus_diam_um"] else None
         ab_by[k] = float(r["abercrombie_factor"]) if r["abercrombie_factor"] else 1.0
         animal_of[keyfn(r["scene_uid"])] = r["animal"]
+        if r.get("denominator_withheld_reason"):
+            den_by[k] = r["denominator_withheld_reason"]
 
     out = []
     for key in sorted(a_by):
@@ -106,6 +109,7 @@ def group_rows(meas, keyfn, keyname, groups, envs):
         # positivity cut - 0 would read as "looked and found none".
         full = pos_known[key] == d_by[key]
         npos = p_by[key] if full else ""
+        no_den = den_by.get(key, "")
         out.append({
             "n_nuclei": n,
             "ROI": rg,
@@ -116,7 +120,8 @@ def group_rows(meas, keyfn, keyname, groups, envs):
             "environment": envs.get(an, ""),
             "total_tissue_area_mm2": round(area, 6),
             "n_positive": npos,
-            "frac_positive": round(npos / n, 4) if (full and n) else "",
+            "frac_positive": (round(npos / n, 4)
+                              if (full and n and not no_den) else ""),
             "positive_cells_per_mm2": (round(npos * ab / area, 1)
                                        if (full and area) else ""),
             "n_discs": d_by[key],
@@ -124,7 +129,9 @@ def group_rows(meas, keyfn, keyname, groups, envs):
             "profiles_per_mm2": round(n / area, 1) if area else "",
             "mean_nucleus_diam_um": round(h, 2) if h else "",
             "abercrombie_factor": round(ab, 4),
-            "cells_per_mm2": round(n * ab / area, 1) if area else "",
+            "cells_per_mm2": (round(n * ab / area, 1)
+                              if (area and not no_den) else ""),
+            "denominator_withheld_reason": no_den,
         })
     return out
 

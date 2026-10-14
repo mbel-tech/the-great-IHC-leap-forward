@@ -42,7 +42,9 @@
       }
     ],
     "_markers_note": "A paired study declares no channel table, because each of its scans carries the nuclear channel plus whichever marker that pass used - so this list is the only record of what the markers are. It is NOT derived from the manifest's marker_channel column: every constant built from it is evaluated at import, and the manifest lives under out_root, which may be absent. Output paths, CSV column values and workbook sheets are built from these names, so changing one renames real files.",
-    "markers": []
+    "markers": [],
+    "_marker_segmentation_note": "A paired study declares no channel table, so every marker takes the nuclear route: StarDist on the counterstain, the marker measured inside the mask. That is wrong for a pass whose counterstain plane is unusable. The LS PCNA (AF488) scans carry a DAPI plane that is noise at native resolution, so there is nothing to segment. Declaring `{\"AF488\": {\"segment\": \"own\", \"backend\": \"stardist\", \"nucleus_shaped\": true}}` segments PCNA on its own channel. Use it only for a marker whose signal is nuclear (PCNA is): StarDist is a nucleus detector. The cost is real and 06a records it: with no counterstain there is no count of all cells, so the fraction positive and the total cell density are withheld for that marker and the readout is positive density. See docs/nuclei-detection-after-roi-curation.md section 4.8.",
+    "marker_segmentation": {}
   },
   "display": {
     "_composite_note": "Empty means every declared marker, in declared order. This order is what the positional colour default reads - the first marker listed here is red, the second green - so a study can swap two markers' colours either by reordering this or by naming the colours in `display.colours`. A marker left out of a non-empty list is still measured; it is simply not drawn, which is visible rather than silently blended into another marker's colour.",

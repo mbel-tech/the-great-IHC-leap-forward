@@ -30,6 +30,14 @@ switched the correction off. The factor is 1.0 in those rows, so
 side by side. The reason is CARRIED from 06a, not re-derived: a factor of 1.0
 on its own cannot be told apart from a correction that came out at 1.0.
 
+**A marker segmented on its own channel has no denominator.** PCNA on the LS
+slides: the DAPI plane is noise, so nuclei are found on the marker itself and
+`n_nuclei` is "objects the marker lit up", not a count of all cells. For such a
+marker `frac_positive` and `cells_per_mm2` are blank and
+`denominator_withheld_reason` says why; `n_positive` and
+`positive_cells_per_mm2` are what it can honestly report. The reason is CARRIED
+from 06a, as the Abercrombie one is.
+
 **Positivity sits alongside the count, not instead of it.** `n_positive`,
 `frac_positive` and `positive_cells_per_mm2` come from 06a's per-section cut.
 They are blank where a section carried fewer than 5 background nuclei and no cut
@@ -259,6 +267,10 @@ def main(argv=None):
     d_by = collections.Counter()               # key -> discs
     sec_by = collections.defaultdict(set)      # key -> scene_uids
     h_by, ab_by, why_by = {}, {}, {}
+    # Carried from 06a, like the Abercrombie reason: whether a denominator
+    # exists is 06a's call (it can see `segmented_on`). Any non-blank value
+    # under a key wins, and every row of a marker carries the same one.
+    den_by = {}
     pos_known = collections.Counter()          # discs whose section had a cut
 
     # THE MARKER IS PART OF THE KEY. Without it a row is AF568 + AF488 summed:
@@ -292,6 +304,8 @@ def main(argv=None):
         # such column. Blank then means what it means everywhere else here: the
         # correction was applied.
         why_by[key] = r.get("abercrombie_withheld_reason", "")
+        if r.get("denominator_withheld_reason"):
+            den_by[key] = r["denominator_withheld_reason"]
 
     by_roi = []
     for key in sorted(a_by):
@@ -304,6 +318,10 @@ def main(argv=None):
         # goes blank unless every disc behind it had a cut.
         full = pos_known[key] == d_by[key]
         npos = p_by[key] if full else ""
+        # No denominator: the objects were found on the marker itself, so n is
+        # "objects the marker lit up", not a count of all cells. The positive
+        # count and the positive density are what such a marker can say.
+        no_den = den_by.get(key, "")
         by_roi.append({
             "n_nuclei": n,
             "ROI": rg,
@@ -318,7 +336,8 @@ def main(argv=None):
             # arms at matched levels is. detector_specificity.csv carries the
             # false-positive rate that has to be quoted with it.
             "n_positive": npos,
-            "frac_positive": round(npos / n, 4) if (full and n) else "",
+            "frac_positive": (round(npos / n, 4)
+                              if (full and n and not no_den) else ""),
             "positive_cells_per_mm2": (round(npos * ab / area, 1)
                                        if (full and area) else ""),
             # Everything past this point is derived from the columns above and
@@ -328,13 +347,17 @@ def main(argv=None):
             "profiles_per_mm2": round(n / area, 1) if area else "",
             "mean_nucleus_diam_um": round(h, 2) if h else "",
             "abercrombie_factor": round(ab, 4),
-            "cells_per_mm2": round(n * ab / area, 1) if area else "",
+            "cells_per_mm2": (round(n * ab / area, 1)
+                              if (area and not no_den) else ""),
             # Beside the corrected density, because that is the number it is
             # about. Blank means the correction was applied; anything else is
             # 06a saying cells_per_mm2 is the profile count uncorrected, and
             # why. A withheld correction that only ever appeared in a CSV
             # nobody opens is not reported.
             "abercrombie_withheld_reason": why_by.get(key, ""),
+            # Blank where a count of all cells exists; otherwise why
+            # frac_positive and cells_per_mm2 are empty on this row.
+            "denominator_withheld_reason": no_den,
         })
 
     # by_disc keeps every individual placement so by_roi can be checked by

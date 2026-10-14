@@ -9,6 +9,38 @@ where things landed, not which plausible-looking route was tried and abandoned, 
 
 ---
 
+## 2026-10-14 - PCNA has no usable DAPI: segment the marker, report positive density
+
+**Changed:** `scripts/ls_channels.py` (`paired_overrides`, validation), `scripts/ls_config.py`
+(`acquisition.marker_segmentation`), `scripts/ls_segment.py` (`percentile_range`, `norm=`),
+`scripts/05c_detect_rois.py` (own-channel route, per-section range, `roi_normalisation.csv`),
+`scripts/06a_roi_dataset.py`, `06c_excel_dataset.py`, `06d_excel_by_slide.py`
+(`denominator_withheld_reason`, positive-object `h`, `bg_false_positives_per_mm2`),
+`analysis/plot_roi_figures.R` (caption fallback), `docs/nuclei-detection-after-roi-curation.md`
+section 4.8. New suites: `tests/test_detect_own_marker.py`, `tests/test_marker_segmented_density.py`.
+
+**Why.** On the AF488 (PCNA) scans the green channel obliterates the nuclear counterstain: the DAPI
+plane is noise at native resolution (it is still fine at 5.2 um/px, so rotations, exclusions,
+artifact masks and the 05a geometry are all unaffected). 05c segments DAPI with StarDist, so the
+PCNA pass would have segmented noise. The PCNA pass had not been run, so no existing number moves.
+
+**Decision.** A paired study can now declare a marker `segment: own` (StarDist on its own channel).
+The agreed readout is PCNA+ **density**, not a fraction. The argument in 4.5 against segmenting on
+the marker is relaxed for this one marker because PCNA is nuclear, and the costs it lists are
+handled in the output: no fraction, no total cell density, `h` from positive objects, a per-area
+false-positive count in place of a rate, and one intensity range per section instead of per crop
+(a per-crop stretch makes a background disc's noise look like signal and hides dim nuclei in bright
+zones). The range is recorded in `results/roi_normalisation.csv` rather than as new columns of
+`roi_nuclei.csv`, to avoid a header migration on a 900k-row shared file.
+
+**What it cost / what is NOT known.** Synthetic tests only: the plumbing is pinned, not whether
+StarDist finds PCNA+ nuclei. The pilot in 4.8 (overlays, a hand count in about six ROIs, the size
+check) has not been run. `plot_roi_figures.R` was edited but R is not available in the build
+environment, so the edit is unexecuted. pERK output is unchanged: its rows, header and `h` are
+checked byte-for-byte by the existing suites.
+
+---
+
 ## 2026-09-04 - An ROI is an area: the atlas numbers areas, and the curator draws them
 
 **Changed:** `04l_roi_curator.py` - ROI numbering in `region_hulls` plus `tag_rois`; the guided

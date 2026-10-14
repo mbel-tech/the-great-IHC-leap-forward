@@ -240,7 +240,47 @@ def threshold_labels(image, k=3.0, min_area_px=10, report=None):
     return labels.astype(np.int32)
 
 
-def stardist_labels(image, model, n_tiles=None):
+def percentile_range(images, lo=1, hi=99.8, max_samples=2_000_000):
+    """One (low, high) intensity range for a SET of crops.
+
+    StarDist's default is to stretch each crop to its own 1st..99.8th
+    percentile. On a counterstain that is harmless: every crop has nuclei in it.
+    On a MARKER it is a bias. A crop holding a bright proliferative zone
+    stretches its own range and its dim positive nuclei fall below what the
+    model sees, while a background disc - nothing but noise - has that noise
+    stretched to full range. Sensitivity would then depend on the crop's own
+    content, which is region-correlated: the periventricular zones where PCNA
+    lives are exactly the bright ones.
+
+    So a marker-segmented section takes ONE range from all its crops, ROIs and
+    background discs alike, and every crop is stretched by the same amount.
+
+    Each crop is subsampled to at most `max_samples` pixels (a regular stride,
+    so the result is deterministic and a re-run gives the same range). Pixels
+    that are not finite are ignored. A flat section has no range to share and
+    raises rather than dividing by nothing.
+    """
+    parts = []
+    for im in images:
+        a = np.asarray(im, dtype=np.float64).ravel()
+        if a.size > max_samples:
+            a = a[::int(np.ceil(a.size / max_samples))]
+        a = a[np.isfinite(a)]
+        if a.size:
+            parts.append(a)
+    if not parts:
+        raise SegmentError("there are no pixels to take an intensity range "
+                           "from.")
+    allp = np.concatenate(parts)
+    low, high = (float(v) for v in np.percentile(allp, [lo, hi]))
+    if not high > low:
+        raise SegmentError(
+            f"the section is flat ({low:g} to {high:g}); there is no intensity "
+            f"range to share between its crops.")
+    return low, high
+
+
+def stardist_labels(image, model, n_tiles=None, norm=None):
     """StarDist's instance segmentation, tiled.
 
     ALWAYS TILE. Untiled, StarDist takes 121 s on a 1.22 Mpx ROI; at
@@ -255,25 +295,45 @@ def stardist_labels(image, model, n_tiles=None):
 
     The model is passed in rather than loaded here so that one process loads it
     once - the weights are the expensive part.
-    """
-    from csbdeep.utils import normalize
 
+    `norm` is a (low, high) intensity range. None keeps what this has always
+    done - stretch THIS crop to its own 1st..99.8th percentile, which is right
+    for a counterstain and is the route every existing count came from. A range
+    is given for a marker segmented on its own channel; see percentile_range
+    for why a per-crop stretch is wrong there. The arithmetic is csbdeep's
+    normalize() with the range supplied instead of measured (and, like it, no
+    clipping), so the two routes differ only in where the range comes from.
+    """
     a = np.asarray(image)
     if n_tiles is None:
         nt = max(2, int(np.ceil(np.sqrt(a.size / 300_000))))
         n_tiles = (nt, nt)
+    if norm is None:
+        from csbdeep.utils import normalize
+        x = normalize(a, 1, 99.8)
+    else:
+        low, high = norm
+        if not (np.isfinite(low) and np.isfinite(high) and high > low):
+            raise SegmentError(
+                f"the intensity range ({low}, {high}) is not usable; it needs "
+                f"two finite numbers with the high above the low.")
+        x = ((a.astype(np.float32) - np.float32(low))
+             / (np.float32(high) - np.float32(low) + np.float32(1e-20)))
     labels, _ = model.predict_instances(
-        normalize(a, 1, 99.8), n_tiles=n_tiles,
-        verbose=False, show_tile_progress=False)
+        x, n_tiles=n_tiles, verbose=False, show_tile_progress=False)
     return labels
 
 
-def segment(image, backend, model=None, k=3.0, min_area_px=10, report=None):
+def segment(image, backend, model=None, k=3.0, min_area_px=10, report=None,
+            norm=None):
     """Dispatch to a backend by name.
 
     `report` is the threshold backend's diagnostic and is left untouched by
     every other one - stardist estimates no background, so a caller reading
     `report["failed"]` after a stardist call correctly finds nothing to say.
+
+    `norm` is a shared intensity range and only StarDist reads it; the
+    threshold backend measures its own background and has no use for one.
     """
     if backend == "threshold":
         return threshold_labels(image, k=k, min_area_px=min_area_px,
@@ -283,7 +343,7 @@ def segment(image, backend, model=None, k=3.0, min_area_px=10, report=None):
             raise SegmentError(
                 "the stardist backend needs a loaded model; 05c loads one per "
                 "process so the weights are read once.")
-        return stardist_labels(image, model)
+        return stardist_labels(image, model, norm=norm)
     raise SegmentError(
         f"unknown segmentation backend {backend!r}. Known backends are "
         f"{', '.join(BACKENDS)}.")

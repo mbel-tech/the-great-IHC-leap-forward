@@ -9,7 +9,7 @@ nothing here starts a thread or writes a file.
 import csv
 import os
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QFrame, QGridLayout, QHBoxLayout, QLabel, QProgressBar, QPushButton, QScrollArea,
     QTabBar, QTabWidget, QVBoxLayout, QWidget)
@@ -245,12 +245,61 @@ class CurateScreen(QWidget):
         self.import_btn.setToolTip(W.plain(S.BY_ID["import_curation"]))
         self.import_btn.clicked.connect(lambda: self.run_requested.emit(["import_curation"]))
         actions.addWidget(self.import_btn)
-        self.measure_btn = QPushButton("Go to Measure")
-        self.measure_btn.clicked.connect(lambda: self.goto.emit("measure"))
-        actions.addWidget(self.measure_btn)
         lay.addLayout(actions)
         lay.addWidget(self.curator, 1)
         self._study = None
+
+        # Done: the one way on from the ROI curator. It presses the page's own
+        # Export, so the decisions the next phase reads are the ones on screen
+        # now, then goes to Measure once the regions file has landed. The button
+        # lives in the curator's own bar, which keeps it beside the page when the
+        # page has its own window.
+        self.curator.done_requested.connect(self._finish)
+        self.curator.exported.connect(self._landed)
+        self._waiting = False
+        self._timeout = QTimer(self)
+        self._timeout.setSingleShot(True)
+        self._timeout.setInterval(20000)
+        self._timeout.timeout.connect(self._export_timed_out)
+
+    # ---- finishing ----------------------------------------------------------
+
+    def _finish(self):
+        if self.current != "roi_curator" or self._waiting:
+            return
+        self._waiting = True
+        self.curator.done_btn.setEnabled(False)
+        self.decision.setText("Exporting your decisions...")
+        self.curator.run_export(self._export_started)
+
+    def _export_started(self, ok):
+        if not ok:
+            self._stop_waiting(
+                f"<span style='color:{COLOUR['waiting']}'>Could not export:</span> the "
+                "curator page is not loaded. Build it on Prepare, then try again.")
+            return
+        self._timeout.start()
+
+    def _landed(self, path):
+        # exportCsv writes three files; the regions file is the one Measure reads.
+        if not self._waiting or not os.path.basename(path).startswith("roi_regions"):
+            return
+        self._stop_waiting(None)
+        self.curator.put_back()
+        self.goto.emit("measure")
+
+    def _export_timed_out(self):
+        self._stop_waiting(
+            f"<span style='color:{COLOUR['waiting']}'>The export did not arrive.</span> "
+            "Press Export in the page, then Done again.")
+
+    def _stop_waiting(self, words):
+        self._waiting = False
+        self._timeout.stop()
+        self.curator.done_btn.setEnabled(True)
+        self._update_actions()
+        if words:
+            self.decision.setText(words)
 
     def _tab_changed(self, i):
         if 0 <= i < len(self.sids):
@@ -290,7 +339,13 @@ class CurateScreen(QWidget):
         self.continue_btn.setVisible(sid == "atlas_reframe")
         self.continue_btn.setEnabled(bool(latest))
         self.import_btn.setVisible(sid == "roi_curator")
-        self.measure_btn.setVisible(sid == "roi_curator")
+        if sid == "roi_curator":
+            self.curator.set_done(
+                "Done: export and go to Measure",
+                "Exports your regions, plates and exclusions, then opens Measure to "
+                "place them on the slides and count nuclei")
+        else:
+            self.curator.set_done("")
 
     def refresh(self, study, running, project, busy=False):
         self._study = study

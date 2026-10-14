@@ -266,6 +266,32 @@ if MW:
     for sid in ("home", "setup", "prepare", "curate", "measure", "results", "instrument", "all"):
         w.goto(sid)
         chk(f"goto {sid} shows it", w.stack.currentWidget() is w.pages[sid])
+    w.goto("curate")
+    w.curate.show_curator("roi_curator")
+    chk("the ROI curator offers Done above its page",
+        (w.curator.done_btn.text(), w.curator.done_btn.isVisibleTo(w.curator)),
+        ("Done: export and go to Measure", True))
+    w.curator.run_export = lambda then: then(False)
+    w.curator.done_btn.click()
+    chk("Done with no page loaded says so and stays",
+        ("not loaded" in w.curate.decision.text(), w.stack.currentWidget() is w.curate),
+        (True, True))
+    w.curator.run_export = lambda then: then(True)
+    w.curator.window_btn.setChecked(True)
+    w.curator.done_btn.click()
+    w.curator.exported.emit(os.path.join(TMP, "roi_plates_14.10.2026_15.20.csv"))
+    chk("...waits for the regions file, not the first of the three",
+        w.stack.currentWidget() is w.curate, True)
+    w.curator.exported.emit(os.path.join(TMP, "roi_regions_14.10.2026_15.20.csv"))
+    chk("...then goes to Measure, with the page back in the app",
+        (w.stack.currentWidget() is w.pages["measure"], w.curator.window_btn.isChecked(),
+         w.curator.parentWidget() is w.curate), (True, False, True))
+    w.curator.exported.emit(os.path.join(TMP, "roi_regions_14.10.2026_15.21.csv"))
+    w.goto("curate")
+    chk("a plain Export afterwards does not move the screen",
+        w.stack.currentWidget() is w.curate, True)
+    w.curate.show_curator("atlas_reframe")
+    chk("other curators have no Done", w.curator.done_btn.isVisibleTo(w.curator), False)
     chk("Set up has a card for slides and one per settings group",
         w.setup.tabs.count(), 1 + len(W.setting_sections(LC.dialog_fields())))
     chk("Set up says where this study's slides come from",

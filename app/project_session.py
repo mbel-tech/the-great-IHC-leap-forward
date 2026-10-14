@@ -149,10 +149,18 @@ class ProjectSession(QObject):
             return self.save(parent)
         return True                          # Discard
 
-    def ensure_saved_for_run(self, parent=None):
-        """Stages read the file on disk, so a run needs the project saved."""
+    def ensure_saved_for_run(self, parent=None, auto=False):
+        """Stages read the file on disk, so a run needs the project saved.
+
+        `auto` saves without asking: the window's Run buttons pass it, because a
+        prompt between pressing Run and the run starting was the most common way
+        to run a stage on the settings from before the last change. File >
+        Revert and Project history still undo what was saved.
+        """
         if not self.dirty:
             return True
+        if auto:
+            return self.save(parent)
         ans = BTN.question(
             parent, "Save before running?",
             "Stages read the saved project, not what is on screen. Save '%s' first?" % self.project.name,
@@ -371,10 +379,10 @@ class ProjectSession(QObject):
 
     # ---- the run history ----------------------------------------------------------
 
-    def record_run(self, stage, ok, started, ended):
+    def record_run(self, stage, ok, started, ended, options=None):
         """Append to the run history. Returns an error message, or None."""
         try:
-            self.project.record_run(stage, ok, started, ended)
+            self.project.record_run(stage, ok, started, ended, options=options)
         except LP.ProjectError as exc:
             return str(exc)
         self.changed.emit()

@@ -457,19 +457,8 @@ OPTIONS = {
         _limit("files"),
     ],
     "overviews": [_force("sections"), _limit()],
+    # Folder, resolution and brightness are study settings (Set up > Scene pictures).
     "scene_renders": [
-        Opt("--um-px", "choice", "Picture resolution (um per pixel)",
-            "How sharp the pictures are. 2.6 shows single nuclei clearly. 1.3 is twice as "
-            "sharp and four times the file size. Full scan resolution (0.65) is not offered "
-            "because it runs out of memory on the laptop. The pictures are made by averaging "
-            "the scan's own pixels, so nothing is skipped.",
-            default="2.6", cli_default="2.6", choices=["2.6", "1.3"]),
-        Opt("--range", "choice", "Brightness",
-            "Same for all (dataset): every picture uses the brightness range of the "
-            "overviews, so a brighter picture means more signal. Per scene (section): each "
-            "scene is stretched to its own tissue, so every picture is well exposed but "
-            "brightness no longer compares between pictures.",
-            default="dataset", cli_default="dataset", choices=["dataset", "section"]),
         _force("pictures"), _limit("scenes"),
     ],
     "contactsheets": [
@@ -706,6 +695,10 @@ SETTING_SECTIONS = [
      "How sharp the colour pictures in the ROI curator are, and where their pixels come "
      "from. Measuring always reads the scan's own pixels, whatever this says.",
      ["curation_render.source", "curation_render.um_per_px"]),
+    ("scene_pictures", "Scene pictures",
+     "Where the pictures of every scene go, how sharp they are and how they are "
+     "brightened.",
+     ["scene_render.out_dir", "scene_render.um_per_px", "scene_render.range"]),
     ("atlas", "Atlas",
      "Which brain atlas the regions come from. Choose a built-in one or import your own.",
      ["atlas_source", "atlas_pdf", "atlas_polygon_mirror", "atlas_plate_set.dir",
@@ -731,7 +724,8 @@ def setting_sections(fields):
     for sid, title, intro, paths in SETTING_SECTIONS:
         keys = [by_path[p] for p in paths if p in by_path]
         placed.update(k.path for k in keys)
-        out.append((sid, title, intro, keys))
+        if keys:  # a card whose settings this ls_config does not have yet stays hidden
+            out.append((sid, title, intro, keys))
     rest = [k for k in fields if k.path not in placed]
     if rest:
         out.append(OTHER_SECTION + (rest,))

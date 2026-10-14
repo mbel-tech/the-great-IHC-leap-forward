@@ -129,6 +129,8 @@ class _K:
 
 chk("a new setting lands in Other settings",
     W.setting_sections([_K("brand.new")])[-1][0], "other")
+chk("a card whose settings are not in ls_config yet is hidden",
+    [c[0] for c in W.setting_sections([_K("study.name")])], ["folders"])
 
 print("--- names and words for this study ---")
 s0 = study()

@@ -12,13 +12,14 @@ the pipeline does not read.
 """
 
 import copy
+import html
 import json
 import os
 
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
     QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMessageBox, QPushButton,
-    QScrollArea, QVBoxLayout, QWidget)
+    QScrollArea, QToolButton, QVBoxLayout, QWidget)
 
 import atlas_registry as AR
 import ls_channel_edit as CE
@@ -26,6 +27,7 @@ import ls_atlas_import as AI
 import ls_config as LC
 import ls_jsonio
 from channel_editor import ChannelEditor
+from widgets import InfoButton
 
 
 class _PathRow(QWidget):
@@ -134,10 +136,53 @@ def _widget_for(key, value, choices=None):
     return edit, lambda: (edit.text().strip() or None)
 
 
-class ConfigDialog(QDialog):
-    """Edit one study's config. `path` names it; default is the active one."""
+def _set_widget(widget, value):
+    """Put `value` into an editor made by `_widget_for` - the Reset button's half."""
+    if isinstance(widget, (_PathRow, _PatternRow)):
+        widget.edit.setText("" if value is None else str(value))
+    elif isinstance(widget, QCheckBox):
+        widget.setChecked(bool(value))
+    elif isinstance(widget, QComboBox):
+        if value is not None:
+            widget.setCurrentText(str(value))
+    elif isinstance(widget, QLineEdit):
+        widget.setText("" if value is None else str(value))
 
-    def __init__(self, repo_root, path=None, study_name=None, parent=None, project=None):
+
+def _esc(text):
+    return html.escape(str(text if text is not None else ""), quote=False)
+
+
+def key_info(key):
+    """The (i) text for one setting: the hint, the reasoning, the default, who reads it."""
+    parts = [f"<p>{_esc(key.doc)}</p>"]
+    if key.note:
+        parts.append(f"<p>{_esc(key.note)}</p>")
+    if key.default is not None:
+        shown = json.dumps(key.default) if not isinstance(key.default, str) else key.default
+        parts.append(f"<p style='color:#8b949e'>Default: {_esc(shown)}</p>")
+    elif key.required:
+        parts.append("<p style='color:#8b949e'>Required: there is no default.</p>")
+    if getattr(key, "minimum", None) is not None:
+        parts.append("<p style='color:#8b949e'>Smallest allowed: %s</p>" % _esc(key.minimum))
+    if key.consumers:
+        parts.append("<p style='color:#8b949e'>Read by: %s</p>" % _esc(", ".join(key.consumers)))
+    parts.append(f"<p style='color:#8b949e'>Stored as <code>{_esc(key.path)}</code></p>")
+    return "".join(parts)
+
+
+class SettingsForm(QWidget):
+    """The settings of one study as a form: one row per key, with (i) and Reset.
+
+    Shared by the Settings dialog (every key) and the Set up screen's cards (a
+    few keys each). `keys` names the dotted keys to show, in order; None shows
+    every key the spec offers. Validation always covers the whole study, so a
+    card that shows four keys still cannot apply a study the pipeline would
+    refuse.
+    """
+
+    def __init__(self, repo_root, path=None, study_name=None, parent=None, project=None,
+                 keys=None):
         super().__init__(parent)
         self.repo_root = repo_root
         # With a project, this edits the project IN MEMORY: Apply changes it and
@@ -151,21 +196,27 @@ class ConfigDialog(QDialog):
         self.study_name = study_name
         self.channel_edits = None           # {key: value} from the channel editor
         self.channel_layout = None          # the layout those edits were made for
-        self.setWindowTitle(f"Settings — {os.path.basename(self.path)}")
-        self.resize(760, 620)
+        self.message = None                 # the last reason Apply refused, for a caller to show
 
         cfg = self._load()
         if study_name:
             cfg.setdefault("study", {})["name"] = study_name
 
-        form = QFormLayout()
+        fields = LC.dialog_fields()
+        if keys is not None:
+            by_path = {k.path: k for k in fields}
+            fields = [by_path[k] for k in keys if k in by_path]
+
+        form = QFormLayout(self)
+        form.setContentsMargins(0, 0, 0, 0)
         self.rows = {}
-        for key in LC.dialog_fields():
+        self.widgets = {}
+        for key in fields:
             found, value = LC._get(cfg, key.parts)
             if key.path == "slide_naming.pattern":
                 widget = _PatternRow(
                     value if found else key.default,
-                    lambda: self.rows["source_dir"][1]())
+                    self._source_dir)
                 getter = widget.value
                 self.pattern_row = widget
             elif key.path == "atlas_source":
@@ -176,7 +227,20 @@ class ConfigDialog(QDialog):
             else:
                 widget, getter = _widget_for(key, value if found else key.default)
             self.rows[key.path] = (key, getter)
-            form.addRow(key.label + ("  *" if key.required else ""), widget)
+            self.widgets[key.path] = widget
+            line = QHBoxLayout()
+            line.setContentsMargins(0, 0, 0, 0)
+            line.addWidget(widget, 1)
+            reset = QToolButton()
+            reset.setText("↺")
+            reset.setToolTip("Back to the default" if key.default is not None
+                             else "Clear (this setting has no default)")
+            reset.clicked.connect(lambda _=False, w=widget, k=key: _set_widget(w, k.default))
+            line.addWidget(reset)
+            line.addWidget(InfoButton(key.label, key_info(key)))
+            holder = QWidget()
+            holder.setLayout(line)
+            form.addRow(key.label + ("  *" if key.required else ""), holder)
             hint = QLabel(key.doc)
             hint.setStyleSheet("color:#9aa0a8;font-size:11px")
             hint.setWordWrap(True)
@@ -194,29 +258,21 @@ class ConfigDialog(QDialog):
                 btn.clicked.connect(self._import_atlas)
                 form.addRow("", btn)
 
-        inner = QWidget()
-        inner.setLayout(form)
-        scroll = QScrollArea()
-        scroll.setWidget(inner)
-        scroll.setWidgetResizable(True)
+    def _source_dir(self):
+        """The slides folder as it would be applied: this form's, else the study's."""
+        row = self.rows.get("source_dir")
+        if row:
+            return row[1]()
+        return self._load().get("source_dir")
 
-        buttons = QDialogButtonBox((QDialogButtonBox.Apply if self.project else QDialogButtonBox.Save)
-                                   | QDialogButtonBox.Cancel)
-        self.ok_button = buttons.button(QDialogButtonBox.Apply if self.project else QDialogButtonBox.Save)
-        buttons.accepted.connect(self._save)
-        buttons.rejected.connect(self.reject)
-        if self.project:                    # Apply is not an AcceptRole button
-            self.ok_button.clicked.connect(self._save)
+    def complete(self):
+        """True when every required key this form shows has a value."""
+        return not self.missing()
 
-        note = QLabel("Changes apply to the open project and are written when you choose "
-                      "File > Save." if self.project else f"Writing to {self.path}")
-        note.setStyleSheet("color:#9aa0a8;font-size:11px")
-        note.setWordWrap(True)
-
-        lay = QVBoxLayout(self)
-        lay.addWidget(scroll, 1)
-        lay.addWidget(note)
-        lay.addWidget(buttons)
+    def missing(self):
+        """The labels of the required keys this form shows that have no value."""
+        return [key.label or key.path for key, get in self.rows.values()
+                if key.required and get() in (None, "")]
 
     @staticmethod
     def _atlas_names(cfg):
@@ -313,7 +369,7 @@ class ConfigDialog(QDialog):
         self.atlas_combo.setCurrentText(name)
         QMessageBox.information(
             self, "Atlas imported",
-            "'%s' is registered and selected. Press Save to keep your other changes." % name)
+            "'%s' is registered and selected. Press Apply to keep your other changes." % name)
 
     def _load(self):
         """The study being edited, or the template for one that is new."""
@@ -328,8 +384,8 @@ class ConfigDialog(QDialog):
                 continue
         return {}
 
-    def _save(self):
-        """Validate before writing.
+    def apply(self):
+        """Validate before writing. True when the settings were applied or written.
 
         A wrong value written here surfaces much later, inside a stage, as a
         message about a missing file rather than a wrong setting. This is the
@@ -358,7 +414,7 @@ class ConfigDialog(QDialog):
                     self, "Channels need another look",
                     "The channels were edited for the %s layout, and the layout has "
                     "since changed. Open 'Channels and markers...' again." % self.channel_layout)
-                return
+                return False
             for path, value in self.channel_edits.items():
                 LC._set(cfg, path.split("."), value)
 
@@ -373,9 +429,9 @@ class ConfigDialog(QDialog):
 
         errors, _ = LC.validate(cfg, self.path, strict_paths=True)
         if errors:
-            QMessageBox.warning(self, "Not saved yet",
-                                "\n\n".join(errors[:6]))
-            return
+            self.message = "\n\n".join(errors[:6])
+            QMessageBox.warning(self, "Not saved yet", self.message)
+            return False
 
         cfg = LC.apply_defaults(cfg)
         out_root = cfg.get("out_root")
@@ -387,13 +443,12 @@ class ConfigDialog(QDialog):
                 self._apply_to_project(cfg)
             except Exception as exc:                        # noqa: BLE001
                 QMessageBox.warning(self, "Not applied", str(exc))
-                return
-            self.accept()
-            return
+                return False
+            return True
 
         ls_jsonio.write_json_atomic(self.path, cfg)
         LC.clear_cache()
-        self.accept()
+        return True
 
     def _touched(self):
         """Dotted keys the person actually edited here, as opposed to defaults filled in."""
@@ -427,6 +482,64 @@ class ConfigDialog(QDialog):
         for file, channels in self.detected:
             self.project.note_detected(file, channels)
         self.detected = []
+
+
+
+class ConfigDialog(QDialog):
+    """Edit one study's config. `path` names it; default is the active one.
+
+    A frame around a `SettingsForm` showing every key. `rows`, `detected` and
+    `project` are the form's, so a caller can reach them as before.
+    """
+
+    def __init__(self, repo_root, path=None, study_name=None, parent=None, project=None):
+        super().__init__(parent)
+        self.form = SettingsForm(repo_root, path=path, study_name=study_name, parent=self,
+                                 project=project)
+        self.project = project
+        self.path = self.form.path
+        self.rows = self.form.rows
+        self.detected = self.form.detected
+        self.setWindowTitle(f"Settings — {os.path.basename(self.path)}")
+        self.resize(760, 620)
+
+        scroll = QScrollArea()
+        scroll.setWidget(self.form)
+        scroll.setWidgetResizable(True)
+
+        buttons = QDialogButtonBox((QDialogButtonBox.Apply if self.project else QDialogButtonBox.Save)
+                                   | QDialogButtonBox.Cancel)
+        self.ok_button = buttons.button(QDialogButtonBox.Apply if self.project else QDialogButtonBox.Save)
+        buttons.accepted.connect(self._save)
+        buttons.rejected.connect(self.reject)
+        if self.project:                    # Apply is not an AcceptRole button
+            self.ok_button.clicked.connect(self._save)
+
+        note = QLabel("Changes apply to the open project and are saved with it, or "
+                      "automatically before a stage runs." if self.project
+                      else f"Writing to {self.path}")
+        note.setStyleSheet("color:#9aa0a8;font-size:11px")
+        note.setWordWrap(True)
+
+        lay = QVBoxLayout(self)
+        lay.addWidget(scroll, 1)
+        lay.addWidget(note)
+        lay.addWidget(buttons)
+
+    def __getattr__(self, name):
+        # Anything else the dialog used to own (pattern_row, atlas_combo,
+        # channel_edits, ...) now lives on the form; reach it there.
+        form = self.__dict__.get("form")
+        if form is None:
+            raise AttributeError(name)
+        return getattr(form, name)
+
+    def _save(self):
+        # The form's lists are replaced, not mutated, in a few places; keep the
+        # caller's view of them in step before applying.
+        self.form.detected = self.detected
+        if self.form.apply():
+            self.accept()
 
 
 def _canon(v):

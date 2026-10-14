@@ -304,10 +304,42 @@ run_app.bat
 from. Running `python -m app` against an interpreter without PySide6 now says which interpreter
 it is and how to fix it, rather than writing a bare traceback to `lsapp-crash.log`.
 
-One window: the pipeline down the left with status read from disk, a log pane,
-and the three HTML curators embedded. The curator pages themselves are unchanged
-— the app hosts them, it does not reimplement them, and opening the same file in
-a browser still works exactly as before.
+One window, laid out in the order you work. A step bar down the left holds six
+screens, each with its progress read from disk:
+
+| Step | What it is for |
+|---|---|
+| **Project** | Where the study stands, and a **Next up** card naming the one thing to do now |
+| **Set up** | Slides, then the study's settings as cards: folders, file names, microscope and channels, atlas, nucleus detection |
+| **Prepare** | The automatic stages, from slide headers to the images the curators show |
+| **Curate** | The curator pages as tabs: atlas plates, rotation and exclusion, ROIs |
+| **Measure** | ROIs back onto the slides, nucleus detection, the per-ROI dataset. Still blind |
+| **Results** | Unblinding (it asks first), the spreadsheets and figures |
+
+**Run all remaining** on a screen runs its missing stages in order. It stops at
+the first failure and never runs past a curator you have not exported yet: a stage
+that needs one waits, with everything behind it, and the screen says what for. The
+project is saved automatically before a run starts.
+
+**Every screen, stage and setting has an (i) button** with a plain explanation:
+what a stage does, what it needs first, what it leaves behind, when it last ran,
+and the technical detail (script, pixel reader, command line) underneath. A
+stage's useful command-line options are offered as switches under **Options**,
+with their defaults; what you change is kept in the project file and used every
+time that stage runs from the app (`app/workflow.py` lists them, and
+`tests/test_workflow.py` checks each is a real flag of its script and that an
+untouched option leaves the command exactly as before). Each setting in Set up
+shows its hint, an (i) with the full reasoning from `ls_config.SPEC`, and a ↺
+to put it back to its default.
+
+The one-time instrument characterisation is under **Tools > Instrument
+characterisation**, and the previous single list of every stage under **View >
+All stages**. A bar along the bottom shows what is running and its last line;
+**Show log** opens the full log.
+
+The curator pages themselves are unchanged — the app hosts them, it does not
+reimplement them, and opening the same file in a browser still works exactly as
+before.
 
 **Add slides** takes a folder, or individual `.czi` files. A folder sets
 `source_dir` and moves nothing. Picking individual files from one folder writes
@@ -383,9 +415,9 @@ the page's `localStorage` from those files before the page's own script runs, an
 mirrors every write back. Curation done earlier in a web browser lives in that
 browser's storage, which no other application can read: open
 `<out_root>/reformatted/export_curation_state.html` in that browser, save the
-JSON, then use **Pipeline → Import curation state**.
+JSON, then use **Tools → Migrate browser curation → Import curation state**.
 
-### The sidebar is the workflow figure
+### All stages is the workflow figure
 
 `app/stages.py` lists every stage in the bands of Figure 1 in
 `docs/pipeline-methods.md` — Ingest and QC, Instrument characterisation, Atlas,
@@ -409,7 +441,7 @@ The Fiji export — step 4 of `run_all.sh`. It is a one-time instrument
 characterisation, already complete for this dataset
 (`qc/flatfield/tilefield_c*.npy`), and `01_overviews` applies the field it finds
 and works without one. It stays in `run_all.sh`, and the app lists it greyed out
-with the reason rather than hiding it; the Python halves of that chain (01e, 01f,
+with the reason (Tools > Instrument characterisation) rather than hiding it; the Python halves of that chain (01e, 01f,
 01c, 01h) run from the app like any other stage.
 
 Nuclei detection (05c) runs from the app when the interpreter can import

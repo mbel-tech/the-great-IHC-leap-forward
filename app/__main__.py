@@ -161,7 +161,7 @@ def _self_test(app, w):
 
     results["window"] = w.isVisible()
     results["local server"] = bool(w.server.port)
-    results["stages listed"] = w.list.count() > 5
+    results["steps listed"] = w.nav.count() >= 6
 
     if target is None:
         results["curator"] = False

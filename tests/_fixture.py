@@ -31,6 +31,11 @@ import os
 import sys
 import tempfile
 
+# The atlas plates shipped in atlas/ are copied into a study that lacks them
+# (ls_atlas.seed_from_bundle). A suite builds its own plate sets and asserts on
+# what is missing, so it must never get those.
+os.environ["LS_ATLAS_BUNDLE"] = ""
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 SCRIPTS = os.path.join(REPO, "scripts")

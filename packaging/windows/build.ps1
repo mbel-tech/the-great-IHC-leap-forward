@@ -6,7 +6,7 @@ Build the installable Windows bundle.
 Produces a self-contained folder:
 
     runtime\     python.org embeddable Python 3.13 with every library installed
-    app\ scripts\ analysis\   the repository, unchanged
+    app\ scripts\ analysis\ atlas\   the repository, unchanged
     R\           R and the figure packages (left out with -NoR)
     keras\       StarDist's pretrained model, so Measure works offline
     LS pipeline.cmd           starts the app from the folder (portable use)
@@ -99,7 +99,7 @@ Invoke-Checked $Py @("-m", "pip", "install", "--no-warn-script-location", "--pre
 Add-Content (Join-Path $Out "BUNDLE_VERSIONS.txt") "python==$PythonVersion"
 
 # --- The repository -------------------------------------------------------
-foreach ($d in "app", "scripts", "analysis") {
+foreach ($d in "app", "scripts", "analysis", "atlas") {
     Copy-Item -Recurse "$Repo\$d" (Join-Path $Out $d)
 }
 foreach ($f in "config.example.json", "README.md") { Copy-Item "$Repo\$f" $Out }

@@ -76,6 +76,8 @@ COLOUR_NAMES = tuple(sorted(ls_channels.NAMED_COLOURS)) if ls_channels else (
 SCHEMA_VERSION = 1
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+#: The salmon atlas shipped with the code; `atlas_pdf` falls back to it.
+BUNDLED_ATLAS_PDF = os.path.join(REPO, "atlas", "Salmon Atlas full.pdf")
 
 # Status of a key, as reported by the generated docs.
 #   live       - read by at least one stage
@@ -193,8 +195,12 @@ SPEC = [
         example="<ABSOLUTE PATH FOR PIPELINE OUTPUT>", consumers=["every stage"]),
 
     Key("atlas_pdf", "path_file",
-        "The atlas the plates and region seeds are extracted from.",
-        required=True, label="Atlas PDF", example="<ABSOLUTE PATH TO THE ATLAS PDF>",
+        "The atlas the plates and region seeds are extracted from. Empty means "
+        "the salmon atlas shipped in the repository's atlas/ folder.",
+        label="Atlas PDF", example="<ABSOLUTE PATH TO THE ATLAS PDF, OR EMPTY>",
+        note="Only 04a, 04a2 and 04a4 open it, to extract plates again. The "
+             "extracted plates themselves ship in atlas/ and are copied into "
+             "<out_root>/atlas/ the first time a study needs them.",
         consumers=["04a_atlas_extract", "04a2", "04a4", "app"]),
 
     Key("export_dir", "path_dir_opt",
@@ -1159,6 +1165,10 @@ def apply_defaults(cfg):
         found, value = _get(out, key.parts)
         if not found or value is None:
             _set(out, key.parts, json.loads(json.dumps(key.default)))
+    # Not a Key default: it is an absolute path on this machine, and a default
+    # is printed into the generated example config and reference docs.
+    if not out.get("atlas_pdf") and os.path.isfile(BUNDLED_ATLAS_PDF):
+        out["atlas_pdf"] = BUNDLED_ATLAS_PDF
     return out
 
 

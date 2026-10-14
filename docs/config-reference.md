@@ -14,7 +14,7 @@ A key marked *required* has to be present before any stage will run.
 | `study.name` | str | `""` | `app` | A short name for this study, shown in the app's study picker. |
 | `source_dir` | path_dir | *required* | `00_manifest`, `00b`, `00d`, `01b_pick`, `01e`, `01h`, `01_overviews`, `05a`, `05c`, `06b`, `app` | The folder holding the .czi files. |
 | `out_root` | path_dir_create | *required* | `every stage` | Where every result is written. Needs room - overviews alone run to several GB. |
-| `atlas_pdf` | path_file | *required* | `04a_atlas_extract`, `04a2`, `04a4`, `app` | The atlas the plates and region seeds are extracted from. |
+| `atlas_pdf` | path_file |  | `04a_atlas_extract`, `04a2`, `04a4`, `app` | The atlas the plates and region seeds are extracted from. Empty means the salmon atlas shipped in the repository's atlas/ folder. |
 | `export_dir` | path_dir_opt |  | `04l`, `05a`, `app/curator_view` | Where the ROI curator files its exports. Empty means <out_root>/exports. |
 | `source_files` | list_str_opt |  | `00_manifest`, `app/import_slides` | Optional allowlist of filenames to process. Empty means every file in source_dir. |
 | `slide_naming.pattern` | regex | *required* | `00_manifest`, `app/slides` | Regex matching your slide filenames, with a named group 'subject'. Optional named groups 'slide' and 'replicate'; any others are carried through as manifest columns. |

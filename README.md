@@ -20,6 +20,18 @@ way), and `04l`'s Shotgun deck uses it to lay slides out by treatment, which is 
 group comparison figure can be built without. Both are documented at `config.groups`, and
 leaving `by_animal` empty disables both.
 
+## Atlases, and how to cite them
+
+The atlas plates ship in [`atlas/`](atlas/README.md), so a new study loads them with no extraction
+step: the first time a study needs a plate set it does not have, the app copies it into
+`<out_root>/atlas/`. If you use either atlas in research, cite it:
+
+- **Salmon atlas** — written by **Marco A. Vindas**, otherwise unpublished. Marco A. Vindas must be
+  cited in any research that uses it.
+- **Wullimann zebrafish atlas** — Wullimann, M. F., Rupp, B., & Reichert, H. (1996). *Neuroanatomy of
+  the Zebrafish Brain: A Topological Atlas*. Basel: Birkhäuser Verlag. ISBN 3-7643-5120-9.
+  https://doi.org/10.1007/978-3-0348-8979-7
+
 ---
 
 ## Reader architecture

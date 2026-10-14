@@ -1,0 +1,48 @@
+plate_id,page,index_on_page,image_file,px_w,px_h,n_seeds,n_seeds_raster,n_text_labels,regions,overlay_written
+plate_001,1,0,plate_001_p01_0.jpeg,800,480,0,0,0,,1
+plate_002,1,1,plate_002_p01_1.jpeg,745,434,0,0,0,,1
+plate_003,1,2,plate_003_p01_2.jpeg,761,520,0,0,0,,1
+plate_004,2,0,plate_004_p02_0.jpeg,738,497,0,0,0,,1
+plate_005,2,1,plate_005_p02_1.jpeg,753,569,0,0,0,,1
+plate_006,2,2,plate_006_p02_2.jpeg,713,553,0,0,0,,1
+plate_007,3,0,plate_007_p03_0.jpeg,952,865,0,0,0,,1
+plate_008,3,1,plate_008_p03_1.jpeg,985,754,0,0,0,,1
+plate_009,4,0,plate_009_p04_0.jpeg,1032,833,10,0,0,Dl|Dm,1
+plate_010,4,1,plate_010_p04_1.jpeg,1026,864,10,0,0,Dl|Dm,1
+plate_011,5,0,plate_011_p05_0.jpeg,1073,865,27,6,0,Dl|Dm|Vd|Vl|Vv,1
+plate_012,5,1,plate_012_p05_1.jpeg,1024,850,27,6,0,Dl|Dm|Vd|Vl|Vv,1
+plate_013,6,0,plate_013_p06_0.jpeg,1136,847,30,17,1,Dl|Dm|Vd|Vl|Vv,1
+plate_014,6,1,plate_014_p06_1.jpeg,1113,833,26,20,0,Dl|Dm|Vd|Vl|Vv,1
+plate_015,7,0,plate_015_p07_0.jpeg,1161,865,28,12,0,Dl|Dm|Vd|Vl|Vv,1
+plate_016,7,1,plate_016_p07_1.jpeg,1073,802,22,0,0,Dl|Dm|Vc|Vs,1
+plate_017,8,0,plate_017_p08_0.jpeg,1073,849,22,0,0,Dl|Dm|Vc|Vs,1
+plate_018,8,1,plate_018_p08_1.jpeg,1226,996,15,5,0,Dl|Dm,1
+plate_019,9,0,plate_019_p09_0.jpeg,1177,865,14,0,0,Dl|Dm,1
+plate_020,9,1,plate_020_p09_1.jpeg,1059,1116,16,0,1,Dl|Dm|POA,1
+plate_021,10,0,plate_021_p10_0.jpeg,1080,1042,15,0,1,Dl|Dm|POA,1
+plate_022,10,1,plate_022_p10_1.jpeg,1078,1042,12,0,1,Dl|Dm|POA,1
+plate_023,11,0,plate_023_p11_0.jpeg,1037,1042,14,0,1,Dl|Dm|POA,1
+plate_024,11,1,plate_024_p11_1.jpeg,1028,1042,14,0,1,Dl|Dm|POA,1
+plate_025,12,0,plate_025_p12_0.jpeg,1050,1042,14,0,1,Dl|Dm|POA,1
+plate_026,12,1,plate_026_p12_1.jpeg,1415,1044,0,0,0,,1
+plate_027,13,0,plate_027_p13_0.jpeg,1595,1042,0,0,0,,1
+plate_028,13,1,plate_028_p13_1.jpeg,1560,1042,0,0,0,,1
+plate_029,14,0,plate_029_p14_0.jpeg,1404,868,0,0,0,,1
+plate_030,14,1,plate_030_p14_1.jpeg,1367,1008,0,0,0,,1
+plate_031,15,0,plate_031_p15_0.jpeg,1401,2022,0,0,0,,1
+plate_032,16,0,plate_032_p16_0.jpeg,1651,2204,0,0,0,,1
+plate_033,17,0,plate_033_p17_0.jpeg,1593,2158,0,0,0,,1
+plate_034,18,0,plate_034_p18_0.jpeg,1641,2204,4,0,2,Nucleus Anterior tuberal|Nucleus Lateral tuberal,1
+plate_035,19,0,plate_035_p19_0.jpeg,1607,2204,8,0,2,Nucleus Anterior tuberal|Nucleus Lateral tuberal,1
+plate_036,20,0,plate_036_p20_0.jpeg,1423,2148,12,0,0,Migrated posterior tuberal nucleus|Nucleus Anterior tuberal|Nucleus Lateral tuberal,1
+plate_037,21,0,plate_037_p21_0.jpeg,1312,2179,8,0,0,Nucleus Posterior Tuberal,1
+plate_038,22,0,plate_038_p22_0.jpeg,1380,2183,0,0,0,,1
+plate_039,23,0,plate_039_p23_0.jpeg,1458,2204,0,0,0,,1
+plate_040,24,0,plate_040_p24_0.jpeg,1341,2182,0,0,0,,1
+plate_041,25,0,plate_041_p25_0.jpeg,1497,2204,4,0,1,Rm,1
+plate_042,26,0,plate_042_p26_0.jpeg,1480,2204,4,0,1,Rm,1
+plate_043,27,0,plate_043_p27_0.jpeg,1452,2204,4,0,1,Rm,1
+plate_044,28,0,plate_044_p28_0.jpeg,1361,2202,2,0,1,Rm,1
+plate_045,29,0,plate_045_p29_0.jpeg,1392,2146,0,0,0,,1
+plate_046,30,0,plate_046_p30_0.jpeg,1307,2194,0,0,0,,1
+plate_047,31,0,plate_047_p31_0.jpeg,1264,2202,0,0,0,,1

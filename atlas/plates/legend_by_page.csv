@@ -1,0 +1,49 @@
+page,colour_hex,region
+4,#ffff00,Dl
+4,#91d04f,Dm
+5,#ffff00,Dl
+5,#91d04f,Dm
+5,#ff0000,Vd
+5,#538dd4,Vl
+5,#a4a4a4,Vv
+6,#ffff00,Dl
+6,#91d04f,Dm
+6,#ff0000,Vd
+6,#538dd4,Vl
+6,#a4a4a4,Vv
+7,#ffff00,Dl
+7,#91d04f,Dm
+7,#f17e39,Vc
+7,#ff0000,Vd
+7,#538dd4,Vl
+7,#964605,Vs
+7,#a4a4a4,Vv
+8,#ffff00,Dl
+8,#91d04f,Dm
+8,#f17e39,Vc
+8,#ff0000,Vd
+8,#964605,Vs
+9,#ffff00,Dl
+9,#91d04f,Dm
+9,#f771ed,POA
+10,#ffff00,Dl
+10,#91d04f,Dm
+10,#f771ed,POA
+11,#ffff00,Dl
+11,#91d04f,Dm
+11,#f771ed,POA
+12,#ffff00,Dl
+12,#91d04f,Dm
+12,#f771ed,POA
+18,#b7dee8,Nucleus Anterior tuberal
+18,#77923b,Nucleus Lateral tuberal
+19,#b7dee8,Nucleus Anterior tuberal
+19,#77923b,Nucleus Lateral tuberal
+20,#fbd4b5,Migrated posterior tuberal nucleus
+20,#b7dee8,Nucleus Anterior tuberal
+20,#77923b,Nucleus Lateral tuberal
+21,#f79546,Nucleus Posterior Tuberal
+25,#ff0000,Rm (Raphe) ??
+26,#ff0000,Rm (Raphe) ??
+27,#ff0000,Rm (Raphe)
+28,#ff0000,Raphe (Rm)

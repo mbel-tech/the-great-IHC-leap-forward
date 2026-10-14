@@ -46,6 +46,8 @@ if _HERE not in sys.path:
 # lines copy-pasted into every stage.
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
 import czi_read as CR  # noqa: E402
+import ls_channels as CH  # noqa: E402
+import ls_io as IO  # noqa: E402
 
 SOURCE_DIR = CONFIG["source_dir"]
 OUT_ROOT = CONFIG["out_root"]
@@ -56,6 +58,22 @@ OVERVIEW_DIR = os.path.join(OUT_ROOT, "overviews")
 QC_DIR = os.path.join(OUT_ROOT, "qc")
 RANGES_PATH = os.path.join(QC_DIR, "display_ranges.json")
 QC_CSV = os.path.join(QC_DIR, "focus.csv")
+# What 01k_saturation_raw.py used to be the only writer of. This stage reads the
+# same two raw planes at the same zoom, so it writes them from the array it
+# already holds; 01k is left as a backfill for sections exported before it did.
+SAT_RAW_CSV = os.path.join(QC_DIR, "saturation_raw.csv")
+CENSOR_RAW_DIR = os.path.join(QC_DIR, "censor_raw")
+# Masks are written for every declared marker - see 01k on why AF488 too.
+MASK_MARKERS = tuple(CH.marker_names(CONFIG))
+SAT_RAW_KEYS = [
+    "scene_uid", "file", "animal", "slide", "variant", "marker_channel",
+    "scene_index", "section_order", "width", "height", "um_px", "zoom",
+    # The scene origin in CZI stage pixels. Recorded here so 06f can map a
+    # nucleus from czi_x/czi_y into this mask without reopening 222 CZIs.
+    "rect_x", "rect_y", "rect_w", "rect_h",
+    "saturated_fraction_raw", "saturated_fraction_dapi_raw",
+    "saturated_fraction_corrected", "raw_over_corrected",
+    "mask_path", "tilefield_applied", "reader"]
 
 SAMPLE_SECTIONS = 120
 SEED = 20260811
@@ -220,6 +238,56 @@ def write_qc(rows):
     os.replace(tmp, QC_CSV)
 
 
+def raw_clip_record(r, fname, rect, s, zoom, dapi_raw, mark_raw, mark_corrected,
+                    ceiling):
+    """One saturation_raw.csv row, writing the raw clipping mask on the way.
+
+    Shared with 01k_saturation_raw.py, so the export and the backfill write the
+    same row and the same mask from the same arrays: the 16-bit planes as read,
+    before the tile field. Nothing here is resampled or rescaled.
+    """
+    clipped = mark_raw >= ceiling
+    raw = float(clipped.mean())
+    corrected = float((mark_corrected >= ceiling).mean())
+    mask_path = ""
+    if r["marker_channel"] in MASK_MARKERS:
+        os.makedirs(CENSOR_RAW_DIR, exist_ok=True)
+        mask_path = os.path.join(CENSOR_RAW_DIR, r["scene_uid"] + "_clipped.png")
+        with IO.atomic_save(mask_path) as tmp:
+            Image.fromarray((clipped * 255).astype(np.uint8)).save(tmp, format="PNG")
+    h, w = mark_raw.shape
+    return {
+        "scene_uid": r["scene_uid"], "file": fname, "animal": r["animal"],
+        "slide": r["slide"], "variant": r["variant"],
+        "marker_channel": r["marker_channel"], "scene_index": s,
+        "section_order": r["section_order"],
+        "width": w, "height": h,
+        "rect_x": rect.x, "rect_y": rect.y, "rect_w": rect.w, "rect_h": rect.h,
+        "um_px": "%.2f" % (BASE_PX_UM / zoom), "zoom": "%.4f" % zoom,
+        "saturated_fraction_raw": "%.6f" % raw,
+        "saturated_fraction_dapi_raw": "%.6f" % float((dapi_raw >= ceiling).mean()),
+        "saturated_fraction_corrected": "%.6f" % corrected,
+        "raw_over_corrected": "%.3f" % (raw / corrected) if corrected > 0 else "",
+        "mask_path": os.path.relpath(mask_path, OUT_ROOT) if mask_path else "",
+        # The mask and the _raw columns are measured before the field.
+        "tilefield_applied": 0,
+        "reader": "pylibCZIrw",
+    }
+
+
+def load_sat_raw():
+    """saturation_raw.csv as uid -> row, or empty when there is none yet."""
+    if not os.path.exists(SAT_RAW_CSV):
+        return {}
+    with open(SAT_RAW_CSV, newline="", encoding="utf-8") as fh:
+        return {r["scene_uid"]: r for r in csv.DictReader(fh)}
+
+
+def write_sat_raw(by_uid):
+    if by_uid:
+        IO.atomic_write_csv(SAT_RAW_CSV, list(by_uid.values()), SAT_RAW_KEYS)
+
+
 # ---------------------------------------------------------------- passes
 
 def sample_display_ranges(scenes, fields, zoom, force):
@@ -296,6 +364,9 @@ def export(scenes, fields, ranges, ceilings, zoom, limit, force):
 
     total = sum(len(v) for v in by_file.values())
     print(f"{total} sections to export across {len(by_file)} files")
+    # Rows for sections exported earlier are kept; a section exported now
+    # replaces its row, so --force cannot leave a stale mask row behind.
+    sat_raw = load_sat_raw()
 
     exported = failed = 0
     t0 = time.time()
@@ -337,6 +408,11 @@ def export(scenes, fields, ranges, ceilings, zoom, limit, force):
                     sat_dapi_raw = float((dapi_raw >= ceiling).mean())
                     dapi = apply_tile_field(dapi_raw, fields.get(0), 1 / zoom)
                     mark = apply_tile_field(mark_raw, fields.get(1), 1 / zoom)
+                    # The raw clipping mask 04j censors from, written here from
+                    # the planes just read rather than by a second pass over
+                    # every CZI in 01k.
+                    sat_raw[r["scene_uid"]] = raw_clip_record(
+                        r, fname, rects[s], s, zoom, dapi_raw, mark_raw, mark, ceiling)
                     h, w = dapi.shape
                     um_px = BASE_PX_UM / zoom
 
@@ -392,12 +468,14 @@ def export(scenes, fields, ranges, ceilings, zoom, limit, force):
         # Checkpoint per file: this runs unattended against an external drive
         # that has already dropped writes once.
         write_qc(qc_rows)
+        write_sat_raw(sat_raw)
         rate = exported / max(time.time() - t0, 1e-9)
         print(f"\r  exported {exported}/{total}  failed {failed}  "
               f"({rate:.1f}/s, {(time.time() - t0) / 60:.1f} min)", end="")
 
     print()
     write_qc(qc_rows)
+    write_sat_raw(sat_raw)
     return exported, failed, len(qc_rows)
 
 

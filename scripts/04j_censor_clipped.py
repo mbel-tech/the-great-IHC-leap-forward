@@ -322,6 +322,31 @@ def guard_partial(out_csv, rows, allow):
                          f"first, or pass --allow-partial to write anyway.")
     return None
 
+def sections_to_check(focus_rows, marker):
+    """The sections this marker's analysis set covers: every scanned one that
+    the curation has not excluded, as `(scene_uid, animal, section_order)`.
+
+    This used to be read off the marker's reformat index, which is the same
+    set - 04a writes an index row for exactly the sections it was not told to
+    exclude - but it tied 04j to a reformat pass that changes nothing 04j
+    reads: the censor mask lives in the overview frame and the verdict is a
+    fraction of it. Asking 04a's own loaders for the exclusions, with the
+    Review mode's decisions merged the same way, gives the same list without
+    making the operator reformat every section once more just to produce it.
+
+    The one difference is a section the reformat later fails to frame (no
+    overview, no tissue mask). It gets a verdict here and no picture there; 04a
+    reports it as lost, and nothing downstream reads a section without an index
+    row.
+    """
+    paths = RF.marker_paths(marker)
+    _, excluded = RF.load_overrides(paths)
+    excluded, _ = RF.apply_review(excluded, marker)
+    return [(r["scene_uid"], r["animal"], r["section_order"])
+            for r in RF.frames_for(focus_rows, marker)
+            if r["scene_uid"] not in excluded]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tolerance", type=float, default=TOLERANCE,
@@ -341,18 +366,18 @@ def main():
     # can share one censor directory without colliding.
     print(f"{label} ({marker}) -> {out_csv}")
 
-    foc = {r["scene_uid"]: r for r in csv.DictReader(open(QC_CSV, encoding="utf-8"))}
-    with open(RF.marker_paths(marker)["index"], newline="", encoding="utf-8") as fh:
-        kept = [r for r in csv.DictReader(fh) if r["kind"] == "section"]
+    with open(QC_CSV, newline="", encoding="utf-8") as fh:
+        focus_rows = list(csv.DictReader(fh))
+    foc = {r["scene_uid"]: r for r in focus_rows}
+    kept = sections_to_check(focus_rows, marker)
 
     rows, missing, no_tissue = [], [], []
-    for i, r in enumerate(kept, 1):
-        uid, animal = r["id"], r["animal"]
+    for i, (uid, animal, section_order) in enumerate(kept, 1):
         dapi = os.path.join(OVERVIEW_DIR, animal, marker, uid + "_DAPI.png")
         cen = censor_mask(uid)
         if cen is None:
             missing.append(uid)
-            rows.append(unmeasured_row(uid, animal, r["section_order"]))
+            rows.append(unmeasured_row(uid, animal, section_order))
             continue
         tis = load_tissue_mask(uid, dapi)
         if tis is not None and tis.shape != cen.shape:
@@ -374,7 +399,7 @@ def main():
 
         v = section_verdict(frac_frame, frac_tissue, args.tolerance)
         rows.append({
-            "scene_uid": uid, "animal": animal, "section_order": r["section_order"],
+            "scene_uid": uid, "animal": animal, "section_order": section_order,
             "censored_fraction": v["censored_fraction"],
             "censored_fraction_in_tissue": v["censored_fraction_in_tissue"],
             "recorded_saturated_fraction": recorded,

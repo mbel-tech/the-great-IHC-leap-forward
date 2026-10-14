@@ -75,9 +75,9 @@ Every stage is resumable — re-running skips completed work.
 | 0 | `00_manifest.py` | Parses all CZI headers **without extracting**, reconstructs the slide layout, renders slide maps under five candidate mounting conventions |
 | 0b | `00b_verify_extraction.py` | Verifies extracted CZIs against the zip central directories; `--crc` checks content, not just size |
 | 0c | `00c_channel_identity.py` | Infers which fluorophore carries which marker from spatial signature |
-| 1 | `01_overviews.py` | Exports every section at exactly 5.20 µm/px with a frozen display range, plus per-section QC |
+| 1 | `01_overviews.py` | Exports every section at exactly 5.20 µm/px with a frozen display range, plus per-section QC and the raw clipping masks `04j` censors from |
 | 1b | `01e`, `01f`, `01c`, `01g`, `01h` | Tile geometry, illumination field, artifact measurement, saturation mapping |
-| 1k | `01k_saturation_raw.py` | Clipping measured on the raw plane, before the tile field; writes the masks `04j` censors from |
+| 1k | `01k_saturation_raw.py` | Backfill: raw-plane clipping for sections exported before `01` wrote it, plus the native-resolution dilution check |
 | 1c | `01d_contactsheets.py` | Per-animal montages in rostro-caudal order, plus an HTML gallery |
 | 2 | `02_pair_passes.py` | Pairs the two marker passes onto the same physical sections via stage coordinates |
 | 4a | `04a_atlas_extract.py` | Extracts labelled plates and region seed points from the atlas PDF |
@@ -215,9 +215,10 @@ file rather than a rewritten override.
 **Reinstating changes the analysis set**, so 05c has to run again for what it adds; the export
 says so before it writes.
 
-`04a_reformat.py --render-excluded` renders excluded sections so they can be *looked* at. It
+`04a_reformat.py --render-excluded` renders excluded sections so they can be *looked* at. The
+app's final pERK reformat passes it, so they are rendered in the same pass. It
 never writes an index row — the index, not the presence of a file in `reformatted/`, is what puts
-a section into the analysis. Run once for pERK, whose 473 exclusions were applied before
+a section into the analysis. It matters for pERK, whose 473 exclusions were applied before
 reformatting and so had no image, while all 593 PCNA ones did.
 
 ---

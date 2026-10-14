@@ -1,5 +1,12 @@
 """Stage 1k - measure clipping on the RAW plane, before the tile field.
 
+**Now a backfill.** `01_overviews.py` writes `saturation_raw.csv` and the
+`censor_raw/` masks itself, from the planes it already reads, so a fresh export
+leaves nothing for this stage to measure and it skips every section. It still
+fills in sections exported before that change, and `--native-sample` still
+measures the resolution-dilution factor below. What follows is why the raw
+measurement exists at all.
+
 `01_overviews.py` applied `apply_tile_field()` and *then* measured
 `saturated_fraction`. Dividing by a gain above 1 lifts a pixel off the 16-bit
 ceiling, so it stops counting as clipped - but the value is gone either way,
@@ -51,13 +58,11 @@ import time
 import sys
 
 import numpy as np
-from PIL import Image
 
 # ls_config resolves LS_CONFIG, applies the defaults and validates once for
 # the whole process. Imported, not re-implemented: this block used to be four
 # lines copy-pasted into every stage.
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
-import ls_channels as CH  # noqa: E402
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _spec = importlib.util.spec_from_file_location("_ov", os.path.join(_HERE, "01_overviews.py"))
@@ -73,15 +78,12 @@ SOURCE_DIR = OV.SOURCE_DIR
 OUT_ROOT = OV.OUT_ROOT
 QC_DIR = OV.QC_DIR
 FOCUS_CSV = OV.QC_CSV
-OUT_CSV = os.path.join(QC_DIR, "saturation_raw.csv")
-MASK_DIR = os.path.join(QC_DIR, "censor_raw")
+OUT_CSV = OV.SAT_RAW_CSV
+MASK_DIR = OV.CENSOR_RAW_DIR
 NATIVE_CSV = os.path.join(QC_DIR, "saturation_raw_native.csv")
 
-# Fallback only. The real value is per-file, from the manifest's clip_ceiling
-# column, via OV.ceiling_for() - see load_ceilings()'s docstring in
-# 01_overviews.py for why 65535 cannot just be assumed.
-CEILING = 65535
-# Masks are written for BOTH markers.
+# Masks are written for BOTH markers. The list lives in 01_overviews now, which
+# writes the same masks during export.
 #
 # **AF488 is not clip-free, and the belief that it was came from this same bug.**
 # LOGS.md said "AF488 cannot clip, so there is nothing to censor". Measured on
@@ -90,20 +92,12 @@ CEILING = 65535
 # had was the 8-bit proxy, and AF488's display high is 37,263: a PNG value of
 # 255 there means "at or above the display high", not "at the sensor ceiling",
 # so the question could not even be asked. Raw 16-bit measurement can ask it.
-MASK_MARKERS = tuple(CH.marker_names(CONFIG))
-
-KEYS = ["scene_uid", "file", "animal", "slide", "variant", "marker_channel",
-        "scene_index", "section_order", "width", "height", "um_px", "zoom",
-        # The scene origin in CZI stage pixels. Recorded here so 06f can map a
-        # nucleus from czi_x/czi_y into this mask without reopening 222 CZIs.
-        "rect_x", "rect_y", "rect_w", "rect_h",
-        "saturated_fraction_raw", "saturated_fraction_dapi_raw",
-        "saturated_fraction_corrected", "raw_over_corrected",
-        "mask_path", "tilefield_applied", "reader"]
+MASK_MARKERS = OV.MASK_MARKERS
+KEYS = OV.SAT_RAW_KEYS
 
 
-def measure(czidoc, rect, fields, zoom, want_mask, ceiling=CEILING, *, scene):
-    """Raw clipping for both channels, and the corrected figure for comparison.
+def measure(czidoc, rect, fields, zoom, *, scene):
+    """The raw planes for both channels, and the marker as the field corrects it.
 
     `scene` is required: measuring clipping on a rectangle that composites a
     neighbour's tissue is how the clipped fraction came to be overstated by up
@@ -111,15 +105,8 @@ def measure(czidoc, rect, fields, zoom, want_mask, ceiling=CEILING, *, scene):
     """
     dapi_raw = OV.read_scene(czidoc, rect, 0, zoom, scene=scene)
     mark_raw = OV.read_scene(czidoc, rect, 1, zoom, scene=scene)
-    clipped = mark_raw >= ceiling
     corrected = OV.apply_tile_field(mark_raw, fields.get(1), 1 / zoom)
-    return {
-        "raw": float(clipped.mean()),
-        "dapi_raw": float((dapi_raw >= ceiling).mean()),
-        "corrected": float((corrected >= ceiling).mean()),
-        "shape": mark_raw.shape,
-        "mask": clipped if want_mask else None,
-    }
+    return dapi_raw, mark_raw, corrected
 
 
 def clip_pool(scenes):
@@ -191,7 +178,7 @@ def native_sample(scenes, n, ceilings, seed=20260901):
                 })
                 print("\r  native sample %d/%d" % (len(rows), n), end="")
     print()
-    atomic_write(NATIVE_CSV, rows, ["scene_uid", "file", "frac_at_5_20um",
+    IO.atomic_write_csv(NATIVE_CSV, rows, ["scene_uid", "file", "frac_at_5_20um",
                                     "frac_at_0_65um", "native_over_overview"])
     if rows:
         v = np.array([r["native_over_overview"] for r in rows], dtype=float)
@@ -223,7 +210,7 @@ def merge_into_focus(rows):
         r["saturated_fraction_raw"] = m["saturated_fraction_raw"]
         r["saturated_fraction_dapi_raw"] = m["saturated_fraction_dapi_raw"]
         hit += 1
-    atomic_write(FOCUS_CSV, foc, keys)
+    IO.atomic_write_csv(FOCUS_CSV, foc, keys)
     print("  merged %d/%d rows into %s" % (hit, len(foc), FOCUS_CSV))
     return hit
 
@@ -317,37 +304,12 @@ def main():
                     if s not in rects:
                         failed += 1
                         continue
-                    uid = r["scene_uid"]
-                    want = r["marker_channel"] in MASK_MARKERS
                     ceiling = OV.ceiling_for(ceilings, fname)
-                    m = measure(czidoc, rects[s], fields, zoom, want, ceiling, scene=s)
-
-                    mask_path = ""
-                    if want:
-                        mask_path = os.path.join(MASK_DIR, uid + "_clipped.png")
-                        with IO.atomic_save(mask_path) as tmp:
-                            Image.fromarray((m["mask"] * 255).astype(np.uint8)).save(tmp, format="PNG")
-
-                    h, w = m["shape"]
-                    ratio = m["raw"] / m["corrected"] if m["corrected"] > 0 else None
-                    rows.append({
-                        "scene_uid": uid, "file": fname, "animal": r["animal"],
-                        "slide": r["slide"], "variant": r["variant"],
-                        "marker_channel": r["marker_channel"], "scene_index": s,
-                        "section_order": r["section_order"],
-                        "width": w, "height": h,
-                        "rect_x": rects[s].x, "rect_y": rects[s].y,
-                        "rect_w": rects[s].w, "rect_h": rects[s].h,
-                        "um_px": "%.2f" % (OV.BASE_PX_UM / zoom), "zoom": "%.4f" % zoom,
-                        "saturated_fraction_raw": "%.6f" % m["raw"],
-                        "saturated_fraction_dapi_raw": "%.6f" % m["dapi_raw"],
-                        "saturated_fraction_corrected": "%.6f" % m["corrected"],
-                        "raw_over_corrected": "" if ratio is None else "%.3f" % ratio,
-                        "mask_path": os.path.relpath(mask_path, OUT_ROOT) if mask_path else "",
-                        # 0, and that is the whole point of this script.
-                        "tilefield_applied": 0,
-                        "reader": "pylibCZIrw",
-                    })
+                    dapi_raw, mark_raw, corrected = measure(
+                        czidoc, rects[s], fields, zoom, scene=s)
+                    rows.append(OV.raw_clip_record(
+                        r, fname, rects[s], s, zoom, dapi_raw, mark_raw,
+                        corrected, ceiling))
                     measured += 1
         except Exception as exc:  # noqa: BLE001 - one bad file must not kill the run
             print("\n  !! %s: %s" % (fname, exc))
@@ -361,17 +323,10 @@ def main():
     print()
     IO.atomic_write_csv(OUT_CSV, rows, KEYS)
 
+    # summarise() prints the whole summary. A second, older copy of it used to
+    # follow here, reading names that only exist inside summarise(), so every
+    # run ended in a NameError before the merge and the native sample.
     summarise(rows, measured, failed)
-    print("measured %d, failed %d, %s now holds %d sections"
-          % (measured, failed, OUT_CSV, len(rows)))
-    print("  marker clipping (raw) : median %.6f  p95 %.6f  max %.6f"
-          % (np.median(raw), np.percentile(raw, 95), raw.max()))
-    print("  DAPI clipping (raw)   : median %.6f  max %.6f   <- expected near zero"
-          % (np.median(dap), dap.max()))
-    if len(ratio):
-        print("  raw / corrected       : median %.3f  p05 %.3f  p95 %.3f  (n=%d)"
-              % (np.median(ratio), np.percentile(ratio, 5), np.percentile(ratio, 95), len(ratio)))
-    print("=" * 74)
 
     if not rows:
         return

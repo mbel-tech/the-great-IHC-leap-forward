@@ -272,7 +272,7 @@ Prepare now stops and the Curate screen asks for the **rotation and exclusion cu
 | Stage | What it does | Makes | Options |
 | --- | --- | --- | --- |
 | 04n Order the ROI queue | Orders sections so stopping part way still covers every animal and brain level equally | `reformatted/roi_worklist.csv` | Hold out animals with fewer than N sections (10) |
-| 04o Colour pictures (pERK, PCNA) | Colour pictures for the curator: nuclei blue, marker in colour. Drawn from the original scan, with no 8-bit loss. | colour section pictures | Picture size (×256 px, default 3 = 768 px); include excluded; redo |
+| 04o Colour pictures (pERK, PCNA) | Colour pictures for the curator: nuclei blue, marker in colour. Drawn from the original scan, with no 8-bit loss, at 2.6 µm per pixel by default (setting \`curation\_render.um\_per\_px\` in \`config.json\`). 1.3 µm is the finest allowed, because a whole section at full resolution is too large for the curator to hold. Measurement always reads the full 0.65 µm scan. | colour section pictures | Picture size (×256 px, default 3 = 768 px); include excluded; redo |
 | 04o Review thumbnails (pERK, PCNA) | Small pictures for the curator's Review grid | thumbnails | Thumbnail size (256 px) |
 | 04p Trace every section | Follows every scanned section through every decision, for Review | `reformatted/section_provenance.csv` | Build tissue outlines (slow, once); redo |
 
@@ -394,7 +394,7 @@ flowchart LR
 
 Two details worth knowing. A region is mapped corner by corner, so it keeps its true shape even where a section was stretched more one way than the other; a round background disc becomes an oval on the slide, and its area is measured as such. And 05a's first stage, *Verify the inverse transform*, checks the whole chain on every pixel before anything is measured.
 
-> **Being worked on.** A one-line fix is in progress for a constant half-pixel shift: today every region sits about half a 256-grid pixel (roughly 12 µm) down and to the right of where it was drawn, which moves about 3% of nuclei across a region edge. The curator picture itself may also change. This section will be updated when both are settled.
+> **Half-pixel correction.** The curator counts a pixel from its edge, while the measuring stages count from its centre. Left alone, every region and background disc would land half a grid pixel (about 16 µm) down and to the right of where you drew it, moving about 3% of region nuclei across an edge. 05a now subtracts that half pixel from every point you placed before mapping it, so regions land where you drew them. A results file measured before this fix keeps the old membership until *Detect and measure nuclei* is run again.
 
 ### Nucleus detection, in plain words
 

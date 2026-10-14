@@ -9,9 +9,9 @@ Produces a self-contained folder:
     app\ scripts\ analysis\   the repository, unchanged
     R\           R and the figure packages (left out with -NoR)
     keras\       StarDist's pretrained model, so Measure works offline
-    LS pipeline.cmd           starts the app from the folder (portable use)
+    The Great IHC Leap Forward.cmd           starts the app from the folder (portable use)
 
-installer.iss wraps that folder into LS-IHC-Setup.exe.
+installer.iss wraps that folder into The-Great-IHC-Leap-Forward-Setup.exe.
 
 Why not PyInstaller (app\lsapp.spec): the stages are loaded by file path at run
 time, so a freezer cannot see what they import, and the spec had to leave
@@ -95,6 +95,14 @@ $req = Join-Path $Cache "requirements-app.txt"
 Get-Content "$Repo\requirements.txt" | Where-Object { $_ -notmatch '^\s*pyinstaller' } | Set-Content $req
 Invoke-Checked $Py @("-m", "pip", "install", "--no-warn-script-location", "--prefer-binary",
     "-r", $req, "-r", "$Repo\requirements-czi.txt", "-r", "$PSScriptRoot\requirements-bundle.txt")
+# Nothing at run time uses these, and they are what makes the bundle large and
+# its paths long: TensorFlow's C++ headers (270 MB, and paths of 160+
+# characters, which broke the installer build at Windows' 260-character limit)
+# and two build tools pip pulls in as dependencies (cmake for itk, libclang for
+# TensorFlow's code generation). smoke_test.py and --self-test run after this.
+Remove-Item -Recurse -Force (Join-Path $Runtime "Lib\site-packages\tensorflow\include")
+Invoke-Checked $Py @("-m", "pip", "uninstall", "-y", "-q", "cmake", "libclang")
+
 & $Py -m pip freeze | Set-Content (Join-Path $Out "BUNDLE_VERSIONS.txt")
 Add-Content (Join-Path $Out "BUNDLE_VERSIONS.txt") "python==$PythonVersion"
 
@@ -104,7 +112,7 @@ foreach ($d in "app", "scripts", "analysis") {
 }
 foreach ($f in "config.example.json", "README.md") { Copy-Item "$Repo\$f" $Out }
 Get-ChildItem $Out -Recurse -Directory -Filter "__pycache__" | Remove-Item -Recurse -Force
-Set-Content -Encoding ascii (Join-Path $Out "LS pipeline.cmd") '@start "" "%~dp0runtime\pythonw.exe" -m app %*'
+Set-Content -Encoding ascii (Join-Path $Out "The Great IHC Leap Forward.cmd") '@start "" "%~dp0runtime\pythonw.exe" -m app %*'
 
 # --- StarDist model -------------------------------------------------------
 # Fetched once here so the first Measure run needs no network. stardist ends
@@ -153,5 +161,15 @@ if (-not $NoR) {
 # test fixtures that are deliberately not valid Python.
 & $Py -m compileall -q -j 0 $Out | Out-Null
 
+# Where the size goes, so slimming is done from numbers.
+$sp = Join-Path $Runtime "Lib\site-packages"
+$dirs = @(Get-ChildItem $Out -Directory | Where-Object Name -ne "runtime") + @(Get-ChildItem $sp -Directory)
+$dirs | ForEach-Object {
+    [pscustomobject]@{ MB = [int]((Get-ChildItem $_.FullName -Recurse -File | Measure-Object Length -Sum).Sum / 1MB); Folder = $_.FullName.Substring($Out.Length + 1) }
+} | Sort-Object MB -Descending | Select-Object -First 25 | Format-Table -AutoSize | Out-String | Write-Host
+
 $size = (Get-ChildItem $Out -Recurse -File | Measure-Object Length -Sum).Sum / 1MB
 Write-Host ("Built {0} ({1:N0} MB)" -f $Out, $size)
+
+# compileall may exit non-zero (see above); that is not this script failing.
+exit 0

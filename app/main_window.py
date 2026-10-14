@@ -365,7 +365,7 @@ class MainWindow(QMainWindow):
         self._file_actions["revert"].setEnabled(self.session.dirty)
 
     def _update_title(self):
-        self.setWindowTitle("LS IHC pipeline  -  " + self.session.title())
+        self.setWindowTitle("The Great IHC Leap Forward  -  " + self.session.title())
         if hasattr(self, "_file_actions"):
             self._fill_recent()
 

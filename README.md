@@ -1,4 +1,21 @@
-# LS whole-brain IHC pipeline
+# The Great IHC Leap Forward
+
+Whole-brain IHC pipeline for LS (formerly `ls-ihc-pipeline`).
+
+## Download
+
+**[Download the Windows installer](https://github.com/mbel-tech/the-great-IHC-leap-forward/releases/latest)**:
+on that page, under *Assets*, get `The-Great-IHC-Leap-Forward-Setup-<version>.exe`.
+
+Run it and start **The Great IHC Leap Forward** from the Start menu. It installs for your
+user only, needs no administrator rights, and brings everything with it: Python and every
+library, StarDist's model (Measure works offline) and R with the figure packages. Installing a
+newer version over it upgrades in place, and your studies (in `%USERPROFILE%\.ls-pipeline`)
+are kept. Windows 10 or 11, 64-bit. Detection runs on the CPU.
+
+Releases are built by GitHub Actions from a version tag; see
+[packaging/windows/README.md](packaging/windows/README.md). To run from source instead, see
+[Desktop app](#desktop-app).
 
 Automated screening of pERK and PCNA immunofluorescence across whole-brain transverse sections
 of a salmonid, from Zeiss CZI whole-slide scans.

@@ -1,14 +1,14 @@
-# Windows installer
+# Windows installer: The Great IHC Leap Forward
 
-`LS-IHC-Setup-<version>.exe` installs the app for the current user, with no
+`The-Great-IHC-Leap-Forward-Setup-<version>.exe` installs the app for the current user, with no
 administrator rights and nothing else to install first: Python, every library
 the stages use (including StarDist and TensorFlow for Measure), StarDist's
 model, and R with the figure packages all come inside it.
 
 ## Getting it
 
-Download the newest `LS-IHC-Setup-*.exe` from the repository's Releases page,
-run it, and start **LS IHC pipeline** from the Start menu. Installing a newer
+Download the newest `The-Great-IHC-Leap-Forward-Setup-*.exe` from the repository's Releases page,
+run it, and start **The Great IHC Leap Forward** from the Start menu. Installing a newer
 one over it upgrades in place. Studies and settings live in
 `%USERPROFILE%\.ls-pipeline` and survive upgrades and uninstalling.
 
@@ -27,8 +27,8 @@ artifact without releasing.
 
 ## Building locally
 
-    pwsh packaging\windows\build.ps1            # -> dist\LS-IHC (runnable: "LS pipeline.cmd")
-    iscc packaging\windows\installer.iss        # -> dist\LS-IHC-Setup-0.0.0-dev.exe
+    pwsh packaging\windows\build.ps1            # -> dist\LS-IHC (runnable: "The Great IHC Leap Forward.cmd")
+    iscc packaging\windows\installer.iss        # -> dist\The-Great-IHC-Leap-Forward-Setup-0.0.0-dev.exe
 
 `-NoR` leaves R out. Downloads are cached in `work\packaging-cache`.
 

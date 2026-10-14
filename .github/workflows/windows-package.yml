@@ -2,7 +2,8 @@
 #
 #   pull request touching packaging/   build + checks, installer kept as an artifact
 #   Actions tab > Run workflow         same, on demand
-#   push a tag v1.2.3                  same, then a GitHub Release with the installer
+#   push a tag v1.2.3, or publish a    same, then the installer is attached to that
+#   drafted release                    tag's release (created if there is none)
 name: Windows package
 
 on:
@@ -14,9 +15,17 @@ on:
   workflow_dispatch:
   push:
     tags: ["v*"]
+  # Publishing a drafted release creates its tag; this covers that path even
+  # where the tag push does not fire. Two runs for one tag cancel down to one.
+  release:
+    types: [published]
 
 permissions:
   contents: write
+
+concurrency:
+  group: windows-package-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -66,7 +75,7 @@ jobs:
       - name: Install silently and run the installed copy
         timeout-minutes: 10
         run: |
-          $setup = (Get-ChildItem dist/LS-IHC-Setup-*.exe).FullName
+          $setup = (Get-ChildItem dist/The-Great-IHC-Leap-Forward-Setup-*.exe).FullName
           $p = Start-Process $setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/CURRENTUSER", "/DIR=$env:RUNNER_TEMP\installed" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "installer exited $($p.ExitCode)" }
           & "$env:RUNNER_TEMP\installed\runtime\python.exe" packaging/windows/smoke_test.py "$env:RUNNER_TEMP\installed"
@@ -74,8 +83,8 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: LS-IHC-Setup-${{ steps.v.outputs.version }}
-          path: dist/LS-IHC-Setup-*.exe
+          name: The-Great-IHC-Leap-Forward-Setup-${{ steps.v.outputs.version }}
+          path: dist/The-Great-IHC-Leap-Forward-Setup-*.exe
           retention-days: 14
           compression-level: 0
 
@@ -84,4 +93,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$env:GITHUB_REF_NAME" (Get-ChildItem dist/LS-IHC-Setup-*.exe).FullName --title "LS IHC pipeline $env:GITHUB_REF_NAME" --generate-notes
+          $exe = (Get-ChildItem dist/The-Great-IHC-Leap-Forward-Setup-*.exe).FullName
+          # A release someone drafted or published for this tag gets the
+          # installer added; otherwise one is created.
+          gh release view "$env:GITHUB_REF_NAME" *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload "$env:GITHUB_REF_NAME" $exe --clobber
+          } else {
+            gh release create "$env:GITHUB_REF_NAME" $exe --title "The Great IHC Leap Forward $env:GITHUB_REF_NAME" --generate-notes
+          }
+          if ($LASTEXITCODE) { throw "release upload failed" }

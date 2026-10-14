@@ -1,8 +1,8 @@
 @echo off
 REM Launch the pipeline app.
 REM
-REM Prefers work\appenv - the SAME Python 3.13 venv build_app.bat freezes the
-REM exe from, and the one refresh_loop.bat already uses. The Python on PATH here
+REM Prefers work\appenv - the Python 3.13 venv build_app.bat sets up, and the
+REM one refresh_loop.bat already uses. The Python on PATH here
 REM is 3.14, which has no PySide6 wheel installed and cannot import pylibCZIrw
 REM at all, so `python -m app` failed with ModuleNotFoundError: PySide6 and
 REM wrote a traceback to lsapp-crash.log. Falling back to PATH keeps this

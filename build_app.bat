@@ -1,31 +1,41 @@
 @echo off
-REM Build the bundled desktop app.
+REM Set up work\appenv, the Python 3.13 environment run_app.bat runs the app in.
 REM
-REM Built with Python 3.13, not 3.14: pylibCZIrw publishes no cp314 wheel, and
-REM the app runs its stages in-process, so the interpreter that freezes the app
-REM is the one that has to be able to read CZIs. A 3.14 build works for
-REM everything except the overview stage.
+REM This used to go on to freeze the app with PyInstaller (app\lsapp.spec). That
+REM build left out StarDist, so it could not run Measure, and it could miss
+REM libraries the stages load at run time; it also closed its window on failure,
+REM so nobody saw why. The app now ships as an installer instead, built by
+REM packaging\windows\build.ps1 on GitHub Actions - see the README's Download.
 REM
+REM Python 3.13 rather than 3.14: pylibCZIrw publishes no cp314 wheel.
 REM The venv is created once and reused; delete work\appenv to start over.
 setlocal
 cd /d "%~dp0"
 
-if not exist work\appenv\Scripts\python.exe (
-  echo Creating the 3.13 build environment...
-  py -3.13 -m venv work\appenv || goto :fail
-  work\appenv\Scripts\python.exe -m pip install --upgrade pip || goto :fail
-  work\appenv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-czi.txt || goto :fail
+echo Most people want the installer instead of this:
+echo   https://github.com/mbel-tech/the-great-IHC-leap-forward/releases/latest
+echo   (under Assets: The-Great-IHC-Leap-Forward-Setup-^<version^>.exe)
+echo.
+
+if exist work\appenv\Scripts\python.exe (
+  echo work\appenv already exists. Delete it to rebuild it.
+  goto :done
 )
 
-echo Building...
-work\appenv\Scripts\pyinstaller.exe app\lsapp.spec --noconfirm || goto :fail
+echo Creating work\appenv with Python 3.13...
+py -3.13 -m venv work\appenv || goto :fail
+work\appenv\Scripts\python.exe -m pip install --upgrade pip || goto :fail
+work\appenv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-czi.txt -r packaging\windows\requirements-bundle.txt || goto :fail
 
+:done
 echo.
-echo Built: dist\LS pipeline\LS pipeline.exe
-echo Copy config.json in beside it, or let the first run ask for the paths.
+echo Ready. Start the app with run_app.bat.
+pause
 goto :eof
 
 :fail
 echo.
-echo BUILD FAILED - see the output above.
+echo SETUP FAILED - see the output above.
+echo If "py -3.13" was not found, install Python 3.13 from python.org first.
+pause
 exit /b 1

@@ -196,12 +196,16 @@ def composite(marker_img, dapi_img, colour, nuclear=(0., 0., 1.)):
     constants probe cannot see pixels and 130 curated sections carry landmark
     coordinates placed on the composites already on disk.
     """
-    mark = np.asarray(marker_img, dtype=np.float64)
-    dapi = np.asarray(dapi_img, dtype=np.float64)
-    rgb = np.zeros(mark.shape + (3,), np.uint8)
-    for p in range(3):
-        plane = np.maximum(colour[p] * mark, nuclear[p] * dapi)
-        rgb[..., p] = np.clip(np.rint(plane), 0, 255).astype(np.uint8)
+    marker_img, dapi_img = np.asarray(marker_img), np.asarray(dapi_img)
+    rgb = np.zeros(marker_img.shape + (3,), np.uint8)
+    # In strips of rows: the float64 copies of a whole 1.3 um/px picture are
+    # most of a GB, and the arithmetic is per pixel, so strips change nothing.
+    for r0 in range(0, marker_img.shape[0], STRIP_ROWS):
+        mark = marker_img[r0:r0 + STRIP_ROWS].astype(np.float64)
+        dapi = dapi_img[r0:r0 + STRIP_ROWS].astype(np.float64)
+        for p in range(3):
+            plane = np.maximum(colour[p] * mark, nuclear[p] * dapi)
+            rgb[r0:r0 + STRIP_ROWS, :, p] = np.clip(np.rint(plane), 0, 255).astype(np.uint8)
     return rgb
 
 
@@ -269,13 +273,28 @@ def bin_factor(native_um_px, out_um_px):
     return max(1, int(np.floor(out_um_px / native_um_px + 1e-9)))
 
 
-def read_region(read, bounds, scene_rect, b):
-    """The native rectangle covering `bounds` = (xmin, ymin, xmax, ymax), read
-    once and block-averaged b x b. Returns (array, x0, y0), or None when the
-    bounds miss the scene.
+#: Native rows fetched per read. The section is read in bands of this many rows
+#: and each band block-averaged before the next is fetched, so the peak is one
+#: band rather than the whole native section - which at 0.65 um/px is hundreds
+#: of MB per plane before the reader's own buffers are counted.
+READ_BAND_ROWS = 2048
 
-    Kept as the scanner's uint16 when b == 1: a float copy of a whole native
-    section is the allocation that ran a 12.7 GB laptop out of memory.
+#: The finest whole-section render 04o will make. Below this the picture is
+#: one PNG of 10,000+ px a side: several GB to render, and more than a browser
+#: holds comfortably as one image. Measurement never depends on it - 05c reads
+#: native pixels whatever the curation picture is.
+MIN_RENDER_UM_PX = 1.3
+
+
+def read_region(read, bounds, scene_rect, b, band_rows=None):
+    """The native rectangle covering `bounds` = (xmin, ymin, xmax, ymax),
+    block-averaged b x b. Returns (array, x0, y0), or None when the bounds miss
+    the scene.
+
+    Read in bands of `band_rows` native rows, each averaged down before the
+    next is read. The result is the same array a single read would give - a
+    b x b block never straddles two bands - at a fraction of the peak memory.
+    Kept as the scanner's uint16 when b == 1.
     """
     rx, ry, rw, rh = scene_rect
     xmin, ymin, xmax, ymax = bounds
@@ -287,10 +306,16 @@ def read_region(read, bounds, scene_rect, b):
         return None
     w = (x1 - x0) // b * b
     h = (y1 - y0) // b * b
-    raw = np.asarray(read(x0, y0, w, h))
-    if b > 1:
-        raw = raw.reshape(h // b, b, w // b, b).mean(axis=(1, 3), dtype=np.float32)
-    return raw, x0, y0
+    step = max(b, (band_rows or READ_BAND_ROWS) // b * b)
+    out = np.empty((h // b, w // b), np.uint16 if b == 1 else np.float32)
+    for r0 in range(0, h, step):
+        n = min(step, h - r0)
+        raw = np.asarray(read(x0, y0 + r0, w, n))
+        if b > 1:
+            raw = raw.reshape(n // b, b, w // b, b).mean(axis=(1, 3), dtype=np.float32)
+        out[r0 // b:(r0 + n) // b] = raw
+        del raw
+    return out, x0, y0
 
 
 def sample_region(region, X, Y, scene_rect, b, field=None):
@@ -371,6 +396,22 @@ def frame_masks(rep, U, V, wmask, artifact=None):
 STRETCH_TOP_PCT = 99.9
 #: At most this many in-tissue pixels go into the statistics (an even stride).
 STRETCH_SAMPLE = 4_000_000
+#: Where the tissue median sits on the display, 0..1 - where 04a's own rule
+#: (median - 1 MAD to median + 4 MAD) puts it.
+STRETCH_MEDIAN_AT = 0.2
+#: The strongest mid-tone lift allowed, so a section that is almost all
+#: background cannot be blown up into noise.
+STRETCH_GAMMA_MIN = 0.3
+
+
+def display_gamma(median_at):
+    """The exponent that moves a tissue median at `median_at` (0..1, after the
+    linear stretch) to STRETCH_MEDIAN_AT. 1.0 when it is already there or above:
+    the curve only ever lifts mid-tones, never darkens them."""
+    if not 0.0 < median_at < STRETCH_MEDIAN_AT:
+        return 1.0
+    g = np.log(STRETCH_MEDIAN_AT) / np.log(median_at)
+    return float(min(1.0, max(STRETCH_GAMMA_MIN, g)))
 
 
 def stretch(values, tissue, art=None):
@@ -386,6 +427,17 @@ def stretch(values, tissue, art=None):
     lost, so the top is lifted until at most 0.1% of the tissue reaches it.
     Where 04a's top already saturates less than that (the 768 route did), it is
     kept, so a picture is never dimmer than it needs to be.
+
+    Lifting the top alone made the pictures dark: a few very bright objects
+    (debris, a vessel, a bright cell) set the 99.9th percentile, and ordinary
+    tissue landed in the bottom tenth - mean in-tissue brightness 17-18 of 255
+    on the real LS sections against 59-81 on the old composites. So the
+    mid-tones are lifted back with a gamma chosen to put the tissue median
+    where 04a's rule puts it, a fifth of the way up (med - 1 MAD to med + 4 MAD
+    places the median at exactly 1/5). Nothing is clipped to do it: the curve
+    is monotonic and keeps the top, so every bright nucleus keeps its texture,
+    and where 04a's own top was already high enough the gamma is exactly 1 and
+    the picture is 04a's.
     """
     keep = tissue if art is None else (tissue & ~art)
     inside = values[keep]
@@ -398,12 +450,19 @@ def stretch(values, tissue, art=None):
             mad = max(float(inside.std()), 1.0)
         lo = med - mad
         hi = max(med + 4.0 * mad, float(np.percentile(inside, STRETCH_TOP_PCT)))
+        med_at = (med - lo) / max(hi - lo, 1e-6)
     else:
         lo, hi = float(values.min()), float(values.max())
+        med_at = STRETCH_MEDIAN_AT
     del inside
+    span = max(hi - lo, 1e-6)
     values -= lo
-    values *= 255.0 / max(hi - lo, 1e-6)
-    np.clip(values, 0, 255, out=values)
+    values *= 1.0 / span
+    np.clip(values, 0, 1, out=values)
+    g = display_gamma(med_at)
+    if g != 1.0:
+        np.power(values, g, out=values)
+    values *= 255.0
     np.rint(values, out=values)
     out = values.astype(np.uint8)
     out[~tissue] = 0
@@ -422,9 +481,9 @@ def render_from_czi(read_dapi, read_mark, rep, scene_rect, overview_um_px,
                     dapi_field=None, mark_field=None):
     """(dapi8, mark8) for one section on the canonical frame at `out_um_px`.
 
-    One plane at a time, sampled in strips of output rows, so the peak is one
-    native read of the section plus one float32 picture - not the whole output
-    grid's coordinates in float64, which is what ran native out of memory.
+    One plane at a time, read in bands of native rows and sampled in strips of
+    output rows, so the peak is one band plus one float32 picture at the
+    output resolution - never the whole native section at once.
     """
     M = czi_frame(rep, scene_rect, overview_um_px, native_um_px)
     side = render_side(M, native_um_px, out_um_px)
@@ -694,7 +753,8 @@ def main():
                          "overview is the old 8-bit 5.2 um/px route")
     ap.add_argument("--um-px", type=float, default=RENDER_UM_PX, metavar="UM",
                     help="resolution of a czi render (default from config "
-                         f"curation_render.um_per_px: {RENDER_UM_PX}); 0.65 is native")
+                         f"curation_render.um_per_px: {RENDER_UM_PX}); at least "
+                         f"{MIN_RENDER_UM_PX}")
     ap.add_argument("--verify", action="store_true",
                     help="check the blue plane still equals the existing greyscale section")
     ap.add_argument("--thumbs", action="store_true",
@@ -780,8 +840,13 @@ def main():
     # route reproduces; it never renders from the CZI.
     czi = None
     if args.source == "czi" and not args.verify:
-        if args.um_px <= 0:
-            raise SystemExit("--um-px must be greater than zero")
+        if args.um_px < MIN_RENDER_UM_PX:
+            raise SystemExit(
+                f"--um-px {args.um_px}: the finest whole-section picture 04o "
+                f"makes is {MIN_RENDER_UM_PX} um/px. Finer than that is one "
+                f"image of 10,000+ px a side, more than a laptop renders or a "
+                f"browser shows comfortably. Measurement is unaffected - 05c "
+                f"always reads the native 0.65 um/px pixels.")
         czi = CziSource(args.marker)
         # One file open per CZI rather than one per section.
         uids = sorted(uids, key=lambda u: czi.file_of(u) or "")

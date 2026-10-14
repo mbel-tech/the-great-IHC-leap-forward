@@ -242,7 +242,8 @@ class Stage:
 
 # The figure's bands, in sidebar order. "Acquisition" is the Add slides screen.
 GROUPS = ["Ingest and QC", "Instrument characterisation", "Atlas",
-          "Normalisation and curation", "Quantification", "Beyond blinding"]
+          "Normalisation and curation", "Quantification", "Beyond blinding",
+          "Repair older outputs"]
 
 FIJI_REASON = ("needs Fiji, which the app does not drive. A one-time "
                "instrument characterisation; run scripts/run_all.sh steps "
@@ -328,13 +329,26 @@ STAGES = [
           needs=["manifest"],
           blurb="Every section at exactly 5.2 um/px with a frozen display "
                 "range, plus per-section QC including clipping measured on the "
-                "raw plane. Applies the tile field if one exists."),
+                "raw plane. Writes the raw clipping masks 04j censors from in "
+                "the same read, so 01k has nothing left to do. Applies the "
+                "tile field if one exists."),
 
     Stage("contactsheets", "01d  Contact sheets and gallery", "Ingest and QC",
           script="01d_contactsheets.py",
           outputs=["contactsheets"],
           needs=["overviews"],
           blurb="Per-animal montages in rostro-caudal order, plus an HTML gallery."),
+
+    Stage("scene_renders", "01l  Pictures of every scene, for viewing", "Ingest and QC",
+          script="01l_scene_renders.py", reader="pylibCZIrw",
+          outputs=["qc/scene_renders.csv"],
+          needs=["manifest"],
+          blurb="Every scene of every slide drawn from the CZI, read in bands "
+                "so memory stays small. Two folders per marker: the stain over "
+                "the counterstain, and the stain alone in grey. The folder, "
+                "resolution (2.6 um/px by default, 0.65 at the finest) and "
+                "brightness are study settings (scene_render). For looking at "
+                "only; nothing downstream reads them."),
 
     Stage("pair", "02  Pair the two marker passes", "Ingest and QC",
           script="02_pair_passes.py",
@@ -423,10 +437,11 @@ STAGES = [
           script="01k_saturation_raw.py", reader="pylibCZIrw",
           outputs=["qc/saturation_raw.csv", "qc/censor_raw"],
           needs=["overviews"],
-          blurb="Measures pixels at the 16-bit ceiling BEFORE the tile field, "
-                "and writes the raw clipping mask per section. 04j and 01g "
-                "read those masks; the post-correction count was a 2x "
-                "undercount."),
+          blurb="Backfill: 01 now writes the raw clipping masks itself, so "
+                "this only measures sections exported before it did, plus the "
+                "native-resolution dilution check. Pixels at the 16-bit "
+                "ceiling BEFORE the tile field; the post-correction count was "
+                "a 2x undercount."),
 
     Stage("saturation_map", "01g  Where the clipping falls",
           "Instrument characterisation",
@@ -493,6 +508,24 @@ STAGES = [
                 "order. Names are read by OCR and are guesses until a person "
                 "reviews them; 04l shows reviewed polygons only."),
     # ---- Normalisation and curation ----------------------------------------
+    # 04g reads only the overviews, so both markers are masked first, before
+    # anything waits on the operator.
+    Stage("artifact_pcna", "04g  Mask artifacts - PCNA", "Normalisation and curation",
+          script="04g_artifact_mask.py", argv=["--include-excluded"],
+          outputs=["artifacts/artifact_summary.csv"],
+          needs=["overviews"],
+          blurb="Bright objects strictly inside the tissue - bubbles, aggregates, "
+                "fibres - masked rather than excluded. Detected on DAPI at "
+                "overview resolution, on every scanned section, so it needs no "
+                "reformat and runs before the rotation curator."),
+
+    Stage("artifact_perk", "04g  Mask artifacts - pERK", "Normalisation and curation",
+          script="04g_artifact_mask.py", argv=["--marker", "{marker0}", "--include-excluded"],
+          outputs=[Art("artifact_summary", 0)],
+          needs=["overviews"],
+          blurb="The same detector on the pERK scan's DAPI. The two scans image "
+                "different fields, so artifacts are not propagated."),
+
     Stage("reformat_pcna", "04a  Reformat PCNA sections", "Normalisation and curation",
           script="04a_reformat.py",
           outputs=[REF + "reformat_index.csv"],
@@ -527,26 +560,10 @@ STAGES = [
                 "overrule the exclusion proposals. Export writes "
                 "rotation_overrides.csv."),
 
-    Stage("reformat_pcna_curated", "04a  Reformat PCNA with the curation applied",
-          "Normalisation and curation",
-          script="04a_reformat.py", argv=["--apply-overrides"],
-          outputs=[REF + "excluded_sections.csv"],
-          needs=["rotation_curator"],
-          blurb="Re-reformats with the manual rotations folded in and the "
-                "exclusions recorded as flags in excluded_sections.csv."),
-
-    Stage("artifact_pcna", "04g  Mask artifacts - PCNA", "Normalisation and curation",
-          script="04g_artifact_mask.py", argv=["--include-excluded"],
-          outputs=["artifacts/artifact_summary.csv"],
-          needs=["reformat_pcna_curated"],
-          blurb="Bright objects strictly inside the tissue - bubbles, aggregates, "
-                "fibres - masked rather than excluded. Detected on DAPI at "
-                "overview resolution, so the mask is the same for both markers."),
-
     Stage("censor_pcna", "04j  Censor clipped pixels - PCNA", "Normalisation and curation",
           script="04j_censor_clipped.py", argv=["--marker", "{marker1}"],
           outputs=[Art("analysis_set", 1)],
-          needs=["saturation_raw", "reformat_pcna_curated"],
+          needs=["saturation_raw", "rotation_curator"],
           blurb="Sections above the 1% clipped tolerance are set aside with a "
                 "flag; surviving clipped pixels are right-censored, not masked. "
                 "AF488 clips rarely but measurably."),
@@ -558,8 +575,10 @@ STAGES = [
           outputs=[REF + "sections"],
           needs=["artifact_pcna", "censor_pcna"],
           blurb="The analysis frame for PCNA: curation applied, artifact pixels "
-                "blanked, censor masks carried into the 256 px frame. Run again "
-                "whenever a mask or the curation changes."),
+                "blanked, censor masks carried into the 256 px frame, and the "
+                "exclusions recorded in excluded_sections.csv. The one reformat "
+                "after curation. Run again whenever a mask or the curation "
+                "changes."),
 
     Stage("propagate_perk", "04i  Carry the curation onto the pERK scans",
           "Normalisation and curation",
@@ -571,24 +590,10 @@ STAGES = [
                 "re-derived by aligning the pERK silhouette onto the curated "
                 "PCNA one, because the scan boxes differ."),
 
-    Stage("reformat_perk", "04a  Reformat pERK sections", "Normalisation and curation",
-          script="04a_reformat.py", argv=["--marker", "{marker0}", "--apply-overrides"],
-          outputs=[Art("index", 0)],
-          needs=["propagate_perk"],
-          blurb="The pERK pass into the same frame, with the propagated "
-                "curation applied."),
-
-    Stage("artifact_perk", "04g  Mask artifacts - pERK", "Normalisation and curation",
-          script="04g_artifact_mask.py", argv=["--marker", "{marker0}", "--include-excluded"],
-          outputs=[Art("artifact_summary", 0)],
-          needs=["reformat_perk"],
-          blurb="The same detector on the pERK scan's DAPI. The two scans image "
-                "different fields, so artifacts are not propagated."),
-
     Stage("censor_perk", "04j  Censor clipped pixels - pERK", "Normalisation and curation",
           script="04j_censor_clipped.py",
           outputs=[Art("analysis_set", 0), "censor"],
-          needs=["saturation_raw", "reformat_perk"],
+          needs=["saturation_raw", "propagate_perk"],
           blurb="The 1000 ms AF568 exposure pins pixels at the ceiling on a "
                 "third of sections. Writes perk_analysis_set.csv - the "
                 "measurable set - and the per-section censor mask."),
@@ -596,28 +601,21 @@ STAGES = [
     Stage("reformat_perk_final", "04a  Reformat pERK - masked and censored",
           "Normalisation and curation",
           script="04a_reformat.py",
-          argv=["--marker", "{marker0}", "--apply-overrides", "--mask-artifacts", "--censor"],
-          outputs=[Art("sections", 0)],
+          argv=["--marker", "{marker0}", "--apply-overrides", "--mask-artifacts",
+                "--censor", "--render-excluded"],
+          outputs=[Art("index", 0), Art("sections", 0)],
           needs=["artifact_perk", "censor_perk"],
-          blurb="The analysis frame for pERK. 05c reads the censor and artifact "
-                "masks this writes."),
-
-    Stage("render_excluded_perk", "04a  Render excluded pERK sections for Review",
-          "Normalisation and curation",
-          script="04a_reformat.py",
-          argv=["--marker", "{marker0}", "--apply-overrides", "--render-excluded"],
-          outputs=[Art("sections", 0)],
-          needs=["reformat_perk_final"],
-          blurb="pERK exclusions were applied before reformatting, so the 473 "
-                "had no picture. Renders them for the curator's Review mode "
-                "without adding an index row."),
+          blurb="The analysis frame for pERK, with the propagated curation "
+                "applied. 05c reads the censor and artifact masks this writes. "
+                "Excluded sections are rendered unmasked in the same pass, for "
+                "the curator's Review mode, and never get an index row."),
 
     Stage("sections_dataset", "04m  Every pERK section and its fate",
           "Normalisation and curation",
           script="04m_sections_dataset.py",
           layouts=LY.layouts_for("04m_sections_dataset.py"),
           outputs=[Art("sections_dataset", 0)],
-          needs=["censor_perk"],
+          needs=["reformat_perk_final"],
           blurb="One row per pERK section - analysis set, censored out, or "
                 "excluded and why - joined to its PCNA partner. The exclusion "
                 "rate per animal is a result to check at unblinding."),
@@ -625,39 +623,30 @@ STAGES = [
     Stage("worklist", "04n  Order the ROI queue", "Normalisation and curation",
           script="04n_roi_worklist.py",
           outputs=[REF + "roi_worklist.csv"],
-          needs=["censor_perk"],
+          needs=["reformat_perk_final"],
           blurb="Orders curation so any prefix is a usable dataset: every animal "
                 "advanced to the same fraction, spread across each brain."),
 
     Stage("rgb_perk", "04o  Colour composites - pERK", "Normalisation and curation",
-          script="04o_section_rgb.py", argv=["--marker", "{marker0}", "--all"],
-          outputs=[Art("sections", 0, "_rgb")],
+          script="04o_section_rgb.py",
+          argv=["--marker", "{marker0}", "--all", "--thumbs"],
+          outputs=[Art("sections", 0, "_rgb"), Art("sections", 0, "_rgb_thumb")],
           needs=["reformat_perk_final"],
           blurb="DAPI blue plus the marker, in the reformatted frame, so the "
-                "curator shows the channel being quantified."),
+                "curator shows the channel being quantified, and the 256 px "
+                "thumbnails of them for the Review grid in the same run."),
 
     Stage("rgb_pcna", "04o  Colour composites - PCNA", "Normalisation and curation",
-          script="04o_section_rgb.py", argv=["--marker", "{marker1}", "--all"],
-          outputs=[Art("sections", 1, "_rgb")],
+          script="04o_section_rgb.py",
+          argv=["--marker", "{marker1}", "--all", "--thumbs"],
+          outputs=[Art("sections", 1, "_rgb"), Art("sections", 1, "_rgb_thumb")],
           needs=["reformat_pcna_final"],
           blurb="The same for the PCNA channel."),
-
-    Stage("thumbs_perk", "04o  Review thumbnails - pERK", "Normalisation and curation",
-          script="04o_section_rgb.py", argv=["--marker", "{marker0}", "--thumbs"],
-          outputs=[Art("sections", 0, "_rgb_thumb")],
-          needs=["rgb_perk"],
-          blurb="256 px colour thumbnails for the curator's Review grid."),
-
-    Stage("thumbs_pcna", "04o  Review thumbnails - PCNA", "Normalisation and curation",
-          script="04o_section_rgb.py", argv=["--marker", "{marker1}", "--thumbs"],
-          outputs=[Art("sections", 1, "_rgb_thumb")],
-          needs=["rgb_pcna"],
-          blurb="The same for PCNA."),
 
     Stage("provenance", "04p  Trace every scanned section", "Normalisation and curation",
           script="04p_section_provenance.py", argv=["--tissue-masks"],
           outputs=[REF + "section_provenance.csv", "tissue"],
-          needs=["artifact_pcna", "artifact_perk"],
+          needs=["reformat_pcna_final", "reformat_perk_final"],
           blurb="One row per scanned section - all 2,572, including the excluded "
                 "ones no other table carries - joining what 04f proposed, what "
                 "the operator decided, what 04g masked and what 04j censored. "
@@ -719,31 +708,6 @@ STAGES = [
                 "StarDist, measures the marker under each nuclear mask. One row "
                 "per nucleus; hours, resumable per section."),
 
-    Stage("recensor", "06f  Recompute the censored flag", "Quantification",
-          script="06f_recensor_nuclei.py",
-          outputs=["results/_pre_06f_backup"],
-          needs=["detect", "saturation_raw"],
-          blurb="Re-samples each stored nucleus position against the raw "
-                "clipping mask, without re-running StarDist. Backs up "
-                "roi_nuclei.csv first."),
-
-    Stage("off_tissue", "06g  Flag nuclei off the section", "Quantification",
-          script="06g_flag_off_tissue.py",
-          outputs=["results/_pre_06g_backup"],
-          needs=["detect"],
-          blurb="Backfills off_tissue onto a roi_nuclei.csv written before 05c "
-                "recorded it: nuclei outside the DAPI silhouette, which drag a "
-                "background disc's cut down."),
-
-    Stage("seg_provenance", "06h  Backfill segmentation provenance", "Quantification",
-          script="06h_backfill_provenance.py",
-          outputs=["results/_pre_06h_backup"],
-          needs=["detect"],
-          blurb="Backfills segmented_on / backend / nucleus_shaped onto a "
-                "roi_nuclei.csv written before 05c recorded them. Every row in "
-                "such a file is nuclear / stardist / nucleus-shaped - there was "
-                "no other route - and 06a's Abercrombie gate reads them."),
-
     Stage("roi_dataset", "06a  Per-ROI dataset", "Quantification",
           script="06a_roi_dataset.py",
           outputs=["results/roi_measurements.csv", "results/detector_specificity.csv"],
@@ -777,6 +741,16 @@ STAGES = [
                 "visible. plot_by_slide.R draws that spread; the per-ROI "
                 "figures and their statistics read 06c's per-animal sheet."),
 
+    Stage("build_results", "06e  Build results: datasets, spreadsheets, figures",
+          "Beyond blinding",
+          script="06e_refresh_loop.py", argv=["--once"],
+          outputs=["results/roi_dataset.xlsx", "results/roi_dataset_by_slide.xlsx"],
+          needs=["detect"],
+          blurb="06a, 06c and 06d in one run, then the figures for every "
+                "measured marker - the same pass the hourly loop makes, made "
+                "once. 06b, the unblinding join, stays its own step. Needs R "
+                "for the figures."),
+
     Stage("refresh_loop", "06e  Refresh datasets and figures hourly", "Beyond blinding",
           script="06e_refresh_loop.py",
           outputs=["results/ROI_plots"],
@@ -785,6 +759,36 @@ STAGES = [
                    "the app's runner open for hours. Run: refresh_loop.bat",
           blurb="Rebuilds both spreadsheets and re-draws the figures every hour "
                 "while detection runs, then stops when every section is measured."),
+
+    # ---- Repair older outputs ----------------------------------------------
+    # Not part of a run. Each brings a file written by an older version of a
+    # stage up to what that stage writes today.
+    Stage("recensor", "06f  Recompute the censored flag", "Repair older outputs",
+          script="06f_recensor_nuclei.py",
+          outputs=["results/_pre_06f_backup"],
+          needs=["detect", "saturation_raw"],
+          blurb="Repair for a roi_nuclei.csv whose censored flag came from the "
+                "coarse 256 px mask: re-samples each stored nucleus against the "
+                "raw clipping mask without re-running StarDist. Backs up "
+                "roi_nuclei.csv first."),
+
+    Stage("off_tissue", "06g  Flag nuclei off the section", "Repair older outputs",
+          script="06g_flag_off_tissue.py",
+          outputs=["results/_pre_06g_backup"],
+          needs=["detect"],
+          blurb="Backfills off_tissue onto a roi_nuclei.csv written before 05c "
+                "recorded it: nuclei outside the DAPI silhouette, which drag a "
+                "background disc's cut down."),
+
+    Stage("seg_provenance", "06h  Backfill segmentation provenance", "Repair older outputs",
+          script="06h_backfill_provenance.py",
+          outputs=["results/_pre_06h_backup"],
+          needs=["detect"],
+          blurb="Backfills segmented_on / backend / nucleus_shaped onto a "
+                "roi_nuclei.csv written before 05c recorded them. Every row in "
+                "such a file is nuclear / stardist / nucleus-shaped - there was "
+                "no other route - and 06a's Abercrombie gate reads them."),
+
 ]
 
 BY_ID = {s.sid: s for s in STAGES}

@@ -224,6 +224,29 @@ BASE_PX_UM = CONFIG["pixel_size_um"]
 # they are canonical-grid pixels and this stage needs no scale factor of its own.
 SEC_GRID = RF.GRID
 
+#: The curator and this stage count pixels differently, and the difference is
+#: half a grid pixel - about 16 um on a section, diagonally. The curator stores
+#: what the mouse hit in canvas coordinates, where pixel i spans [i, i+1] and
+#: its centre is i + 0.5 (04l: `(e.clientX - ox) / k`, exported as `v / K`).
+#: Everything here - `grid_to_overview`, the matrix, 05c's membership test,
+#: the 256 masks - indexes pixel CENTRES: pixel i is at i. Measured on the LS
+#: study before this was fixed: 3% of ROI nuclei and 6% of background-disc
+#: nuclei sat on the wrong side of their shape's edge, with about as many
+#: missing on the far side, so counts barely moved but the nuclei were the
+#: wrong ones at the boundary.
+CURATOR_PX_OFFSET = 0.5
+
+
+def curator_to_grid(u, v):
+    """A point as the curator stored it -> the same point as a grid index.
+
+    Applied to every curated position (sec_x/sec_y and every sec_poly vertex)
+    before it meets the matrix or a grid-indexed nucleus. Not to sec_r: a
+    radius is a length, and a length has no origin to shift.
+    """
+    return (np.asarray(u, float) - CURATOR_PX_OFFSET,
+            np.asarray(v, float) - CURATOR_PX_OFFSET)
+
 
 # --------------------------------------------------------------------------
 # the composition
@@ -619,8 +642,8 @@ def build(regions_csv, limit=None, plates_csv=None, require_background=True):
                 # measured perfectly well.
                 shapeless.append((uid, r.get("region", "")))
                 continue
-            X, Y = apply_affine(M, U, V)
-            cx, cy = apply_affine(M, sx, sy)
+            X, Y = apply_affine(M, *curator_to_grid(U, V))
+            cx, cy = apply_affine(M, *curator_to_grid(sx, sy))
             x0, x1 = int(np.floor(X.min())), int(np.ceil(X.max()))
             y0, y1 = int(np.floor(Y.min())), int(np.ceil(Y.max()))
             # A polygon has no semi-axes. They describe the ellipse a CIRCLE

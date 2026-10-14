@@ -87,8 +87,8 @@ FIGURE = {
     "pair",                                                      # 02
     "atlas_extract", "atlas_remerge", "atlas_reframe",           # 04a atlas
     "atlas_enforce", "atlas_rebuild",
-    "reformat_pcna", "reformat_pcna_curated", "reformat_pcna_final",   # 04a reformat
-    "propagate_perk", "reformat_perk", "reformat_perk_final",
+    "reformat_pcna", "reformat_pcna_final",                      # 04a reformat
+    "propagate_perk", "reformat_perk_final",
     "exclusion", "symmetry", "rotation_curator",                 # 04f
     "artifact_pcna", "artifact_perk",                            # 04g
     "censor_perk", "censor_pcna", "recensor",                    # 04j / 06f

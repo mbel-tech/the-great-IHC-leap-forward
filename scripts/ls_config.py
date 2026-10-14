@@ -285,12 +285,53 @@ SPEC = [
     Key("curation_render.um_per_px", "float",
         "Resolution of the curation composites rendered from the CZI.",
         default=2.6, label="Curation image resolution (um/px)",
-        note="0.65 is the scan's native pixel and loses nothing. The ROI "
-             "curator draws the whole section on one canvas and has no zoom, "
-             "so below about 1.3 it gets slow to redraw without showing more "
-             "on a normal screen. Measurement (05c) always reads native "
-             "pixels, whatever this says.",
+note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
+             "section at that resolution is one picture of 10,000+ px a "
+             "side - several GB to render and more than a browser holds "
+             "comfortably - so 04o refuses anything finer than 1.3. 2.6 is "
+             "already twice as sharp per pixel as the overview route, and the "
+             "curator's zoom shows every pixel of it. Measurement (05c) always "
+             "reads native pixels, whatever this says.",
         consumers=["04o"]),
+
+    Key("scene_render.out_dir", "path_dir_opt",
+        "Where the pictures of every scene go. Empty means "
+        "<out_root>/scene_renders.",
+        default=None, label="Scene pictures folder",
+        example="<ABSOLUTE PATH FOR SCENE PICTURES, OR EMPTY>",
+        note="01l writes <folder>/<marker>/stain+DAPI/ and "
+             "<folder>/<marker>/stain_only/ here, one PNG per scene. Any "
+             "folder will do, including one outside the study: nothing "
+             "downstream reads these pictures. The table saying how each was "
+             "drawn always stays at <out_root>/qc/scene_renders.csv, so the "
+             "app can tell the step has run wherever the pictures went.",
+        consumers=["01l"]),
+
+    Key("scene_render.um_per_px", "float",
+        "Resolution of the scene pictures, in micrometres per pixel.",
+        default=2.6, label="Scene picture resolution (um/px)",
+        note="0.65 is the scan's own pixels, the finest there is; larger "
+             "numbers give smaller, softer pictures (5.2 is the overviews' "
+             "scale). Each picture pixel is the average of whole native 0.65 "
+             "um pixels, so the value is rounded to a multiple of 0.65 and the "
+             "table records what was drawn. Memory: a whole scene at 0.65 can "
+             "need several GB. Each scene is checked against the memory free "
+             "at the time, and one that does not fit is skipped with a "
+             "message rather than crashing the run; 1.3 needs a quarter of "
+             "that, 2.6 a sixteenth.",
+        consumers=["01l"]),
+
+    Key("scene_render.range", "str",
+        "How the scene pictures are brightened.",
+        default="dataset", choices=["dataset", "section"],
+        label="Scene picture brightness",
+        note="`dataset` uses the overviews' frozen range "
+             "(qc/display_ranges.json), so the same brightness means the same "
+             "signal in every picture; the brightest nuclei can saturate at "
+             "fine resolutions. `section` stretches each scene to its own "
+             "tissue: every picture well exposed, but brightness no longer "
+             "compares between pictures.",
+        consumers=["01l"]),
 
     # ---- channels (replaced by the channels/markers sub-project) ---------
     # ---- acquisition ------------------------------------------------------
@@ -1068,6 +1109,14 @@ def export_dir(cfg=None):
     """
     cfg = cfg if cfg is not None else load()
     return cfg.get("export_dir") or os.path.join(cfg["out_root"], "exports")
+
+
+def scene_render_dir(cfg=None):
+    """Where 01l puts the scene pictures: `scene_render.out_dir` when set,
+    else `<out_root>/scene_renders`."""
+    cfg = cfg if cfg is not None else load()
+    return ((cfg.get("scene_render") or {}).get("out_dir")
+            or os.path.join(cfg["out_root"], "scene_renders"))
 
 
 def require_path(dotted, cfg=None):

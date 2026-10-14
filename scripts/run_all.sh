@@ -111,8 +111,11 @@ step 9 "export overviews for every section" \
 # Clipping measured BEFORE the tile field, per section, with the raw mask 04j
 # censors from. Dividing by a gain above 1 lifts a pixel off the ceiling, so
 # the count taken after correction was roughly half the truth (LOGS
-# 2026-09-02). pylibCZIrw again, so the same interpreter as step 9.
-step 10 "measure clipping on the raw plane" \
+# 2026-09-02). Step 9 now writes those masks from the planes it reads, so on a
+# fresh export this reads no section again: it backfills sections exported
+# before that, and measures the native-resolution dilution factor.
+# pylibCZIrw again, so the same interpreter as step 9.
+step 10 "backfill raw clipping, dilution check" \
   "$CZIPY" 01k_saturation_raw.py || exit 1
 
 step 11 "build contact sheets and gallery" \

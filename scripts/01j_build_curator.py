@@ -24,10 +24,15 @@ import argparse
 import csv
 import json
 import os
+import sys
 
-CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.json")
-with open(CONFIG_PATH, encoding="utf-8") as _fh:
-    CONFIG = json.load(_fh)
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+# ls_config resolves LS_CONFIG, applies the defaults and validates, the same
+# as every other stage. Reading the repo's config.json directly here ignored
+# the study the app or a suite had pointed at.
+from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
 
 OUT_ROOT = CONFIG["out_root"]
 REPORT_DIR = os.path.join(OUT_ROOT, "qc", "multisection")

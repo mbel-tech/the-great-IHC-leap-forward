@@ -234,6 +234,24 @@ for name, img in (("DAPI", d8), ("marker", m8)):
 old_sat = float((old[0][old[0] > 0] == 255).mean())
 chk("...where 04a's rule alone would saturate the nuclei",
     old_sat > float((d8[tis] == 255).mean()), f"{old_sat:.2%} on the 768 route")
+# A few very bright objects must not darken the whole section. Tissue around
+# 1000 with 0.5% debris at 8000: the 99.9th percentile is the debris, and a
+# linear map from there would put the tissue at the bottom of the range.
+rng = np.random.default_rng(3)
+vals = rng.normal(1000, 100, (400, 400)).astype(np.float32)
+vals.flat[rng.choice(vals.size, vals.size // 200, replace=False)] = 8000
+alltis = np.ones(vals.shape, bool)
+out = O.stretch(vals.copy(), alltis)
+chk("debris does not darken the tissue: its median sits where 04a puts it",
+    abs(float(np.median(out)) - 0.2 * 255) <= 3, float(np.median(out)))
+chk("...and still nothing saturates beyond the cap",
+    float((out == 255).mean()) <= 0.006, f"{float((out == 255).mean()):.3%}")
+plain = rng.normal(1000, 100, (400, 400)).astype(np.float32)
+med = float(np.median(plain))
+mad = float(np.median(np.abs(plain - med))) * 1.4826
+want = np.rint(np.clip((plain - (med - mad)) / (5 * mad), 0, 1) * 255)
+chk("where 04a's top is already high enough, the picture is exactly 04a's",
+    O.display_gamma(0.2) == 1.0 and np.abs(O.stretch(plain.copy(), alltis) - want).max() <= 1)
 chk("the render is drawn in strips, and they join",
     side13 > O.STRIP_ROWS and not (d8[O.STRIP_ROWS - 1:O.STRIP_ROWS + 1].sum(axis=1) == 0).any(), "")
 
@@ -346,6 +364,30 @@ th = os.path.join(tdir, UID + ".png")
 chk("one run with --thumbs builds the composite AND its thumbnail",
     os.path.exists(th) and Image.open(th).size == (256, 256)
     and Image.open(out).size[0] == O.render_side(M, NATIVE, 2.6))
+
+# Memory: the native rectangle is read in bands, not in one piece.
+calls = []
+def counting(x, y, w, h):
+    calls.append(h)
+    return reader(1)(x, y, w, h)
+whole = O.read_region(reader(1), (RX, RY, RX + RW - 1, RY + RH - 1), (RX, RY, RW, RH), 4,
+                      band_rows=10 ** 9)
+banded = O.read_region(counting, (RX, RY, RX + RW - 1, RY + RH - 1), (RX, RY, RW, RH), 4,
+                       band_rows=256)
+chk("a banded read gives exactly the single read's pixels",
+    np.array_equal(whole[0], banded[0]) and whole[1:] == banded[1:])
+chk("...fetching no more than one band of native rows at a time",
+    len(calls) > 1 and max(calls) <= 256, (len(calls), max(calls)))
+
+sys.argv = ["04o", "--marker", "AF568", "--include-excluded", "--force",
+            "--um-px", "0.65"]
+try:
+    O.main()
+    refused = False
+except SystemExit as e:
+    refused = "1.3" in str(e)
+chk("a whole-section render finer than 1.3 um/px is refused, with the reason",
+    refused)
 
 print()
 print("FAILED: %d" % fails if fails else "all passed")

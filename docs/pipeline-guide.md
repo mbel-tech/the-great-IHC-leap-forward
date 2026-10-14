@@ -275,7 +275,7 @@ control are marked rather than dropped, so a gap in a series is never silently i
 
 ## 01l  Pictures of every scene, for viewing {#stage-scene_renders}
 
-*`scripts/01l_scene_renders.py` → `scene_renders/<marker>/stain+DAPI/`, `scene_renders/<marker>/stain_only/`, `scene_renders/scene_renders.csv`*
+*`scripts/01l_scene_renders.py` → `scene_renders/<marker>/stain+DAPI/`, `scene_renders/<marker>/stain_only/`, `qc/scene_renders.csv`*
 
 Every scene of every slide, drawn straight from the scan file, to be looked at in a file viewer.
 The overviews are too coarse to see nuclei and the curation pictures are already cut and rotated;
@@ -296,6 +296,14 @@ Brightness is the overviews' frozen range by default, so the same brightness mea
 every picture. Because a nucleus is no longer averaged with its surroundings at this resolution, the
 brightest ones can saturate; the per-scene option stretches each scene to its own tissue instead, at
 the cost of brightness no longer comparing between pictures. The table records which was used.
+
+Clipped pixels, the ones that hit the top of the scanner's range, are handled apart. They are drawn at
+full brightness without the tile correction, which would otherwise print the tile pattern onto them,
+and they are left out when a scene's own range is worked out. Where the overviews' frozen range was
+itself pushed to the top by clipping (AF568 in this dataset, because its rim around the tissue clips),
+that channel is stretched per scene even in the default mode, the run says so, and the table marks it.
+Parts of a scene's rectangle that were never scanned are black. The table has one row per picture,
+so runs into different folders or at different resolutions each keep their own.
 
 ## 02  Pair the two marker passes {#stage-pair}
 

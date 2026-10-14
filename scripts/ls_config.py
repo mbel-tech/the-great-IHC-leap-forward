@@ -334,7 +334,8 @@ note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
              "signal in every picture; the brightest nuclei can saturate at "
              "fine resolutions. `section` stretches each scene to its own "
              "tissue: every picture well exposed, but brightness no longer "
-             "compares between pictures.",
+             "compares between pictures. A frozen range pushed to the top by "
+             "clipped pixels is stretched per scene in either mode.",
         consumers=["01l"]),
 
     # ---- channels (replaced by the channels/markers sub-project) ---------

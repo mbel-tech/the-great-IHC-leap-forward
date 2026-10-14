@@ -160,9 +160,9 @@ chk("an export decides it", W.decided("rotation_curator", s0), True)
 plan2, held2 = W.run_plan("prepare", s0)
 chk("...and the stages behind it are planned",
     ("reformat_pcna_final" in plan2, "reformat_pcna_final" in held2), (True, False))
-chk("the artifact masks sit in the half of Prepare their needs put them",
-    all((m in W.PREPARE.parts[2][2]) == (S.BY_ID[m].needs == ["overviews"])
-        for m in ("artifact_pcna", "artifact_perk")), True)
+chk("the artifact masks run before the rotation curator",
+    [m for m in ("artifact_pcna", "artifact_perk") if m in W.PREPARE.parts[2][2]],
+    ["artifact_pcna", "artifact_perk"])
 chk("repairs for older files are never part of Run all remaining",
     [s for s in W.run_plan("measure", s0)[0] if s in W.REPAIRS], [])
 chk("...nor are pictures only for looking at",

@@ -50,33 +50,11 @@ class Screen:
         return f"<Screen {self.sid}>"
 
 
-# The parts below name every stage id that either stage table has used, and
-# Screen.stage_ids() drops the ones the table in use does not define. So a
-# stage renamed or merged in stages.py leaves its old id here harmlessly.
-#
-# The artifact masks read only the overviews in the streamlined order, so they
-# run before the rotation curator; in the older order they waited for the
-# curated reformat. Each goes in whichever half its needs put it.
-#: Ids only one of the two stage tables (older, streamlined) defines. Listed
+# Screen.stage_ids() drops any id the stage table does not define, so a part can
+# name a stage from a pull request that has not merged yet.
+#: Ids named below that the stage table on main does not define (yet). Listed
 #: so a typo in a screen part is still caught by the tests.
-OTHER_TABLE = {"reformat_pcna_curated", "reformat_perk", "render_excluded_perk",
-               "thumbs_pcna", "thumbs_perk", "build_results", "scene_renders"}
-
-_MASKS = ("artifact_pcna", "artifact_perk")
-_EARLY_MASKS = [m for m in _MASKS if m in S.BY_ID and S.BY_ID[m].needs == ["overviews"]]
-_LATE_MASKS = [m for m in _MASKS if m not in _EARLY_MASKS]
-
-
-def _late(ids):
-    """`ids` with the masks that run after the rotation curator put back in place."""
-    out = []
-    for sid in ids:
-        if sid == "censor_pcna" and "artifact_pcna" in _LATE_MASKS:
-            out.append("artifact_pcna")
-        if sid == "censor_perk" and "artifact_perk" in _LATE_MASKS:
-            out.append("artifact_perk")
-        out.append(sid)
-    return out
+OTHER_TABLE = {"scene_renders"}
 
 
 HOME = Screen(
@@ -125,19 +103,19 @@ PREPARE = Screen(
          ["atlas_extract", "atlas_remerge", "atlas_enforce", "atlas_rebuild",
           "atlas_wullimann_plates", "atlas_wullimann_polygons"]),
         ("Before rotation curation",
-         "A first standard image of every section, plus the program's proposals "
-         "for which sections to drop and how to rotate the rest.",
-         _EARLY_MASKS + ["reformat_pcna", "exclusion", "symmetry"]),
+         "Masks bubbles and debris in both scans, makes a first standard image of "
+         "every section, and proposes which sections to drop and how to rotate the "
+         "rest.",
+         ["artifact_pcna", "artifact_perk", "reformat_pcna", "exclusion", "symmetry"]),
         ("After rotation curation",
-         "Carries your rotation and exclusion decisions into the final images, "
-         "masks bubbles and debris, and sets aside saturated sections.",
-         _late(["reformat_pcna_curated", "censor_pcna", "reformat_pcna_final",
-                "propagate_perk", "reformat_perk", "censor_perk",
-                "reformat_perk_final", "render_excluded_perk", "sections_dataset"])),
+         "Carries your rotation and exclusion decisions into the final images of "
+         "both scans and sets aside saturated sections.",
+         ["censor_pcna", "reformat_pcna_final", "propagate_perk", "censor_perk",
+          "reformat_perk_final", "sections_dataset"]),
         ("Get ready for the ROI curator",
-         "Orders the curation queue and makes the colour pictures the ROI curator "
-         "shows.",
-         ["worklist", "rgb_perk", "rgb_pcna", "thumbs_perk", "thumbs_pcna", "provenance"]),
+         "Orders the curation queue and makes the colour pictures and Review "
+         "thumbnails the ROI curator shows.",
+         ["worklist", "rgb_perk", "rgb_pcna", "provenance"]),
     ])
 
 CURATE = Screen(
@@ -235,10 +213,9 @@ VIEW_ONLY = {"scene_renders"}
 #: Never planned by Run all remaining.
 BY_HAND = REPAIRS | VIEW_ONLY
 
-#: Where the table has the one-pass Build results stage, Run all remaining uses
-#: it instead of the spreadsheet stages it already runs. They keep their own
-#: Run buttons.
-COVERED = {"excel_sample", "excel_slide"} if "build_results" in S.BY_ID else set()
+#: Run all remaining uses the one-pass Build results stage instead of the
+#: spreadsheet stages it already runs. They keep their own Run buttons.
+COVERED = {"excel_sample", "excel_slide"}
 
 #: Kept only on All stages: superseded, and not to be used by accident.
 HIDDEN = {"level_curator": "Superseded by the ROI curator's own plate slider; kept "
@@ -307,30 +284,24 @@ PLAIN = {
     "symmetry": "Proposes a small rotation for each section so its midline is vertical.",
     "rotation_curator": "You check each section's rotation and accept or overrule the "
                         "proposed exclusions.",
-    "reformat_pcna_curated": "Remakes the {m1} images with your rotations and exclusions "
-                             "applied.",
     "artifact_pcna": "Finds bubbles, clumps and fibres inside the {m1} sections and masks them "
-                     "out.",
+                     "out. Works on the overviews, so it runs before you curate.",
     "censor_pcna": "Sets aside {m1} sections with too many saturated pixels and flags the "
                    "rest.",
     "reformat_pcna_final": "The final {m1} images: your decisions applied, artifacts masked, "
                            "saturation flagged.",
     "propagate_perk": "Copies your {m1} decisions onto the matching {m0} scans.",
-    "reformat_perk": "Makes the standard {m0} images with those decisions applied.",
     "artifact_perk": "Finds and masks artifacts in the {m0} sections.",
     "censor_perk": "Sets aside {m0} sections with too many saturated pixels and writes the "
                    "list of measurable sections.",
-    "reformat_perk_final": "The final {m0} images, ready for measuring.",
-    "render_excluded_perk": "Makes pictures of the excluded {m0} sections so you can look at "
-                            "them in Review.",
+    "reformat_perk_final": "The final {m0} images with your decisions carried over, ready "
+                           "for measuring. Excluded sections are drawn too, for Review.",
     "sections_dataset": "A table of every {m0} section and what happened to it.",
     "worklist": "Orders the ROI curation queue so that stopping part way still leaves every "
                 "animal equally covered.",
     "rgb_perk": "Colour pictures of the {m0} sections (nuclei blue, marker in colour) for "
-                "the ROI curator.",
-    "rgb_pcna": "The same colour pictures for {m1}.",
-    "thumbs_perk": "Small {m0} pictures for the curator's Review grid.",
-    "thumbs_pcna": "Small {m1} pictures for the Review grid.",
+                "the ROI curator, and the small ones for its Review grid.",
+    "rgb_pcna": "The same colour pictures and Review thumbnails for {m1}.",
     "provenance": "Traces every scanned section through every decision, for the curator's "
                   "Review mode.",
     "roi_curator": "You match each section to an atlas plate and draw the brain regions to "
@@ -471,6 +442,9 @@ _RGB = [
     Opt("--include-excluded", "bool", "Include excluded sections",
         "Also make pictures of sections the pipeline excluded, so Review can show them "
         "in colour."),
+    Opt("--thumb-size", "int", "Thumbnail size (px)", "Edge length of the Review grid "
+        "pictures made in the same run.", default=256, cli_default=256, minimum=64,
+        maximum=1024),
     _force("pictures"),
 ]
 
@@ -598,14 +572,6 @@ OPTIONS = {
     ],
     "rgb_perk": _RGB,
     "rgb_pcna": _RGB,
-    "thumbs_perk": [
-        Opt("--thumb-size", "int", "Thumbnail size (px)", "Edge length of the Review grid "
-            "pictures.", default=256, cli_default=256, minimum=64, maximum=1024),
-    ],
-    "thumbs_pcna": [
-        Opt("--thumb-size", "int", "Thumbnail size (px)", "Edge length of the Review grid "
-            "pictures.", default=256, cli_default=256, minimum=64, maximum=1024),
-    ],
     "provenance": [
         Opt("--tissue-masks", "bool", "Build tissue outlines",
             "Draws each section's tissue outline for Review. Slow, since it opens every "
@@ -735,7 +701,11 @@ SETTING_SECTIONS = [
      "scanned and which channel is which.",
      ["pixel_size_um", "section_thickness_um", "overview_target_um_per_px",
       "acquisition.layout", "display.nuclear_colour", "channels.dapi_index",
-      "channels.marker_index", "curation_render.source", "curation_render.um_per_px"]),
+      "channels.marker_index"]),
+    ("curation", "Curation pictures",
+     "How sharp the colour pictures in the ROI curator are, and where their pixels come "
+     "from. Measuring always reads the scan's own pixels, whatever this says.",
+     ["curation_render.source", "curation_render.um_per_px"]),
     ("atlas", "Atlas",
      "Which brain atlas the regions come from. Choose a built-in one or import your own.",
      ["atlas_source", "atlas_pdf", "atlas_polygon_mirror", "atlas_plate_set.dir",

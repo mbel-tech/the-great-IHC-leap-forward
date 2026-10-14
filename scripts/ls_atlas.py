@@ -28,6 +28,7 @@ import csv
 import hashlib
 import os
 import re
+import shutil
 
 import atlas_registry as REG
 import ls_io as IO
@@ -60,6 +61,13 @@ ASPECT_TOLERANCE = 0.01
 # not billions, and the consequence of a collision is one section verifying that
 # should have been flagged - not a wrong number.
 DIGEST_CHARS = 12
+
+# The plate sets shipped with the code, laid out exactly as `<out_root>/atlas/`.
+# A study whose own copy of a set is missing gets this one copied in on first
+# use (`plate_dir`), byte for byte, so the fingerprints curation stores still
+# match. See atlas/README.md for where they come from and how to cite them.
+BUNDLED = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       "atlas")
 CACHE_NAME = "fingerprints.csv"
 CACHE_COLUMNS = ("image_stem", "image_file", "bytes", "mtime_ns", "digest")
 
@@ -147,7 +155,45 @@ def plate_dir(cfg, set_name=None):
     rather than a leftover literal.
     """
     out_root = (cfg or {}).get("out_root") or ""
-    return os.path.join(out_root, "atlas", set_name or _default_set_name(cfg))
+    name = set_name or _default_set_name(cfg)
+    target = os.path.join(out_root, "atlas", name)
+    # Only into an output folder that already exists: this is a path lookup
+    # first, and must never create a study's out_root as a side effect.
+    if out_root and os.path.isdir(out_root):
+        seed_from_bundle(target, name)
+    return target
+
+
+def seed_from_bundle(target, name):
+    """Copy the shipped plate set `name` into `target` when `target` is absent.
+
+    Never touches a set that is already there - a study's own plates, however
+    they were made, win. Copied beside the target and renamed into place, so an
+    interrupted copy leaves no half set that would then be trusted. Any failure
+    is swallowed: this runs from stage constants at import, and the stage that
+    needs the plates says they are missing better than a traceback here would.
+    Returns True when it copied.
+    """
+    # LS_ATLAS_BUNDLE moves the shipped sets, and set empty turns copying off:
+    # the test suites build their own plate sets and must not get these.
+    bundle = os.environ.get("LS_ATLAS_BUNDLE", BUNDLED)
+    if not bundle:
+        return False
+    source_dir = os.path.join(bundle, name)
+    if os.path.exists(target) or not os.path.isdir(source_dir):
+        return False
+    if os.path.abspath(source_dir) == os.path.abspath(target):
+        return False
+    partial = target + ".copying"
+    try:
+        shutil.rmtree(partial, ignore_errors=True)
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        shutil.copytree(source_dir, partial)
+        os.replace(partial, target)
+    except OSError:
+        shutil.rmtree(partial, ignore_errors=True)
+        return False
+    return True
 
 
 def plate_order(rows, key="plate_id"):

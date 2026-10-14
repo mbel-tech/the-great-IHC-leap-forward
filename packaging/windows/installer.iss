@@ -43,6 +43,7 @@ Type: filesandordirs; Name: "{app}\runtime"
 Type: filesandordirs; Name: "{app}\app"
 Type: filesandordirs; Name: "{app}\scripts"
 Type: filesandordirs; Name: "{app}\analysis"
+Type: filesandordirs; Name: "{app}\atlas"
 Type: filesandordirs; Name: "{app}\R"
 Type: filesandordirs; Name: "{app}\keras"
 

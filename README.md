@@ -37,6 +37,18 @@ way), and `04l`'s Shotgun deck uses it to lay slides out by treatment, which is 
 group comparison figure can be built without. Both are documented at `config.groups`, and
 leaving `by_animal` empty disables both.
 
+## Atlases, and how to cite them
+
+The atlas plates ship in [`atlas/`](atlas/README.md), so a new study loads them with no extraction
+step: the first time a study needs a plate set it does not have, the app copies it into
+`<out_root>/atlas/`. If you use either atlas in research, cite it:
+
+- **Salmon atlas** — written by **Marco A. Vindas**, otherwise unpublished. Marco A. Vindas must be
+  cited in any research that uses it.
+- **Wullimann zebrafish atlas** — Wullimann, M. F., Rupp, B., & Reichert, H. (1996). *Neuroanatomy of
+  the Zebrafish Brain: A Topological Atlas*. Basel: Birkhäuser Verlag. ISBN 3-7643-5120-9.
+  https://doi.org/10.1007/978-3-0348-8979-7
+
 ---
 
 ## Reader architecture
@@ -143,9 +155,15 @@ Things that differ from salmon, so they are not a surprise later:
   crop. On real stippled zebrafish micrographs against salmon sections it is untested: compare
   `roi_regions_refined.csv` with the curator's `roi_regions.csv` before trusting it.
 - Needs tesseract for the name proposals: `requirements-wullimann.txt`.
-- The plates come from a book that is not ours to redistribute; `atlas/` is ignored by git.
+- The plates ship in `atlas/plates_wullimann/` (with the 04x outlines, not yet reviewed) and the cut-out cross sections in
+  `atlas/wullimann1996/`; `04v` cuts them out of the book's PDF again if needed. Cite the book - see
+  [Atlases, and how to cite them](#atlases-and-how-to-cite-them).
 
 ### Using an atlas of your own
+
+**The simple way:** draw the regions on each plate in Fiji's ROI Manager, save each plate's ROIs as
+`<plate>.zip` beside it, and run `python scripts/ls_atlas_imagej.py FOLDER --name mouse`. Step by step:
+[docs/adding-your-own-atlas.md](docs/adding-your-own-atlas.md).
 
 An atlas the pipeline can use is a **plate set**: a folder of plate images plus the tables that say where
 the regions are on them. If you already have one (from another species, or drawn by hand), nothing needs

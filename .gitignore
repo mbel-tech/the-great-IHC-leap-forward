@@ -18,9 +18,18 @@ qupath/
 results/
 logs/
 
-# Atlas plates are extracted from Salmon Atlas.pdf - 107 MB, and not ours to
-# redistribute. The extraction script is here; run it against your own copy.
-atlas/
+# Atlas plates ship with the code, with their authors' permission - see
+# atlas/README.md for the citations. Only the sets listed here; anything else
+# a run drops into atlas/ stays local.
+/atlas/*
+!/atlas/README.md
+!/atlas/Salmon Atlas full.pdf
+!/atlas/plates/
+!/atlas/plates_final/
+!/atlas/plates_wullimann/
+!/atlas/wullimann1996/
+/atlas/*/fingerprints.csv
+/atlas/*/qc/
 
 # Working directories: Bio-Formats memo caches, the Python 3.13 venv, extracted CZIs
 work/
@@ -88,3 +97,7 @@ reformatted/roi_curator.html
 # Shareable copies of a project (they may carry the unblinding key when exported unblinded)
 *-UNBLINDED-copy.*
 *-copy.zip
+
+# Re-include the shipped atlas images that the image rules above exclude.
+!/atlas/*/*.png
+!/atlas/*/*.jpeg

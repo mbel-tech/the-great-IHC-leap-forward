@@ -7,3 +7,5 @@
 #   Windows:        the UB Mannheim installer, then add it to PATH
 pytesseract>=0.3.10
 opencv-python-headless
+# 04v: cutting the cross sections out of the book's PDF
+pymupdf

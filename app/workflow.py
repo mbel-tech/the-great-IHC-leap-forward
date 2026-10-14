@@ -28,12 +28,18 @@ import stages as S
 # ---------------------------------------------------------------------------
 
 class Screen:
-    def __init__(self, sid, title, intro, info, parts=()):
+    def __init__(self, sid, title, intro, info, parts=(), role="", subtitle=""):
         self.sid = sid
         self.title = title
         self.intro = intro          # two or three sentences under the screen title
         self.info = info            # the (i) text: what goes in, what comes out
         self.parts = list(parts)    # [(heading, explanation, [stage ids])]
+        # "Your part": one sentence on what the person does here, shown in a
+        # callout under the intro. The intro says what the screen is; this says
+        # what to press, so a new lab member is never left reading a list.
+        self.role = role
+        # The step list's one line under the title: automatic, or you decide.
+        self.subtitle = subtitle
 
     def visible_parts(self):
         """The parts, keeping only the stage ids the table in use defines."""
@@ -66,7 +72,10 @@ HOME = Screen(
     "app, and a record of every stage that ran. It lives in one file, which "
     "File &gt; Save writes.</p>"
     "<p>Progress is read from the output folder, so it is right even for work "
-    "done outside the app.</p>")
+    "done outside the app.</p>",
+    role="Read the Next up card and press Go. Come back here any time to see where "
+         "the study stands.",
+    subtitle="Where things stand")
 
 SETUP = Screen(
     "setup", "Set up",
@@ -77,7 +86,10 @@ SETUP = Screen(
     "when they run. Changes are kept in the project as you press <b>Apply</b> and "
     "are saved automatically before any stage runs.</p>"
     "<p>Each field shows a short hint; its (i) button gives the full reasoning "
-    "and which stages read it. The ↺ button puts a field back to its default.</p>")
+    "and which stages read it. The ↺ button puts a field back to its default.</p>",
+    role="Fill in each tab once, in order, and press Apply on each. Nothing runs yet, "
+         "so you cannot break anything.",
+    subtitle="Tell the app about your slides")
 
 PREPARE = Screen(
     "prepare", "Prepare",
@@ -116,7 +128,9 @@ PREPARE = Screen(
          "Orders the curation queue and makes the colour pictures and Review "
          "thumbnails the ROI curator shows.",
          ["worklist", "rgb_perk", "rgb_pcna", "provenance"]),
-    ])
+    ],
+    role="Press Run all remaining. It runs straight through to the ROI curator.",
+    subtitle="Automatic: read, check, clean")
 
 CURATE = Screen(
     "curate", "Curate",
@@ -132,7 +146,11 @@ CURATE = Screen(
     parts=[
         ("Decisions", "", ["atlas_reframe", "roi_curator",
                            "import_curation"]),
-    ])
+    ],
+    role="In the ROI curator: turn sections upright, bring back any that were set "
+         "aside, place the regions, then press Done: export and go to Measure. Your "
+         "work saves as you go.",
+    subtitle="You decide: rotate, exclude, mark regions")
 
 MEASURE = Screen(
     "measure", "Measure",
@@ -155,7 +173,10 @@ MEASURE = Screen(
          "Only for a results file written by an older version of the pipeline. "
          "Each one backs the file up before changing it.",
          ["recensor", "off_tissue", "seg_provenance"]),
-    ])
+    ],
+    role="Press Run all remaining and leave it. Detection takes hours; you can stop "
+         "and resume.",
+    subtitle="Automatic: find and count nuclei")
 
 RESULTS = Screen(
     "results", "Results",
@@ -169,7 +190,10 @@ RESULTS = Screen(
         ("Unblind", "Reads the treatment groups for the first time.", ["join_sampling"]),
         ("Spreadsheets and figures", "The tables you analyse and the figures drawn from them.",
          ["build_results", "excel_sample", "excel_slide", "refresh_loop"]),
-    ])
+    ],
+    role="Press Run on Join the treatment groups once you are sure the regions are "
+         "final, then build the spreadsheets.",
+    subtitle="Unblind, then tables and figures")
 
 INSTRUMENT = Screen(
     "instrument", "Instrument characterisation",
@@ -186,7 +210,8 @@ INSTRUMENT = Screen(
          "Where the tiles are and how bright each part of a tile comes out.",
          ["tile_geometry", "pick_sections", "fiji_export", "tilefield_build",
           "tilefield_verify", "artifact_before", "artifact_after", "tilefield_raw"]),
-    ])
+    ],
+    role="Nothing. This was done once for this microscope and does not need repeating.")
 
 ALL = Screen(
     "all", "All stages",
@@ -195,7 +220,9 @@ ALL = Screen(
     "exactly which stage you want.",
     "<p>This is the app's previous layout. Stages are grouped by the bands of "
     "Figure 1 in <code>docs/pipeline-methods.md</code>.</p>",
-    parts=[(g, "", [st.sid for st in S.in_group(g)]) for g in S.GROUPS])
+    parts=[(g, "", [st.sid for st in S.in_group(g)]) for g in S.GROUPS],
+    role="Only here if you know exactly which stage you want. New to the app? Use the "
+         "steps on the left.")
 
 #: The step bar, in order.
 STEPS = [HOME, SETUP, PREPARE, CURATE, MEASURE, RESULTS]
@@ -433,7 +460,7 @@ def _force(what):
 
 _RGB = [
     Opt("--scale", "int", "Picture size (x 256 px)",
-        "How large the colour pictures are drawn when Set up > Curation pictures takes "
+        "How large the colour pictures are drawn when Set up > Pictures takes "
         "them from the overviews; 3 gives 768 px. Pictures drawn from the scan files "
         "use the resolution set there instead, and ignore this. Only the sampling "
         "changes; the section's frame and rotation stay exactly the same.",
@@ -456,7 +483,7 @@ OPTIONS = {
         _limit("files"),
     ],
     "overviews": [_force("sections"), _limit()],
-    # Folder, resolution and brightness are study settings (Set up > Scene pictures).
+    # Folder, resolution and brightness are study settings (Set up > Pictures).
     "scene_renders": [
         _force("pictures"), _limit("scenes"),
     ],
@@ -677,15 +704,12 @@ SETTING_SECTIONS = [
      ["pixel_size_um", "section_thickness_um", "overview_target_um_per_px",
       "acquisition.layout", "display.nuclear_colour", "channels.dapi_index",
       "channels.marker_index"]),
-    ("curation", "Curation pictures",
-     "How sharp the colour pictures in the ROI curator are, and where their pixels come "
-     "from. Measuring always reads the scan's own pixels, whatever this says. Pictures "
-     "already made keep their old look until the colour pictures run again with Redo.",
-     ["curation_render.source", "curation_render.um_per_px"]),
-    ("scene_pictures", "Scene pictures",
-     "Where the pictures of every scene go, how sharp they are and how they are "
-     "brightened.",
-     ["scene_render.out_dir", "scene_render.um_per_px", "scene_render.range"]),
+    ("pictures", "Pictures",
+     "The pictures Prepare draws for you to look at: the colour pictures in the ROI "
+     "curator, and a picture of every scene. Measuring always reads the scan's own "
+     "pixels, whatever this says.",
+     ["curation_render.source", "curation_render.um_per_px",
+      "scene_render.out_dir", "scene_render.um_per_px", "scene_render.range"]),
     ("atlas", "Atlas",
      "Which brain atlas the regions come from. Choose a built-in one or import your own.",
      ["atlas_source", "atlas_pdf", "atlas_polygon_mirror", "atlas_plate_set.dir",
@@ -695,6 +719,19 @@ SETTING_SECTIONS = [
      ["detection.nucleus_diameter_um", "detection.abercrombie.enabled",
       "detection.threshold.mad_k", "detection.threshold.min_area_um2"]),
 ]
+
+#: Sub-headings inside a card, shown before the key they name: (heading, one line).
+SECTION_HEADINGS = {
+    "curation_render.source": (
+        "Curation pictures",
+        "How sharp the colour pictures in the ROI curator are, and where their pixels "
+        "come from. Pictures already made keep their old look until the colour "
+        "pictures run again with Redo."),
+    "scene_render.out_dir": (
+        "Scene pictures",
+        "Where the pictures of every scene go, how sharp they are and how they are "
+        "brightened."),
+}
 
 OTHER_SECTION = ("other", "Other settings",
                  "Settings not yet sorted into a card above.")
@@ -864,6 +901,10 @@ def run_plan(screen_sid, study, include_curator_pages=True):
     for st in S.STAGES:
         if st.sid not in wanted or st.sid in HIDDEN or st.sid in BY_HAND | COVERED:
             continue
+        # Unblinding is always a person's decision, made with its own Run and a
+        # confirmation. No stage needs it, so leaving it out holds nothing back.
+        if st.unblinds:
+            continue
         ok, _ = applies(st, study)
         if not ok or st.cli_reason():
             continue
@@ -907,6 +948,30 @@ def progress(screen_sid, study):
         else:
             done += st.done(study.out_root, study.names)
     return done, total
+
+
+def step_progress(screen_sid, study):
+    """(done, total) for a step, as the step list and Project show it.
+
+    Curate counts curators exported rather than stages: building a curator's
+    page is Prepare's work, and what Curate asks of you is the export.
+    """
+    if screen_sid == "curate":
+        sids = curators(study)
+        done = sum(1 for sid in sids
+                   if decided(sid, study) and S.BY_ID[sid].done(study.out_root, study.names))
+        return done, len(sids)
+    return progress(screen_sid, study)
+
+
+def progress_words(screen_sid, done, total):
+    """'5 of 6 cards', '10 of 19 stages', '0 of 1 exported', or 'Done'."""
+    if not total:
+        return "Nothing to do"
+    if done >= total:
+        return "Done"
+    unit = {"setup": "cards", "curate": "exported"}.get(screen_sid, "stages")
+    return f"{done} of {total} {unit}"
 
 
 def curators(study):
@@ -1016,15 +1081,15 @@ def next_up(study, setup_ok=True, setup_missing=()):
         return "setup", "Finish Set up: %s." % gaps, None
     plan, held = run_plan("prepare", study)
     if plan:
-        first = S.BY_ID[plan[0]]
-        if first.curator:
-            return "prepare", "Run Prepare to build the %s page." % display_title(first, study), None
-        return "prepare", "Run Prepare: %d stage%s left." % (len(plan), "" if len(plan) == 1 else "s"), None
+        return "prepare", "Run Prepare. It goes straight through to the ROI curator.", None
     for sid in curators(study):
         st = S.BY_ID[sid]
         if not st.done(study.out_root, study.names):
             continue
         if not decided(sid, study):
+            if sid == "roi_curator":
+                return "curate", ("Turn the sections upright, check what was set aside, "
+                                  "place the regions, then export from the ROI curator."), sid
             return "curate", "Curate: work through %s and export your decisions." % \
                 display_title(st, study), sid
     if held:
@@ -1035,9 +1100,14 @@ def next_up(study, setup_ok=True, setup_missing=()):
     if m_plan:
         return "measure", "Run Measure: %d stage%s left." % (
             len(m_plan), "" if len(m_plan) == 1 else "s"), None
+    # Run all remaining leaves unblinding out, so it is named here on its own.
+    for sid in SCREENS["results"].stage_ids():
+        st = S.BY_ID[sid]
+        if st.unblinds and applies(st, study)[0] and not st.done(study.out_root, study.names):
+            return "results", "Measurements are in. Unblind and build the results.", sid
     r_plan, _ = run_plan("results", study)
     if r_plan:
-        return "results", "Results: unblind and build the spreadsheets.", None
+        return "results", "Build the spreadsheets and figures on Results.", None
     return "home", "Everything the app can run is done.", None
 
 

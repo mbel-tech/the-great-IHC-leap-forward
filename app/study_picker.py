@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QListWidget, QListWidgetItem, QMessageBox, QPushButton, QVBoxLayout)
 
 import ls_config as LC
+import theme as T
 
 
 def reveal(path):
@@ -51,7 +52,7 @@ class StudyPicker(QDialog):
         self.list.itemDoubleClicked.connect(lambda _: self._open())
 
         where = QLabel(f"Studies live in {LC.studies_dir()}")
-        where.setStyleSheet("color:#9aa0a8;font-size:11px")
+        where.setStyleSheet(T.HINT)
         where.setWordWrap(True)
 
         new = QPushButton("New study…")

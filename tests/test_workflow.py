@@ -68,6 +68,12 @@ chk("no stage is on two screens", sorted(x for x in set(on_steps) if on_steps.co
 chk("All stages lists every stage", sorted(W.ALL.stage_ids()), sorted(st.sid for st in S.STAGES))
 chk("the step bar is in working order",
     [s.sid for s in W.STEPS], ["home", "setup", "prepare", "curate", "measure", "results"])
+chk("every screen says what your part in it is",
+    [s.sid for s in W.STEPS + W.EXTRA if not s.role.strip()], [])
+chk("...and every step has its one line in the step list",
+    [s.sid for s in W.STEPS if not s.subtitle.strip()], [])
+chk("Curate's part names the Done button that takes you on",
+    "Done: export and go to Measure" in W.CURATE.role, True)
 chk("saturation stages stay in the daily path, since 04j reads them",
     (W.screen_of("saturation_raw"), W.screen_of("saturation_map")), ("prepare", "prepare"))
 
@@ -129,6 +135,12 @@ class _K:
 
 chk("a new setting lands in Other settings",
     W.setting_sections([_K("brand.new")])[-1][0], "other")
+chk("the picture settings share one Pictures card",
+    [k.path for sid, _t, _i, keys in cards if sid == "pictures" for k in keys],
+    ["curation_render.source", "curation_render.um_per_px",
+     "scene_render.out_dir", "scene_render.um_per_px", "scene_render.range"])
+chk("...under a heading for each kind of picture",
+    [k for k in W.SECTION_HEADINGS if k not in shown], [])
 chk("a card whose settings are not in ls_config yet is hidden",
     [c[0] for c in W.setting_sections([_K("study.name")])], ["folders"])
 
@@ -229,6 +241,15 @@ chk("...and names the settings it is missing",
     "Finish Set up: Atlas needs Atlas PDF.")
 d, t = W.progress("prepare", s0)
 chk("progress counts only stages the app runs here", (d <= t, t > 10), (True, True))
+chk("Run all remaining never unblinds",
+    [s for s in W.run_plan("results", s0)[0] + W.run_plan("all", s0)[0]
+     if S.BY_ID[s].unblinds], [])
+chk("Curate's progress counts curators exported",
+    W.progress_words("curate", *W.step_progress("curate", s0)).endswith("exported")
+    or W.progress_words("curate", *W.step_progress("curate", s0)) == "Done", True)
+chk("progress words", (W.progress_words("setup", 5, 6), W.progress_words("prepare", 10, 19),
+                       W.progress_words("curate", 0, 1), W.progress_words("measure", 3, 3)),
+    ("5 of 6 cards", "10 of 19 stages", "0 of 1 exported", "Done"))
 chk("a run's duration in words",
     W.duration_words({"started": "2026-01-01T10:00:00+00:00", "ended": "2026-01-01T10:03:10+00:00"}),
     "took 3 min")
@@ -261,11 +282,37 @@ if MW:
     asked = []
     QMessageBox.warning = staticmethod(lambda *a, **k: (asked.append(a[1]), QMessageBox.Cancel)[1])
     QMessageBox.information = staticmethod(lambda *a, **k: asked.append(a[1]))
+    import theme
+    theme.apply(app)
+    unblind_answer = []           # what the next Unblind dialog does: (accept?, workbook)
+
+    def _unblind_exec(dlg):
+        asked.append(dlg.windowTitle())
+        chk("the unblind dialog starts on Cancel", dlg.cancel_btn.isDefault(), True)
+        accept, book = unblind_answer.pop(0) if unblind_answer else (False, None)
+        if book is not None:
+            dlg.field.setValue(book)
+        return MW.QDialog.Accepted if accept else MW.QDialog.Rejected
+    MW.UnblindDialog.exec = _unblind_exec
     w = MW.MainWindow(REPO, config_path=PATH)
     chk("the step bar has the six steps", w.nav.count(), 6)
+    import widgets as WG
+    chk("each step carries its line and its progress",
+        (w.nav.item(1).data(WG.StepDelegate.ROLE_SUB),
+         bool(re.match(r"\d+ of \d+ cards|Done", w.nav.item(1).data(WG.StepDelegate.ROLE_PROGRESS)))),
+        ("Tell the app about your slides", True))
+    chk("the step list stays between 236 and 280 px",
+        (w.nav.parentWidget().minimumWidth(), w.nav.parentWidget().maximumWidth()), (236, 280))
+    chk("every screen shows its Your part",
+        all(p.findChild(WG.ScreenHeader).role.text() for p in w.pages.values()), True)
     for sid in ("home", "setup", "prepare", "curate", "measure", "results", "instrument", "all"):
         w.goto(sid)
         chk(f"goto {sid} shows it", w.stack.currentWidget() is w.pages[sid])
+    chk("Advanced marks the screen it is on", w.advanced["all"].isChecked(), True)
+    w.advanced["instrument"].click()
+    chk("...and its buttons go there",
+        (w.stack.currentWidget() is w.pages["instrument"], w.advanced["all"].isChecked()),
+        (True, False))
     w.goto("curate")
     w.curate.show_curator("roi_curator")
     chk("the ROI curator offers Done above its page",
@@ -314,12 +361,36 @@ if MW:
     chk("running the unblinding stage asks first, and Cancel stops it",
         (started, "Unblind the analysis?" in asked), (False, True))
     chk("nothing is left queued", (w._queue, w._thread), ([], None))
+    _js = w.lists["results"].rows["join_sampling"]
+    chk("the unblinding row says Run... since it asks first", _js.run_btn.text(), "Run…")
+    _ran = []
+    _real_run_next = w._run_next
+    w._run_next = lambda: _ran.append(list(w._queue))
+    unblind_answer.append((True, "C:/data/sampling.xlsx"))
+    started = w.run_stages(["join_sampling"])
+    chk("Unblind and run keeps the workbook as the stage's option",
+        (started, w.session.project.stage_options("join_sampling")),
+        (True, {"--xlsx": "C:/data/sampling.xlsx"}))
+    w._run_next = _real_run_next
+    w._queue, w._running = [], {}
+    w.drawer.stop_btn.setVisible(False)
+    w.refresh()
+    _geo = w.lists["measure"].rows["roi_geometry"]
+    chk("a stage held by the ROI export says so and offers the curator",
+        (_geo.status.text(), _geo.run_btn.text(), _geo.run_btn.isEnabled()),
+        ("Waiting for your ROI export", "Open curator", True))
+    _geo.run_btn.click()
+    chk("...which goes to Curate", w.stack.currentWidget() is w.curate, True)
     open(_nuc, "w").write("uid\n")
     os.utime(_nuc, (W.ROI_FIX_AT - 3600, W.ROI_FIX_AT - 3600))
     w.refresh()
     chk("Measure shows the redo notice for old nuclei",
         (w.lists["measure"].notice.isVisibleTo(w.lists["measure"]),
          "Place the ROIs" in w.lists["measure"].notice.text()), (True, True))
+    w.lists["measure"].dismiss_btn.click()
+    w.refresh()
+    chk("Dismiss puts the notice away", w.lists["measure"].notice.isVisibleTo(w.lists["measure"]),
+        False)
     os.remove(_nuc)
     w.refresh()
     chk("...and drops it once they are measured again",
@@ -332,19 +403,23 @@ if MW:
     chk("Set up offers where each marker's nuclei are found",
         list(form.seg_row.combos), ["AF568", "AF488"])
     chk("...on the counterstain unless chosen", form._segmentation_value(), None)
+    chk("...with nothing withheld", form.seg_row.notes["AF488"].isVisibleTo(form), False)
     form.seg_row.combos["AF488"].setCurrentText(CD.OWN_ROUTE)
     chk("PCNA on its own channel writes the block 05c reads",
         form._segmentation_value(), {"AF488": CD.OWN_ENTRY})
+    chk("...and says what that withholds",
+        (form.seg_row.notes["AF488"].isVisibleTo(form), form.seg_row.notes["AF488"].text()),
+        (True, "Total cell density is withheld for this marker."))
     _out = json.loads(json.dumps(_cfg))
     LC._set(_out, ["acquisition", "marker_segmentation"], form._segmentation_value())
     chk("...which validates", [e for e in LC.validate(_out, _p)[0] if "segment" in e], [])
     form.widgets["acquisition.layout"].setCurrentText("multiplex")
     chk("a multiplex study hides it and writes nothing",
         (form._segmentation_value(), form.seg_row.isVisibleTo(form)), (None, False))
-    chk("the scene pictures row has an Open pictures button",
+    chk("the scene pictures row keeps Open pictures until there are pictures",
         (w.lists["prepare"].rows["scene_renders"].open_btn.text(),
          w.lists["prepare"].rows["scene_renders"].open_btn.isVisibleTo(w.lists["prepare"])),
-        ("Open pictures", True))
+        ("Open pictures", False))
     w.open_curator("scene_renders")
     chk("opening it before any pictures exist says so", "Nothing to open yet" in asked, True)
     import runner as RN

@@ -45,6 +45,7 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QWidget
 
 import state as ST
+import theme as T
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -130,7 +131,7 @@ class CuratorView(QWidget):
 
         self.view = QWebEngineView(self)
         self.title = QLabel("", self)
-        self.title.setStyleSheet("color:#9aa0a8;padding:2px 6px")
+        self.title.setStyleSheet(f"{T.QUIET};padding:2px 6px")
 
         reload_btn = QPushButton("Reload", self)
         reload_btn.clicked.connect(self.view.reload)
@@ -150,6 +151,7 @@ class CuratorView(QWidget):
         # bar rather than on the screen around it so it moves with the page into
         # its own window.
         self.done_btn = QPushButton("", self)
+        T.mark(self.done_btn, kind="primary")
         self.done_btn.setVisible(False)
         self.done_btn.clicked.connect(self.done_requested.emit)
 
@@ -330,7 +332,7 @@ class CuratorView(QWidget):
         path = os.path.join(self.out_root, rel)
         if not os.path.exists(path):
             self.view.setHtml(
-                "<body style='background:#0e1014;color:#e6e6e6;font:14px system-ui;"
+                f"<body style='background:{T.BG};color:{T.TEXT};font:14px system-ui;"
                 "padding:24px'><h2>Not built yet</h2>"
                 f"<p><code>{rel}</code> does not exist. Run the stage that "
                 "generates it, then reload.</p></body>")

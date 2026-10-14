@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 import ls_channel_edit as E
 import ls_channel_guess as G
 import ls_channels as CH
+import theme as T
 
 DEFAULT_TEXT = "(default)"
 CUSTOM_TEXT = "Custom..."
@@ -104,7 +105,7 @@ class ChannelEditor(QDialog):
             else "A paired study has one scan per marker, so only the marker names are "
                  "declared. The name becomes folder and file names in every output.")
         intro.setWordWrap(True)
-        intro.setStyleSheet("color:#9aa0a8;font-size:11px")
+        intro.setStyleSheet(T.HINT)
         self.status = QLabel("")
         self.status.setWordWrap(True)
 
@@ -216,7 +217,7 @@ class ChannelEditor(QDialog):
     @staticmethod
     def _detected_label(r):
         label = QLabel(r.get("detected") or "")
-        label.setStyleSheet("color:#9aa0a8;font-size:11px")
+        label.setStyleSheet(T.HINT)
         label.setToolTip("what the CZI file says this channel is; the file records the dye, "
                          "not the antibody, so the marker name is your choice")
         return label
@@ -276,10 +277,10 @@ class ChannelEditor(QDialog):
             errors, warnings = [str(exc)], []
         if not rows:
             warnings = warnings or ["nothing declared yet"]
-        lines = ["<span style='color:#e5534b'>%s</span>" % _esc(e) for e in errors[:5]]
-        lines += ["<span style='color:#c69026'>%s</span>" % _esc(w) for w in warnings[:3]]
+        lines = [f"<span style='color:{T.DANGER}'>%s</span>" % _esc(e) for e in errors[:5]]
+        lines += [f"<span style='color:{T.WARN}'>%s</span>" % _esc(w) for w in warnings[:3]]
         self.status.setText("<br>".join(lines) if lines else
-                            "<span style='color:#3fb950'>The pipeline accepts this table.</span>")
+                            f"<span style='color:{T.OK}'>The pipeline accepts this table.</span>")
         self.buttons.button(QDialogButtonBox.Ok).setEnabled(not errors)
 
     # ---- actions -----------------------------------------------------------

@@ -15,9 +15,13 @@ from PySide6.QtWidgets import (
     QTabBar, QTabWidget, QVBoxLayout, QWidget)
 
 import stages as S
+import theme as T
 import workflow as W
 from widgets import (COLOUR, QUIET, WORD, InfoButton, PartHeader, ScreenHeader, StageRow,
                      esc)
+
+#: Space around a screen's content (docs/ui-handoff.md 3.3).
+PAGE_MARGINS = (24, 18, 24, 10)
 
 
 def _scroll(inner):
@@ -35,14 +39,15 @@ def stage_info(st, study, block=None, values=None):
         parts.append("<p><b>You decide here.</b> The page opens on the Curate screen; "
                      "its Export button hands your decisions on.</p>")
     if st.unblinds:
-        parts.append("<p style='color:#f85149'><b>This stage unblinds the analysis.</b> "
+        parts.append(f"<p style='color:{T.DANGER}'><b>This stage unblinds the analysis.</b> "
                      "It is the first one allowed to read the treatment groups.</p>")
     ok, why = W.applies(st, study)
     if not ok:
         parts.append(f"<p style='{QUIET}'>{esc(why)}</p>")
     reason = st.cli_reason()
     if reason:
-        parts.append(f"<p style='color:#a371f7'><b>Not run from the app:</b> {esc(reason)}</p>")
+        parts.append(f"<p style='color:{T.PURPLE_TEXT}'><b>Not run from the app:</b> "
+                     f"{esc(reason)}</p>")
     if st.needs:
         needs = ", ".join(esc(W.display_title(S.BY_ID[n], study)) for n in st.needs
                           if n in S.BY_ID)
@@ -50,10 +55,10 @@ def stage_info(st, study, block=None, values=None):
     if st.outputs:
         shown = st.output_names(study.out_root, study.names)
         missing = set(st.missing(study.out_root, study.names))
-        files = ", ".join((f"<span style='color:#d29922'>{esc(o)}</span>" if o in missing
+        files = ", ".join((f"<span style='color:{T.WARN}'>{esc(o)}</span>" if o in missing
                            else esc(o)) for o in shown)
         parts.append(f"<p><b>Leaves behind:</b> {files}"
-                     + (" <span style='color:#d29922'>(amber: not there yet)</span>"
+                     + (f" <span style='color:{T.WARN}'>(amber: not there yet)</span>"
                         if missing else "") + "</p>")
     rec = W.last_run(block, st.sid)
     if rec:
@@ -72,14 +77,46 @@ def stage_info(st, study, block=None, values=None):
     return "".join(parts)
 
 
-def stage_status(st, study, running):
-    """(state, words) for a row's right-hand status."""
+def stage_status(st, study, running, held=None):
+    """(state, words) for a row's status.
+
+    `held` is run_plan's {stage id: what it waits for}. A stage still to run
+    whose prerequisite is not met says what it is waiting on (section 8.1:
+    not used, running, queued and done all come first).
+    """
     state = W.state(st, study, running)
     if st.operator and state == "done" and not W.decided(st.sid, study):
         return "waiting", "Page built; waiting for your export"
     if st.operator and state == "done":
         return "done", "Decisions exported"
+    if state == "todo" and held and st.sid in held:
+        return "waiting", waiting_words(held[st.sid], study)
     return state, WORD.get(state, state)
+
+
+def waiting_words(need, study):
+    """What a held stage says it is waiting on: your export, or a stage to finish."""
+    n = S.BY_ID.get(need)
+    if n is not None and n.operator:
+        if need == "roi_curator":
+            return "Waiting for your ROI export"
+        return f"Waiting for your export from {W.display_title(n, study)}"
+    if need == "detect":
+        return "Needs detection to finish first"
+    return (f"Needs {W.display_title(n, study)} to finish first" if n is not None
+            else "Waiting for an earlier stage")
+
+
+def row_action(st, state, held):
+    """(label or None for the default, screen to go to or None) for a row's main button."""
+    if state == "waiting" and held and st.sid in held:
+        need = S.BY_ID.get(held[st.sid])
+        if need is not None and need.operator:
+            return "Open curator", "curate"
+    if st.unblinds and state in ("todo", "failed"):
+        # The dots say a question comes before anything runs.
+        return "Run…", None
+    return None, None
 
 
 def marks(st):
@@ -102,23 +139,29 @@ class StageListScreen(QWidget):
         super().__init__(parent)
         self.screen = screen
         self.rows = {}
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(16, 12, 16, 8)
+        # The whole screen scrolls, header included: on a laptop at 614 px a
+        # fixed header plus a separate list squeezes both until words overlap.
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(*PAGE_MARGINS)
+        lay.setSpacing(8)
         lay.addWidget(ScreenHeader(screen))
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(_scroll(page))
 
         bar = QHBoxLayout()
+        bar.setSpacing(10)
         self.run_all = QPushButton("Run all remaining")
-        self.run_all.setMinimumHeight(30)
-        f = self.run_all.font()
-        f.setBold(True)
-        self.run_all.setFont(f)
+        self.run_all.setMinimumHeight(34)
+        T.mark(self.run_all, kind="primary")
         self.run_all.clicked.connect(self._run_all)
         bar.addWidget(self.run_all)
         bar.addWidget(InfoButton(
             "Run all remaining",
             "<p>Runs, in order, every stage on this screen whose results are not there "
-            "yet. Stages this study does not use, and stages that run outside the app, "
-            "are left out.</p>"
+            "yet. Stages this study does not use, stages that run outside the app, "
+            "repairs and the unblinding stage are left out.</p>"
             "<p>It stops at the first failure, and it never runs past a place where you "
             "decide: a stage that needs a curator you have not exported yet waits, along "
             "with everything after it.</p>"
@@ -128,11 +171,32 @@ class StageListScreen(QWidget):
         self.plan_note.setStyleSheet(QUIET)
         bar.addWidget(self.plan_note, 1)
         lay.addLayout(bar)
+
+        # The amber notice: older results that need measuring again. Dismiss
+        # hides it for this session only; it comes back if the app restarts and
+        # the results are still old, because the reminder is the point.
+        self.notice_box = QFrame()
+        self.notice_box.setObjectName("notice")
+        nl = QHBoxLayout(self.notice_box)
+        nl.setContentsMargins(14, 10, 10, 10)
+        ncol = QVBoxLayout()
+        ncol.setSpacing(2)
+        self.notice_head = QLabel("These results are older than the ROI fixes.")
+        f = self.notice_head.font()
+        f.setBold(True)
+        self.notice_head.setFont(f)
+        ncol.addWidget(self.notice_head)
         self.notice = QLabel("")
         self.notice.setWordWrap(True)
-        self.notice.setStyleSheet(f"color:{COLOUR['waiting']};padding:4px 0")
-        self.notice.setVisible(False)
-        lay.addWidget(self.notice)
+        ncol.addWidget(self.notice)
+        nl.addLayout(ncol, 1)
+        self.dismiss_btn = QPushButton("Dismiss")
+        T.mark(self.dismiss_btn, kind="small")
+        self.dismiss_btn.clicked.connect(self._dismiss)
+        nl.addWidget(self.dismiss_btn, 0, Qt.AlignTop)
+        self.notice_box.setVisible(False)
+        self._dismissed = None
+        lay.addWidget(self.notice_box)
         self._plan = []
         # All stages spans the whole pipeline, unblinding included; running all of
         # it from one button is not something to offer.
@@ -142,12 +206,18 @@ class StageListScreen(QWidget):
             if item is not None and item is not self.plan_note:
                 item.setVisible(self._offers_run_all)
 
-        inner = QWidget()
-        body = QVBoxLayout(inner)
-        body.setContentsMargins(0, 0, 8, 0)
+        body = QVBoxLayout()
+        body.setContentsMargins(0, 0, 0, 12)
+        body.setSpacing(0)
         for heading, text, ids in screen.visible_parts():
             if heading:
                 body.addWidget(PartHeader(heading, text))
+            # Each part's rows sit together on one card, divided by soft lines.
+            card = QFrame()
+            card.setObjectName("card")
+            cl = QVBoxLayout(card)
+            cl.setContentsMargins(1, 1, 1, 1)
+            cl.setSpacing(0)
             for sid in ids:
                 st = S.BY_ID[sid]
                 folder = W.FOLDERS.get(sid)
@@ -155,46 +225,70 @@ class StageListScreen(QWidget):
                                open_label=folder[0] if folder else None)
                 row.run_clicked.connect(lambda s: self.run_requested.emit([s]))
                 row.open_clicked.connect(self.open_requested.emit)
+                row.goto_clicked.connect(self.goto.emit)
                 row.options_changed.connect(self.options_changed.emit)
                 self.rows[sid] = row
-                body.addWidget(row)
-        body.addStretch(1)
-        lay.addWidget(_scroll(inner), 1)
+                cl.addWidget(row)
+            row.set_last(True)
+            body.addSpacing(6)
+            body.addWidget(card)
+        lay.addLayout(body)
+        lay.addStretch(1)
 
     def _run_all(self):
         if self._plan:
             self.run_requested.emit(list(self._plan))
 
+    def _dismiss(self):
+        self._dismissed = self.notice.text()
+        self.notice_box.setVisible(False)
+
     def refresh(self, study, running, project, busy=False):
         block = project.block if project is not None else {}
+        self._plan, held = W.run_plan(self.screen.sid, study)
         for sid, row in self.rows.items():
             st = S.BY_ID[sid]
             values = project.stage_options(sid) if project is not None else {}
-            state, words = stage_status(st, study, running)
+            state, words = stage_status(st, study, running, held)
             ok, _ = W.applies(st, study)
             code, _name = W.split_title(st.title)
             if sid in W.HIDDEN:
                 words = "Superseded"
+            action, goto = row_action(st, state, held)
+            can_run = bool(st.script) and ok and not st.cli_reason() and not busy
+            if state == "waiting" and goto is None:
+                can_run = False             # its prerequisite has not finished
             row.refresh(title=W.display_title(st, study), code=code,
                         plain=W.plain(st, study), status=words, state=state,
                         info_html=stage_info(st, study, block, values), mark=marks(st),
-                        can_run=bool(st.script) and ok and not st.cli_reason() and not busy,
-                        option_values=values, changed_count=len(values))
-        self._plan, held = W.run_plan(self.screen.sid, study)
+                        can_run=can_run, option_values=values, changed_count=len(values),
+                        action=action, goto=goto,
+                        # A folder to open once the stage has made something.
+                        open_visible=(state == "done") if sid in W.FOLDERS else None)
         self.run_all.setEnabled(bool(self._plan) and not busy)
-        bits = []
-        if self._plan:
-            bits.append(f"{len(self._plan)} stage{'s' if len(self._plan) != 1 else ''} to run")
+        now = next((sid for sid, what in (running or {}).items()
+                    if what == "running" and sid in self.rows), None)
+        if now:
+            self.plan_note.setText(f"Running: {W.display_title(S.BY_ID[now], study)}")
+        elif self._plan or held:
+            n = len(self._plan)
+            text = f"{n} stage{'s' if n != 1 else ''} left to run"
+            # Held behind your export, or behind a stage that has not run yet.
+            you = sum(1 for w in held.values() if getattr(S.BY_ID.get(w), "operator", False))
+            if you:
+                text += f"; {you} wait{'s' if you == 1 else ''} for you"
+            if len(held) - you:
+                text += f"; {len(held) - you} wait{'s' if len(held) - you == 1 else ''} " \
+                        "for earlier stages"
+            self.plan_note.setText(text + ".")
         else:
-            bits.append("Nothing left to run here")
-        if held:
-            waits = sorted(set(held.values()))
-            names = ", ".join(W.display_title(S.BY_ID[w], study) for w in waits)
-            bits.append(f"{len(held)} waiting for: {names}")
-        self.plan_note.setText(" · ".join(bits))
+            self.plan_note.setText("Nothing left to run here.")
         shown = W.notices(self.screen.sid, study)
-        self.notice.setText("\n\n".join(shown))
-        self.notice.setVisible(bool(shown))
+        text = "\n\n".join(shown)
+        self.notice.setText(text)
+        if not shown:
+            self._dismissed = None
+        self.notice_box.setVisible(bool(shown) and text != self._dismissed)
 
 
 class CurateScreen(QWidget):
@@ -210,7 +304,7 @@ class CurateScreen(QWidget):
         self.sids = []
         self.current = None
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(16, 12, 16, 8)
+        lay.setContentsMargins(*PAGE_MARGINS)
         lay.addWidget(ScreenHeader(W.CURATE))
 
         self.tabs = QTabBar()
@@ -225,7 +319,9 @@ class CurateScreen(QWidget):
             row = StageRow(S.BY_ID[sid], W.options_for(sid))
             row.open_btn.setVisible(False)
             row.run_clicked.connect(lambda s: self.run_requested.emit([s]))
+            row.goto_clicked.connect(self.goto.emit)
             row.options_changed.connect(self.options_changed.emit)
+            row.set_last(True)
             row.setVisible(False)
             self.rows[sid] = row
             self.row_holder.addWidget(row)
@@ -247,6 +343,12 @@ class CurateScreen(QWidget):
         actions.addWidget(self.import_btn)
         lay.addLayout(actions)
         lay.addWidget(self.curator, 1)
+        foot = QLabel("Your work in a curator is saved into the project as you go, so "
+                      "closing the app loses nothing. Export is what hands the decisions "
+                      "to the stages that come after.")
+        foot.setWordWrap(True)
+        foot.setStyleSheet(T.HINT)
+        lay.addWidget(foot)
         self._study = None
 
         # Done: the one way on from the ROI curator. It presses the page's own
@@ -327,18 +429,22 @@ class CurateScreen(QWidget):
         latest = W.decision_file(sid, study)
         if sid in W.DECISION_FILES:
             if latest:
+                where = (os.path.relpath(latest, study.out_root)
+                         if latest.startswith(study.out_root) else latest)
+                then = " Measure can now run." if sid == "roi_curator" else ""
                 self.decision.setText(
-                    f"<span style='color:{COLOUR['done']}'>Decisions exported:</span> "
-                    f"{esc(os.path.relpath(latest, study.out_root) if latest.startswith(study.out_root) else latest)}")
+                    f"<span style='color:{COLOUR['done']}'>● Exported and handed on.</span>"
+                    f"{then} <span style='{QUIET}'>{esc(where)}</span>")
             else:
                 self.decision.setText(
-                    f"<span style='color:{COLOUR['waiting']}'>No decisions exported "
-                    "yet.</span> Work in the page below, then press its Export button.")
+                    f"<span style='color:{COLOUR['waiting']}'>● Waiting for your "
+                    "export.</span> Decide in the page, then press Export.")
         else:
             self.decision.setText(W.plain(S.BY_ID[sid], study))
         self.continue_btn.setVisible(sid == "atlas_reframe")
         self.continue_btn.setEnabled(bool(latest))
         self.import_btn.setVisible(sid == "roi_curator")
+        T.mark(self.continue_btn, kind="primary" if latest else "")
         if sid == "roi_curator":
             self.curator.set_done(
                 "Done: export and go to Measure",
@@ -394,9 +500,13 @@ class HomeScreen(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(16, 12, 16, 8)
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(*PAGE_MARGINS)
         lay.addWidget(ScreenHeader(W.HOME))
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(_scroll(page))
 
         self.project_line = QLabel("")
         self.project_line.setWordWrap(True)
@@ -405,18 +515,17 @@ class HomeScreen(QWidget):
 
         card = QFrame()
         card.setObjectName("nextUp")
-        card.setStyleSheet("#nextUp{border:2px solid #4da3ff;border-radius:8px}")
         cl = QHBoxLayout(card)
-        cl.setContentsMargins(14, 10, 14, 10)
+        cl.setContentsMargins(16, 12, 16, 12)
+        cl.setSpacing(10)
         col = QVBoxLayout()
+        col.setSpacing(4)
         head = QLabel("Next up")
-        head.setStyleSheet("color:#4da3ff;font-weight:600")
+        head.setObjectName("nextUpLabel")
         col.addWidget(head)
         self.next_text = QLabel("")
         self.next_text.setWordWrap(True)
-        f = self.next_text.font()
-        f.setPointSize(f.pointSize() + 2)
-        self.next_text.setFont(f)
+        self.next_text.setFont(T.font(16))
         col.addWidget(self.next_text)
         cl.addLayout(col, 1)
         cl.addWidget(InfoButton("Next up", "<p>The single next thing to do, worked out "
@@ -425,6 +534,8 @@ class HomeScreen(QWidget):
                                 "for your export, then Measure and Results.</p>"))
         self.next_btn = QPushButton("Go")
         self.next_btn.setMinimumWidth(90)
+        self.next_btn.setMinimumHeight(36)
+        T.mark(self.next_btn, kind="primary")
         self.next_btn.clicked.connect(lambda: self.goto.emit(self._next_target))
         cl.addWidget(self.next_btn)
         lay.addWidget(card)
@@ -432,6 +543,8 @@ class HomeScreen(QWidget):
 
         grid = QGridLayout()
         grid.setColumnStretch(2, 1)
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(8)
         self.bars, self.counts = {}, {}
         for r, sid in enumerate(self.STEP_IDS):
             scr = W.SCREENS[sid]
@@ -444,9 +557,10 @@ class HomeScreen(QWidget):
             grid.addWidget(bar, r, 2)
             count = QLabel("")
             count.setStyleSheet(QUIET)
-            count.setMinimumWidth(150)
+            count.setMinimumWidth(120)
             grid.addWidget(count, r, 3)
             btn = QPushButton("Open")
+            T.mark(btn, kind="small")
             btn.clicked.connect(lambda _=False, s=sid: self.goto.emit(s))
             grid.addWidget(btn, r, 4)
             self.bars[sid], self.counts[sid] = bar, count
@@ -498,19 +612,21 @@ class HomeScreen(QWidget):
                                         setup_missing=setup_missing)
         self._next_target = target + (":run" if target in ("prepare", "measure") else "")
         self.next_text.setText(words)
-        self.next_btn.setText("Open" if target in ("setup", "curate", "results", "home")
-                              else "Run it")
+        self.next_btn.setText("Go")
+        self.next_btn.setToolTip("Runs what is left there" if target in ("prepare", "measure")
+                                 else "Opens that step")
         self.next_btn.setEnabled(target != "home" and not busy)
 
         for sid in self.STEP_IDS:
             if sid == "setup":
                 done, total = setup_done, setup_total
             else:
-                done, total = W.progress(sid, study)
+                done, total = W.step_progress(sid, study)
             bar = self.bars[sid]
             bar.setMaximum(max(total, 1))
             bar.setValue(done)
-            self.counts[sid].setText(f"{done} of {total} done" if total else "nothing to do")
+            T.mark(bar, complete=bool(total) and done >= total)
+            self.counts[sid].setText(W.progress_words(sid, done, total))
 
         runs = list(reversed((project.block.get("runs") if project is not None else None) or []))[:6]
         if not runs:
@@ -525,8 +641,8 @@ class HomeScreen(QWidget):
                 colour = COLOUR["done"] if ok else COLOUR["failed"]
                 when = (rec.get("ended") or "")[:16].replace("T", " ")
                 took = W.duration_words(rec)
-                lines.append(f"<span style='color:{colour}'>●</span> {esc(title)} "
-                             f"<span style='{QUIET}'>{'ok' if ok else 'failed'} · {esc(when)}"
+                lines.append(f"<span style='color:{colour}'>● {'ok' if ok else 'failed'}"
+                             f"</span>&nbsp; {esc(title)} <span style='{QUIET}'>· {esc(when)}"
                              f"{' · ' + took if took else ''}</span>")
             self.recent.setText("<br>".join(lines))
 
@@ -544,7 +660,7 @@ class SetupScreen(QWidget):
         self.importer = importer
         self.forms = {}
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(16, 12, 16, 8)
+        lay.setContentsMargins(*PAGE_MARGINS)
         lay.addWidget(ScreenHeader(W.SETUP))
         self.tabs = QTabWidget()
         lay.addWidget(self.tabs, 1)
@@ -593,7 +709,8 @@ class SetupScreen(QWidget):
             head.addWidget(text, 1)
             pl.addLayout(head)
             form = SettingsForm(self.repo_root, project=project,
-                                keys=[k.path for k in keys], parent=page)
+                                keys=[k.path for k in keys], parent=page,
+                                headings=W.SECTION_HEADINGS)
             form.setEnabled(not project.read_only)
             pl.addWidget(_scroll(form), 1)
             foot = QHBoxLayout()
@@ -602,6 +719,8 @@ class SetupScreen(QWidget):
             status.setStyleSheet(QUIET)
             foot.addWidget(status, 1)
             apply_btn = QPushButton("Apply")
+            apply_btn.setMinimumWidth(96)
+            T.mark(apply_btn, kind="primary")
             apply_btn.setEnabled(not project.read_only)
             apply_btn.clicked.connect(lambda _=False, s=sid: self.apply(s))
             foot.addWidget(apply_btn)

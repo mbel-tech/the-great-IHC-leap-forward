@@ -1340,7 +1340,9 @@ canvas{display:block;width:100%;height:100%;object-fit:contain;cursor:crosshair;
       <button id="guideBtn" class="btn-guide" data-k="g" onclick="toggleGuided()">Guided</button>
       <button id="selBtn" class="btn-region" data-k="o" onclick="selOpen()"
               title="choose which regions you will draw (o)">ROIs...</button>
-      <button id="skipBtn" class="btn-guide" data-k="s" onclick="skipRoi()">Skip ROI</button></div>
+      <button id="skipBtn" class="btn-guide" data-k="s" onclick="skipRoi()">Skip ROI</button>
+      <button id="addRoiBtn" class="btn-region" data-k="n" onclick="addRoi()"
+              title="a region the plate has no outline for: name it, then draw it on the section (n)">ADD ROI</button></div>
     <div class="grp"><h3>Background discs</h3>
       <button id="bgBtn" class="btn-bg" data-k="d" onclick="toggleBgMode()">Background</button>
       <label class="disc">disc size <kbd>[</kbd> <kbd>]</kbd> &middot; <b id="roiSizeVal"></b> px
@@ -2369,7 +2371,7 @@ function drawPl(){
   // whole atlas - and a one-vertex shape strokes no pixels at all, so both are
   // drawn as what they are rather than silently skipped.
   HL.forEach(h => {
-    if(h.v.length > 2) return;
+    if(h.v.length > 2 || !h.v.length) return;   // none: an ROI the operator added
     const on = isSel(h), col = on ? selColour(h) : SEL_GREY;
     const tgt = on && isTgtRoi(h);
     x.lineCap = "round";
@@ -2403,7 +2405,7 @@ function drawPl(){
   // six times over the anatomy it is meant to label. Once, at the shape's
   // centre, says the same thing and covers five sixths less tissue.
   HL.forEach(h => {
-    if(!isSel(h)) return;                      // dimmed outlines are unnumbered
+    if(!isSel(h) || !h.v.length) return;       // dimmed outlines are unnumbered
     const N = dispLabel(h);
     const isDone = done.has(h.roi), isTgt = guided && h.roi === gTarget;
     const cx = h.v.reduce((a,v)=>a+v[0],0)/h.v.length*c.width;
@@ -2909,6 +2911,53 @@ function toggleGuided(){
 // A region that is not on this section is skipped, not outlined somewhere vague.
 function skipRoi(){ if(!guided || !active || !gTarget) return;
   draft=null; gAdvance(); drawSec(); drawPl(); status(); }
+
+// ---- ROIs the operator adds -------------------------------------------------
+//
+// A region the atlas never outlined on this plate, or one it does not have at
+// all. ADD ROI asks for its name, gives it the plate's next free ROI number, and
+// puts the cursor on it, so the next ring drawn on the section is that region.
+// It has no shape on the plate: the operator's polygon on the section is the
+// whole of it, and it exports like any other polygon, by name and number.
+//
+// Kept per plate set and plate in its own localStorage key, for the reason the
+// selection is: the section store must hold section records only.
+const CUSTOM_KEY = "ls_roi_curator_v1_custom";   // {plate_set: {plate_id: [{region, roi}]}}
+let CUSTOM = {};
+try { CUSTOM = JSON.parse(localStorage.getItem(CUSTOM_KEY) || "{}") || {}; } catch(e){}
+const customHull = c => ({region: c.region, amb: "", unk: 0, hex: "#ff7b72", part: 1,
+                          n_parts: 1, seeds: [], v: [], roi: c.roi, custom: 1});
+(function applyCustom(){
+  const mine = CUSTOM[PLATE_SET] || {};
+  PLATES.forEach(P => {
+    if(!P || !mine[P.id]) return;
+    const H = P.hulls || (P.hulls = []);
+    for(const c of mine[P.id]) if(!H.some(h => h.roi === c.roi)) H.push(customHull(c));
+  });
+})();
+function addRoi(){
+  if(!active) return;
+  const P = plateAt(st(active));
+  if(!P || !P.id){ alert("Assign this section's atlas plate first."); return; }
+  const name = (prompt("ADD ROI on " + P.id + ": name of the region you will draw") || "").trim();
+  if(!name) return;
+  const H = P.hulls || (P.hulls = []);
+  let h = H.find(x => x.region === name);
+  if(!h){
+    h = customHull({region: name, roi: H.reduce((m, x) => Math.max(m, x.roi || 0), 0) + 1});
+    H.push(h);
+    const set = CUSTOM[PLATE_SET] || (CUSTOM[PLATE_SET] = {});
+    (set[P.id] || (set[P.id] = [])).push({region: h.region, roi: h.roi});
+    try { localStorage.setItem(CUSTOM_KEY, JSON.stringify(CUSTOM)); } catch(e){}
+  }
+  // A chosen subset would hide it, and the cursor only walks what is chosen.
+  if(SEL !== null && !SEL.includes(name)){
+    SEL.push(name);
+    try { localStorage.setItem(SEL_KEY, JSON.stringify(SEL)); } catch(e){}
+  }
+  guided = true; pending = null; draft = null; gTarget = h.roi;
+  drawSec(); drawPl(); status();
+}
 
 // ---- placing a landmark: press, size it, release --------------------------
 //
@@ -4068,6 +4117,7 @@ addEventListener("keydown", e=>{
   else if(e.key==="d" || e.key==="D"){ toggleBgMode(); }
   else if(e.key==="g" || e.key==="G"){ toggleGuided(); }
   else if(e.key==="s" || e.key==="S"){ skipRoi(); }
+  else if(e.key==="n" || e.key==="N"){ addRoi(); e.preventDefault(); }
   else if(e.key==="[" || e.key==="]"){
     const step = e.key === "]" ? 1 : -1;
     const v = Math.min(60, Math.max(1, PT_R_CANON + step));

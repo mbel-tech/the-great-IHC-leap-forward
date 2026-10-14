@@ -18,6 +18,7 @@ judgement is tested without a window (`tests/test_workflow.py`).
 
 import glob
 import os
+import re
 
 import stages as S
 
@@ -926,6 +927,27 @@ def curators(study):
     """The Curate tabs this study uses, in order."""
     return [sid for sid in ("atlas_reframe", "rotation_curator", "roi_curator")
             if applies(S.BY_ID[sid], study)[0]]
+
+
+#: Stages that finish successfully with some items left undone, and the line in
+#: their output that says how many. 01l skips a scene that does not fit in free
+#: memory (or whose CZI is missing) and carries on, so its exit code alone
+#: would read as a full run.
+SHORTFALL = {
+    "scene_renders": (re.compile(r"^\s*(\d+) not drawn:", re.M), "scene", "not drawn"),
+}
+
+
+def shortfall(sid, output):
+    """'3 scenes not drawn' when a finished stage left some undone, else None."""
+    rule = SHORTFALL.get(sid)
+    if not rule or not output:
+        return None
+    m = rule[0].search(output)
+    if not m:
+        return None
+    n = int(m.group(1))
+    return "%d %s%s %s" % (n, rule[1], "" if n == 1 else "s", rule[2])
 
 
 def next_up(study, setup_ok=True, setup_missing=()):

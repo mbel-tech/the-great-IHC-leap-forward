@@ -132,6 +132,22 @@ chk("a new setting lands in Other settings",
 chk("a card whose settings are not in ls_config yet is hidden",
     [c[0] for c in W.setting_sections([_K("study.name")])], ["folders"])
 
+print("--- limits the stages enforce are enforced in Set up ---")
+_sr = next(k for k in LC.SPEC if k.path == "scene_render.um_per_px")
+chk("0.65 um/px scene pictures are allowed", LC._check(_sr, 0.65), None)
+chk("finer than the scan's own pixels is refused",
+    "at least 0.65" in (LC._check(_sr, 0.3) or ""), True)
+_cr = next(k for k in LC.SPEC if k.path == "curation_render.um_per_px")
+chk("curation pictures finer than 04o draws are refused",
+    "at least 1.3" in (LC._check(_cr, 0.65) or ""), True)
+
+print("--- a run that leaves some items undone says so ---")
+_out = "wrote 40 scenes at 0.65 um/px\n  3 not drawn:\n    LS53_2b_s1  needs about 9.1 GB\n"
+chk("skipped scenes are counted", W.shortfall("scene_renders", _out), "3 scenes not drawn")
+chk("one skipped scene", W.shortfall("scene_renders", "  1 not drawn:\n"), "1 scene not drawn")
+chk("a full run has no shortfall", W.shortfall("scene_renders", "wrote 40 scenes\n"), None)
+chk("other stages are not read for it", W.shortfall("manifest", _out), None)
+
 print("--- names and words for this study ---")
 s0 = study()
 chk("titles lose their script number", W.display_title(S.BY_ID["manifest"]), "Read slide headers")
@@ -240,6 +256,18 @@ if MW:
     chk("running the unblinding stage asks first, and Cancel stops it",
         (started, "Unblind the analysis?" in asked), (False, True))
     chk("nothing is left queued", (w._queue, w._thread), ([], None))
+    import runner as RN
+    from PySide6.QtCore import QCoreApplication
+    import time as _t
+    w.runner.run = lambda stage, on_line=None, extra_argv=(): RN.StageResult(
+        stage.sid, True, 0.1, "wrote 9 scenes\n  2 not drawn:\n    s1  needs about 9 GB\n")
+    w.run_stages(["scene_renders"])
+    _end = _t.time() + 10
+    while (w._thread is not None or w._queue) and _t.time() < _end:
+        QCoreApplication.processEvents()
+        _t.sleep(0.02)
+    chk("a finished run that skipped scenes says so in the drawer",
+        "2 scenes not drawn" in w.drawer.state.text(), True)
     w.server.stop()
 
 print()

@@ -163,6 +163,8 @@ def key_info(key):
         parts.append(f"<p style='color:#8b949e'>Default: {_esc(shown)}</p>")
     elif key.required:
         parts.append("<p style='color:#8b949e'>Required: there is no default.</p>")
+    if getattr(key, "minimum", None) is not None:
+        parts.append("<p style='color:#8b949e'>Smallest allowed: %s</p>" % _esc(key.minimum))
     if key.consumers:
         parts.append("<p style='color:#8b949e'>Read by: %s</p>" % _esc(", ".join(key.consumers)))
     parts.append(f"<p style='color:#8b949e'>Stored as <code>{_esc(key.path)}</code></p>")

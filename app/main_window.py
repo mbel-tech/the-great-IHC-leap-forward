@@ -121,6 +121,7 @@ class MainWindow(QMainWindow):
         self._running = {}          # stage id -> running / queued / failed, this session
         self._queue = []
         self._queue_total = 0
+        self._shortfalls = []
         self._stop_requested = False
 
         self.resize(1400, 900)
@@ -556,6 +557,7 @@ class MainWindow(QMainWindow):
         if line:
             self._log(f"curation: {line}")
         self._queue = [st.sid for st in stages]
+        self._shortfalls = []
         self._queue_total = len(self._queue)
         self._stop_requested = False
         for sid in self._queue:
@@ -623,12 +625,20 @@ class MainWindow(QMainWindow):
         if res.ok:
             self._running.pop(st.sid, None)
             self._log(f"--- {st.title}: done in {res.seconds:.1f}s")
+            short = W.shortfall(st.sid, res.output)
+            if short:
+                self._log(f"--- {st.title}: {short}; the reasons are listed above")
+                self._shortfalls.append(f"{W.display_title(st)}: {short}")
             if st.curator and self.curate.current == st.sid:
                 self.curator.show_page(st.curator, W.display_title(st, self.study()))
             self._run_next()
             if self._thread is None and not self._queue:
-                self.drawer.state.setText(
-                    f"Finished {self._queue_total} stage{'s' if self._queue_total != 1 else ''}")
+                done = f"Finished {self._queue_total} stage{'s' if self._queue_total != 1 else ''}"
+                if self._shortfalls:
+                    # Done, but not everything was made: say so where the eye is.
+                    done += " (" + "; ".join(self._shortfalls) + ", see log)"
+                    self.drawer.state.setStyleSheet(f"color:{COLOUR['waiting']}")
+                self.drawer.state.setText(done)
             return
         self._running[st.sid] = "failed"
         for sid in self._queue:

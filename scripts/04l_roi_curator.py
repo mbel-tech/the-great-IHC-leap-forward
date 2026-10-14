@@ -847,10 +847,14 @@ PAGE = """<!doctype html>
       --ok:#3fb950;--warn:#d29922;--done:#7c5cff}
 *{box-sizing:border-box}
 /* The whole tool is one screen. body is a flex column, the panes take what is
-   left, and only the side card and the strip scroll - inside themselves. */
+   left, and only the side card and the strip scroll - inside themselves.
+   Until the window is too short for that: inside the app on a laptop the page
+   gets about 320 px, the header alone is more, and with the body clipped the
+   canvases shrank to nothing and the last row of buttons was cut off. So the
+   panes keep a working height and the page scrolls instead of clipping. */
 html,body{height:100%}
 body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 system-ui,sans-serif;
-     display:flex;flex-direction:column;overflow:hidden}
+     display:flex;flex-direction:column;overflow-x:hidden;overflow-y:auto}
 header{flex:0 0 auto;background:var(--bg);border-bottom:1px solid var(--line);
        padding:7px 14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 h1{font-size:15px;margin:0;font-weight:600}.grow{flex:1}
@@ -859,7 +863,7 @@ button,select{background:#1c2027;color:var(--fg);border:1px solid var(--line);bo
        padding:6px 10px;cursor:pointer;font:inherit}
 button:hover{border-color:var(--accent)}
 button.primary{background:var(--accent);border-color:var(--accent);color:#04121f;font-weight:600}
-#panes{flex:1 1 auto;min-height:0;display:grid;grid-template-columns:1fr 1fr 250px;
+#panes{flex:1 1 auto;min-height:360px;display:grid;grid-template-columns:1fr 1fr 250px;
        grid-template-rows:minmax(0,1fr);gap:10px;padding:10px}
 .pane{position:relative;background:#0e1014;border:1px solid var(--line);border-radius:9px;
       overflow:hidden;min-width:0;min-height:0}

@@ -132,9 +132,20 @@ class CuratorView(QWidget):
         reload_btn.clicked.connect(self.view.reload)
         browser_btn = QPushButton("Open in browser", self)
         browser_btn.clicked.connect(self._open_external)
+        # The page is one screen of controls above two canvases. Inside the app
+        # window on a laptop it gets about 840 x 320 px, which its header alone
+        # fills, so the canvases vanish and the last row of buttons is cut off.
+        # Its own maximised window gives it the whole screen.
+        self.window_btn = QPushButton("Own window", self)
+        self.window_btn.setCheckable(True)
+        self.window_btn.setToolTip("Open the curator in its own full-size window; "
+                                   "close that window to put it back here")
+        self.window_btn.toggled.connect(self._own_window)
+        self._home = None
 
         bar = QHBoxLayout()
         bar.addWidget(self.title, 1)
+        bar.addWidget(self.window_btn)
         bar.addWidget(reload_btn)
         bar.addWidget(browser_btn)
 
@@ -146,6 +157,42 @@ class CuratorView(QWidget):
         prof = self.view.page().profile()
         prof.downloadRequested.connect(self._on_download)
         self._install_state_bridge()
+
+    # ---- own window -------------------------------------------------------
+
+    def _own_window(self, on):
+        """Move this view into a maximised window of its own, or back home.
+
+        The same widget moves, not a copy, so the page, its unsaved state and
+        the bridge that saves it all stay as they are.
+        """
+        if on and self._home is None:
+            parent = self.parentWidget()
+            layout = parent.layout() if parent is not None else None
+            if layout is None:
+                self.window_btn.setChecked(False)
+                return
+            self._home = (layout, layout.indexOf(self))
+            layout.removeWidget(self)
+            self.setParent(None)
+            self.setWindowTitle(self.title.text() or "Curator")
+            self.window_btn.setText("Back to the app")
+            self.showMaximized()
+        elif not on and self._home is not None:
+            layout, index = self._home
+            self._home = None
+            self.hide()
+            layout.insertWidget(index, self, 1)
+            self.window_btn.setText("Own window")
+            self.show()
+
+    def closeEvent(self, e):
+        # Closing the separate window puts the curator back rather than losing it.
+        if self._home is not None:
+            e.ignore()
+            self.window_btn.setChecked(False)
+            return
+        super().closeEvent(e)
 
     # ---- curation state ---------------------------------------------------
 

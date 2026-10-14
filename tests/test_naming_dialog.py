@@ -113,8 +113,12 @@ print()
 print("--- the settings dialog, generated from the spec ---")
 
 cfg = ConfigDialog(REPO, path=STUDY.path)
+# Every key the spec marks editable gets a row. The dialog may add rows of its
+# own beside them (the per-marker segmentation route sits by the channel
+# editor), so this checks coverage rather than an exact count.
 chk("it offers every key the spec marks editable",
-    len(cfg.rows), len(__import__("ls_config").dialog_fields()))
+    sorted(k.path for k in __import__("ls_config").dialog_fields()
+           if k.path not in cfg.rows), [])
 chk("the pattern gets the builder row", hasattr(cfg, "pattern_row"), True)
 chk("which can reach the slides folder it previews against",
     cfg.pattern_row.source_getter(), STUDY.source_dir)

@@ -335,8 +335,7 @@ places.
 run_app.bat
 ```
 
-`run_app.bat` prefers `work/appenv`, the same Python 3.13 venv `build_app.bat` freezes the exe
-from. Running `python -m app` against an interpreter without PySide6 now says which interpreter
+`run_app.bat` prefers `work/appenv`, the Python 3.13 venv `build_app.bat` sets up. Running `python -m app` against an interpreter without PySide6 now says which interpreter
 it is and how to fix it, rather than writing a bare traceback to `lsapp-crash.log`.
 
 One window, laid out in the order you work. A step bar down the left holds six
@@ -491,36 +490,28 @@ them. `pylibCZIrw` publishes no cp314 wheel, so the overview stage needs Python
 **3.13 or earlier**. Running from source on 3.14 works for everything except that
 stage.
 
-### Building the .exe
+### Setting up to run from source
 
 ```bash
 build_app.bat
 ```
 
-It creates a Python 3.13 venv under `work/appenv` on first run and reuses it
-afterwards. **3.13, not 3.14**: `pylibCZIrw` publishes no cp314 wheel, and since
-the app runs its stages in-process, the interpreter that freezes the app is the
-one that has to be able to read CZIs.
+Creates `work/appenv`, the Python 3.13 venv `run_app.bat` uses, on first run, with
+StarDist so Measure works too. **3.13, not 3.14**: `pylibCZIrw` publishes no cp314
+wheel. It no longer builds an .exe: the app is distributed as the Windows installer
+(see [Download](#download) and [packaging/windows/README.md](packaging/windows/README.md)).
 
-`config.json` is read from **beside the executable**, not from inside the bundle,
-so it stays visible and editable. On first run, with no config there, the setup
-dialog asks for the three paths and writes it.
-
-One-folder, roughly 500 MB. Not one-file: QtWebEngine runs a helper process that
-must find its resources on disk, and a one-file build leaves the curator panes
-blank.
-
-### Checking a build
+### Checking an install
 
 ```bash
-"LS pipeline.exe" --self-test
+runtime\python.exe -m app --self-test
 ```
 
-Opens the window, starts the local server and loads a curator, then reports
-PASS/FAIL per check and exits. Results go to `lsapp-selftest.log` beside the
-executable as well as to stdout, because a windowed build has no console. This
-is how to confirm a copy works on a machine you are not sitting at — a window
-appearing proves nothing about whether QtWebEngine actually renders.
+Run in the install folder. Opens the window, starts the local server and loads a
+curator, then reports PASS/FAIL per check and exits. Results go to
+`lsapp-selftest.log` beside the app as well as to stdout. A window appearing proves
+nothing about whether QtWebEngine actually renders; this does. The installer build
+runs it on every release.
 
 ---
 

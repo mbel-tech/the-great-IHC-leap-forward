@@ -42,7 +42,7 @@ dividing it by a gain that runs 0.81-1.10 across the tile would print the tile
 pattern onto every clipped area (the hard rectangles first seen in the AF568
 rim on LS105). Clipped pixels stay at the top of the range instead.
 
-Grey areas of a scene's rectangle that hold no tiles at all read as 0 and are
+Parts of a scene's rectangle that hold no tiles at all read as 0 and are
 drawn black: there is nothing there to show.
 
 Brightness: `--range dataset` (the default) uses 01's frozen display range,

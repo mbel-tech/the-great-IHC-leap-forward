@@ -2,7 +2,8 @@
 #
 #   pull request touching packaging/   build + checks, installer kept as an artifact
 #   Actions tab > Run workflow         same, on demand
-#   push a tag v1.2.3                  same, then a GitHub Release with the installer
+#   push a tag v1.2.3, or publish a    same, then the installer is attached to that
+#   drafted release                    tag's release (created if there is none)
 name: Windows package
 
 on:
@@ -14,6 +15,10 @@ on:
   workflow_dispatch:
   push:
     tags: ["v*"]
+  # Publishing a drafted release creates its tag; this covers that path even
+  # where the tag push does not fire. Two runs for one tag cancel down to one.
+  release:
+    types: [published]
 
 permissions:
   contents: write

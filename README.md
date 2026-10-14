@@ -174,6 +174,10 @@ Existing composites are kept until it runs with `--force`:
 work/czienv/Scripts/python.exe scripts/04o_section_rgb.py --marker AF568 --all --force
 ```
 
+**Zoom in the ROI curator** to see that detail: the mouse wheel zooms about the cursor, the middle or
+right button drags to pan, `+` / `-` zoom about the centre and `0` fits the section again. The zoom is
+only a view; it changes nothing that is stored or exported.
+
 `--source overview` (or `curation_render.source: "overview"`) is the old route. What no
 software step can undo is the scan's own JPEG-XR tile compression, fixed at acquisition.
 

@@ -32,8 +32,18 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 from _fixture import use_temp_study, load_stage  # noqa: E402
 
+import atexit  # noqa: E402
+import shutil  # noqa: E402
+import tempfile  # noqa: E402
+
+# The pictures go to a folder chosen in the study's settings, outside out_root,
+# as an operator choosing "whichever folder" would.
+PICS = tempfile.mkdtemp(prefix="scene_pics_")
+atexit.register(shutil.rmtree, PICS, True)
 STUDY = use_temp_study(acquisition={"layout": "paired",
-                                    "markers": ["AF568", "AF488"]})
+                                    "markers": ["AF568", "AF488"]},
+                       scene_render={"out_dir": PICS, "um_per_px": 2.6,
+                                     "range": "dataset"})
 
 fails = 0
 
@@ -122,12 +132,15 @@ def run(*argv):
     L.main()
 
 
-def pic(folder, uid):
-    return os.path.join(L.OUT_DIR, "AF568", folder, uid + ".png")
+def pic(folder, uid, root=PICS):
+    return os.path.join(root, "AF568", folder, uid + ".png")
 
 
 print("--- the pictures, at 2.6 um/px ---")
 run()
+chk("the folder is the study's scene_render.out_dir", L.OUT_DIR == PICS, L.OUT_DIR)
+chk("...and the index stays under out_root",
+    L.INDEX_CSV == os.path.join(STUDY.out_root, "qc", "scene_renders.csv"))
 chk("the counterstain folder is named after it", L.nuclear_name() == "DAPI")
 for s, uid in enumerate(UIDS):
     p_rgb, p_only = pic("stain+DAPI", uid), pic("stain_only", uid)
@@ -178,7 +191,9 @@ print("--- kept, forced, and the finer settings ---")
 READS.clear()
 run()
 chk("a second run reads nothing", READS == [], len(READS))
-run("--um-px", "1.3", "--range", "section", "--force")
+READS.clear()
+run("--um-px", "1.3", "--range", "section")
+chk("a new resolution redraws without --force", len(READS) > 0, len(READS))
 only13 = np.asarray(Image.open(pic("stain_only", UIDS[1])))
 chk("--um-px 1.3 draws 2x2 blocks", only13.shape == (H // 2, W // 2), only13.shape)
 chk("--range section fills the range on its own scene",
@@ -188,6 +203,9 @@ chk("...and the index says so", rows[UIDS[1]]["range"] == "section"
     and rows[UIDS[1]]["um_per_px"] == "1.30")
 chk("rounding to whole native pixels", (L.block_for(2.6), L.block_for(1.3), L.block_for(2.0))
     == (4, 2, 3))
+OTHER = os.path.join(STUDY.root, "elsewhere")
+run("--out-dir", OTHER, "--limit", "1")
+chk("--out-dir sends one run elsewhere", os.path.exists(pic("stain_only", UIDS[0], OTHER)))
 try:
     run("--um-px", "0.65")
     chk("finer than 1.3 is refused", False)

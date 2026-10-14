@@ -7,7 +7,8 @@ enough to see nuclei. This is that, and nothing reads it - it exists to be
 browsed in a file viewer.
 
 For each scene of each CZI in the manifest it writes, under
-`scene_renders/<marker>/`:
+the scene pictures folder (`scene_render.out_dir`, by default
+`<out_root>/scene_renders`), under `<marker>/`:
 
   stain+<counterstain>/<scene_uid>.png   the marker in its colour over the
                                          counterstain in its own - the same
@@ -18,7 +19,7 @@ For each scene of each CZI in the manifest it writes, under
                                          red or green alone uses a third of it,
                                          so faint signal stays readable
 
-and one row per scene in `scene_renders/scene_renders.csv` saying which
+and one row per scene in `qc/scene_renders.csv` saying which
 picture is which and how it was drawn.
 
 How the pixels are made
@@ -68,7 +69,8 @@ from PIL import Image
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
-from ls_config import CONFIG  # noqa: E402
+from ls_config import CONFIG, CONFIG_PATH  # noqa: E402,F401
+import ls_config as LC  # noqa: E402
 import ls_channels as CH  # noqa: E402
 import ls_io as IO  # noqa: E402
 import czi_read as CR  # noqa: E402
@@ -82,10 +84,16 @@ MANIFEST_CSV = os.path.join(OUT_ROOT, "manifest", "manifest_scenes.csv")
 QC_DIR = os.path.join(OUT_ROOT, "qc")
 RANGES_PATH = os.path.join(QC_DIR, "display_ranges.json")
 FIELD_DIR = os.path.join(QC_DIR, "flatfield")
-OUT_DIR = os.path.join(OUT_ROOT, "scene_renders")
-INDEX_CSV = os.path.join(OUT_DIR, "scene_renders.csv")
+# The folder, resolution and brightness are study settings (`scene_render.*`),
+# so the app's Set up screen and a command-line run agree; the flags below
+# override them for one run. The index stays under out_root whichever folder
+# the pictures go to, so the app can tell the step has run.
+_SR = CONFIG.get("scene_render") or {}
+OUT_DIR = LC.scene_render_dir(CONFIG)
+INDEX_CSV = os.path.join(QC_DIR, "scene_renders.csv")
 
-DEFAULT_UM_PX = 2.6
+DEFAULT_UM_PX = float(_SR.get("um_per_px", 2.6))
+DEFAULT_RANGE = _SR.get("range", "dataset")
 #: The finest picture made. Native 0.65 um/px is a picture 4x the area of 1.3,
 #: and on the operator's laptop it ran out of memory - in the PNG encoder and
 #: in whatever opens it, not just here.
@@ -220,6 +228,24 @@ def load_index():
         return {r["scene_uid"]: r for r in csv.DictReader(fh)}
 
 
+def same_drawing(row, um_px, range_mode, only_path):
+    """True when the index says the picture on disk was drawn as asked now.
+
+    Changing the resolution or brightness in Set up has to redraw the pictures
+    on the next run without anyone remembering --force; a picture with no row
+    (drawn before the index existed, or by hand) is kept, as 01 keeps its own.
+    """
+    if row is None:
+        return True
+    try:
+        same_px = abs(float(row.get("um_per_px") or 0) - um_px) < 0.005
+    except ValueError:
+        same_px = False
+    return (same_px and row.get("range") == range_mode
+            and os.path.normcase(os.path.abspath(row.get("stain_only") or ""))
+            == os.path.normcase(os.path.abspath(only_path)))
+
+
 def save_png(img, path):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with IO.atomic_save(path) as tmp:
@@ -260,12 +286,17 @@ def render_scene(read_nuc, read_mark, rect, b, fields_nm, ranges, range_mode,
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--um-px", type=float, default=DEFAULT_UM_PX, metavar="UM",
-                    help=f"picture resolution in um per pixel (default {DEFAULT_UM_PX}; "
+                    help=f"picture resolution in um per pixel (default from config "
+                         f"scene_render.um_per_px: {DEFAULT_UM_PX}; "
                          f"finest {MIN_UM_PX}). Rounded to whole native "
                          f"{NATIVE_UM} um pixels")
-    ap.add_argument("--range", choices=["dataset", "section"], default="dataset",
-                    help="dataset: 01's frozen brightness range, so pictures compare "
-                         "(default). section: each scene stretched to its own tissue")
+    ap.add_argument("--range", choices=["dataset", "section"], default=DEFAULT_RANGE,
+                    help="dataset: 01's frozen brightness range, so pictures compare. "
+                         "section: each scene stretched to its own tissue "
+                         f"(default from config scene_render.range: {DEFAULT_RANGE})")
+    ap.add_argument("--out-dir", default=None, metavar="DIR",
+                    help="where the pictures go (default from config "
+                         f"scene_render.out_dir: {OUT_DIR})")
     ap.add_argument("--marker", choices=MARKERS or None, default=None,
                     help="only the scans of this marker (default: every marker)")
     ap.add_argument("--force", action="store_true",
@@ -280,6 +311,7 @@ def main():
             f"{MIN_UM_PX} um/px. A whole scene at the native {NATIVE_UM} is four "
             f"times the pixels again - more than the laptop holds - and nothing "
             f"is measured from these pictures anyway.")
+    out_dir = args.out_dir or OUT_DIR
     b = block_for(args.um_px)
     um_px = b * NATIVE_UM
     if abs(um_px - args.um_px) > 1e-6:
@@ -328,14 +360,15 @@ def main():
             f = load_fields((n_idx, m_idx))
             fields_cache[(n_idx, m_idx)] = (f.get(n_idx), f.get(m_idx))
         fields_nm = fields_cache[(n_idx, m_idx)]
-        mdir = os.path.join(OUT_DIR, marker)
+        mdir = os.path.join(out_dir, marker)
 
         todo = []
         for r in rows:
             uid = r["scene_uid"]
             both = [os.path.join(mdir, nuc_dir, uid + ".png"),
                     os.path.join(mdir, ONLY_DIR, uid + ".png")]
-            if not args.force and all(os.path.exists(p) for p in both):
+            if (not args.force and all(os.path.exists(p) for p in both)
+                    and same_drawing(index.get(uid), um_px, range_mode, both[1])):
                 existing += 1
                 continue
             todo.append(r)
@@ -380,8 +413,8 @@ def main():
                         "section_order": r.get("section_order", ""),
                         "um_per_px": "%.2f" % um_px, "block": b, "range": range_mode,
                         "tilefield_applied": int(fields_nm[1] is not None),
-                        "stain_counterstain": os.path.relpath(p_rgb, OUT_ROOT),
-                        "stain_only": os.path.relpath(p_only, OUT_ROOT),
+                        "stain_counterstain": os.path.abspath(p_rgb),
+                        "stain_only": os.path.abspath(p_only),
                         "reader": "pylibCZIrw", **facts}
                     drawn.add(uid)
                     made += 1
@@ -401,7 +434,7 @@ def main():
             break
 
     print()
-    print(f"wrote {made} scenes at {um_px:.2f} um/px ({range_mode} range) to {OUT_DIR}")
+    print(f"wrote {made} scenes at {um_px:.2f} um/px ({range_mode} range) to {out_dir}")
     if existing:
         print(f"  {existing} already there, left alone (--force redraws them)")
     if failed:

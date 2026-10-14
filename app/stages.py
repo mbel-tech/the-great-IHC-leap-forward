@@ -341,13 +341,14 @@ STAGES = [
 
     Stage("scene_renders", "01l  Pictures of every scene, for viewing", "Ingest and QC",
           script="01l_scene_renders.py", reader="pylibCZIrw",
-          outputs=["scene_renders/scene_renders.csv"],
+          outputs=["qc/scene_renders.csv"],
           needs=["manifest"],
-          blurb="Every scene of every slide drawn from the CZI at 2.6 um/px "
-                "(1.3 at the finest), read in bands so memory stays small. Two "
-                "folders per marker: the stain over the counterstain, and the "
-                "stain alone in grey. For looking at only; nothing downstream "
-                "reads them."),
+          blurb="Every scene of every slide drawn from the CZI, read in bands "
+                "so memory stays small. Two folders per marker: the stain over "
+                "the counterstain, and the stain alone in grey. The folder, "
+                "resolution (2.6 um/px by default, 1.3 at the finest) and "
+                "brightness are study settings (scene_render). For looking at "
+                "only; nothing downstream reads them."),
 
     Stage("pair", "02  Pair the two marker passes", "Ingest and QC",
           script="02_pair_passes.py",

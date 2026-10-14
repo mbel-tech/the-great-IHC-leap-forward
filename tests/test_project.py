@@ -306,7 +306,8 @@ for bad in ({"source_dir": "/abs/slides"}, {"source_dir": "../up"}, {"source_dir
         any("portable" in e for e in LC.validate(dict(read(mp if os.path.exists(mp) else os.path.join(Bdir + "_again", "study.json")), project={"portable": bad}), "x")[0]), True)
 legacy = P.Project.open(write_study(os.path.join(TMP, "mv_legacy")))
 chk("a legacy file with no record opens untouched", (legacy.reanchored, legacy.dirty), ([], False))
-chk("the keys come from the spec", P.path_keys(), ["source_dir", "out_root", "atlas_pdf", "export_dir"])
+chk("the keys come from the spec", P.path_keys(),
+    ["source_dir", "out_root", "atlas_pdf", "export_dir", "scene_render.out_dir"])
 
 print("--- curation inside the project file ---")
 cpath, cdir = fresh("cur")

@@ -95,6 +95,14 @@ $req = Join-Path $Cache "requirements-app.txt"
 Get-Content "$Repo\requirements.txt" | Where-Object { $_ -notmatch '^\s*pyinstaller' } | Set-Content $req
 Invoke-Checked $Py @("-m", "pip", "install", "--no-warn-script-location", "--prefer-binary",
     "-r", $req, "-r", "$Repo\requirements-czi.txt", "-r", "$PSScriptRoot\requirements-bundle.txt")
+# Nothing at run time uses these, and they are what makes the bundle large and
+# its paths long: TensorFlow's C++ headers (270 MB, and paths of 160+
+# characters, which broke the installer build at Windows' 260-character limit)
+# and two build tools pip pulls in as dependencies (cmake for itk, libclang for
+# TensorFlow's code generation). smoke_test.py and --self-test run after this.
+Remove-Item -Recurse -Force (Join-Path $Runtime "Lib\site-packages\tensorflow\include")
+Invoke-Checked $Py @("-m", "pip", "uninstall", "-y", "-q", "cmake", "libclang")
+
 & $Py -m pip freeze | Set-Content (Join-Path $Out "BUNDLE_VERSIONS.txt")
 Add-Content (Join-Path $Out "BUNDLE_VERSIONS.txt") "python==$PythonVersion"
 

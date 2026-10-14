@@ -54,7 +54,7 @@ class Screen:
 # name a stage from a pull request that has not merged yet.
 #: Ids named below that the stage table on main does not define (yet). Listed
 #: so a typo in a screen part is still caught by the tests.
-OTHER_TABLE = {"scene_renders"}
+OTHER_TABLE = set()
 
 
 HOME = Screen(

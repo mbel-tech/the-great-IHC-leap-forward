@@ -137,6 +137,27 @@ def abercrombie_reason(segmented_on, nucleus_shaped, enabled=True):
             f"does not hold for them, so counts here are raw")
 
 
+def denominator_reason(own, segmented_on):
+    """Why a marker's fraction and total cell density are withheld, or "".
+
+    Blank means a denominator exists: the objects are nuclei found on the
+    counterstain, and `n_nuclei` is a count of all cells that was never decided
+    by the marker. NOT blank means the objects were found on the marker's own
+    channel, so `n_nuclei` is "objects the marker lit up" - the numerator's own
+    population - and a fraction of it, or a "cell density" built from it, would
+    be a number that reads as a statement about cells and is not one.
+
+    The positive count and the positive density are NOT withheld: those are
+    what such a marker can honestly say. A string rather than a boolean for the
+    reason denominator_reason's sibling gives - the output has to say why.
+    """
+    if not own:
+        return ""
+    return (f"objects segmented on {segmented_on} itself; with no nuclear "
+            f"counterstain there is no count of all cells, so the fraction "
+            f"positive and the total cell density are withheld")
+
+
 def abercrombie_factor(h, apply=True):
     """T/(T+h), or 1.0 when the correction does not apply.
 
@@ -289,6 +310,15 @@ def main(argv=None):
         # nuclear - see reads_nucleus_shaped.
         r["_shaped"] = reads_nucleus_shaped(r.get("nucleus_shaped"))
         r["_segon"] = r.get("segmented_on") or "the nuclear channel"
+        # NUCLEI found on the marker's own channel (PCNA with no usable DAPI).
+        # Read off the row, like the shape: a nuclear-route row says "nuclear"
+        # (or the counterstain's name), never the marker's, and an old file
+        # with no column is False. Nucleus-shaped only: a fibre or plaque
+        # marker is also segmented on itself, but its objects are regions, not
+        # a cell population, and what 06a does for those - raw counts, with
+        # the Abercrombie reason saying so - is older than this and unchanged.
+        r["_own"] = (bool(r.get("segmented_on"))
+                     and r["segmented_on"] == r["marker"] and r["_shaped"])
 
     # Artifact pixels are not tissue and leave the analysis entirely. Censored
     # ones are RIGHT-censored - value lost, but at least the ceiling - so they
@@ -327,6 +357,7 @@ def main(argv=None):
     # one config cannot produce both for one marker, and if a file somehow
     # carries both the correction is the thing to withhold, not to apply.
     shape_by = {}
+    own_by = {}                                # marker -> segmented on itself
     uids, d_all = set(), []
     for r in nuc:
         uid = r["scene_uid"]
@@ -341,10 +372,11 @@ def main(argv=None):
         seen = shape_by.get(r["marker"])
         if seen is None or (seen[1] and not r["_shaped"]):
             shape_by[r["marker"]] = (r["_segon"], r["_shaped"])
+        own_by[r["marker"]] = own_by.get(r["marker"], False) or r["_own"]
         if r["roi_kind"] == "background":
             if not r["_cen"]:
                 bg_by[uid].append(r["_v"])
-        else:
+        elif not r["_own"]:
             diam_by[(r["marker"], r["region"])].append(r["_d"])
 
     # ---- the per-section cut, from that section's own background discs
@@ -357,6 +389,18 @@ def main(argv=None):
         bgstat[uid] = (m, s, len(bg))
 
     # ---- h for Abercrombie, measured per region and marker
+    #
+    # For a marker segmented on its OWN channel the objects are not "all the
+    # nuclei": StarDist on a marker also outlines dim, unspecific blobs, and
+    # Abercrombie's h is the size of the thing being COUNTED. So h comes from
+    # the objects that are counted as positive - above their section's cut, or
+    # censored - in real ROIs. A section with no cut contributes nothing: its
+    # objects are not counted either.
+    for r in nuc:
+        if (r["_own"] and r["roi_kind"] != "background"
+                and r["scene_uid"] in cuts
+                and (r["_cen"] or r["_v"] > cuts[r["scene_uid"]])):
+            diam_by[(r["marker"], r["region"])].append(r["_d"])
     hs = {k: st.mean(v) for k, v in diam_by.items() if v}
 
     # THE FALLBACK IS PER MARKER TOO, and it is not an edge case: background
@@ -368,6 +412,16 @@ def main(argv=None):
     h_by_marker = {}
     for mk in {r["marker"] for r in nuc}:
         d = [r["_d"] for r in nuc if r["marker"] == mk]
+        if own_by.get(mk):
+            # The same population as the per-region h above; every object of
+            # the marker only if none was positive, so a marker with no
+            # positives still gets a factor rather than none.
+            pos = [r["_d"] for r in nuc
+                   if r["marker"] == mk and r["_own"]
+                   and r["roi_kind"] != "background"
+                   and r["scene_uid"] in cuts
+                   and (r["_cen"] or r["_v"] > cuts[r["scene_uid"]])]
+            d = pos or d
         if d:
             h_by_marker[mk] = st.mean(d)
     h_all = st.mean(d_all) if d_all else 0.0
@@ -414,6 +468,14 @@ def main(argv=None):
                                    if not r["_shaped"]), "")
                 why = abercrombie_reason(seg_on, shaped, enabled=AB_ON)
                 ab = abercrombie_factor(h, apply=not why)
+                # Whether this disc's objects were found on the marker itself:
+                # its own nuclei answer first, the marker's other rows if it
+                # has none - the same two-step the shape uses above.
+                own = (any(r["_own"] for r in here) if here
+                       else own_by.get(b["marker"], False))
+                no_denom = denominator_reason(
+                    own, next((r["_segon"] for r in here if r["_own"]),
+                              b["marker"]))
                 row = {
                     "scene_uid": uid, "animal": b["animal"], "marker": b["marker"],
                     "roi_kind": b["roi_kind"], "region": b["region"],
@@ -423,8 +485,9 @@ def main(argv=None):
                     "roi_area_mm2": round(area / 1e6, 6),
                     "n_nuclei": n_nuc,
                     "n_positive": n_pos,
-                    "frac_positive": (round(n_pos / n_nuc, 4) if (cut is not None and n_nuc)
-                                      else ""),
+                    "frac_positive": (round(n_pos / n_nuc, 4)
+                                      if (cut is not None and n_nuc
+                                          and not no_denom) else ""),
                     "profile_density_per_mm2": round(n_nuc / (area / 1e6), 1) if area else "",
                     "abercrombie_factor": round(ab, 4),
                     # EVERY row carries this key, blank included. There is no
@@ -435,7 +498,11 @@ def main(argv=None):
                     "abercrombie_withheld_reason": why,
                     "mean_nucleus_diam_um": round(h, 2) if h else "",
                     "cell_density_per_mm2": (round(n_nuc * ab / (area / 1e6), 1)
-                                             if area else ""),
+                                             if (area and not no_denom) else ""),
+                    # Blank where a denominator exists. EVERY row carries the
+                    # key, as abercrombie_withheld_reason does, because the
+                    # header is the first emitted row's keys.
+                    "denominator_withheld_reason": no_denom,
                     "positive_density_per_mm2": (round(n_pos * ab / (area / 1e6), 1)
                                                  if (cut is not None and area) else ""),
                     "marker_median_of_roi": (round(st.median([r["_v"] for r in usable]), 1)
@@ -464,7 +531,21 @@ def main(argv=None):
                 "bg_area_mm2": round(tot_a, 6),
                 "bg_nuclei_per_mm2": round(tot_n / tot_a, 1) if tot_a else "",
                 "bg_false_positives": tot_p,
-                "false_positive_rate": round(tot_p / tot_n, 4) if tot_n else "",
+                # The rate's denominator is every object the detector chose to
+                # find in empty tissue. For a counterstain that is "nuclei",
+                # whatever their brightness; for a marker segmented on itself
+                # it is "blobs StarDist outlined on noise", which depends on
+                # how sensitive StarDist happens to be and not on the antibody.
+                # So the rate is withheld there, and the per-area count of
+                # false positives - which has no such denominator - stands in.
+                "false_positive_rate": (round(tot_p / tot_n, 4)
+                                        if (tot_n and not bgrows[0][
+                                            "denominator_withheld_reason"])
+                                        else ""),
+                "bg_false_positives_per_mm2": (round(tot_p / tot_a, 1)
+                                               if tot_a else ""),
+                "denominator_withheld_reason": bgrows[0][
+                    "denominator_withheld_reason"],
                 "bg_level": round(bgstat[uid][0], 1),
                 "bg_spread": round(bgstat[uid][1], 1),
                 "positivity_cut": round(cut, 1),
@@ -524,6 +605,14 @@ def main(argv=None):
                       f"{T_UM/(T_UM+hi):.3f}-{T_UM/(T_UM+lo):.3f}")
         fp = [s["false_positive_rate"] for s in m_spec
               if s["false_positive_rate"] != ""]
+        fpd = [s["bg_false_positives_per_mm2"] for s in m_spec
+               if s["bg_false_positives_per_mm2"] != ""]
+        if not fp and fpd and own_by.get(mk):
+            # Withheld for a marker segmented on itself - see the spec row. The
+            # per-area count has no such denominator and is what to read.
+            print(f"{head}false positives     : median {st.median(fpd):.1f} "
+                  f"per mm2 of background (the RATE is withheld: no count of "
+                  f"all cells)")
         if fp:
             print(f"{head}false-positive rate : median {st.median(fp)*100:.1f}%, "
                   f"range {min(fp)*100:.1f}-{max(fp)*100:.1f}%   "

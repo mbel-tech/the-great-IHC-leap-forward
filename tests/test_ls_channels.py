@@ -237,5 +237,52 @@ except CH.ChannelError as exc:
     chk("...and names both", "'A'" in str(exc) and "'B'" in str(exc), True)
 
 print()
+print("--- paired: a marker may be segmented on its own channel ---")
+PAIRED = {"layout": "paired", "markers": ["AF568", "AF488"], "channels": [],
+          "marker_segmentation": {
+              "AF488": {"segment": "own", "backend": "stardist",
+                        "nucleus_shaped": True}}}
+ov = CH.paired_overrides({"acquisition": PAIRED})
+chk("an override becomes a Channel", [c.name for c in ov], ["AF488"])
+chk("...segmented on its own channel", ov[0].segment, "own")
+chk("...with the declared backend", ov[0].backend, "stardist")
+chk("...and still nucleus-shaped", ov[0].nucleus_shaped, True)
+chk("no override block gives none",
+    CH.paired_overrides({"acquisition": dict(PAIRED, marker_segmentation={})}),
+    [])
+chk("a multiplex study gives none (its table says it)",
+    CH.paired_overrides({"acquisition": dict(PAIRED, layout="multiplex")}), [])
+chk("a malformed block gives none, it does not raise",
+    CH.paired_overrides({"acquisition": dict(PAIRED,
+                                              marker_segmentation="AF488")}), [])
+chk("a valid override block is accepted",
+    CH.validate(PAIRED, "paired")[0], [])
+chk("an unknown marker is refused",
+    len(CH.validate(dict(PAIRED, marker_segmentation={"GFP": {"segment": "own"}}),
+                    "paired")[0]), 1)
+chk("a bad segment is refused",
+    len(CH.validate(dict(PAIRED, marker_segmentation={
+        "AF488": {"segment": "weird"}}), "paired")[0]), 1)
+chk("stardist on non-nucleus-shaped objects is refused",
+    len(CH.validate(dict(PAIRED, marker_segmentation={
+        "AF488": {"segment": "own", "backend": "stardist",
+                  "nucleus_shaped": False}}), "paired")[0]), 1)
+chk("overrides are judged by the layout ARGUMENT, not a key in the block",
+    len(CH.validate({"markers": ["AF488"], "channels": [],
+                     "marker_segmentation": {"AF488": {"segment": "weird"}}},
+                    "paired")[0]), 1)
+chk("a non-block override is refused",
+    len(CH.validate(dict(PAIRED, marker_segmentation={"AF488": "own"}),
+                    "paired")[0]), 1)
+chk("a non-block marker_segmentation is refused",
+    len(CH.validate(dict(PAIRED, marker_segmentation=["AF488"]),
+                    "paired")[0]), 1)
+chk("under multiplex it is refused (the table already says it)",
+    any("paired" in e for e in CH.validate(
+        {"layout": "multiplex", "channels": BLOCK,
+         "marker_segmentation": {"pERK": {"segment": "own"}}},
+        "multiplex")[0]), True)
+
+print()
 print("ALL PASS" if not failures else f"{len(failures)} FAILED")
 sys.exit(1 if failures else 0)

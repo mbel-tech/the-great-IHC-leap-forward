@@ -336,6 +336,30 @@ SPEC = [
                    "04j_censor_clipped", "04l_roi_curator", "04o_section_rgb",
                    "05a_roi_geometry"]),
 
+    Key("acquisition.marker_segmentation", "raw",
+        "Per marker, how a `paired` study finds the objects it measures: "
+        "`segment` (`nuclear` or `own`), and for `own` a `backend` and whether "
+        "the objects are `nucleus_shaped`. A marker not listed here is "
+        "measured inside the nuclear mask, as always. Not used under "
+        "`multiplex`.",
+        default={}, ui=False,
+        note="A paired study declares no channel table, so every marker takes "
+             "the nuclear route: StarDist on the counterstain, the marker "
+             "measured inside the mask. That is wrong for a pass whose "
+             "counterstain plane is unusable. The LS PCNA (AF488) scans carry "
+             "a DAPI plane that is noise at native resolution, so there is "
+             "nothing to segment. Declaring `{\"AF488\": {\"segment\": "
+             "\"own\", \"backend\": \"stardist\", \"nucleus_shaped\": true}}` "
+             "segments PCNA on its own channel. Use it only for a marker whose "
+             "signal is nuclear (PCNA is): StarDist is a nucleus detector. The "
+             "cost is real and 06a records it: with no counterstain there is "
+             "no count of all cells, so the fraction positive and the total "
+             "cell density are withheld for that marker and the readout is "
+             "positive density. See docs/nuclei-detection-after-roi-curation.md "
+             "section 4.8.",
+        example={},
+        consumers=["05c", "06a"]),
+
     # ---- display ----------------------------------------------------------
     Key("display.composite", "raw",
         "Which markers are shown in the composite and the curator's Review "

@@ -254,5 +254,76 @@ except SG.SegmentError:
 chk("an infinity is refused the same way", got, "refused")
 
 print()
+print("--- per-section normalisation (marker-segmented StarDist) ---")
+import types
+
+_seen = {}
+
+
+class FakeModel:
+    def predict_instances(self, x, n_tiles=None, **kw):
+        _seen["x"] = np.asarray(x)
+        _seen["tiles"] = n_tiles
+        return np.zeros(np.asarray(x).shape, dtype=np.int32), {}
+
+
+# csbdeep is a heavy dependency that is not always installed where the cheap
+# suites run; the default path only needs its normalize(), so a stand-in with
+# the same arithmetic is enough to prove the default path is still the default.
+_cs = types.ModuleType("csbdeep")
+_cu = types.ModuleType("csbdeep.utils")
+_cu.normalize = lambda a, lo, hi: (
+    (a - np.percentile(a, lo)) / (np.percentile(a, hi) - np.percentile(a, lo) + 1e-20)
+).astype(np.float32)
+_cs.utils = _cu
+_saved = {k: sys.modules.get(k) for k in ("csbdeep", "csbdeep.utils")}
+sys.modules["csbdeep"], sys.modules["csbdeep.utils"] = _cs, _cu
+try:
+    img = np.arange(100 * 100, dtype=np.float64).reshape(100, 100)
+    SG.stardist_labels(img, FakeModel())
+    default_x = _seen["x"].copy()
+    chk("default path is the per-crop percentile", float(default_x.max()) > 1.0
+        and float(default_x.min()) < 0.0, True)
+    SG.stardist_labels(img, FakeModel(), norm=(0.0, 10000.0))
+    chk("a given range is used as is", float(_seen["x"].max()),
+        float(np.float32(9999.0 / 10000.0)))
+    chk("...and is NOT re-stretched to this crop", float(_seen["x"].min()), 0.0)
+    SG.stardist_labels(img[:50], FakeModel(), norm=(0.0, 10000.0))
+    chk("two crops under one range share a scale",
+        float(_seen["x"].max()), float(np.float32(4999.0 / 10000.0)))
+    SG.segment(img, "stardist", model=FakeModel(), norm=(0.0, 10000.0))
+    chk("segment() passes it through to stardist",
+        float(_seen["x"].max()), float(np.float32(9999.0 / 10000.0)))
+    for bad in [(5.0, 5.0), (9.0, 1.0), (float("nan"), 1.0), (0.0, float("inf"))]:
+        try:
+            SG.stardist_labels(img, FakeModel(), norm=bad)
+            chk(f"range {bad} is refused", False, True)
+        except SG.SegmentError:
+            chk(f"range {bad} is refused", True, True)
+finally:
+    for k, v in _saved.items():
+        if v is None:
+            sys.modules.pop(k, None)
+        else:
+            sys.modules[k] = v
+
+a = np.full((100, 100), 10.0)
+b = np.full((100, 100), 1000.0)
+lo, hi = SG.percentile_range([a, b])
+chk("percentile_range spans every crop, not one", (lo, hi), (10.0, 1000.0))
+chk("...and ignores non-finite pixels",
+    all(np.isfinite(SG.percentile_range([np.array([1.0, np.nan, 3.0, np.inf, 5.0])]))), True)
+try:
+    SG.percentile_range([np.full((10, 10), 7.0)])
+    chk("a flat section has no range to share", False, True)
+except SG.SegmentError:
+    chk("a flat section has no range to share", True, True)
+try:
+    SG.percentile_range([])
+    chk("no crops has no range", False, True)
+except SG.SegmentError:
+    chk("no crops has no range", True, True)
+
+print()
 print("ALL PASS" if not failures else f"{len(failures)} FAILED")
 sys.exit(1 if failures else 0)

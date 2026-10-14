@@ -546,11 +546,12 @@ Code only. Nothing derived from the imaging data is committed, and neither are t
 they are extracted from a PDF that is not ours to redistribute. Run `04a_atlas_extract.py`
 against your own copy.
 
-Three documents, answering three different questions:
+Four documents, answering four different questions:
 
 | Question | Document |
 |---|---|
 | How do I install, run or change this? | this README |
+| I am new: how do I use the app, screen by screen? | `docs/user-guide.md` |
 | What happens to a brain section, step by step, in plain language? | `docs/pipeline-guide.md` |
 | What is the Methods section, with citations and the measured numbers? | `docs/pipeline-methods.md` |
 

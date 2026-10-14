@@ -34,7 +34,7 @@ There are far too many sections to measure by hand, so the program does the repe
 1. **Read and check the slides.** Every slide file is listed, checked, and every section on it saved as a small picture.
 2. **Standardise every section.** Each section is cleaned, turned upright, centred and resized to the same square, so a position means the same thing on every section.
 3. **Curate.** You check the rotations, accept or overrule proposed exclusions, match each section to an atlas plate, and draw the brain regions to measure.
-4. **Measure.** Your regions are mapped back onto the original full-resolution scan. Every nucleus inside them is found on DAPI and the marker is measured in each.
+4. **Measure.** Your regions are mapped back onto the original full-resolution scan. Every nucleus inside them is found (on DAPI, or for PCNA on its own channel) and the marker is measured in each.
 5. **Unblind and report.** Only now are the animals joined to their treatment groups, and the spreadsheets and figures are written.
 
 ```mermaid
@@ -43,7 +43,7 @@ flowchart LR
     B --> C{{Rotation curator<br/>upright? usable?}}
     C --> D[Prepare, part 2<br/>censor, final pictures]
     D --> E{{ROI curator<br/>plate and regions}}
-    E --> F[Measure<br/>find nuclei on DAPI]
+    E --> F[Measure<br/>find nuclei]
     F -. blinding ends here .-> G[Unblind<br/>join treatment groups]
     G --> H[Results<br/>spreadsheets, figures]
 ```
@@ -178,6 +178,16 @@ Animal is required; slide and replicate are optional. An animal ID cannot contai
 | Abercrombie correction | On | Leave on. It corrects for nuclei cut across two sections. |
 | Threshold: MAD multiplier | 3 | Only for markers counted on their own channel (not nuclei); see (i) |
 | Threshold: minimum object area (µm²) | 5 | As above |
+
+**Markers counted on their own channel (paired studies).** A marker whose scan has no usable counterstain can be counted on its own channel instead of inside DAPI nuclei. The LS study needs this for PCNA (AF488), because its DAPI plane is noise at full resolution. This setting is not in Set up yet: add it to the study's `config.json` under `acquisition`:
+
+```json
+"marker_segmentation": {
+  "AF488": {"segment": "own", "backend": "stardist", "nucleus_shaped": true}
+}
+```
+
+Use it only for a marker whose signal is in the nucleus, as PCNA's is. Section 7 explains what it changes in the results.
 
 **Other settings** collects anything not yet sorted into a card. You rarely need it.
 
@@ -361,22 +371,45 @@ Measure puts your regions back onto the original slides, finds every nucleus ins
 | --- | --- | --- | --- |
 | 05a Verify the inverse transform | Checks that regions map back onto the slides accurately before anything is measured | A pass or fail in the log |  |
 | 05a Place the regions on the slides | Maps every region from the 256-pixel curation picture back onto the slide's own 0.65 µm pixels | Region geometry and boxes for each marker | Every section with a region (also those without a background disc); first N |
-| 05c Detect and measure nuclei | Reads each region at full resolution, finds nuclei on DAPI with StarDist, measures the marker in each, and flags nuclei that sit on clipped pixels | `results/roi_nuclei.csv` | Order sections are measured in; save check pictures; redo; first N |
+| 05c Detect and measure nuclei | Reads each region at full resolution, finds nuclei with StarDist (on DAPI; PCNA on its own channel, see below), measures the marker in each, and flags nuclei that sit on clipped pixels | `results/roi_nuclei.csv` | Order sections are measured in; save check pictures; redo; first N |
 | 06a Per-region dataset | Turns nuclei into per-region numbers: how many cells, how many positive, per mm² | `results/roi_measurements.csv`, `results/detector_specificity.csv` |  |
 
 ### Nucleus detection, in plain words
 
-- **Nuclei are found on DAPI, never on the marker.** The marker is measured afterwards inside each nucleus, and "positive" is decided later still. So you can change the positivity rule without re-reading any scans.
+- **Nuclei are found on DAPI, not on the marker (PCNA is the one exception, below).** The marker is measured afterwards inside each nucleus, and "positive" is decided later still. So you can change the positivity rule without re-reading any scans.
 - **StarDist** separates touching nuclei, which matters in densely packed regions. It is used as published, without tuning.
 - **It takes hours.** You can stop it with **Stop after this stage** or close the app, and run it again later. Finished sections are not redone.
 - **Measurement order.** *balanced* (default) alternates treatment and control, so a part-finished run is already a fair comparison; it reads the group key only to choose the order. *uid* keeps the run fully blind. The finished file is identical either way.
 - **Check pictures** (`--qc`) save one picture per region with nuclei outlined: green counted, red found but outside the region. Turn this on for a first run on a new study.
+
+### PCNA: counted on its own channel
+
+In the PCNA (AF488) scans, the DAPI plane is just noise at full resolution, so there are no nuclei on it to find. PCNA itself sits in the nucleus, so for PCNA the pipeline finds the PCNA-stained nuclei directly on the green channel. pERK is not affected and still uses DAPI.
+
+**What this changes in your results:**
+
+- **You get positive density only.** With no counterstain there is no count of all cells, so *fraction positive* and *total cell density* are left blank for PCNA. The column `denominator_withheld_reason` says why. The PCNA readout is **positive cells per mm²**.
+- **Positivity is still set per section from the background discs**, as for pERK. Instead of a false-positive rate, PCNA reports **false positives per mm² of background** (`bg_false_positives_per_mm2` in `detector_specificity.csv`). The figures are captioned with it.
+- **Brightness is scaled once per section.** All of a section's regions and background discs share one intensity range before StarDist sees them, so a bright proliferative zone cannot hide dim nuclei. The range used is recorded in `results/roi_normalisation.csv`.
+- **The Abercrombie correction uses the size of the positive nuclei**, the ones actually counted.
+
+**Before the full PCNA run, do a pilot.** This route has been tested on synthetic data only.
+
+1. Turn on the study setting (see *Nucleus detection* in section 4).
+2. On Measure, open **Options** on *Detect and measure nuclei*, set **Only the first N sections** to 3 and turn on **Save check pictures**, then run it for PCNA.
+3. Look at the check pictures, especially in periventricular regions and background discs: are nuclei missed, or found in noise?
+4. Hand-count PCNA-positive nuclei in about six regions, including two background discs, and compare with `n_positive` from 06a.
+5. Check the median nucleus size of positive objects is roughly 7 to 9 µm.
+
+Only then run all sections. The full checklist is in `docs/nuclei-detection-after-roi-curation.md`, section 4.8.
 
 ### How "positive" is decided (stage 06a)
 
 Each section's own background discs set its cut: the background median plus three times its spread. It is worked out per section, because background brightness varies between sections. The share of background nuclei above the cut is reported as a false-positive rate in `detector_specificity.csv`.
 
 Two densities are reported side by side: all nuclei, and positive nuclei. Both are divided by the region's area on the slide. Counts are also corrected for nuclei cut across two sections (the Abercrombie correction), using the nucleus size measured in that region. Raw and corrected numbers are both kept.
+
+For PCNA, only the positive density is reported; see *PCNA: counted on its own channel* above.
 
 **What good looks like.** The check pictures show nuclei outlined one by one, with few red ones. The false-positive rate is low and similar across animals.
 
@@ -486,7 +519,7 @@ Every stage is a script in `scripts/` and can also be run from a terminal; the (
 | Blinding | No stage reads an animal's treatment group until Results, so no decision can be biased by it |
 | Censored (clipped) pixel | A pixel where the camera hit its maximum, so its true brightness is unknown. Nuclei under one count as positive. |
 | Channel | One colour recorded by the scanner, such as DAPI or a marker |
-| Counterstain (DAPI) | Stains every nucleus. Nuclei are found on it; it is not itself measured. |
+| Counterstain (DAPI) | Stains every nucleus. Nuclei are found on it (except for PCNA, whose DAPI plane is unusable); it is not itself measured. |
 | Curator | An interactive page where you make decisions; it saves as you go and hands decisions on with Export |
 | CZI | Zeiss's slide file: one slide, several sections, every channel and tile |
 | Exclusion | A decision that a section should not be used. It is a flag, not a deletion. |

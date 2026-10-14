@@ -56,8 +56,9 @@ def study(cfg=None):
 print("--- every stage has a home and plain words ---")
 homes = {}
 for scr in W.STEPS + W.EXTRA:
-    for sid in scr.stage_ids():
-        chk(f"{scr.sid}: {sid} is a stage", sid in S.BY_ID)
+    for sid in [i for _h, _e, ids in scr.parts for i in ids]:
+        chk(f"{scr.sid}: {sid} is a stage, or one the other table had",
+            sid in S.BY_ID or sid in W.OTHER_TABLE)
 for st in S.STAGES:
     where = W.screen_of(st.sid)
     chk(f"{st.sid} is on a screen or hidden on purpose", where is not None or st.sid in W.HIDDEN)
@@ -73,7 +74,8 @@ chk("saturation stages stay in the daily path, since 04j reads them",
 print("--- every option is a real flag of its script ---")
 for sid, opts in W.OPTIONS.items():
     st = S.BY_ID.get(sid)
-    chk(f"options for {sid}: a stage", st is not None)
+    chk(f"options for {sid}: a stage, or one the other table had",
+        st is not None or sid in W.OTHER_TABLE)
     if not st or not st.script.endswith(".py"):
         continue
     src = open(os.path.join(REPO, "scripts", st.script), encoding="utf-8").read()
@@ -143,8 +145,8 @@ chk("a fresh study starts with the slide headers", plan[:1], ["manifest"])
 chk("the plan keeps the table's order",
     plan, [st.sid for st in S.STAGES if st.sid in plan])
 chk("nothing after the rotation curator runs before you export",
-    "reformat_pcna_curated" in plan, False)
-chk("...it is held, and says what for", held.get("reformat_pcna_curated"), "rotation_curator")
+    "reformat_pcna_final" in plan, False)
+chk("...it is held, and says what for", held.get("reformat_pcna_final"), "rotation_curator")
 chk("the curator page itself is built", "rotation_curator" in plan, True)
 chk("stages for another atlas are left out",
     "atlas_wullimann_plates" in plan, s0.atlas_source == "wullimann1996")
@@ -157,7 +159,12 @@ open(os.path.join(OUT, "reformatted", "rotation_overrides.csv"), "w").write("uid
 chk("an export decides it", W.decided("rotation_curator", s0), True)
 plan2, held2 = W.run_plan("prepare", s0)
 chk("...and the stages behind it are planned",
-    ("reformat_pcna_curated" in plan2, "reformat_pcna_curated" in held2), (True, False))
+    ("reformat_pcna_final" in plan2, "reformat_pcna_final" in held2), (True, False))
+chk("the artifact masks sit in the half of Prepare their needs put them",
+    all((m in W.PREPARE.parts[2][2]) == (S.BY_ID[m].needs == ["overviews"])
+        for m in ("artifact_pcna", "artifact_perk")), True)
+chk("repairs for older files are never part of Run all remaining",
+    [s for s in W.run_plan("measure", s0)[0] if s in W.REPAIRS], [])
 os.makedirs(os.path.join(s0.export_root, "01.02.2026_10.00"), exist_ok=True)
 chk("an ROI export is found in a stamped folder too", W.decided("roi_curator", s0), False)
 open(os.path.join(s0.export_root, "01.02.2026_10.00", "roi_regions_01.02.2026_10.00.csv"), "w").write("x\n")

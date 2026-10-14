@@ -140,7 +140,7 @@ class StageListScreen(QWidget):
         inner = QWidget()
         body = QVBoxLayout(inner)
         body.setContentsMargins(0, 0, 8, 0)
-        for heading, text, ids in screen.parts:
+        for heading, text, ids in screen.visible_parts():
             if heading:
                 body.addWidget(PartHeader(heading, text))
             for sid in ids:

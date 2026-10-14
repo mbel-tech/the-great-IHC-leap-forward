@@ -34,11 +34,49 @@ class Screen:
         self.info = info            # the (i) text: what goes in, what comes out
         self.parts = list(parts)    # [(heading, explanation, [stage ids])]
 
+    def visible_parts(self):
+        """The parts, keeping only the stage ids the table in use defines."""
+        out = []
+        for heading, text, ids in self.parts:
+            ids = [sid for sid in ids if sid in S.BY_ID]
+            if ids:
+                out.append((heading, text, ids))
+        return out
+
     def stage_ids(self):
-        return [sid for _h, _e, ids in self.parts for sid in ids]
+        return [sid for _h, _e, ids in self.visible_parts() for sid in ids]
 
     def __repr__(self):
         return f"<Screen {self.sid}>"
+
+
+# The parts below name every stage id that either stage table has used, and
+# Screen.stage_ids() drops the ones the table in use does not define. So a
+# stage renamed or merged in stages.py leaves its old id here harmlessly.
+#
+# The artifact masks read only the overviews in the streamlined order, so they
+# run before the rotation curator; in the older order they waited for the
+# curated reformat. Each goes in whichever half its needs put it.
+#: Ids only one of the two stage tables (older, streamlined) defines. Listed
+#: so a typo in a screen part is still caught by the tests.
+OTHER_TABLE = {"reformat_pcna_curated", "reformat_perk", "render_excluded_perk",
+               "thumbs_pcna", "thumbs_perk", "build_results"}
+
+_MASKS = ("artifact_pcna", "artifact_perk")
+_EARLY_MASKS = [m for m in _MASKS if m in S.BY_ID and S.BY_ID[m].needs == ["overviews"]]
+_LATE_MASKS = [m for m in _MASKS if m not in _EARLY_MASKS]
+
+
+def _late(ids):
+    """`ids` with the masks that run after the rotation curator put back in place."""
+    out = []
+    for sid in ids:
+        if sid == "censor_pcna" and "artifact_pcna" in _LATE_MASKS:
+            out.append("artifact_pcna")
+        if sid == "censor_perk" and "artifact_perk" in _LATE_MASKS:
+            out.append("artifact_perk")
+        out.append(sid)
+    return out
 
 
 HOME = Screen(
@@ -89,13 +127,13 @@ PREPARE = Screen(
         ("Before rotation curation",
          "A first standard image of every section, plus the program's proposals "
          "for which sections to drop and how to rotate the rest.",
-         ["reformat_pcna", "exclusion", "symmetry"]),
+         _EARLY_MASKS + ["reformat_pcna", "exclusion", "symmetry"]),
         ("After rotation curation",
          "Carries your rotation and exclusion decisions into the final images, "
          "masks bubbles and debris, and sets aside saturated sections.",
-         ["reformat_pcna_curated", "artifact_pcna", "censor_pcna", "reformat_pcna_final",
-          "propagate_perk", "reformat_perk", "artifact_perk", "censor_perk",
-          "reformat_perk_final", "render_excluded_perk", "sections_dataset"]),
+         _late(["reformat_pcna_curated", "censor_pcna", "reformat_pcna_final",
+                "propagate_perk", "reformat_perk", "censor_perk",
+                "reformat_perk_final", "render_excluded_perk", "sections_dataset"])),
         ("Get ready for the ROI curator",
          "Orders the curation queue and makes the colour pictures the ROI curator "
          "shows.",
@@ -150,7 +188,7 @@ RESULTS = Screen(
     parts=[
         ("Unblind", "Reads the treatment groups for the first time.", ["join_sampling"]),
         ("Spreadsheets and figures", "The tables you analyse and the figures drawn from them.",
-         ["excel_sample", "excel_slide", "refresh_loop"]),
+         ["build_results", "excel_sample", "excel_slide", "refresh_loop"]),
     ])
 
 INSTRUMENT = Screen(
@@ -184,6 +222,15 @@ STEPS = [HOME, SETUP, PREPARE, CURATE, MEASURE, RESULTS]
 #: Reached from the menus rather than the step bar.
 EXTRA = [INSTRUMENT, ALL]
 SCREENS = {s.sid: s for s in STEPS + EXTRA}
+
+#: Shown on Measure but never part of Run all remaining: each brings a file an
+#: older version wrote up to date, and is run by hand when that is the case.
+REPAIRS = {"recensor", "off_tissue", "seg_provenance"}
+
+#: Where the table has the one-pass Build results stage, Run all remaining uses
+#: it instead of the spreadsheet stages it already runs. They keep their own
+#: Run buttons.
+COVERED = {"excel_sample", "excel_slide"} if "build_results" in S.BY_ID else set()
 
 #: Kept only on All stages: superseded, and not to be used by accident.
 HIDDEN = {"level_curator": "Superseded by the ROI curator's own plate slider; kept "
@@ -295,6 +342,8 @@ PLAIN = {
     "excel_sample": "The spreadsheet with one row per region per animal. The figures read "
                     "this one.",
     "excel_slide": "The same spreadsheet one level finer, per slide.",
+    "build_results": "Rebuilds the per-region numbers, both spreadsheets and the figures in "
+                     "one go. Does not unblind; that stays its own step.",
     "refresh_loop": "Rebuilds the spreadsheets and figures every hour while detection runs. "
                     "Run from refresh_loop.bat.",
 }
@@ -660,7 +709,7 @@ SETTING_SECTIONS = [
      "scanned and which channel is which.",
      ["pixel_size_um", "section_thickness_um", "overview_target_um_per_px",
       "acquisition.layout", "display.nuclear_colour", "channels.dapi_index",
-      "channels.marker_index"]),
+      "channels.marker_index", "curation_render.source", "curation_render.um_per_px"]),
     ("atlas", "Atlas",
      "Which brain atlas the regions come from. Choose a built-in one or import your own.",
      ["atlas_source", "atlas_pdf", "atlas_polygon_mirror", "atlas_plate_set.dir",
@@ -836,7 +885,7 @@ def run_plan(screen_sid, study, include_curator_pages=True):
         wanted |= {st.sid for st in S.STAGES if st.curator and st.sid not in HIDDEN}
     plan, held, planned = [], {}, set()
     for st in S.STAGES:
-        if st.sid not in wanted or st.sid in HIDDEN:
+        if st.sid not in wanted or st.sid in HIDDEN or st.sid in REPAIRS | COVERED:
             continue
         ok, _ = applies(st, study)
         if not ok or st.cli_reason():
@@ -873,7 +922,7 @@ def progress(screen_sid, study):
     done = total = 0
     for sid in SCREENS[screen_sid].stage_ids():
         st = S.BY_ID[sid]
-        if not applies(st, study)[0] or st.cli_reason():
+        if sid in REPAIRS or not applies(st, study)[0] or st.cli_reason():
             continue
         total += 1
         if st.operator:

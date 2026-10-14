@@ -269,13 +269,28 @@ def bin_factor(native_um_px, out_um_px):
     return max(1, int(np.floor(out_um_px / native_um_px + 1e-9)))
 
 
-def read_region(read, bounds, scene_rect, b):
-    """The native rectangle covering `bounds` = (xmin, ymin, xmax, ymax), read
-    once and block-averaged b x b. Returns (array, x0, y0), or None when the
-    bounds miss the scene.
+#: Native rows fetched per read. The section is read in bands of this many rows
+#: and each band block-averaged before the next is fetched, so the peak is one
+#: band rather than the whole native section - which at 0.65 um/px is hundreds
+#: of MB per plane before the reader's own buffers are counted.
+READ_BAND_ROWS = 2048
 
-    Kept as the scanner's uint16 when b == 1: a float copy of a whole native
-    section is the allocation that ran a 12.7 GB laptop out of memory.
+#: The finest whole-section render 04o will make. Below this the picture is
+#: one PNG of 10,000+ px a side: several GB to render, and more than a browser
+#: holds comfortably as one image. Measurement never depends on it - 05c reads
+#: native pixels whatever the curation picture is.
+MIN_RENDER_UM_PX = 1.3
+
+
+def read_region(read, bounds, scene_rect, b, band_rows=None):
+    """The native rectangle covering `bounds` = (xmin, ymin, xmax, ymax),
+    block-averaged b x b. Returns (array, x0, y0), or None when the bounds miss
+    the scene.
+
+    Read in bands of `band_rows` native rows, each averaged down before the
+    next is read. The result is the same array a single read would give - a
+    b x b block never straddles two bands - at a fraction of the peak memory.
+    Kept as the scanner's uint16 when b == 1.
     """
     rx, ry, rw, rh = scene_rect
     xmin, ymin, xmax, ymax = bounds
@@ -287,10 +302,16 @@ def read_region(read, bounds, scene_rect, b):
         return None
     w = (x1 - x0) // b * b
     h = (y1 - y0) // b * b
-    raw = np.asarray(read(x0, y0, w, h))
-    if b > 1:
-        raw = raw.reshape(h // b, b, w // b, b).mean(axis=(1, 3), dtype=np.float32)
-    return raw, x0, y0
+    step = max(b, (band_rows or READ_BAND_ROWS) // b * b)
+    out = np.empty((h // b, w // b), np.uint16 if b == 1 else np.float32)
+    for r0 in range(0, h, step):
+        n = min(step, h - r0)
+        raw = np.asarray(read(x0, y0 + r0, w, n))
+        if b > 1:
+            raw = raw.reshape(n // b, b, w // b, b).mean(axis=(1, 3), dtype=np.float32)
+        out[r0 // b:(r0 + n) // b] = raw
+        del raw
+    return out, x0, y0
 
 
 def sample_region(region, X, Y, scene_rect, b, field=None):
@@ -422,9 +443,9 @@ def render_from_czi(read_dapi, read_mark, rep, scene_rect, overview_um_px,
                     dapi_field=None, mark_field=None):
     """(dapi8, mark8) for one section on the canonical frame at `out_um_px`.
 
-    One plane at a time, sampled in strips of output rows, so the peak is one
-    native read of the section plus one float32 picture - not the whole output
-    grid's coordinates in float64, which is what ran native out of memory.
+    One plane at a time, read in bands of native rows and sampled in strips of
+    output rows, so the peak is one band plus one float32 picture at the
+    output resolution - never the whole native section at once.
     """
     M = czi_frame(rep, scene_rect, overview_um_px, native_um_px)
     side = render_side(M, native_um_px, out_um_px)
@@ -694,7 +715,8 @@ def main():
                          "overview is the old 8-bit 5.2 um/px route")
     ap.add_argument("--um-px", type=float, default=RENDER_UM_PX, metavar="UM",
                     help="resolution of a czi render (default from config "
-                         f"curation_render.um_per_px: {RENDER_UM_PX}); 0.65 is native")
+                         f"curation_render.um_per_px: {RENDER_UM_PX}); at least "
+                         f"{MIN_RENDER_UM_PX}")
     ap.add_argument("--verify", action="store_true",
                     help="check the blue plane still equals the existing greyscale section")
     ap.add_argument("--thumbs", action="store_true",
@@ -780,8 +802,13 @@ def main():
     # route reproduces; it never renders from the CZI.
     czi = None
     if args.source == "czi" and not args.verify:
-        if args.um_px <= 0:
-            raise SystemExit("--um-px must be greater than zero")
+        if args.um_px < MIN_RENDER_UM_PX:
+            raise SystemExit(
+                f"--um-px {args.um_px}: the finest whole-section picture 04o "
+                f"makes is {MIN_RENDER_UM_PX} um/px. Finer than that is one "
+                f"image of 10,000+ px a side, more than a laptop renders or a "
+                f"browser shows comfortably. Measurement is unaffected - 05c "
+                f"always reads the native 0.65 um/px pixels.")
         czi = CziSource(args.marker)
         # One file open per CZI rather than one per section.
         uids = sorted(uids, key=lambda u: czi.file_of(u) or "")

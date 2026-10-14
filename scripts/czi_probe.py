@@ -20,7 +20,7 @@ with pyczi.open_czi(PATH) as czi:
     s0 = scenes[0]
     for zoom in (0.125, 0.25):
         t = time.time()
-        img = czi.read(roi=(s0.x, s0.y, s0.w, s0.h), plane={"C": 0}, zoom=zoom)
+        img = czi.read(roi=(s0.x, s0.y, s0.w, s0.h), plane={"C": 0}, scene=0, zoom=zoom)
         dt = time.time() - t
         um = 0.65 / zoom
         print(f"  scene0 C0 zoom={zoom}: {img.shape} {img.dtype} "
@@ -32,7 +32,7 @@ with pyczi.open_czi(PATH) as czi:
     for i in sorted(scenes):
         r = scenes[i]
         for c in (0, 1):
-            czi.read(roi=(r.x, r.y, r.w, r.h), plane={"C": c}, zoom=0.125)
+            czi.read(roi=(r.x, r.y, r.w, r.h), plane={"C": c}, scene=i, zoom=0.125)
             n += 1
     dt = time.time() - t
     print(f"\nall {len(scenes)} scenes x 2 channels at 5.2 um/px: {dt:.1f}s "

@@ -196,12 +196,16 @@ def composite(marker_img, dapi_img, colour, nuclear=(0., 0., 1.)):
     constants probe cannot see pixels and 130 curated sections carry landmark
     coordinates placed on the composites already on disk.
     """
-    mark = np.asarray(marker_img, dtype=np.float64)
-    dapi = np.asarray(dapi_img, dtype=np.float64)
-    rgb = np.zeros(mark.shape + (3,), np.uint8)
-    for p in range(3):
-        plane = np.maximum(colour[p] * mark, nuclear[p] * dapi)
-        rgb[..., p] = np.clip(np.rint(plane), 0, 255).astype(np.uint8)
+    marker_img, dapi_img = np.asarray(marker_img), np.asarray(dapi_img)
+    rgb = np.zeros(marker_img.shape + (3,), np.uint8)
+    # In strips of rows: the float64 copies of a whole 1.3 um/px picture are
+    # most of a GB, and the arithmetic is per pixel, so strips change nothing.
+    for r0 in range(0, marker_img.shape[0], STRIP_ROWS):
+        mark = marker_img[r0:r0 + STRIP_ROWS].astype(np.float64)
+        dapi = dapi_img[r0:r0 + STRIP_ROWS].astype(np.float64)
+        for p in range(3):
+            plane = np.maximum(colour[p] * mark, nuclear[p] * dapi)
+            rgb[r0:r0 + STRIP_ROWS, :, p] = np.clip(np.rint(plane), 0, 255).astype(np.uint8)
     return rgb
 
 
@@ -392,6 +396,22 @@ def frame_masks(rep, U, V, wmask, artifact=None):
 STRETCH_TOP_PCT = 99.9
 #: At most this many in-tissue pixels go into the statistics (an even stride).
 STRETCH_SAMPLE = 4_000_000
+#: Where the tissue median sits on the display, 0..1 - where 04a's own rule
+#: (median - 1 MAD to median + 4 MAD) puts it.
+STRETCH_MEDIAN_AT = 0.2
+#: The strongest mid-tone lift allowed, so a section that is almost all
+#: background cannot be blown up into noise.
+STRETCH_GAMMA_MIN = 0.3
+
+
+def display_gamma(median_at):
+    """The exponent that moves a tissue median at `median_at` (0..1, after the
+    linear stretch) to STRETCH_MEDIAN_AT. 1.0 when it is already there or above:
+    the curve only ever lifts mid-tones, never darkens them."""
+    if not 0.0 < median_at < STRETCH_MEDIAN_AT:
+        return 1.0
+    g = np.log(STRETCH_MEDIAN_AT) / np.log(median_at)
+    return float(min(1.0, max(STRETCH_GAMMA_MIN, g)))
 
 
 def stretch(values, tissue, art=None):
@@ -407,6 +427,17 @@ def stretch(values, tissue, art=None):
     lost, so the top is lifted until at most 0.1% of the tissue reaches it.
     Where 04a's top already saturates less than that (the 768 route did), it is
     kept, so a picture is never dimmer than it needs to be.
+
+    Lifting the top alone made the pictures dark: a few very bright objects
+    (debris, a vessel, a bright cell) set the 99.9th percentile, and ordinary
+    tissue landed in the bottom tenth - mean in-tissue brightness 17-18 of 255
+    on the real LS sections against 59-81 on the old composites. So the
+    mid-tones are lifted back with a gamma chosen to put the tissue median
+    where 04a's rule puts it, a fifth of the way up (med - 1 MAD to med + 4 MAD
+    places the median at exactly 1/5). Nothing is clipped to do it: the curve
+    is monotonic and keeps the top, so every bright nucleus keeps its texture,
+    and where 04a's own top was already high enough the gamma is exactly 1 and
+    the picture is 04a's.
     """
     keep = tissue if art is None else (tissue & ~art)
     inside = values[keep]
@@ -419,12 +450,19 @@ def stretch(values, tissue, art=None):
             mad = max(float(inside.std()), 1.0)
         lo = med - mad
         hi = max(med + 4.0 * mad, float(np.percentile(inside, STRETCH_TOP_PCT)))
+        med_at = (med - lo) / max(hi - lo, 1e-6)
     else:
         lo, hi = float(values.min()), float(values.max())
+        med_at = STRETCH_MEDIAN_AT
     del inside
+    span = max(hi - lo, 1e-6)
     values -= lo
-    values *= 255.0 / max(hi - lo, 1e-6)
-    np.clip(values, 0, 255, out=values)
+    values *= 1.0 / span
+    np.clip(values, 0, 1, out=values)
+    g = display_gamma(med_at)
+    if g != 1.0:
+        np.power(values, g, out=values)
+    values *= 255.0
     np.rint(values, out=values)
     out = values.astype(np.uint8)
     out[~tissue] = 0

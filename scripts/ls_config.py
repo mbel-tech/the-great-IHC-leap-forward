@@ -294,6 +294,42 @@ note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
              "reads native pixels, whatever this says.",
         consumers=["04o"]),
 
+    Key("scene_render.out_dir", "path_dir_opt",
+        "Where the pictures of every scene go. Empty means "
+        "<out_root>/scene_renders.",
+        default=None, label="Scene pictures folder",
+        example="<ABSOLUTE PATH FOR SCENE PICTURES, OR EMPTY>",
+        note="01l writes <folder>/<marker>/stain+DAPI/ and "
+             "<folder>/<marker>/stain_only/ here, one PNG per scene. Any "
+             "folder will do, including one outside the study: nothing "
+             "downstream reads these pictures. The table saying how each was "
+             "drawn always stays at <out_root>/qc/scene_renders.csv, so the "
+             "app can tell the step has run wherever the pictures went.",
+        consumers=["01l"]),
+
+    Key("scene_render.um_per_px", "float",
+        "Resolution of the scene pictures, in micrometres per pixel.",
+        default=2.6, label="Scene picture resolution (um/px)",
+        note="1.3 at the finest; larger numbers give smaller, softer pictures "
+             "(5.2 is the overviews' scale). Each picture pixel is the average "
+             "of whole native 0.65 um pixels, so the value is rounded to a "
+             "multiple of 0.65 and the table records what was drawn. The "
+             "native 0.65 itself is refused: a whole scene at that size ran "
+             "the laptop out of memory.",
+        consumers=["01l"]),
+
+    Key("scene_render.range", "str",
+        "How the scene pictures are brightened.",
+        default="dataset", choices=["dataset", "section"],
+        label="Scene picture brightness",
+        note="`dataset` uses the overviews' frozen range "
+             "(qc/display_ranges.json), so the same brightness means the same "
+             "signal in every picture; the brightest nuclei can saturate at "
+             "fine resolutions. `section` stretches each scene to its own "
+             "tissue: every picture well exposed, but brightness no longer "
+             "compares between pictures.",
+        consumers=["01l"]),
+
     # ---- channels (replaced by the channels/markers sub-project) ---------
     # ---- acquisition ------------------------------------------------------
     Key("acquisition.layout", "str",
@@ -1070,6 +1106,14 @@ def export_dir(cfg=None):
     """
     cfg = cfg if cfg is not None else load()
     return cfg.get("export_dir") or os.path.join(cfg["out_root"], "exports")
+
+
+def scene_render_dir(cfg=None):
+    """Where 01l puts the scene pictures: `scene_render.out_dir` when set,
+    else `<out_root>/scene_renders`."""
+    cfg = cfg if cfg is not None else load()
+    return ((cfg.get("scene_render") or {}).get("out_dir")
+            or os.path.join(cfg["out_root"], "scene_renders"))
 
 
 def require_path(dotted, cfg=None):

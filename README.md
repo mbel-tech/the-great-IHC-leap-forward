@@ -144,6 +144,10 @@ Things that differ from salmon, so they are not a surprise later:
 
 ### Using an atlas of your own
 
+**The simple way:** draw the regions on each plate in Fiji's ROI Manager, save each plate's ROIs as
+`<plate>.zip` beside it, and run `python scripts/ls_atlas_imagej.py FOLDER --name mouse`. Step by step:
+[docs/adding-your-own-atlas.md](docs/adding-your-own-atlas.md).
+
 An atlas the pipeline can use is a **plate set**: a folder of plate images plus the tables that say where
 the regions are on them. If you already have one (from another species, or drawn by hand), nothing needs
 extracting; it only needs checking and filing. It needs three things:

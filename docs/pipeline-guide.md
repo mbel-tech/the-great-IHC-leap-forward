@@ -238,6 +238,11 @@ frozen, a difference in brightness between two sections is a real difference in 
 the tissue is brighter than the brain itself. Sampling the whole frame therefore pinned the top of
 the range at the sensor maximum and left the actual tissue rendering almost black.
 
+**The same read also writes the clipping masks.** The pixels at the sensor's ceiling are counted
+on the raw planes this step has just read, before the illumination correction, and the mask of them
+is saved beside the counts (`qc/saturation_raw.csv`, `qc/censor_raw/`). The step that used to do
+this, 01k, read every section of every scan a second time at the same scale only to produce them.
+
 Finding the tissue is itself not trivial. These channels are extremely lopsided — DAPI runs a median
 around 500 against a 99.9th percentile in the tens of thousands — and the standard automatic
 threshold chases that bright tail and returns a value above almost every pixel, marking the section
@@ -437,6 +442,11 @@ adopting it would be a decision a person makes and records, not something a scri
 
 *`scripts/01k_saturation_raw.py` → `qc/saturation_raw.csv`, `qc/censor_raw/`*
 
+**Now a backfill.** The export (01) writes these files itself from the planes it reads, so after a
+fresh export this step finds nothing to measure. It fills in sections exported before that change,
+and still measures how much the overview's scale understates clipping against the full-resolution
+scan. What follows is why the measurement exists at all.
+
 A pixel that was brighter than the camera could record stops at the sensor's ceiling. Its true value
 is gone, and no correction recovers it — this is lost information, not miscalibration. This step
 finds those pixels and writes a mask of them for every section.
@@ -454,11 +464,12 @@ The masks this step writes are what the censoring steps later read.
 > **In the code** — `scripts/01k_saturation_raw.py`
 >
 > ```python
-> CEILING = 65535
+> clipped = mark_raw >= ceiling
 > ```
 >
-> That is a fallback only. The real ceiling is read per file from the manifest, because not every
-> file's camera reports the same one, and assuming the 16-bit maximum would be wrong for some.
+> `mark_raw` is the plane as read, before any correction, and `ceiling` is read per file from the
+> manifest, because not every file's camera reports the same one and assuming the 16-bit maximum
+> would be wrong for some. The function lives in `01_overviews.py`, and this step calls the same one.
 
 ## 01g  Where the clipping falls {#stage-saturation_map}
 
@@ -599,12 +610,58 @@ patch inside an otherwise good section can be unusable, or an individual pixel's
 Third, an operator places the **anatomical regions**.
 
 The order of the steps reflects one more thing. Every curation decision is made on the **PCNA pass**,
-and then carried across onto the pERK pass. So the part runs: prepare PCNA, curate PCNA, clean PCNA,
-propagate to pERK, clean pERK, then build the tables and pages the region curator reads. That is
-why the reformatting step appears repeatedly — it is re-run each time a new decision needs folding
-in — and why the two markers are not treated symmetrically.
+and then carried across onto the pERK pass. So the part runs: mask artifacts on both passes, prepare PCNA, curate
+PCNA, censor and reformat PCNA once with everything folded in, propagate to pERK, censor and reformat
+pERK once, then build the tables and pages the region curator reads. That is why the two markers are
+not treated symmetrically, and why the reformatting step appears three times rather than once.
 
 Three of the pipeline's four operator steps are in this part.
+
+## 04g  Mask artifacts — PCNA {#stage-artifact_pcna}
+
+*`scripts/04g_artifact_mask.py --include-excluded` → `artifacts/artifact_summary.csv`*
+
+The second removal mechanism, and the first step of this part to run, before anything waits on the
+operator. Some sections are fine overall but carry bubbles, antibody aggregates
+or stray fibres sitting inside otherwise good tissue. Dropping the whole section would throw away
+good data; the answer is to mask the offending patch and keep the rest.
+
+This is not a rare problem — the large majority of sections carry at least one bright artifact
+strictly inside the tissue. The masked area is small on most sections, but it reaches several per
+cent at worst, and **these are by construction the brightest pixels in the section.** For a count per
+square millimetre that is a minor correction. For anything driven by intensity it is not, which is
+why the mask is applied *before* the intensity normalisation rather than after: artifact-inflated
+intensities have been shown to skew normalisation badly enough to change cell labels well outside
+the artifact itself.
+
+It needs nothing from the reformatting that follows. The detector reads the DAPI overview and writes
+its mask in the overview's own frame, and with `--include-excluded` it covers every scanned section
+of the pass, so it runs straight after the export and is finished by the time anyone needs it. Each
+section is flagged with what the curation says about it at the time of the run; masking an excluded
+section changes nothing downstream, because 04a reads a mask only for the sections it indexes.
+
+Two design points keep the mask honest. **Detection runs on DAPI only**, so the mask is identical for
+both marker passes and cannot encode anything about the marker being measured. And the tissue rim is
+protected: the outer edge of a section is genuinely DAPI-bright — the pial surface, the ventricular
+lining — so a plain brightness rule would mask the whole border. The edge is eroded away before
+anything is seeded, and any growth that escapes along the bright rim is abandoned.
+
+> **In the code** — `scripts/04g_artifact_mask.py`
+>
+> ```python
+> core = ndimage.binary_erosion(tis, np.ones((2 * RIM_ERODE_PX + 1,) * 2))
+> ```
+>
+> `core` is the tissue with its rim eroded away. Artifacts are sought there, so the bright edge of
+> the section can never seed one.
+
+## 04g  Mask artifacts — pERK {#stage-artifact_perk}
+
+*`scripts/04g_artifact_mask.py --marker AF568 --include-excluded` → `artifacts/artifact_summary_AF568.csv`*
+
+The same artifact detector, run on the pERK scan's own DAPI channel. Artifacts are **not** propagated
+from the PCNA pass: the two scans imaged different fields of the same slide, so a bubble sitting in
+one scan's frame may be outside the other's.
 
 ## 04a  Reformat PCNA sections {#stage-reformat_pcna}
 
@@ -631,17 +688,20 @@ cropping to the DAPI tissue discards it. Measured on reformatted sections, mean 
 the tissue is a fraction of a unit against tens of units inside. **The safeguard holds only as long
 as no geometry is ever computed on the marker channel.**
 
-This same script runs six times across the pipeline, each time folding in whatever has been decided
-since. The other five entries below are short because they are this step with different flags:
+This same script runs three times across the pipeline: once before curation, because the curator
+needs a frame to show, and once per marker after it, with everything decided folded in. The other
+two entries below are short because they are this step with different flags:
 
 | Step | Flags | What it adds |
 |---|---|---|
 | `04a` reformat PCNA | — | the first pass, before any curation |
-| `04a` reformat PCNA curated | `--apply-overrides` | the operator's rotations and exclusions |
-| `04a` reformat PCNA final | `+ --mask-artifacts --censor` | the PCNA analysis frame |
-| `04a` reformat pERK | `--marker AF568 --apply-overrides` | the pERK pass, with propagated curation |
-| `04a` reformat pERK final | `+ --mask-artifacts --censor` | the pERK analysis frame |
-| `04a` render excluded pERK | `--render-excluded` | pictures only, no index row |
+| `04a` reformat PCNA final | `--apply-overrides --mask-artifacts --censor` | the PCNA analysis frame |
+| `04a` reformat pERK final | `--marker AF568`, the same, `+ --render-excluded` | the pERK analysis frame, and pictures of its excluded sections |
+
+It used to run six times. Two of the passes existed only so that the masking and censoring steps
+could read the list of surviving sections off a fresh index, which neither needs: the artifact
+masks are made before any reformat, and censoring takes the same list from the curation files
+directly. The sixth was the excluded-section rendering, which now rides on the final pERK pass.
 
 > **In the code** — `scripts/04a_reformat.py`
 >
@@ -719,50 +779,14 @@ Exclusions decided here drop a section out of everything downstream, which is wh
 its decisions to a file rather than editing anything in place: the decisions are data, they are
 reviewable, and they can be re-applied or revised without re-deriving them.
 
-## 04a  Reformat PCNA with the curation applied {#stage-reformat_pcna_curated}
-
-*`scripts/04a_reformat.py --apply-overrides` → `reformatted/excluded_sections.csv`*
-
-The reformat again, now folding in the operator's manual rotations. Exclusions are recorded as flags
-in a file, not by deleting anything — so an excluded section can be reinstated later without
-re-reading a single scan.
-
-## 04g  Mask artifacts — PCNA {#stage-artifact_pcna}
-
-*`scripts/04g_artifact_mask.py --include-excluded` → `artifacts/artifact_summary.csv`*
-
-The second removal mechanism. Some sections are fine overall but carry bubbles, antibody aggregates
-or stray fibres sitting inside otherwise good tissue. Dropping the whole section would throw away
-good data; the answer is to mask the offending patch and keep the rest.
-
-This is not a rare problem — the large majority of sections carry at least one bright artifact
-strictly inside the tissue. The masked area is small on most sections, but it reaches several per
-cent at worst, and **these are by construction the brightest pixels in the section.** For a count per
-square millimetre that is a minor correction. For anything driven by intensity it is not, which is
-why the mask is applied *before* the intensity normalisation rather than after: artifact-inflated
-intensities have been shown to skew normalisation badly enough to change cell labels well outside
-the artifact itself.
-
-Two design points keep the mask honest. **Detection runs on DAPI only**, so the mask is identical for
-both marker passes and cannot encode anything about the marker being measured. And the tissue rim is
-protected: the outer edge of a section is genuinely DAPI-bright — the pial surface, the ventricular
-lining — so a plain brightness rule would mask the whole border. The edge is eroded away before
-anything is seeded, and any growth that escapes along the bright rim is abandoned.
-
-> **In the code** — `scripts/04g_artifact_mask.py`
->
-> ```python
-> core = ndimage.binary_erosion(tis, np.ones((2 * RIM_ERODE_PX + 1,) * 2))
-> ```
->
-> `core` is the tissue with its rim eroded away. Artifacts are sought there, so the bright edge of
-> the section can never seed one.
-
 ## 04j  Censor clipped pixels — PCNA {#stage-censor_pcna}
 
 *`scripts/04j_censor_clipped.py --marker AF488` → `reformatted/pcna_analysis_set.csv`*
 
-The same censoring described under the pERK entry below, run for PCNA.
+The same censoring described under the pERK entry below, run for PCNA, straight after the rotation
+curator. It checks every scanned PCNA section the curation has not excluded, which it reads from the
+curator's export and the Review mode's decisions through the reformatting script's own loaders, so
+it needs no reformat in front of it.
 
 This step is worth a note, because it corrects an earlier assumption. Censoring used to be run for
 pERK only, on the stated grounds that the AF488 channel could not clip. That was **an inference from
@@ -776,8 +800,11 @@ the worst. A clipped PCNA pixel is lost for exactly the same reasons a clipped p
 
 *`scripts/04a_reformat.py --apply-overrides --mask-artifacts --censor` → `reformatted/sections/`*
 
-The PCNA analysis frame: curation applied, artifact pixels blanked, and the clipping masks carried
-into the 256-pixel frame. Re-run whenever a mask or a curation decision changes.
+The PCNA analysis frame, and the only reformat after curation: the operator's rotations applied,
+exclusions recorded as flags in `reformatted/excluded_sections.csv` rather than by deleting anything,
+artifact pixels blanked, and the clipping masks carried into the 256-pixel frame. An excluded section
+can be reinstated later without re-reading a single scan. Re-run whenever a mask or a curation
+decision changes.
 
 ## 04i  Carry the curation onto the pERK scans {#stage-propagate_perk}
 
@@ -803,20 +830,6 @@ section, so a failure is visible rather than silent.
 > ```
 >
 > The pairing from step 02 is what makes the exclusion transfer a lookup rather than a guess.
-
-## 04a  Reformat pERK sections {#stage-reformat_perk}
-
-*`scripts/04a_reformat.py --marker AF568 --apply-overrides` → `reformatted/reformat_index_AF568.csv`*
-
-The pERK pass put into the same 256-pixel frame, with the propagated curation applied.
-
-## 04g  Mask artifacts — pERK {#stage-artifact_perk}
-
-*`scripts/04g_artifact_mask.py --marker AF568 --include-excluded` → `artifacts/artifact_summary_AF568.csv`*
-
-The same artifact detector, run on the pERK scan's own DAPI channel. Artifacts are **not** propagated
-from the PCNA pass: the two scans imaged different fields of the same slide, so a bubble sitting in
-one scan's frame may be outside the other's.
 
 ## 04j  Censor clipped pixels — pERK {#stage-censor_perk}
 
@@ -857,18 +870,16 @@ a property of the experiment.
 
 ## 04a  Reformat pERK — masked and censored {#stage-reformat_perk_final}
 
-*`scripts/04a_reformat.py --marker AF568 --apply-overrides --mask-artifacts --censor` → `reformatted/sections_AF568/`*
+*`scripts/04a_reformat.py --marker AF568 --apply-overrides --mask-artifacts --censor --render-excluded` → `reformatted/reformat_index_AF568.csv`, `reformatted/sections_AF568/`*
 
-The pERK analysis frame. The nuclei detection step reads the artifact and censor masks this writes.
+The pERK pass put into the same 256-pixel frame, with the propagated curation applied. The nuclei
+detection step reads the artifact and censor masks this writes.
 
-## 04a  Render excluded pERK sections for Review {#stage-render_excluded_perk}
-
-*`scripts/04a_reformat.py --marker AF568 --apply-overrides --render-excluded` → `reformatted/sections_AF568/`*
-
-pERK exclusions were applied *before* reformatting, so excluded sections had no picture at all and
-could not be looked at. This renders them. It writes an image but deliberately **no index row** — and
-the index, not the image, is what puts a section into the analysis — so the sections become
-reviewable without becoming measurable.
+The same pass renders the excluded pERK sections, so they can be looked at in the region curator's
+Review mode. It writes an image for each but deliberately **no index row** — and the index, not the
+image, is what puts a section into the analysis — so they become reviewable without becoming
+measurable. They are rendered unmasked, because a section on screen so someone can decide whether to
+reinstate it cannot be judged with an artifact already painted out.
 
 ## 04m  Every pERK section and its fate {#stage-sections_dataset}
 
@@ -1190,46 +1201,6 @@ rather than the whole run. It takes hours.
 > Pretrained and unmodified — the model's published defaults, not values tuned until this dataset
 > gave a pleasing answer.
 
-## 06f  Recompute the censored flag {#stage-recensor}
-
-*`scripts/06f_recensor_nuclei.py` → `results/_pre_06f_backup/`*
-
-When the clipping measurement moved to the raw plane (01k), every nucleus already measured carried a
-censoring flag derived from the old, under-counting mask. This step re-samples each stored nucleus
-position against the corrected mask and rewrites the flag.
-
-It does **not** re-run the segmentation, and does not need to: nuclei are found on DAPI, and DAPI
-essentially does not clip — its clipping was measured at a few parts in a hundred thousand at the
-median. So the objects are unchanged and only their flags need revisiting. The original table is
-backed up first.
-
-## 06g  Flag nuclei off the section {#stage-off_tissue}
-
-*`scripts/06g_flag_off_tissue.py` → `results/_pre_06g_backup/`*
-
-Marks nuclei that fall outside the DAPI silhouette — objects the detector found on glass rather than
-on tissue.
-
-These matter more than their number suggests, because of where they land. Objects on bare glass are
-dim, and a background reference disc that includes some of them has its measured level and spread
-pulled **down**. Since that level sets the positivity threshold for the whole section, a few
-off-tissue objects make the entire section look more positive than it is. This step backfills the
-flag onto tables written before the detection step recorded it itself.
-
-## 06h  Backfill segmentation provenance {#stage-seg_provenance}
-
-*`scripts/06h_backfill_provenance.py` → `results/_pre_06h_backup/`*
-
-Records, on every row of a table written before the detection step said so, which channel the object
-was found on, which method found it, and whether it is a nucleus.
-
-Newer runs write that down per object, because a table outlives the settings that produced it and
-the later correction for counting the same nucleus twice is only valid for objects that really are
-nuclei. On an older table the three answers are not unknown — the pipeline had one way of finding an
-object back then, and it was the counterstain — so this step writes that reading in rather than
-leaving a reader to assume it. It reads the whole table, adds the three columns to every row at once,
-and refuses a table whose columns it does not recognise. Running it twice changes nothing.
-
 ## 06a  Per-ROI dataset {#stage-roi_dataset}
 
 *`scripts/06a_roi_dataset.py` → `results/roi_measurements.csv`, `results/detector_specificity.csv`*
@@ -1353,6 +1324,15 @@ grouping by slide is coarser than grouping by section and finer than grouping by
 sample: slides from one animal are not independent replicates of a treatment. The per-ROI figures
 and every test on them read 06c's per-animal sheet instead.
 
+## 06e  Build results: datasets, spreadsheets, figures {#stage-build_results}
+
+*`scripts/06e_refresh_loop.py --once` → `results/roi_dataset.xlsx`, `results/roi_dataset_by_slide.xlsx`, `results/ROI_plots/`*
+
+The per-region dataset, both spreadsheets and every figure, in one run: the same pass the hourly
+loop below makes, made once. It runs 06a first, because 06a owns every per-region number and the
+spreadsheets only group and format it, then draws the figures once per marker measured. The
+unblinding join, 06b, is not part of it and stays a step someone runs on purpose. The figures need R.
+
 ## 06e  Refresh datasets and figures hourly {#stage-refresh_loop}
 
 *`scripts/06e_refresh_loop.py` → `results/ROI_plots/`*
@@ -1361,6 +1341,53 @@ Detection takes many hours, so this rebuilds both spreadsheets and redraws the f
 while it runs, and stops when every section has been measured. It is a long-running loop rather than
 a one-shot step, which is why the desktop application does not run it — it would hold the app's
 runner open for hours.
+
+## Repairing older outputs
+
+The last three steps are not part of a run. Each brings a table written by an older version of the
+detection step up to what that step writes today, so an older table and a fresh one mean the same
+thing. On a table the current detection step wrote, none of them has anything to do.
+
+## 06f  Recompute the censored flag {#stage-recensor}
+
+*`scripts/06f_recensor_nuclei.py` → `results/_pre_06f_backup/`*
+
+Detection used to set each nucleus's censoring flag from a coarse mask, first an under-counting one
+taken after the illumination correction and later the raw mask squashed into the 256-pixel frame.
+It now decides from the nucleus's own full-resolution pixels. For a table written before that, this step re-samples each stored nucleus position against the raw clipping mask and rewrites the
+flag.
+
+It does **not** re-run the segmentation, and does not need to: nuclei are found on DAPI, and DAPI
+essentially does not clip — its clipping was measured at a few parts in a hundred thousand at the
+median. So the objects are unchanged and only their flags need revisiting. The original table is
+backed up first.
+
+## 06g  Flag nuclei off the section {#stage-off_tissue}
+
+*`scripts/06g_flag_off_tissue.py` → `results/_pre_06g_backup/`*
+
+Marks nuclei that fall outside the DAPI silhouette — objects the detector found on glass rather than
+on tissue.
+
+These matter more than their number suggests, because of where they land. Objects on bare glass are
+dim, and a background reference disc that includes some of them has its measured level and spread
+pulled **down**. Since that level sets the positivity threshold for the whole section, a few
+off-tissue objects make the entire section look more positive than it is. This step backfills the
+flag onto tables written before the detection step recorded it itself.
+
+## 06h  Backfill segmentation provenance {#stage-seg_provenance}
+
+*`scripts/06h_backfill_provenance.py` → `results/_pre_06h_backup/`*
+
+Records, on every row of a table written before the detection step said so, which channel the object
+was found on, which method found it, and whether it is a nucleus.
+
+Newer runs write that down per object, because a table outlives the settings that produced it and
+the later correction for counting the same nucleus twice is only valid for objects that really are
+nuclei. On an older table the three answers are not unknown — the pipeline had one way of finding an
+object back then, and it was the counterstain — so this step writes that reading in rather than
+leaving a reader to assume it. It reads the whole table, adds the three columns to every row at once,
+and refuses a table whose columns it does not recognise. Running it twice changes nothing.
 
 \newpage
 

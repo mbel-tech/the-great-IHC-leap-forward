@@ -39,7 +39,8 @@ SITES = {
     "06a_roi_dataset.py": ('with open(path, "w", newline="", encoding="utf-8") as fh:\n            w = csv.DictWriter(fh, fieldnames=list(data[0].keys()))',
                            "IO.atomic_write_csv(path, data, list(data[0].keys()))"),
     "06c_excel_dataset.py": ("    wb.save(path)", "with IO.atomic_save(path) as tmp:\n        wb.save(tmp)"),
-    "01k_saturation_raw.py": (".save(mask_path)", "with IO.atomic_save(mask_path) as tmp:"),
+    # The mask write moved to 01_overviews (checked below); 01k keeps its CSV.
+    "01k_saturation_raw.py": (".save(mask_path)", "IO.atomic_write_csv(OUT_CSV, rows, KEYS)"),
     "00d_czi_selftest.py": ('with open(OUT_CSV, "w"', "IO.atomic_write_csv(OUT_CSV, rows, KEYS)"),
 }
 
@@ -49,6 +50,15 @@ for name, (gone, present) in SITES.items():
     chk(f"{name}: in-place write gone", gone in src, False)
     chk(f"{name}: atomic write present", present in src, True)
     chk(f"{name}: imports ls_io", '"ls_io.py"' in src, True)
+
+# 01_overviews writes the raw clipping masks 01k used to, and imports ls_io by
+# name rather than by path.
+with open(os.path.join(SCRIPTS, "01_overviews.py"), encoding="utf-8") as fh:
+    src = fh.read()
+chk("01_overviews.py: clipping mask written atomically",
+    "with IO.atomic_save(mask_path) as tmp:" in src, True)
+chk("01_overviews.py: saturation_raw.csv written atomically",
+    "IO.atomic_write_csv(SAT_RAW_CSV" in src, True)
 
 print("\n" + ("ALL PASS" if not fails else f"{fails} FAILED"))
 raise SystemExit(1 if fails else 0)

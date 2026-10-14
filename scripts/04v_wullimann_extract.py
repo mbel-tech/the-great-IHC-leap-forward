@@ -37,6 +37,12 @@ FIG5_PAGE = 2          # the sagittal diagram marking every cross-section level
 SCALE = re.compile(r"^\d+\s*[jJµu]?[jJµu]?m$|^\d+$")
 
 
+# Abbreviations OCR gives with an O for the book's D. ON (optic nerve) and OT
+# (optic tract) are real and stay.
+D_MISREAD = {"OIL": "DIL", "OTN": "DTN", "OP": "DP", "Od": "Dd", "Om": "Dm", "Op": "Dp",
+             "O": "D", "0": "D"}
+
+
 def fix_abbreviation(text):
     """OCR reads a capital L as "l"; undo that only where it is unambiguous."""
     text = text.strip()
@@ -145,6 +151,13 @@ def main(argv=None):
         best, n = votes[r["definition"]].most_common(1)[0]
         if n > votes[r["definition"]][r["abbreviation"]]:
             r["abbreviation"] = best
+
+    # The book's D is round enough that OCR reads it as O or 0 everywhere, so no
+    # vote can fix it: "Om, medial zone of 0" is Dm, medial zone of D.
+    for r in legends:
+        r["abbreviation"] = D_MISREAD.get(r["abbreviation"], r["abbreviation"])
+        r["definition"] = re.sub(r"\b(?:of|area) [0O]$", lambda m: m.group(0)[:-1] + "D",
+                                 r["definition"])
 
     with open(os.path.join(out, "index.csv"), "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, ["file", "pdf_page", "label", "px_w", "px_h"])

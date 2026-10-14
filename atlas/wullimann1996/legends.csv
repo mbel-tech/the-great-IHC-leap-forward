@@ -28,10 +28,10 @@ cross_section,pdf_page,abbreviation,definition
 71,6,Vd,dorsal nucleus of V
 71,6,Vv,ventral nucleus of V
 71,6,VI,lateral nucleus of V
-71,6,Dc,central zone of 0
-71,6,Op,posterior zone of 0
+71,6,Dc,central zone of D
+71,6,Dp,posterior zone of D
 71,6,D,dorsal telencephalic area
-71,6,Om,medial zone of 0
+71,6,Dm,medial zone of D
 71,6,LOT,lateral olfactory tract
 71,6,MOT,medial olfactory tract
 85,7,TelV,telencephalic ventricle
@@ -41,25 +41,25 @@ cross_section,pdf_page,abbreviation,definition
 85,7,Sy,sulcus ypsiloniformis
 85,7,Cantd,"commissura anterior, pars dorsalis"
 85,7,ENd,"entopeduncular nucleus, dorsal part"
-85,7,Dc,central zone of 0
+85,7,Dc,central zone of D
 85,7,MOT,medial olfactory tract
 85,7,LOT,lateral olfactory tract
 85,7,D,dorsal telencephalic area
-85,7,Od,dorsal zone of 0
-85,7,Om,medial zone of 0
-85,7,Op,posterior zone of 0
+85,7,Dd,dorsal zone of D
+85,7,Dm,medial zone of D
+85,7,Dp,posterior zone of D
 92,8,Cantd,"commissura anterior, pars dorsalis"
 92,8,Cantv,"commissura anterior, pars ventralis"
 92,8,Vs,supracommissural nucleus of V
 92,8,V,ventral telencephalic area
-92,8,Dc,central zone of 0
+92,8,Dc,central zone of D
 92,8,ENd,"entopeduncular nucleus, dorsal part"
 92,8,Sy,sulcus ypsiloniformis
 92,8,D,dorsal telencephalic area
 92,8,DiV,diencephalic ventricle
-92,8,Om,medial zone of 0
-92,8,Op,posterior zone of 0
-92,8,Od,dorsal zone of 0
+92,8,Dm,medial zone of D
+92,8,Dp,posterior zone of D
+92,8,Dd,dorsal zone of D
 92,8,MOT,medial olfactory tract
 92,8,PPa,"parvocellular preoptic nucleus, anterior part"
 92,8,ENv,"entopeduncular nucleus, ventral part"
@@ -230,7 +230,7 @@ cross_section,pdf_page,abbreviation,definition
 149,17,Ctec,commissura tecti
 149,17,CP,central posterior thalamic nucleus
 149,17,DP,dorsal posterior thalamic nucleus
-149,17,OIL,diffuse nucleus of the inferior lobe
+149,17,DIL,diffuse nucleus of the inferior lobe
 149,17,TPM,tractus pretectomamillaris
 149,17,TPp,periventricular nucleus of posterior tuberculum
 149,17,TeO,tectum opticum
@@ -250,8 +250,8 @@ cross_section,pdf_page,abbreviation,definition
 153,18,CP,central posterior thalamic nucleus
 153,18,Cpost,commissura posterior
 153,18,Ctec,commissura tecti
-153,18,OIL,diffuse nucleus of the inferior lobe
-153,18,OP,dorsal posterior thalamic nucleus
+153,18,DIL,diffuse nucleus of the inferior lobe
+153,18,DP,dorsal posterior thalamic nucleus
 153,18,DiV,diencephalic ventricle
 153,18,Hv,ventral zone of periventricular hypothalamus
 153,18,Hd,dorsal zone of periventricular hypothalamus
@@ -281,7 +281,7 @@ cross_section,pdf_page,abbreviation,definition
 158,19,LH,lateral hypothalamic nucleus
 158,19,Chor,commissura horizontalis
 158,19,Cpost,commissura posterior
-158,19,OIL,diffuse nucleus of the inferior lobe
+158,19,DIL,diffuse nucleus of the inferior lobe
 158,19,LR,lateral recess of diencephalic ventricle
 158,19,P,posterior thalamic nucleus
 158,19,PGI,lateral preglomerular nucleus
@@ -302,7 +302,7 @@ cross_section,pdf_page,abbreviation,definition
 162,20,Cpost,commissura posterior
 162,20,Ctec,commissura tecti
 162,20,Hc,caudal zone of periventricular hypothalamus
-162,20,OIL,diffuse nucleus of the inferior lobe
+162,20,DIL,diffuse nucleus of the inferior lobe
 162,20,DiV,diencephalic ventricle
 162,20,FR,fasciculus retroflex us
 162,20,Hd,dorsal zone of periventricular hypothalamus
@@ -332,7 +332,7 @@ cross_section,pdf_page,abbreviation,definition
 168,21,PGZ,periventricular gray zone of optic tectum
 168,21,Cpost,commissura posterior
 168,21,Ctec,commissura tecti
-168,21,OIL,diffuse nucleus of the inferior lobe
+168,21,DIL,diffuse nucleus of the inferior lobe
 168,21,DiV,diencephalic ventricle
 168,21,FR,fasciculus retroflexus
 168,21,TL,torus longitudinalis
@@ -353,7 +353,7 @@ cross_section,pdf_page,abbreviation,definition
 173,22,Cil,central nucleus of the inferior lobe
 173,22,CM,corpus mamillare
 173,22,DTN,dorsal tegmental nucleus
-173,22,OIL,diffuse nucleus of the inferior lobe
+173,22,DIL,diffuse nucleus of the inferior lobe
 173,22,EW,Edinger-Westphal nucleus
 173,22,FR,fasciculus retroflexus
 173,22,Hc,caudal zone of periventricular hypothalamus
@@ -386,7 +386,7 @@ cross_section,pdf_page,abbreviation,definition
 179,23,NMLF,nucleus of MLF
 179,23,LLF,lateral longitudinal fascicle
 179,23,MLF,medial longitudinal fascicle
-179,23,OIL,diffuse nucleus of the inferior lobe
+179,23,DIL,diffuse nucleus of the inferior lobe
 179,23,Cans,commissura ansulata
 179,23,DTN,dorsal tegmental nucleus
 179,23,FR,fasciculus retroflexus
@@ -413,8 +413,8 @@ cross_section,pdf_page,abbreviation,definition
 185,24,Nln,nucleus interpeduncularis
 185,24,NLL,nucleus of the lateral lemniscus (of Prasada Rao et al. 87)
 185,24,MLF,medial longitudinal fascicle
-185,24,OIL,diffuse nucleus of the inferior lobe
-185,24,OTN,dorsal tegmental nucleus
+185,24,DIL,diffuse nucleus of the inferior lobe
+185,24,DTN,dorsal tegmental nucleus
 185,24,LR,lateral recess of diencephalic ventricle
 185,24,NLV,nucleus lateralis valvulae
 185,24,NLLI,oculomotor nucleus
@@ -439,11 +439,11 @@ cross_section,pdf_page,abbreviation,definition
 196,25,Nln,nucleus interpeduncularis
 196,25,NLV,nucleus lateralis valvulae
 196,25,MLF,medial longitudinal fascicle
-196,25,OIL,diffuse nucleus of the inferior lobe
+196,25,DIL,diffuse nucleus of the inferior lobe
 196,25,GC,griseum centrale
 196,25,NIV,trochlear nucleus
 196,25,LLF,lateral longitudinal fascicle
-196,25,OTN,dorsal tegmental nucleus
+196,25,DTN,dorsal tegmental nucleus
 196,25,TeO,tectum opticum
 196,25,TeV,tecta I ventricle
 196,25,TL,torus longitudinalis
@@ -460,7 +460,7 @@ cross_section,pdf_page,abbreviation,definition
 201,26,Ctec,commissura tecti
 201,26,Cven,commissura ventralis rhombencephali
 201,26,GC,griseum centrale
-201,26,OIL,diffuse nucleus of the inferior lobe
+201,26,DIL,diffuse nucleus of the inferior lobe
 201,26,LLF,lateral longitudinal fascicle
 201,26,SR,superior raphe
 201,26,PGZ,periventricular gray zone of optic tectum
@@ -488,7 +488,7 @@ cross_section,pdf_page,abbreviation,definition
 204,27,LC,locus coeruleus
 204,27,Cven,commissura ventralis rhombencephali
 204,27,GC,griseum centrale
-204,27,OIL,diffuse nucleus of the inferior lobe
+204,27,DIL,diffuse nucleus of the inferior lobe
 204,27,DIV,trochlear decussation
 204,27,TeO,tectum opticum
 204,27,TL,torus longitudinalis

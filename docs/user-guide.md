@@ -12,7 +12,7 @@ The app has six screens down the left, in the order you work. Do them top to bot
 
 | # | Screen | What you do there | You are done when |
 | --- | --- | --- | --- |
-| ⌂ | **Project** | Open or create your study's project. Read the **Next up** card and press **Go**. | You know which screen to go to next. |
+| ⌂ | **Project** | Open or create your study's project. Read the **Next up** card (if settings are missing, it names each Set up card and what it lacks) and press **Go**. | You know which screen to go to next. |
 | 1 | **Set up** | Point the app at your slides, then fill in the cards in order: folders, file names, microscope and channels, atlas, nucleus detection. Press **Apply** on each card. | No red rows on the Slides tab, and every card says *Applied*. |
 | 2 | **Prepare** | Press **Run all remaining**. It runs on its own and stops when it needs you. | It says it is waiting for a curator. |
 | 3 | **Curate** | Work through each curator tab, press its **Export** button, then **Continue Prepare**. Last comes the ROI curator, where you draw the brain regions. | All curators exported; the ROI curator's Export has written its files. |
@@ -123,6 +123,8 @@ Every field has a short hint, an **(i)** with the full reasoning and which stage
 3. **Fix every red row before you go on.** A red row is a file whose name does not fit the naming pattern, and every stage would silently ignore it. Fix the pattern on the *Slide file names* card, or rename the file.
 4. Press **Use these slides**.
 
+Once a folder is set, the top of the Slides tab says which folder the study reads and how many files the slide headers list, and the tab gets a ✓. For the LS study that is 444 files from `D:\SLIDES HE DEC 2025 LS`. Use the buttons only to change it.
+
 Choosing a folder only records where the slides are; nothing is moved. Picking separate files from one folder records a list, which costs no space. If the files are spread over several folders, the app offers to link or copy them and always shows the size first.
 
 ### Study and folders
@@ -145,6 +147,8 @@ The app reads which animal and slide each file is from its name, and builds the 
 
 Animal is required; slide and replicate are optional. An animal ID cannot contain an underscore `_`.
 
+In the LS study the pattern also accepts a suffix after a dash, so a name such as `LS53_2b-_A568.czi` is read like `LS53_2b.czi`.
+
 ### Microscope and channels
 
 | Setting | What it means | LS study value |
@@ -152,7 +156,7 @@ Animal is required; slide and replicate are optional. An animal ID cannot contai
 | Pixel size (µm) | Camera pixel size at the objective used | 0.65 |
 | Section thickness (µm) | How thick the sections were cut. Used for the Abercrombie correction. | 14 |
 | Overview resolution (µm per px) | Size of the small per-section pictures | 5.2 (default) |
-| Acquisition layout | **multiplex**: one scan holds every marker. **paired**: one scan per marker, each with its own counterstain. | paired (pERK and PCNA were scanned separately) |
+| Acquisition layout | **multiplex**: one scan holds every marker. **paired**: one scan per marker, each with its own counterstain. | paired: pERK (AF568) and PCNA (AF488) were scanned separately, listed in that order under Markers |
 | Counterstain colour | How DAPI is drawn in pictures | blue |
 | DAPI index, Marker index | Which channel in the CZI file is which | 0 and 1 |
 
@@ -220,6 +224,7 @@ What you change is remembered in the project and used every time that stage runs
 | 00d CZI self-test | Checks for faults that would make every measurement wrong, such as images shifted between zoom levels | `qc/czi_selftest.csv` | Also read N files' pixels; only the first N files |
 | 01 Export section overviews | Saves a picture of every section at one fixed size and brightness, scores focus, and saves a mask of pixels where the camera hit its maximum | `overviews/`, `qc/focus.csv` | Redo; first N |
 | 01d Contact sheets | Each animal's sections side by side in brain order, to browse quickly | `contactsheets/` | Which picture (RGB, marker only, DAPI only); sections per row; thumbnail size |
+| 01l Pictures of every scene (coming with PR #26) | Draws every scene of every slide straight from the scan, at 2.6 µm per pixel (1.3 at the finest), so you can look at the raw tissue before anything is cropped or rotated. For viewing only: no later stage reads these pictures and nothing is measured from them. | scene\_renders/\<marker>/stain+DAPI/ (stain over the counterstain) and stain\_only/ (stain alone, in grey) | Resolution (2.6 or 1.3 µm); brightness: same for all (the dataset's range, so scenes compare; default) or per scene (each stretched to its own tissue); one marker only; redo |
 | 02 Pair the two marker passes | Works out which pERK scan and which PCNA scan show the same physical section (paired studies only) | `pairs.csv` |  |
 | 00c Infer marker identity | Suggests which dye carries which marker from how the signal looks. Reports only; changes nothing. | `qc/channel_identity/` |  |
 | 01k Clipping on the raw plane | Now only fills in clipping masks for sections exported before 01 made them, and checks them at full resolution. Skips sections that already have one. | `qc/saturation_raw.csv`, `qc/censor_raw/` | Redo; full-resolution check on N sections (default 30); first N |
@@ -272,11 +277,12 @@ Prepare now stops and the Curate screen asks for the **rotation and exclusion cu
 | Stage | What it does | Makes | Options |
 | --- | --- | --- | --- |
 | 04n Order the ROI queue | Orders sections so stopping part way still covers every animal and brain level equally | `reformatted/roi_worklist.csv` | Hold out animals with fewer than N sections (10) |
-| 04o Colour pictures (pERK, PCNA) | Colour pictures for the curator: nuclei blue, marker in colour. Drawn from the original scan, with no 8-bit loss, at 2.6 µm per pixel by default (setting \`curation\_render.um\_per\_px\` in \`config.json\`). 1.3 µm is the finest allowed, because a whole section at full resolution is too large for the curator to hold. Measurement always reads the full 0.65 µm scan. | colour section pictures | Picture size (×256 px, default 3 = 768 px); include excluded; redo |
-| 04o Review thumbnails (pERK, PCNA) | Small pictures for the curator's Review grid | thumbnails | Thumbnail size (256 px) |
+| 04o Colour pictures and thumbnails (pERK, PCNA) | Colour pictures for the curator: nuclei blue, marker in colour. One run per marker also makes the 256 px thumbnails for the curator's Review grid. Drawn from the original scan, with no 8-bit loss, at 2.6 µm per pixel by default (setting `curation_render.um_per_px` in `config.json`). 1.3 µm is the finest allowed, because a whole section at full resolution is too large for the curator to hold; the scan is read in strips, so memory stays bounded. Measurement always reads the full 0.65 µm scan. | colour section pictures | Picture size (×256 px, default 3 = 768 px); include excluded; thumbnail size (256 px); redo |
 | 04p Trace every section | Follows every scanned section through every decision, for Review | `reformatted/section_provenance.csv` | Build tissue outlines (slow, once); redo |
 
 **What good looks like.** In the curator, every section is upright, centred and the same size, with debris gone and no pen marks around the tissue. The colour pictures look sharp when zoomed.
+
+> **Going back to the old previews.** If the new pictures cause trouble, set `curation_render.source` to `overview` in `config.json` (shown in Set up as *Curation images from*). The curator then shows the old 768 px pictures made from the 5.2 µm overview, which are softer (about 8 µm per screen pixel). Both kinds use the same frame, so landmarks and regions you already placed stay where they are, and measurement is unchanged. Pictures that already exist are kept until you rebuild them: run this stage with **Redo … already done** switched on, or from a command prompt run `python scripts/04o_section_rgb.py --marker AF568 --all --thumbs --force` and then the same with `--marker AF488`.
 
 **Common problems.** A section rotated badly after curation means its rotation was not exported; check the rotation curator's Export. Many sections set aside for saturation in one animal is a property of that animal's scans, not a bug; note it for the analysis.
 
@@ -511,7 +517,7 @@ Every stage is a script in `scripts/` and can also be run from a terminal; the (
 | Red rows on the Slides tab | File names do not fit the naming pattern | Fix the pattern with **Build…** on *Slide file names*, or rename the files |
 | Fewer sections than expected | Unmatched file names, or an incomplete copy | Check the Slides tab and the 00b result |
 | Run all remaining stops at a stage | That stage failed, or it waits for a curator | Read the screen's note and **Show log**. A waiting stage names the curator to export. |
-| "Finish Set up" on the Next up card | A required setting is empty | Open Set up; the card with the missing setting says so |
+| "Finish Set up" on the Next up card | A required setting is empty | The card names each Set up card and the settings it lacks; open Set up and fill those in |
 | A curator's decisions are ignored | You did not press **Export** | Open the curator and press Export, then Continue Prepare |
 | Curation made in a browser is missing | Browser work is stored in that browser only | **Tools > Migrate browser curation**, or **Bring in browser exports** |
 | Nucleus detection is greyed out | No StarDist in this Python | Start with `run_app.bat` (uses `work/appenv`), not the packaged .exe |

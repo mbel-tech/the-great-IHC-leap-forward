@@ -374,6 +374,28 @@ Measure puts your regions back onto the original slides, finds every nucleus ins
 | 05c Detect and measure nuclei | Reads each region at full resolution, finds nuclei with StarDist (on DAPI; PCNA on its own channel, see below), measures the marker in each, and flags nuclei that sit on clipped pixels | `results/roi_nuclei.csv` | Order sections are measured in; save check pictures; redo; first N |
 | 06a Per-region dataset | Turns nuclei into per-region numbers: how many cells, how many positive, per mm² | `results/roi_measurements.csv`, `results/detector_specificity.csv` |  |
 
+### How your regions get from the curator to the slide
+
+You draw regions on a small, standardised picture of the section, but nuclei can only be counted on the original scan. The picture in the curator is about 25 µm per pixel on the 256 grid; a nucleus is about 7 µm. So every region has to be carried back, point by point, onto the slide's own 0.65 µm pixels. This is the mapping step, and it happens in five moves.
+
+```mermaid
+flowchart LR
+    M1{{1. Your click<br/>stored on the 256 grid<br/>about 25 µm/px}} --> M2[2. Overview<br/>re-run reformat, then undo it<br/>5.2 µm/px]
+    M2 --> M3[3. Slide<br/>scale x 8, plus section position]
+    M3 --> M4[4. Reading box<br/>rectangle around the outline<br/>0.65 µm/px]
+    M4 --> M5{{5. Keep nuclei<br/>inside your outline only}}
+```
+
+1. **Your click is stored on the 256 grid.** The curator picture may be shown at any size, and you may be zoomed in. Neither matters: when you export, every point is converted to the same 256 × 256 grid, so `roi_regions.csv` always holds grid coordinates. Zoom is only a view and never changes what is saved.
+2. **The grid is turned back into the overview.** Stage 05a rebuilds how this section was standardised by re-running the exact same steps as the reformat stage: find the tissue, rotate it, flip it, crop it, pad it to a square. It checks that the rotation it gets matches the one recorded when you curated (to within 0.06°), and skips the section if not. It then undoes those steps, landing on the 5.2 µm overview picture of the section.
+3. **The overview is placed on the slide.** The overview is exactly 8 times coarser than the scan, and the section's position on the slide is known from the file header. 05a checks the overview size matches the section's rectangle in the file. All of this becomes one small transformation per section, saved in the region geometry file.
+4. **Each outline gets a reading box.** Every corner of your outline goes through that transformation. The rectangle around the outline is the only part of the slide file that detection reads, at full 0.65 µm resolution.
+5. **Nuclei are kept only if they are inside your outline.** 05c finds nuclei in the box, then sends each nucleus centre back through the transformation and keeps it only if it falls inside the shape you drew. So your outline decides what counts, not the box.
+
+Two details worth knowing. A region is mapped corner by corner, so it keeps its true shape even where a section was stretched more one way than the other; a round background disc becomes an oval on the slide, and its area is measured as such. And 05a's first stage, *Verify the inverse transform*, checks the whole chain on every pixel before anything is measured.
+
+> **Being worked on.** A one-line fix is in progress for a constant half-pixel shift: today every region sits about half a 256-grid pixel (roughly 12 µm) down and to the right of where it was drawn, which moves about 3% of nuclei across a region edge. The curator picture itself may also change. This section will be updated when both are settled.
+
 ### Nucleus detection, in plain words
 
 - **Nuclei are found on DAPI, not on the marker (PCNA is the one exception, below).** The marker is measured afterwards inside each nucleus, and "positive" is decided later still. So you can change the positivity rule without re-reading any scans.

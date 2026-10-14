@@ -14,6 +14,8 @@ from PySide6.QtWidgets import (
     QDialog, QDialogButtonBox, QLabel, QPlainTextEdit, QTableWidget, QTableWidgetItem,
     QTabWidget, QVBoxLayout, QWidget)
 
+import theme as T
+
 SHORT = 70
 
 
@@ -87,7 +89,7 @@ class ProjectHistory(QDialog):
         head = QLabel("%s\nid %s    created %s    last saved %s    app %s" % (
             p.path or "not saved yet", block.get("id", "?"), _when(block.get("created")) or "?",
             _when(block.get("modified")) or "never", block.get("app_version") or "?"))
-        head.setStyleSheet("color:#9aa0a8;font-size:11px")
+        head.setStyleSheet(T.HINT)
         head.setWordWrap(True)
 
         self.tabs = QTabWidget()
@@ -108,7 +110,7 @@ class ProjectHistory(QDialog):
 
         foot = QLabel("The animal-to-treatment key is never written into this history, only the "
                       "fact that it changed. Lists keep the newest entries (runs 200, decisions 500).")
-        foot.setStyleSheet("color:#9aa0a8;font-size:11px")
+        foot.setStyleSheet(T.HINT)
         foot.setWordWrap(True)
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
         buttons.rejected.connect(self.reject)

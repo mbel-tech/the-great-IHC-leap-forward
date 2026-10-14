@@ -517,7 +517,7 @@ STAGES = [
           blurb="Bright objects strictly inside the tissue - bubbles, aggregates, "
                 "fibres - masked rather than excluded. Detected on DAPI at "
                 "overview resolution, on every scanned section, so it needs no "
-                "reformat and runs before the rotation curator."),
+                "reformat."),
 
     Stage("artifact_perk", "04g  Mask artifacts - pERK", "Normalisation and curation",
           script="04g_artifact_mask.py", argv=["--marker", "{marker0}", "--include-excluded"],
@@ -532,7 +532,8 @@ STAGES = [
           needs=["overviews", "atlas_extract"],
           blurb="Debris removed, rotated onto the principal axis, centred, "
                 "cropped, padded square, 256 px - all on DAPI. The frame every "
-                "later coordinate lives in. First pass, before curation."),
+                "later coordinate lives in. First pass, for the exclusion "
+                "proposals."),
 
     Stage("exclusion", "04f  Propose unmeasurable sections", "Normalisation and curation",
           script="04f_exclusion_candidates.py",
@@ -540,30 +541,13 @@ STAGES = [
           needs=["reformat_pcna"],
           blurb="Conservative proposals only: no tissue worth the name, or no "
                 "resolvable nuclear detail. Every call carries its numbers and "
-                "is adjudicated in the rotation curator."),
-
-    Stage("symmetry", "04h  Propose symmetry-axis rotations", "Normalisation and curation",
-          script="04h_symmetry_axis.py",
-          outputs=[REF + "symmetry_proposals.csv"],
-          needs=["exclusion"],
-          blurb="A residual rotation that puts each section's midline vertical, "
-                "pre-applied in the rotation curator so the manual pass fixes "
-                "failures instead of rotating everything."),
-
-    Stage("rotation_curator", "04d  Rotation and exclusion curator",
-          "Normalisation and curation",
-          script="04d_rotation_curator.py",
-          outputs=[REF + "rotation_curator.html"],
-          curator=REF + "rotation_curator.html", operator=True,
-          needs=["symmetry"],
-          blurb="Adjudicate each PCNA section: drag it upright, accept or "
-                "overrule the exclusion proposals. Export writes "
-                "rotation_overrides.csv."),
+                "is applied by the final reformat; the ROI curator's Review "
+                "mode reinstates any it got wrong."),
 
     Stage("censor_pcna", "04j  Censor clipped pixels - PCNA", "Normalisation and curation",
           script="04j_censor_clipped.py", argv=["--marker", "{marker1}"],
           outputs=[Art("analysis_set", 1)],
-          needs=["saturation_raw", "rotation_curator"],
+          needs=["saturation_raw", "exclusion"],
           blurb="Sections above the 1% clipped tolerance are set aside with a "
                 "flag; surviving clipped pixels are right-censored, not masked. "
                 "AF488 clips rarely but measurably."),

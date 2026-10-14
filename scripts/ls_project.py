@@ -449,6 +449,28 @@ class Project:
         self._check_writable()
         self.block["notes"] = str(text)
 
+    # ---- stage options ----------------------------------------------------------
+
+    def stage_options(self, stage):
+        """{flag: value} the operator chose for one stage; {} when untouched.
+
+        Kept in the `project` block, which no stage reads: the app turns them into
+        command-line flags when it runs the stage, so a stage run from a terminal
+        is unaffected by what was chosen here.
+        """
+        return dict(((self.block.get("stage_options") or {}).get(stage)) or {})
+
+    def set_stage_options(self, stage, values):
+        """Remember the options chosen for one stage; an empty dict forgets them."""
+        self._check_writable()
+        held = self.block.setdefault("stage_options", {})
+        if values:
+            held[stage] = dict(values)
+        else:
+            held.pop(stage, None)
+        if not held:
+            self.block.pop("stage_options", None)
+
     # ---- portable paths -------------------------------------------------------
 
     def folder(self):
@@ -759,7 +781,7 @@ class Project:
 
     # ---- the run history ------------------------------------------------------
 
-    def record_run(self, stage, ok, started, ended):
+    def record_run(self, stage, ok, started, ended, options=None):
         """Append a run to `project.runs` on disk and in memory, saving nothing else.
 
         Stages read the file from disk, so a run is always of what is on disk; the
@@ -768,6 +790,8 @@ class Project:
         """
         rec = {"stage": stage, "started": started, "ended": ended, "ok": bool(ok),
                "config_sha": None, "code": code_version()}
+        if options:
+            rec["options"] = dict(options)
         if not self.path or not os.path.exists(self.path):
             rec["config_sha"] = self.config_sha()
             self.block.setdefault("runs", []).append(rec)

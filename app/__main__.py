@@ -98,6 +98,9 @@ def main():
 
     app = QApplication(sys.argv)
     app.setApplicationName("LS IHC pipeline")
+    # Before any window exists, so the study picker is drawn light too.
+    import theme
+    theme.apply(app)
 
     try:
         from study_picker import ensure_study
@@ -161,7 +164,7 @@ def _self_test(app, w):
 
     results["window"] = w.isVisible()
     results["local server"] = bool(w.server.port)
-    results["stages listed"] = w.list.count() > 5
+    results["steps listed"] = w.nav.count() >= 6
 
     if target is None:
         results["curator"] = False

@@ -12,13 +12,14 @@ the pipeline does not read.
 """
 
 import copy
+import html
 import json
 import os
 
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
     QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMessageBox, QPushButton,
-    QScrollArea, QVBoxLayout, QWidget)
+    QScrollArea, QToolButton, QVBoxLayout, QWidget)
 
 import atlas_registry as AR
 import ls_channel_edit as CE
@@ -26,6 +27,81 @@ import ls_atlas_import as AI
 import ls_config as LC
 import ls_jsonio
 from channel_editor import ChannelEditor
+import theme as T
+from widgets import InfoButton
+
+
+#: How a paired study finds the objects each marker is measured in, as Set up
+#: offers it: the words shown, and the `acquisition.marker_segmentation` entry
+#: written (None: the marker is not listed, so it takes the nuclear route).
+NUCLEAR_ROUTE = "On the counterstain (DAPI)"
+OWN_ROUTE = "On this marker's own channel"
+OWN_ENTRY = {"segment": "own", "backend": "stardist", "nucleus_shaped": True}
+#: Said under a marker whose nuclei are found on its own channel: what that costs.
+OWN_CONSEQUENCE = "Total cell density is withheld for this marker."
+
+
+class _SegmentationRow(QWidget):
+    """Per marker of a paired study: are its nuclei found on DAPI or on itself?
+
+    The LS PCNA (AF488) scans carry a DAPI plane that is noise, so PCNA has to be
+    segmented on its own green channel. Without this row that was only possible
+    by editing config.json. An entry already in the file with settings of its
+    own (another backend) is kept as it is while its marker stays on its own
+    channel.
+    """
+
+    def __init__(self, markers, block, parent=None):
+        super().__init__(parent)
+        self.block = dict(block) if isinstance(block, dict) else {}
+        self.lay = QFormLayout(self)
+        self.lay.setContentsMargins(0, 0, 0, 0)
+        self.combos = {}
+        self.set_markers(markers)
+
+    def set_markers(self, markers):
+        current = (self.value() or {}) if self.combos else self.block
+        while self.lay.rowCount():
+            self.lay.removeRow(0)
+        self.combos, self.notes = {}, {}
+        for m in markers:
+            combo = QComboBox()
+            combo.addItems([NUCLEAR_ROUTE, OWN_ROUTE])
+            entry = current.get(m)
+            own = isinstance(entry, dict) and (entry.get("segment") or "own") == "own"
+            combo.setCurrentText(OWN_ROUTE if own else NUCLEAR_ROUTE)
+            # The choice changes what the results can report, so say so beside
+            # it rather than only in the (i).
+            note = QLabel(OWN_CONSEQUENCE)
+            note.setStyleSheet(f"color:{T.WARN};font-size:12px")
+            note.setVisible(own)
+            combo.currentTextChanged.connect(
+                lambda text, n=note: n.setVisible(text == OWN_ROUTE))
+            cell = QWidget()
+            cl = QVBoxLayout(cell)
+            cl.setContentsMargins(0, 0, 0, 0)
+            cl.setSpacing(2)
+            cl.addWidget(combo)
+            cl.addWidget(note)
+            self.combos[m], self.notes[m] = combo, note
+            self.lay.addRow(m, cell)
+        if not markers:
+            note = QLabel("No markers declared yet (Channels and markers...).")
+            note.setStyleSheet(T.QUIET)
+            self.lay.addRow(note)
+
+    def value(self):
+        out = {}
+        for m, combo in self.combos.items():
+            if combo.currentText() == OWN_ROUTE:
+                kept = self.block.get(m)
+                out[m] = dict(kept) if isinstance(kept, dict) and \
+                    (kept.get("segment") or "own") == "own" else dict(OWN_ENTRY)
+        return out or None
+
+    def reset(self):
+        for combo in self.combos.values():
+            combo.setCurrentText(NUCLEAR_ROUTE)
 
 
 class _PathRow(QWidget):
@@ -134,10 +210,55 @@ def _widget_for(key, value, choices=None):
     return edit, lambda: (edit.text().strip() or None)
 
 
-class ConfigDialog(QDialog):
-    """Edit one study's config. `path` names it; default is the active one."""
+def _set_widget(widget, value):
+    """Put `value` into an editor made by `_widget_for` - the Reset button's half."""
+    if isinstance(widget, _SegmentationRow):
+        widget.reset()
+    elif isinstance(widget, (_PathRow, _PatternRow)):
+        widget.edit.setText("" if value is None else str(value))
+    elif isinstance(widget, QCheckBox):
+        widget.setChecked(bool(value))
+    elif isinstance(widget, QComboBox):
+        if value is not None:
+            widget.setCurrentText(str(value))
+    elif isinstance(widget, QLineEdit):
+        widget.setText("" if value is None else str(value))
 
-    def __init__(self, repo_root, path=None, study_name=None, parent=None, project=None):
+
+def _esc(text):
+    return html.escape(str(text if text is not None else ""), quote=False)
+
+
+def key_info(key):
+    """The (i) text for one setting: the hint, the reasoning, the default, who reads it."""
+    parts = [f"<p>{_esc(key.doc)}</p>"]
+    if key.note:
+        parts.append(f"<p>{_esc(key.note)}</p>")
+    if key.default is not None:
+        shown = json.dumps(key.default) if not isinstance(key.default, str) else key.default
+        parts.append(f"<p style='{T.QUIET}'>Default: {_esc(shown)}</p>")
+    elif key.required:
+        parts.append(f"<p style='{T.QUIET}'>Required: there is no default.</p>")
+    if getattr(key, "minimum", None) is not None:
+        parts.append(f"<p style='{T.QUIET}'>Smallest allowed: %s</p>" % _esc(key.minimum))
+    if key.consumers:
+        parts.append(f"<p style='{T.QUIET}'>Read by: %s</p>" % _esc(", ".join(key.consumers)))
+    parts.append(f"<p style='{T.QUIET}'>Stored as <code>{_esc(key.path)}</code></p>")
+    return "".join(parts)
+
+
+class SettingsForm(QWidget):
+    """The settings of one study as a form: one row per key, with (i) and Reset.
+
+    Shared by the Settings dialog (every key) and the Set up screen's cards (a
+    few keys each). `keys` names the dotted keys to show, in order; None shows
+    every key the spec offers. Validation always covers the whole study, so a
+    card that shows four keys still cannot apply a study the pipeline would
+    refuse.
+    """
+
+    def __init__(self, repo_root, path=None, study_name=None, parent=None, project=None,
+                 keys=None, headings=None):
         super().__init__(parent)
         self.repo_root = repo_root
         # With a project, this edits the project IN MEMORY: Apply changes it and
@@ -151,21 +272,35 @@ class ConfigDialog(QDialog):
         self.study_name = study_name
         self.channel_edits = None           # {key: value} from the channel editor
         self.channel_layout = None          # the layout those edits were made for
-        self.setWindowTitle(f"Settings — {os.path.basename(self.path)}")
-        self.resize(760, 620)
+        self.message = None                 # the last reason Apply refused, for a caller to show
 
         cfg = self._load()
         if study_name:
             cfg.setdefault("study", {})["name"] = study_name
 
-        form = QFormLayout()
+        fields = LC.dialog_fields()
+        if keys is not None:
+            by_path = {k.path: k for k in fields}
+            fields = [by_path[k] for k in keys if k in by_path]
+
+        form = QFormLayout(self)
+        form.setContentsMargins(0, 0, 0, 0)
         self.rows = {}
-        for key in LC.dialog_fields():
+        self.widgets = {}
+        for key in fields:
+            # A sub-heading inside a card that holds two groups of settings.
+            if headings and key.path in headings:
+                title, line = headings[key.path]
+                head = QLabel(f"<b>{_esc(title)}</b><br><span style='{T.QUIET}'>"
+                              f"{_esc(line)}</span>")
+                head.setWordWrap(True)
+                head.setContentsMargins(0, 10 if self.rows else 0, 0, 4)
+                form.addRow(head)
             found, value = LC._get(cfg, key.parts)
             if key.path == "slide_naming.pattern":
                 widget = _PatternRow(
                     value if found else key.default,
-                    lambda: self.rows["source_dir"][1]())
+                    self._source_dir)
                 getter = widget.value
                 self.pattern_row = widget
             elif key.path == "atlas_source":
@@ -176,9 +311,22 @@ class ConfigDialog(QDialog):
             else:
                 widget, getter = _widget_for(key, value if found else key.default)
             self.rows[key.path] = (key, getter)
-            form.addRow(key.label + ("  *" if key.required else ""), widget)
+            self.widgets[key.path] = widget
+            line = QHBoxLayout()
+            line.setContentsMargins(0, 0, 0, 0)
+            line.addWidget(widget, 1)
+            reset = QToolButton()
+            reset.setText("↺")
+            reset.setToolTip("Back to the default" if key.default is not None
+                             else "Clear (this setting has no default)")
+            reset.clicked.connect(lambda _=False, w=widget, k=key: _set_widget(w, k.default))
+            line.addWidget(reset)
+            line.addWidget(InfoButton(key.label, key_info(key)))
+            holder = QWidget()
+            holder.setLayout(line)
+            form.addRow(key.label + ("  *" if key.required else ""), holder)
             hint = QLabel(key.doc)
-            hint.setStyleSheet("color:#9aa0a8;font-size:11px")
+            hint.setStyleSheet(T.HINT)
             hint.setWordWrap(True)
             form.addRow("", hint)
             if key.path == "acquisition.layout":
@@ -187,6 +335,7 @@ class ConfigDialog(QDialog):
                               "the colour each marker is drawn in")
                 cb.clicked.connect(self._edit_channels)
                 form.addRow("", cb)
+                self._add_segmentation_row(form, cfg)
             if key.path == "atlas_source":
                 btn = QPushButton("Import atlas...")
                 btn.setToolTip("add an atlas you made elsewhere: a folder of plate "
@@ -194,29 +343,69 @@ class ConfigDialog(QDialog):
                 btn.clicked.connect(self._import_atlas)
                 form.addRow("", btn)
 
-        inner = QWidget()
-        inner.setLayout(form)
-        scroll = QScrollArea()
-        scroll.setWidget(inner)
-        scroll.setWidgetResizable(True)
+    def _add_segmentation_row(self, form, cfg):
+        """Where each marker's nuclei are found - shown for a paired study only."""
+        key = LC.BY_PATH["acquisition.marker_segmentation"]
+        found, value = LC._get(cfg, key.parts)
+        self.seg_row = _SegmentationRow(self._markers_now(), value if found else {})
+        line = QHBoxLayout()
+        line.setContentsMargins(0, 0, 0, 0)
+        line.addWidget(self.seg_row, 1)
+        reset = QToolButton()
+        reset.setText("↺")
+        reset.setToolTip("Back to the default: every marker on the counterstain")
+        reset.clicked.connect(self.seg_row.reset)
+        line.addWidget(reset)
+        line.addWidget(InfoButton("Where nuclei are found", key_info(key)))
+        holder = QWidget()
+        holder.setLayout(line)
+        label = QLabel("Find nuclei")
+        form.addRow(label, holder)
+        hint = QLabel("For a marker whose scan has no usable DAPI (the LS PCNA scans), "
+                      "find its nuclei on the marker itself. Its fraction positive and "
+                      "total cell density are then not reported; positive density is.")
+        hint.setStyleSheet(T.HINT)
+        hint.setWordWrap(True)
+        form.addRow("", hint)
+        self._seg_parts = (label, holder, hint)
+        self.rows[key.path] = (key, self._segmentation_value)
+        self.widgets[key.path] = self.seg_row
+        layout_widget = self.widgets.get("acquisition.layout")
+        if isinstance(layout_widget, QComboBox):
+            layout_widget.currentTextChanged.connect(lambda _t: self._show_segmentation())
+        self._show_segmentation()
 
-        buttons = QDialogButtonBox((QDialogButtonBox.Apply if self.project else QDialogButtonBox.Save)
-                                   | QDialogButtonBox.Cancel)
-        self.ok_button = buttons.button(QDialogButtonBox.Apply if self.project else QDialogButtonBox.Save)
-        buttons.accepted.connect(self._save)
-        buttons.rejected.connect(self.reject)
-        if self.project:                    # Apply is not an AcceptRole button
-            self.ok_button.clicked.connect(self._save)
+    def _segmentation_value(self):
+        # Only a paired study may carry the block; anywhere else it is dropped.
+        return self.seg_row.value() if self._layout_now() == "paired" else None
 
-        note = QLabel("Changes apply to the open project and are written when you choose "
-                      "File > Save." if self.project else f"Writing to {self.path}")
-        note.setStyleSheet("color:#9aa0a8;font-size:11px")
-        note.setWordWrap(True)
+    def _show_segmentation(self):
+        on = self._layout_now() == "paired"
+        for w in self._seg_parts:
+            w.setVisible(on)
 
-        lay = QVBoxLayout(self)
-        lay.addWidget(scroll, 1)
-        lay.addWidget(note)
-        lay.addWidget(buttons)
+    def _markers_now(self):
+        cfg = self._load()
+        if self.channel_edits is not None:
+            cfg = CE.apply(cfg, self.channel_edits)
+        markers = (cfg.get("acquisition") or {}).get("markers") or []
+        return [m for m in markers if isinstance(m, str)]
+
+    def _source_dir(self):
+        """The slides folder as it would be applied: this form's, else the study's."""
+        row = self.rows.get("source_dir")
+        if row:
+            return row[1]()
+        return self._load().get("source_dir")
+
+    def complete(self):
+        """True when every required key this form shows has a value."""
+        return not self.missing()
+
+    def missing(self):
+        """The labels of the required keys this form shows that have no value."""
+        return [key.label or key.path for key, get in self.rows.values()
+                if key.required and get() in (None, "")]
 
     @staticmethod
     def _atlas_names(cfg):
@@ -239,6 +428,8 @@ class ConfigDialog(QDialog):
         dlg = ChannelEditor(cfg, layout, self, on_detected=lambda f, ch: self.detected.append((f, ch)))
         if dlg.exec() == QDialog.Accepted and dlg.result_edits is not None:
             self.channel_edits, self.channel_layout = dlg.result_edits, layout
+            if getattr(self, "seg_row", None) is not None:
+                self.seg_row.set_markers(self._markers_now())
 
     def _import_atlas(self):
         """Pick a folder, have it judged, and register it as an atlas.
@@ -313,7 +504,7 @@ class ConfigDialog(QDialog):
         self.atlas_combo.setCurrentText(name)
         QMessageBox.information(
             self, "Atlas imported",
-            "'%s' is registered and selected. Press Save to keep your other changes." % name)
+            "'%s' is registered and selected. Press Apply to keep your other changes." % name)
 
     def _load(self):
         """The study being edited, or the template for one that is new."""
@@ -328,8 +519,8 @@ class ConfigDialog(QDialog):
                 continue
         return {}
 
-    def _save(self):
-        """Validate before writing.
+    def apply(self):
+        """Validate before writing. True when the settings were applied or written.
 
         A wrong value written here surfaces much later, inside a stage, as a
         message about a missing file rather than a wrong setting. This is the
@@ -358,7 +549,7 @@ class ConfigDialog(QDialog):
                     self, "Channels need another look",
                     "The channels were edited for the %s layout, and the layout has "
                     "since changed. Open 'Channels and markers...' again." % self.channel_layout)
-                return
+                return False
             for path, value in self.channel_edits.items():
                 LC._set(cfg, path.split("."), value)
 
@@ -373,9 +564,9 @@ class ConfigDialog(QDialog):
 
         errors, _ = LC.validate(cfg, self.path, strict_paths=True)
         if errors:
-            QMessageBox.warning(self, "Not saved yet",
-                                "\n\n".join(errors[:6]))
-            return
+            self.message = "\n\n".join(errors[:6])
+            QMessageBox.warning(self, "Not saved yet", self.message)
+            return False
 
         cfg = LC.apply_defaults(cfg)
         out_root = cfg.get("out_root")
@@ -387,13 +578,12 @@ class ConfigDialog(QDialog):
                 self._apply_to_project(cfg)
             except Exception as exc:                        # noqa: BLE001
                 QMessageBox.warning(self, "Not applied", str(exc))
-                return
-            self.accept()
-            return
+                return False
+            return True
 
         ls_jsonio.write_json_atomic(self.path, cfg)
         LC.clear_cache()
-        self.accept()
+        return True
 
     def _touched(self):
         """Dotted keys the person actually edited here, as opposed to defaults filled in."""
@@ -427,6 +617,64 @@ class ConfigDialog(QDialog):
         for file, channels in self.detected:
             self.project.note_detected(file, channels)
         self.detected = []
+
+
+
+class ConfigDialog(QDialog):
+    """Edit one study's config. `path` names it; default is the active one.
+
+    A frame around a `SettingsForm` showing every key. `rows`, `detected` and
+    `project` are the form's, so a caller can reach them as before.
+    """
+
+    def __init__(self, repo_root, path=None, study_name=None, parent=None, project=None):
+        super().__init__(parent)
+        self.form = SettingsForm(repo_root, path=path, study_name=study_name, parent=self,
+                                 project=project)
+        self.project = project
+        self.path = self.form.path
+        self.rows = self.form.rows
+        self.detected = self.form.detected
+        self.setWindowTitle(f"Settings — {os.path.basename(self.path)}")
+        self.resize(760, 620)
+
+        scroll = QScrollArea()
+        scroll.setWidget(self.form)
+        scroll.setWidgetResizable(True)
+
+        buttons = QDialogButtonBox((QDialogButtonBox.Apply if self.project else QDialogButtonBox.Save)
+                                   | QDialogButtonBox.Cancel)
+        self.ok_button = buttons.button(QDialogButtonBox.Apply if self.project else QDialogButtonBox.Save)
+        buttons.accepted.connect(self._save)
+        buttons.rejected.connect(self.reject)
+        if self.project:                    # Apply is not an AcceptRole button
+            self.ok_button.clicked.connect(self._save)
+
+        note = QLabel("Changes apply to the open project and are saved with it, or "
+                      "automatically before a stage runs." if self.project
+                      else f"Writing to {self.path}")
+        note.setStyleSheet(T.HINT)
+        note.setWordWrap(True)
+
+        lay = QVBoxLayout(self)
+        lay.addWidget(scroll, 1)
+        lay.addWidget(note)
+        lay.addWidget(buttons)
+
+    def __getattr__(self, name):
+        # Anything else the dialog used to own (pattern_row, atlas_combo,
+        # channel_edits, ...) now lives on the form; reach it there.
+        form = self.__dict__.get("form")
+        if form is None:
+            raise AttributeError(name)
+        return getattr(form, name)
+
+    def _save(self):
+        # The form's lists are replaced, not mutated, in a few places; keep the
+        # caller's view of them in step before applying.
+        self.form.detected = self.detected
+        if self.form.apply():
+            self.accept()
 
 
 def _canon(v):

@@ -1,31 +1,35 @@
-"""The application shell: stages down the left, work on the right.
+"""The application shell: a step bar down the left, one screen at a time on the right.
 
-Deliberately a thin frame. Every judgement about the pipeline lives in
-`stages.py`; everything about running one lives in `runner.py`. This file decides
-only what is on screen.
+Deliberately a thin frame. What the pipeline is lives in `stages.py`; how it is
+laid out for the operator, and explained, lives in `workflow.py`; running one
+stage lives in `runner.py`; the screens themselves in `screens.py`. This file
+decides what is on screen, and runs the queue of stages the screens ask for.
+
+The previous layout - every stage in one list, in the order of the methods
+figure - is still here as View > All stages.
 """
 
 import json
 import os
 
 from PySide6.QtCore import QObject, Qt, QThread, Signal
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
-    QFileDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMainWindow,
-    QMessageBox, QPlainTextEdit, QPushButton, QSplitter, QStackedWidget,
-    QVBoxLayout, QWidget)
+    QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel, QListWidgetItem, QMainWindow,
+    QMessageBox, QPlainTextEdit, QPushButton, QStackedWidget, QVBoxLayout, QWidget)
 
 import ls_project as LP
 import stages as S
 import state as ST
-from config_dialog import ConfigDialog
+import theme as T
+import workflow as W
 from curator_view import CuratorView, LocalServer
 from import_slides import ImportScreen
 from project_session import ProjectSession, now_iso
 from runner import Runner
-
-DOT = {"done": "#3fb950", "todo": "#8b949e", "cli": "#6e4d99",
-       "running": "#4da3ff", "failed": "#f85149", "skip": "#484f58"}
+from study_picker import reveal
+from screens import CurateScreen, HomeScreen, SetupScreen, StageListScreen
+from widgets import COLOUR, QUIET, StepList, UnblindDialog
 
 
 class _Job(QObject):
@@ -42,6 +46,52 @@ class _Job(QObject):
         self.finished.emit(res)
 
 
+class ActivityDrawer(QFrame):
+    """The strip along the bottom: what is running, its last line, and the full log."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("drawer")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(10, 4, 10, 4)
+        top = QHBoxLayout()
+        self.state = QLabel("Idle")
+        f = self.state.font()
+        f.setBold(True)
+        self.state.setFont(f)
+        top.addWidget(self.state)
+        self.last = QLabel("")
+        self.last.setStyleSheet(QUIET)
+        self.last.setMinimumWidth(100)
+        top.addWidget(self.last, 1)
+        self.stop_btn = QPushButton("Stop after this stage")
+        self.stop_btn.setVisible(False)
+        top.addWidget(self.stop_btn)
+        self.toggle = QPushButton("Show log")
+        self.toggle.setCheckable(True)
+        self.toggle.toggled.connect(self._toggle)
+        top.addWidget(self.toggle)
+        lay.addLayout(top)
+        self.log = QPlainTextEdit()
+        self.log.setObjectName("log")
+        self.log.setReadOnly(True)
+        self.log.setFont(T.font(12, mono=True))
+        self.log.setMaximumBlockCount(20000)
+        self.log.setMinimumHeight(180)
+        self.log.setVisible(False)
+        lay.addWidget(self.log)
+
+    def _toggle(self, on):
+        self.log.setVisible(on)
+        self.toggle.setText("Hide log" if on else "Show log")
+
+    def append(self, text):
+        self.log.appendPlainText(text)
+        tail = (text or "").strip().splitlines()
+        if tail:
+            self.last.setText(tail[-1][:160])
+
+
 class MainWindow(QMainWindow):
     def __init__(self, repo_root, scripts_dir=None, config_path=None):
         super().__init__()
@@ -55,86 +105,122 @@ class MainWindow(QMainWindow):
         self.scripts_dir = scripts_dir or os.path.join(repo_root, "scripts")
         self.runner = Runner(self.scripts_dir, self.config_path)
         # The open project: the study config plus the app's record of working on it.
-        # Held in memory; stages read the saved file, so a run asks to save first.
+        # Held in memory; stages read the saved file, so a run saves it first.
         self.session = ProjectSession(LP.Project.open(self.config_path), self)
+        self._pending_log = []
         for key, _old, new in self.session.project.reanchored:
-            self._pending_log = getattr(self, "_pending_log", []) + [
-                f"paths updated for this location: {key} -> {new} (File > Save to keep)"]
+            self._pending_log.append(
+                f"paths updated for this location: {key} -> {new} (File > Save to keep)")
         self.session.changed.connect(self._update_title)
         self.session.opened.connect(self._project_opened)
         self.session.saved.connect(self._project_saved)
         self.out_root = self._config()["out_root"]
         line = self.session.sync_curation(self)
         if line:
-            self._pending_log = getattr(self, "_pending_log", []) + [f"curation: {line}"]
+            self._pending_log.append(f"curation: {line}")
         self.server = LocalServer(self.out_root)
         self._thread = None
-        self._states = {}
+        self._running = {}          # stage id -> running / queued / failed, this session
+        self._queue = []
+        self._queue_total = 0
+        self._shortfalls = []
+        self._stop_requested = False
 
-        self.resize(1360, 860)
+        self.resize(1400, 900)
 
-        # ---- left: the pipeline ------------------------------------------
-        self.list = QListWidget()
-        self.list.setAlternatingRowColors(False)
-        self.list.currentItemChanged.connect(self._on_select)
-        self.list.setMinimumWidth(330)
-
-        self.run_btn = QPushButton("Run stage")
-        self.run_btn.clicked.connect(self._run_current)
-        self.refresh_btn = QPushButton("Refresh status")
-        self.refresh_btn.clicked.connect(self.refresh)
-        btns = QHBoxLayout()
-        btns.addWidget(self.run_btn, 1)
-        btns.addWidget(self.refresh_btn)
-
-        left = QWidget()
-        lv = QVBoxLayout(left)
-        lv.setContentsMargins(6, 6, 6, 6)
-        lv.addWidget(self.list, 1)
-        lv.addLayout(btns)
-
-        # ---- right: log, import, curators --------------------------------
-        self.log = QPlainTextEdit()
-        self.log.setReadOnly(True)
-        self.log.setFont(QFont("Consolas", 9))
-        self.log.setMaximumBlockCount(20000)
-
-        self.blurb = QLabel("")
-        self.blurb.setWordWrap(True)
-        self.blurb.setStyleSheet("padding:6px")
-
-        log_page = QWidget()
-        lg = QVBoxLayout(log_page)
-        lg.setContentsMargins(0, 0, 0, 0)
-        lg.addWidget(self.blurb)
-        lg.addWidget(self.log, 1)
-
+        # ---- the screens ----------------------------------------------------
+        self.curator = CuratorView(self.server, self.out_root,
+                                   project_source=lambda: self.session.project)
+        self.curator.logged.connect(self._log)
         self.importer = ImportScreen(self.config_path, self.runner)
         self.importer.logged.connect(self._log)
         self.importer.imported.connect(self.refresh)
 
-        self.curator = CuratorView(self.server, self.out_root,
-                                   project_source=lambda: self.session.project)
-        self.curator.logged.connect(self._log)
+        self.home = HomeScreen()
+        self.home.goto.connect(self.goto)
+        self.home.action.connect(self._home_action)
+        self.setup = SetupScreen(self.repo_root, self.importer, self.session)
+        self.setup.applied.connect(self.refresh)
+        self.setup.logged.connect(self._log)
+        self.curate = CurateScreen(self.curator)
+        self.lists = {sid: StageListScreen(W.SCREENS[sid])
+                      for sid in ("prepare", "measure", "results", "instrument", "all")}
 
         self.stack = QStackedWidget()
-        self.stack.addWidget(log_page)      # 0
-        self.stack.addWidget(self.importer)  # 1
-        self.stack.addWidget(self.curator)   # 2
+        self.pages = {"home": self.home, "setup": self.setup, "curate": self.curate}
+        self.pages.update(self.lists)
+        for sid in ("home", "setup", "prepare", "curate", "measure", "results",
+                    "instrument", "all"):
+            self.stack.addWidget(self.pages[sid])
+        for scr in [self.curate] + list(self.lists.values()):
+            scr.run_requested.connect(self.run_stages)
+            scr.options_changed.connect(self._options_changed)
+            scr.goto.connect(self.goto)
+        for scr in self.lists.values():
+            scr.open_requested.connect(self.open_curator)
 
-        split = QSplitter(Qt.Horizontal)
-        split.addWidget(left)
-        split.addWidget(self.stack)
-        split.setStretchFactor(1, 1)
-        self.setCentralWidget(split)
+        # ---- the step list ---------------------------------------------------
+        # The six steps, then the two screens most people never need under
+        # Advanced at the foot. Between 236 and 280 px: narrower and the
+        # descriptions wrap to three lines, wider and the screens lose room.
+        self.nav = StepList()
+        for i, scr in enumerate(W.STEPS):
+            it = QListWidgetItem(scr.title)
+            it.setData(Qt.UserRole, scr.sid)
+            self.nav.addItem(it)
+            self.nav.set_step(i, title=scr.title, badge=str(i) if i else "⌂",
+                              sub=scr.subtitle)
+        self.nav.currentItemChanged.connect(self._nav_changed)
+        steps = QFrame()
+        steps.setObjectName("stepColumn")
+        steps.setMinimumWidth(236)
+        steps.setMaximumWidth(280)
+        sl = QVBoxLayout(steps)
+        sl.setContentsMargins(0, 8, 0, 10)
+        sl.setSpacing(2)
+        sl.addWidget(self.nav, 1)
+        adv = QLabel("ADVANCED")
+        adv.setObjectName("groupLabel")
+        adv.setContentsMargins(16, 6, 0, 2)
+        sl.addWidget(adv)
+        self.advanced = {}
+        for sid, label in (("all", "All stages"), ("instrument", "Instrument characterisation")):
+            b = QPushButton(label)
+            b.setObjectName("advButton")
+            b.setCheckable(True)
+            b.setToolTip(W.SCREENS[sid].intro)
+            b.clicked.connect(lambda _=False, s=sid: self.goto(s))
+            box = QHBoxLayout()
+            box.setContentsMargins(6, 0, 6, 0)
+            box.addWidget(b)
+            sl.addLayout(box)
+            self.advanced[sid] = b
 
+        # ---- the activity drawer -------------------------------------------
+        self.drawer = ActivityDrawer()
+        self.drawer.stop_btn.clicked.connect(self._request_stop)
+        self.log = self.drawer.log
+
+        body = QWidget()
+        hb = QHBoxLayout(body)
+        hb.setContentsMargins(0, 0, 0, 0)
+        hb.setSpacing(0)
+        hb.addWidget(steps)
+        hb.addWidget(self.stack, 1)
+        central = QWidget()
+        vb = QVBoxLayout(central)
+        vb.setContentsMargins(0, 0, 0, 0)
+        vb.setSpacing(0)
+        vb.addWidget(body, 1)
+        vb.addWidget(self.drawer)
+        self.setCentralWidget(central)
+
+        self._build_status_bar()
         self._build_menu()
         self._update_title()
-        self.statusBar().showMessage(
-            f"{self._study_name()}   out_root  {self.out_root}")
-        self._build_list()
+        self.nav.setCurrentRow(0)
         self.refresh()
-        for line in getattr(self, "_pending_log", []):
+        for line in self._pending_log:
             self._log(line)
         self._log(f"repo    {repo_root}")
         self._log(f"out     {self.out_root}")
@@ -147,10 +233,34 @@ class MainWindow(QMainWindow):
         except OSError as e:
             self._log(f"could not write the state export page: {e}")
         held = ST.CurationStore(self.out_root, lambda: self.session.project).all_present()
-        self._log(f"curation state on disk: "
-                  + (", ".join(held) if held else "none yet"))
+        self._log("curation state on disk: " + (", ".join(held) if held else "none yet"))
 
-    # ---- menu -------------------------------------------------------------
+    # ---- status bar -------------------------------------------------------
+
+    def _build_status_bar(self):
+        """Study on the left, what is running in the middle, outputs on the right."""
+        bar = self.statusBar()
+        self.sb_study = QLabel("")
+        self.sb_state = QLabel("Idle")
+        self.sb_state.setAlignment(Qt.AlignCenter)
+        self.sb_out = QLabel("")
+        self.sb_out.setFont(T.font(12, mono=True))
+        self.sb_out.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        for w in (self.sb_study, self.sb_state, self.sb_out):
+            w.setContentsMargins(8, 0, 8, 0)
+        bar.addWidget(self.sb_study)
+        bar.addWidget(self.sb_state, 1)
+        bar.addPermanentWidget(self.sb_out)
+        self._set_run_state("Idle")
+
+    def _set_run_state(self, text, state=None):
+        """The status bar's middle: Idle in grey, or what runs in the running colour."""
+        if not hasattr(self, "sb_state"):
+            return
+        self.sb_state.setText(text)
+        self.sb_state.setStyleSheet(f"color:{COLOUR[state]}" if state else QUIET)
+
+    # ---- menus ------------------------------------------------------------
 
     def _build_menu(self):
         """Kept on self deliberately.
@@ -160,17 +270,35 @@ class MainWindow(QMainWindow):
         menu bar ends up holding a deleted object. Same for the actions.
         """
         self._build_file_menu()
-        self._menu = self.menuBar().addMenu("&Pipeline")
         self._actions = []
-        for label, slot in (("Studies…", self._studies),
-                            ("Settings…", self._settings),
-                            (None, None),
-                            ("Import curation state…", self._import_state),
+
+        self._view_menu = self.menuBar().addMenu("&View")
+        for i, scr in enumerate(W.STEPS):
+            act = self._view_menu.addAction(scr.title)
+            act.setShortcut(QKeySequence(f"Ctrl+{i + 1}"))
+            act.triggered.connect(lambda _=False, s=scr.sid: self.goto(s))
+            self._actions.append(act)
+        self._view_menu.addSeparator()
+        act = self._view_menu.addAction("All stages")
+        act.setToolTip("Every stage in one list, in the order of the methods figure")
+        act.triggered.connect(lambda: self.goto("all"))
+        self._actions.append(act)
+        act = self._view_menu.addAction("Refresh status")
+        act.setShortcut(QKeySequence("F5"))
+        act.triggered.connect(self.refresh)
+        self._actions.append(act)
+
+        self._tools_menu = self.menuBar().addMenu("&Tools")
+        for label, slot in (("Instrument characterisation", lambda: self.goto("instrument")),
+                            ("All settings…", self._settings),
+                            ("Switch study…", self._studies)):
+            act = self._tools_menu.addAction(label)
+            act.triggered.connect(slot)
+            self._actions.append(act)
+        self._migrate_menu = self._tools_menu.addMenu("Migrate browser curation")
+        for label, slot in (("Import curation state…", self._import_state),
                             ("Where is my curation state?", self._explain_state)):
-            if label is None:
-                self._menu.addSeparator()
-                continue
-            act = self._menu.addAction(label)
+            act = self._migrate_menu.addAction(label)
             act.triggered.connect(slot)
             self._actions.append(act)
 
@@ -194,15 +322,32 @@ class MainWindow(QMainWindow):
         self._file_menu.addSeparator()
         add("save", "&Save", lambda: self.session.save(self), "Ctrl+S")
         add("save_as", "Save &As...", lambda: self.session.save_as(self), "Ctrl+Shift+S")
-        add("revert", "&Revert", lambda: self.session.revert(self))
+        add("revert", "&Revert", self._revert)
         self._file_menu.addSeparator()
         add("history", "Project &history...", self._history)
         add("copy", "Export a &copy...", lambda: self.session.export_copy(self))
         self._fill_recent()
 
+    def _revert(self):
+        self.session.revert(self)
+        self.setup.build()
+        self.refresh()
+
     def _history(self):
         from project_history import ProjectHistory
         ProjectHistory(self.session, self).exec()
+
+    def _home_action(self, key):
+        if key == "switch":
+            self._studies()
+        elif key == "open":
+            self.session.open_project(self, repo_root=self.repo_root)
+        elif key == "new":
+            self.session.new_project(self.repo_root, self)
+        elif key == "copy":
+            self.session.export_copy(self)
+        elif key == "history":
+            self._history()
 
     def _fill_recent(self):
         import ls_config as LC
@@ -224,6 +369,8 @@ class MainWindow(QMainWindow):
         if hasattr(self, "_file_actions"):
             self._fill_recent()
 
+    # ---- project changes ----------------------------------------------------
+
     def _project_opened(self, path):
         """A different project file is now open: point the stages and the screens at it."""
         if not path or os.path.normcase(os.path.abspath(path)) == os.path.normcase(self.config_path):
@@ -231,6 +378,7 @@ class MainWindow(QMainWindow):
         self.config_path = os.path.abspath(path)
         self.runner.rebind(self.config_path)
         self.importer.config_path = self.config_path
+        self.setup.build()
         self._rebase()
         line = self.session.sync_curation(self)
         if line:
@@ -250,7 +398,6 @@ class MainWindow(QMainWindow):
                       "stage modules reload on next run")
         else:
             self.refresh()
-        self.statusBar().showMessage(f"{self._study_name()}   out_root  {self.out_root}")
 
     def _studies(self):
         """Switch to another study, or make one."""
@@ -272,15 +419,16 @@ class MainWindow(QMainWindow):
         self.server = LocalServer(self.out_root)
         self.curator.rebase(self.server, self.out_root)
         self.refresh()
-        self.statusBar().showMessage(f"{self._study_name()}   out_root  {self.out_root}")
 
     def _study_name(self):
         try:
-            return (self._config().get("study") or {}).get("name") or                 os.path.splitext(os.path.basename(self.config_path))[0]
+            return (self._config().get("study") or {}).get("name") or \
+                os.path.splitext(os.path.basename(self.config_path))[0]
         except Exception:                                   # noqa: BLE001
             return "?"
 
     def _settings(self):
+        from config_dialog import ConfigDialog
         if self.session.project.read_only:
             QMessageBox.information(self, "Read-only project",
                                     "This project was written by a newer version of the app and "
@@ -290,8 +438,26 @@ class MainWindow(QMainWindow):
                            project=self.session.project)
         if dlg.exec():
             self.session.touch()
-            self._log("settings applied to the project - choose File > Save to write them; "
-                      "stages read the saved file")
+            self.setup.build()
+            self.refresh()
+            self._log("settings applied to the project - saved automatically before the "
+                      "next run, or with File > Save")
+
+    def _options_changed(self, sid, values):
+        """A stage's options were changed on screen: keep what differs from the defaults."""
+        project = self.session.project
+        if project.read_only:
+            return
+        try:
+            clean = W.clean_options(sid, values)
+        except ValueError as exc:
+            self._log(f"option not kept: {exc}")
+            return
+        if clean == project.stage_options(sid):
+            return
+        project.set_stage_options(sid, clean)
+        self.session.touch()
+        self.refresh()
 
     def _import_state(self):
         """Take over curation done in a browser, once.
@@ -332,7 +498,7 @@ class MainWindow(QMainWindow):
             "browser's storage, which no application can read from outside. "
             "To bring it over, open this page in that browser:\n\n"
             f"{page}\n\n"
-            "then use Pipeline > Import curation state.")
+            "then use Tools > Migrate browser curation > Import curation state.")
 
     # ---- helpers ----------------------------------------------------------
 
@@ -341,188 +507,240 @@ class MainWindow(QMainWindow):
             return json.load(fh)
 
     def _log(self, text):
-        self.log.appendPlainText(text)
+        self.drawer.append(text)
 
-    def _build_list(self):
-        self.list.clear()
+    def study(self):
+        """The open study as the screens need it, read once per refresh."""
+        cfg = self._config()
+        return W.Study(cfg.get("out_root", ""), self.runner.names(), cfg)
 
-        def header(text):
-            head = QListWidgetItem(text.upper())
-            head.setFlags(Qt.NoItemFlags)
-            hf = head.font(); hf.setPointSize(max(7, hf.pointSize() - 1)); head.setFont(hf)
-            head.setForeground(Qt.gray)
-            self.list.addItem(head)
+    # ---- navigation ---------------------------------------------------------
 
-        # The figure's first band. Add slides is a screen rather than a stage,
-        # so it is the one row with no script behind it.
-        header("Acquisition")
-        add = QListWidgetItem("  Add slides")
-        add.setData(Qt.UserRole, "__import__")
-        f = add.font(); f.setBold(True); add.setFont(f)
-        self.list.addItem(add)
-        for group in S.GROUPS:
-            header(group)
-            for st in S.in_group(group):
-                it = QListWidgetItem("   " + st.title)
-                it.setData(Qt.UserRole, st.sid)
-                self.list.addItem(it)
+    def _nav_changed(self, item, _prev):
+        if item is not None:
+            self._show(item.data(Qt.UserRole))
 
-    def _state_of(self, st, names=None):
-        if self._states.get(st.sid) in ("running", "failed"):
-            return self._states[st.sid]
-        if names is None:
-            names = self.runner.names()
-        # A stage this study's acquisition layout does not have. Dimmed and
-        # still listed, for the reason the stage table gives for cli_only
-        # stages: hiding it turns "your study does not do this" into "this
-        # does not exist". run_all.sh skips exactly the same list.
-        if not st.applies(names.layout):
-            return "skip"
-        if st.cli_reason():
-            return "cli"
-        return "done" if st.done(self.out_root, names) else "todo"
+    def _show(self, sid):
+        page = self.pages.get(sid)
+        if page is not None:
+            self.stack.setCurrentWidget(page)
+        for key, b in self.advanced.items():
+            b.setChecked(key == sid)
+        if sid == "curate":
+            self.curate.ensure_page()
+
+    def goto(self, target):
+        """Show a screen. `prepare:run` also starts its Run all remaining."""
+        sid, _, then = target.partition(":")
+        if sid not in self.pages:
+            return
+        row = next((i for i, s in enumerate(W.STEPS) if s.sid == sid), None)
+        self.nav.blockSignals(True)
+        if row is None:
+            self.nav.clearSelection()
+            self.nav.setCurrentRow(-1)
+        else:
+            self.nav.setCurrentRow(row)
+        self.nav.blockSignals(False)
+        self._show(sid)
+        if then == "run" and sid in self.lists:
+            self.refresh()
+            plan, _held = W.run_plan(sid, self.study())
+            if plan:
+                self.run_stages(plan)
+
+    def open_curator(self, sid):
+        if sid in W.FOLDERS:
+            self.open_folder(sid)
+            return
+        self.curate.show_curator(sid)
+        self.goto("curate")
+
+    def open_folder(self, sid):
+        """Show the folder of pictures a stage made, in the file manager."""
+        got = W.output_folder(sid, self._config())
+        if not got or not os.path.isdir(got[1]):
+            QMessageBox.information(
+                self, "Nothing to open yet",
+                "%s has not made any pictures yet%s." % (
+                    W.display_title(S.BY_ID[sid]),
+                    " (they will go to %s)" % got[1] if got else ""))
+            return
+        reveal(got[1])
+
+    # ---- status -------------------------------------------------------------
 
     def refresh(self):
         self.out_root = self._config()["out_root"]
         # Asked ONCE for the whole sweep. Resolving it per stage would re-read
-        # config.json 57 times on every refresh, and a refresh happens on every
-        # stage completion.
-        names = self.runner.names()
-        for i in range(self.list.count()):
-            it = self.list.item(i)
-            sid = it.data(Qt.UserRole)
-            if not sid or sid == "__import__":
-                continue
-            st = S.BY_ID[sid]
-            state = self._state_of(st, names)
-            # The figure's red outline: a person decides here. And the one
-            # stage that reads the group key, marked so it cannot be run by
-            # accident while the analysis is meant to be blind.
-            mark = "  ✎" if st.operator else ("  ⚠ unblinds" if st.unblinds else "")
-            it.setText(f"  ● {st.title}{mark}")
-            it.setForeground(QColor(DOT[state]))
-            it.setToolTip(st.cli_reason() or st.blurb)
-        self.statusBar().showMessage(f"out_root  {self.out_root}")
-
-    # ---- selection --------------------------------------------------------
-
-    def _current_stage(self):
-        it = self.list.currentItem()
-        if not it:
-            return None
-        sid = it.data(Qt.UserRole)
-        return S.BY_ID.get(sid) if sid and sid != "__import__" else None
-
-    def _on_select(self, item, _prev):
-        if not item:
-            return
-        sid = item.data(Qt.UserRole)
-        if sid == "__import__":
-            self.stack.setCurrentIndex(1)
-            self.run_btn.setEnabled(False)
-            return
-        st = S.BY_ID.get(sid)
-        if not st:
-            return
-        if st.curator:
-            self.curator.show_page(st.curator, st.title)
-            self.stack.setCurrentIndex(2)
-        else:
-            self.stack.setCurrentIndex(0)
-
-        # One resolution for the whole panel: which markers this study has and
-        # what its artifacts are called. Asked before anything uses it, because
-        # `names` below is a list of stage TITLES and shadowing is how a panel
-        # ends up calling .markers on a string.
-        study = self.runner.names()
-        blocked = S.blocked_by(st, self.out_root, study)
-        reason = st.cli_reason()
-        off_layout = not st.applies(study.layout)
-        bits = [f"<b>{st.title}</b>", st.blurb]
-        if st.operator:
-            bits.append("<span style='color:#f85149'><b>An operator decides here.</b> "
-                        "The page opens on the right; Export writes beside it.</span>")
-        if st.unblinds:
-            bits.append("<span style='color:#f85149'><b>Reads the treatment group.</b> "
-                        "Nothing before this stage may.</span>")
-        if off_layout:
-            bits.append(
-                "<span style='color:#8b949e'><b>Not part of this study.</b> "
-                f"It applies to {' and '.join(st.layouts)} acquisition; this "
-                f"study is {study.layout}.</span>")
-        if reason:
-            bits.append(f"<span style='color:#bc8cff'><b>Not run here.</b> {reason}</span>")
-        elif blocked:
-            names = ", ".join(S.BY_ID[b].title for b in blocked)
-            bits.append(f"<span style='color:#d29922'>Usually run after: {names}"
-                        "</span>")
-        # The right-hand column of the figure: the file each stage leaves
-        # behind, and which reader touched pixels to make it.
-        if st.outputs:
-            # The NAMES this study writes, not the table's tokens: a stage that
-            # leaves `sections_{marker0}` is a sentence about the code, and the
-            # operator is looking for a folder on their drive.
-            shown = st.output_names(self.out_root, study)
-            missing = set(st.missing(self.out_root, study))
-            files = ", ".join(
-                (f"<span style='color:#d29922'>{o}</span>" if o in missing else o)
-                for o in shown)
-            bits.append(f"<span style='color:#9aa0a8'>leaves: {files}</span>")
-        if st.reader != "none":
-            bits.append(f"<span style='color:#9aa0a8'>pixels read by {st.reader}</span>")
-        if st.script:
-            # The command as it would actually run: `--marker {marker0}`
-            # is not something anyone can type.
-            argv = " ".join(S.fill_markers(a, study.markers)
-                            for a in st.argv)
-            bits.append(f"<code>{st.script} {argv}</code>")
-        self.blurb.setText("<br>".join(b for b in bits if b))
-        self.run_btn.setEnabled(bool(st.script) and not reason and not off_layout)
-        self.run_btn.setText("Regenerate" if st.curator else "Run stage")
+        # config.json for every stage on every refresh, and a refresh happens on
+        # every stage completion.
+        study = self.study()
+        busy = self._thread is not None
+        project = self.session.project
+        for scr in self.lists.values():
+            scr.refresh(study, self._running, project, busy)
+        self.curate.refresh(study, self._running, project, busy)
+        self.setup.update_marks(study)
+        sd, st = self.setup.completion()
+        self.home.refresh(study, project, sd, st, busy, self.setup.missing())
+        for i, scr in enumerate(W.STEPS):
+            if scr.sid == "home":
+                words, complete = "", False
+            else:
+                done, total = (sd, st) if scr.sid == "setup" else W.step_progress(scr.sid, study)
+                words = W.progress_words(scr.sid, done, total)
+                complete = bool(total) and done >= total
+            self.nav.set_step(i, title=scr.title, badge=str(i) if i else "⌂",
+                              sub=scr.subtitle, progress=words, complete=complete)
+        self.sb_study.setText(f"Study: {self._study_name()}")
+        self.sb_out.setText(self.out_root)
+        self.sb_out.setToolTip(f"Outputs are written to {self.out_root}")
 
     # ---- running ----------------------------------------------------------
 
-    def _run_current(self):
-        st = self._current_stage()
-        if not st or self._thread:
-            return
-        if not self.session.ensure_saved_for_run(self):
-            return
+    def run_stages(self, sids):
+        """Queue stages to run in order, one at a time. Saves the project first."""
+        if self._thread is not None:
+            QMessageBox.information(self, "Already running",
+                                    "A stage is running. Wait for it to finish, or press "
+                                    "Stop after this stage.")
+            return False
+        stages = [S.BY_ID[s] for s in sids if s in S.BY_ID]
+        if not stages:
+            return False
+        unblinding = [st for st in stages if st.unblinds]
+        if unblinding and not self._confirm_unblind(unblinding):
+            return False
+        if not self.session.ensure_saved_for_run(self, auto=True):
+            return False
         line = self.session.sync_curation(self)
         if line:
             self._log(f"curation: {line}")
-        self._run_started = now_iso()
-        self._states[st.sid] = "running"
-        self.refresh()
-        self.run_btn.setEnabled(False)
-        self._log(f"\n=== {st.title} ===")
+        self._queue = [st.sid for st in stages]
+        self._shortfalls = []
+        self._queue_total = len(self._queue)
+        self._stop_requested = False
+        for sid in self._queue:
+            self._running[sid] = "queued"
+        self.drawer.stop_btn.setVisible(len(self._queue) > 1)
+        self._run_next()
+        return True
 
+    def _confirm_unblind(self, unblinding):
+        """Ask before the treatment groups are read, and which workbook to read.
+
+        The workbook is the unblinding stage's own --xlsx option, so what is
+        chosen here is what its Options panel shows, and is kept in the project.
+        """
+        names = ", ".join(W.display_title(st, self.study()) for st in unblinding)
+        sid = "join_sampling" if any(st.sid == "join_sampling" for st in unblinding) else None
+        project = self.session.project
+        before = project.stage_options(sid).get("--xlsx", "") if sid else ""
+        dlg = UnblindDialog(names, before, self)
+        if not sid:
+            dlg.field.setEnabled(False)
+        if dlg.exec() != QDialog.Accepted:
+            return False
+        chosen = dlg.workbook()
+        if sid and chosen != (before or ""):
+            values = dict(project.stage_options(sid))
+            values["--xlsx"] = chosen
+            self._options_changed(sid, values)
+        return True
+
+    def _request_stop(self):
+        self._stop_requested = True
+        self.drawer.stop_btn.setEnabled(False)
+        self.drawer.state.setText(self.drawer.state.text() + " - stopping after this stage")
+
+    def _run_next(self):
+        if not self._queue or self._stop_requested:
+            for sid in self._queue:
+                self._running.pop(sid, None)
+            stopped = bool(self._queue)
+            self._queue = []
+            self.drawer.stop_btn.setVisible(False)
+            self.drawer.stop_btn.setEnabled(True)
+            self.drawer.state.setText("Stopped" if stopped else "Idle")
+            self._set_run_state("Stopped" if stopped else "Idle")
+            self.refresh()
+            return
+        sid = self._queue.pop(0)
+        base = S.BY_ID[sid]
+        values = self.session.project.stage_options(sid)
+        st = W.with_options(base, values)
+        n = self._queue_total - len(self._queue)
+        self._run_started = now_iso()
+        self._run_values = values
+        self._running[sid] = "running"
         self._thread = QThread(self)
+        self.refresh()
+        title = W.display_title(base, self.study())
+        self.drawer.state.setText(f"Running {title}"
+                                  + (f"  ({n} of {self._queue_total})" if self._queue_total > 1 else ""))
+        self.drawer.state.setStyleSheet(f"color:{COLOUR['running']}")
+        self._set_run_state(f"Running: {title}"
+                            + (f"  ({n} of {self._queue_total})" if self._queue_total > 1 else ""),
+                            "running")
+        self._log(f"\n=== {base.title} ===")
+        if values:
+            self._log(f"options: {values}")
         self._job = _Job(self.runner, st)
         self._job.moveToThread(self._thread)
         self._thread.started.connect(self._job.run)
         self._job.line.connect(self._log)
-        self._job.finished.connect(lambda res, s=st: self._done(s, res))
+        # A bound method of the window, not a lambda: a lambda has no thread of
+        # its own, so Qt would call it on the worker thread, which then tries to
+        # wait on itself and starts the next stage's thread from inside it.
+        self._current = base
+        self._job.finished.connect(self._job_finished)
         self._thread.start()
+
+    def _job_finished(self, res):
+        self._done(self._current, res)
 
     def _done(self, st, res):
         self._thread.quit()
         self._thread.wait()
         self._thread = None
-        self._states[st.sid] = "done" if res.ok else "failed"
-        problem = self.session.record_run(st.sid, res.ok, getattr(self, "_run_started", None), now_iso())
+        problem = self.session.record_run(st.sid, res.ok, getattr(self, "_run_started", None),
+                                          now_iso(), options=getattr(self, "_run_values", None))
         if problem:
             self._log(f"could not record the run in the project: {problem}")
+        self.drawer.state.setStyleSheet("")
         if res.ok:
+            self._running.pop(st.sid, None)
             self._log(f"--- {st.title}: done in {res.seconds:.1f}s")
-        else:
-            self._log(f"--- {st.title}: FAILED\n{res.error}")
-            QMessageBox.warning(self, f"{st.title} failed",
-                                (res.error or "").split("\n\n")[0][:600])
-        if st.curator and res.ok:
-            self.curator.show_page(st.curator, st.title)
+            short = W.shortfall(st.sid, res.output)
+            if short:
+                self._log(f"--- {st.title}: {short}; the reasons are listed above")
+                self._shortfalls.append(f"{W.display_title(st)}: {short}")
+            if st.curator and self.curate.current == st.sid:
+                self.curator.show_page(st.curator, W.display_title(st, self.study()))
+            self._run_next()
+            if self._thread is None and not self._queue:
+                done = f"Finished {self._queue_total} stage{'s' if self._queue_total != 1 else ''}"
+                if self._shortfalls:
+                    # Done, but not everything was made: say so where the eye is.
+                    done += " (" + "; ".join(self._shortfalls) + ", see log)"
+                    self.drawer.state.setStyleSheet(f"color:{COLOUR['waiting']}")
+                self.drawer.state.setText(done)
+                self._set_run_state("Idle")
+            return
+        self._running[st.sid] = "failed"
+        for sid in self._queue:
+            self._running.pop(sid, None)
+        self._queue = []
+        self.drawer.stop_btn.setVisible(False)
+        self.drawer.state.setText(f"{W.display_title(st)} failed")
+        self.drawer.state.setStyleSheet(f"color:{COLOUR['failed']}")
+        self._set_run_state(f"Failed: {W.display_title(st)}", "failed")
+        self._log(f"--- {st.title}: FAILED\n{res.error}")
         self.refresh()
-        self.run_btn.setEnabled(True)
+        QMessageBox.warning(self, f"{W.display_title(st)} failed",
+                            (res.error or "").split("\n\n")[0][:600]
+                            + "\n\nThe full message is in the log (Show log, bottom right).")
 
     def closeEvent(self, e):
         if not self.session.confirm_discard(self, "close"):

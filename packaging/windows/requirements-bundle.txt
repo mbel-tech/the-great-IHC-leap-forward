@@ -1,0 +1,13 @@
+# What the installed app carries on top of requirements.txt and
+# requirements-czi.txt.
+#
+# Measure (05c) runs StarDist in-process. The old PyInstaller build left it out
+# to save size; the installer carries it, because an app that cannot measure is
+# not the app. TensorFlow on native Windows is CPU-only from 2.11 on.
+stardist>=0.9.2
+tensorflow>=2.20
+
+# Imported by stages but not listed in requirements.txt, where they arrived
+# transitively on the development machine.
+scikit-image>=0.24
+openpyxl>=3.1

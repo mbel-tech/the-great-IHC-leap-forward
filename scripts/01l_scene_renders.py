@@ -19,8 +19,9 @@ the scene pictures folder (`scene_render.out_dir`, by default
                                          red or green alone uses a third of it,
                                          so faint signal stays readable
 
-and one row per scene in `qc/scene_renders.csv` saying which
-picture is which and how it was drawn.
+and one row per picture in `qc/scene_renders.csv` saying which
+picture is which and how it was drawn. The row is keyed by the picture's own
+path, so runs into different folders each keep theirs.
 
 How the pixels are made
 -----------------------
@@ -35,7 +36,14 @@ The resolution is therefore a whole number of native pixels: 2.6 is 4x4
 blocks, 1.3 is 2x2, 0.65 is the scan's own pixels. A value in between is rounded to the nearest whole block
 and the CSV records what was drawn.
 
-The tile-field correction is applied as 01 applies it, when 01f has built one.
+The tile-field correction is applied as 01 applies it, when 01f has built one,
+except on clipped pixels: a pixel at the clip ceiling has lost its value, and
+dividing it by a gain that runs 0.81-1.10 across the tile would print the tile
+pattern onto every clipped area (the hard rectangles first seen in the AF568
+rim on LS105). Clipped pixels stay at the top of the range instead.
+
+Parts of a scene's rectangle that hold no tiles at all read as 0 and are
+drawn black: there is nothing there to show.
 
 Brightness: `--range dataset` (the default) uses 01's frozen display range,
 `qc/display_ranges.json`, so the same brightness means the same signal on
@@ -43,9 +51,15 @@ every picture - the reason the overviews froze theirs. At 2.6 um/px a nucleus
 is no longer averaged with the neuropil around it, so the brightest ones can
 saturate under a range set at 5.2. `--range section` stretches each scene to
 its own tissue instead (01's percentiles, 1 to 99.5, inside 01's log-space
-tissue mask): every picture well exposed, but brightness no longer compares
-between pictures. Without a display_ranges.json the section range is used and
-the CSV says so.
+tissue mask, leaving out clipped pixels): every picture well exposed, but
+brightness no longer compares between pictures. Without a display_ranges.json
+the section range is used and the CSV says so.
+
+A frozen range whose top is the clip ceiling is no range at all - AF568 in this
+dataset froze at 1070..65535 because its rim clips, which leaves the tissue
+near black. Such a channel is stretched per scene as `section` does, the run
+says so once, and the CSV's `marker_range_from` / `nuclear_range_from` say
+`scene` instead of `dataset`.
 
 Nothing here is measured. 05c reads native pixels from the CZI, whatever these
 pictures look like.
@@ -102,22 +116,31 @@ DEFAULT_RANGE = _SR.get("range", "dataset")
 MIN_UM_PX = NATIVE_UM
 #: Bytes held per output pixel at the peak: two float32 planes (counterstain
 #: and marker), the tile-field gain, the 8-bit planes, the RGB composite and
-#: PIL's copy of it while encoding. Rounded up.
-BYTES_PER_PX = 24
-#: Keep this much free for the operating system and anything else running.
-MEMORY_HEADROOM = 1.5e9
+#: PIL's copy of it while encoding, and the two clip masks. Rounded up.
+BYTES_PER_PX = 26
+#: Left over after a scene is allocated, so the allocation itself is not what
+#: tips the computer over. Small, because `available_memory` already counts
+#: only memory that can be had without taking it from anything running.
+MEMORY_HEADROOM = 0.25e9
 #: Native rows per read. Smaller than 04o's 2048 because a whole scene is wider
 #: than a cut section; at 1024 rows a band of a 20,000 px wide scene is 40 MB.
 BAND_ROWS = 1024
 
 ONLY_DIR = "stain_only"
+#: A frozen range whose top is within this fraction of the clip ceiling was
+#: pinned there by clipped pixels and is not used.
+PINNED = 0.95
+#: Pixels sampled for a per-scene range: percentiles do not need every pixel,
+#: and a 0.65 um/px scene has hundreds of millions.
+RANGE_SAMPLE = 4_000_000
 
 INDEX_KEYS = ["scene_uid", "file", "animal", "slide", "variant",
               "marker_channel", "scene_index", "section_order",
               "um_per_px", "block", "width", "height", "range",
-              "nuclear_lo", "nuclear_hi", "marker_lo", "marker_hi",
-              "tilefield_applied", "stain_counterstain", "stain_only",
-              "reader"]
+              "nuclear_lo", "nuclear_hi", "nuclear_range_from",
+              "marker_lo", "marker_hi", "marker_range_from",
+              "clipped_fraction_marker", "tilefield_applied",
+              "stain_counterstain_png", "stain_only_png", "reader"]
 
 
 def _load(script, name):
@@ -165,8 +188,12 @@ def tissue_threshold(image):
     return float(np.expm1(centres[int(np.argmax(var))]))
 
 
-def apply_field(plane, field, b):
+def apply_field(plane, field, b, clipped=None):
     """Divide out 01f's tile field, at each block's centre in the tile fold.
+
+    `clipped` marks blocks whose every native pixel sat at the clip ceiling;
+    they are put back at 65535 after the division rather than taking the
+    field's tile pattern.
 
     `plane` is block-averaged b x b from the scene origin, so output pixel j
     covers native [j*b, (j+1)*b) and its centre is j*b + (b - 1)/2 - the
@@ -186,6 +213,8 @@ def apply_field(plane, field, b):
     ok = gain > 0.05
     out[ok] /= gain[ok]
     np.clip(out, 0, 65535, out=out)
+    if clipped is not None:
+        out[clipped] = 65535
     return out
 
 
@@ -199,12 +228,31 @@ def read_scene(read, rect, b):
     return np.asarray(got[0], dtype=np.float32)
 
 
-def section_range(values, tissue):
-    """01's percentiles, 1 and 99.5, on this scene's own tissue."""
-    inside = values[tissue] if tissue is not None and tissue.sum() >= 500 else values[values > 0]
-    if inside.size < 50:
+def section_range(values, tissue, clipped=None):
+    """01's percentiles, 1 and 99.5, on this scene's own tissue.
+
+    Clipped pixels are left out: where more than 0.5% of the tissue clips, as
+    it does on a third of the AF568 sections, they are the 99.5th percentile
+    and the range tops out at 65535 with the tissue drawn near black.
+    """
+    step = max(1, int(np.sqrt(values.size / RANGE_SAMPLE)))
+    v = values[::step, ::step]
+    keep = v > 0
+    if clipped is not None:
+        keep &= ~clipped[::step, ::step]
+    if tissue is not None:
+        inside = keep & tissue[::step, ::step]
+        if inside.sum() >= 500:
+            keep = inside
+    vals = v[keep]
+    if vals.size < 50:
         return float(values.min()), float(values.max())
-    return float(np.percentile(inside, 1.0)), float(np.percentile(inside, 99.5))
+    return float(np.percentile(vals, 1.0)), float(np.percentile(vals, 99.5))
+
+
+def pinned(rng, ceiling=65535):
+    """True when a frozen range's top sits at the clip ceiling."""
+    return rng is None or float(rng["hi"]) >= PINNED * ceiling
 
 
 def to_8bit(values, lo, hi):
@@ -230,18 +278,56 @@ def load_fields(indices):
     return fields
 
 
+def load_ceilings():
+    """file name -> clip ceiling, from 00's manifest, as 01 reads it."""
+    path = os.path.join(OUT_ROOT, "manifest", "manifest_files.csv")
+    out = {}
+    if os.path.exists(path):
+        with open(path, newline="", encoding="utf-8") as fh:
+            for r in csv.DictReader(fh):
+                try:
+                    out[r["file"]] = int(r["clip_ceiling"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+    return out
+
+
 def load_index():
     if not os.path.exists(INDEX_CSV):
         return {}
     with open(INDEX_CSV, newline="", encoding="utf-8") as fh:
-        return {r["scene_uid"]: r for r in csv.DictReader(fh)}
+        rows = list(csv.DictReader(fh))
+    for r in rows:   # columns renamed: carry an older index's paths across
+        for old in ("stain_counterstain", "stain_only"):
+            if r.get(old) and not r.get(old + "_png"):
+                r[old + "_png"] = r[old]
+    return {index_key(r): r for r in rows if index_key(r)}
+
+
+def index_key(row_or_path):
+    """A picture's row is keyed by its stain-only path, normalised.
+
+    Keyed by scene_uid alone, a run into another folder or at another
+    resolution replaced the row of a picture that is still on disk.
+    """
+    p = row_or_path if isinstance(row_or_path, str) else (
+        row_or_path.get("stain_only_png") or "")
+    return os.path.normcase(os.path.abspath(p)) if p else ""
 
 
 def available_memory():
-    """Bytes of memory free now, or None when this platform will not say."""
+    """Bytes a new allocation can get now, or None when the platform will not say.
+
+    Free RAM PLUS free page file (swap), because that is the limit an
+    allocation actually fails at. Free RAM alone was the first version: on the
+    laptop it read 0.5 GB with the usual programs open, and every scene was
+    skipped - including 2.6 um/px ones a few hundred MB in size, which Windows
+    hands out from the page file without complaint. Exceeding free RAM makes a
+    scene slower, not impossible.
+    """
     try:
         import psutil
-        return int(psutil.virtual_memory().available)
+        return int(psutil.virtual_memory().available + psutil.swap_memory().free)
     except Exception:  # noqa: BLE001 - psutil is optional
         pass
     if sys.platform == "win32":
@@ -260,16 +346,21 @@ def available_memory():
             st = _Status()
             st.dwLength = ctypes.sizeof(_Status)
             if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st)):
-                return int(st.ullAvailPhys)
+                # The commit limit left: RAM and page file together.
+                return int(st.ullAvailPageFile)
         except Exception:  # noqa: BLE001
             return None
         return None
     try:
+        got = {}
         with open("/proc/meminfo", encoding="ascii") as fh:
             for line in fh:
-                if line.startswith("MemAvailable:"):
-                    return int(line.split()[1]) * 1024
-    except OSError:
+                key, _, rest = line.partition(":")
+                if key in ("MemAvailable", "SwapFree"):
+                    got[key] = int(rest.split()[0]) * 1024
+        if "MemAvailable" in got:
+            return got["MemAvailable"] + got.get("SwapFree", 0)
+    except (OSError, ValueError):
         pass
     return None
 
@@ -302,9 +393,7 @@ def same_drawing(row, um_px, range_mode, only_path):
         same_px = abs(float(row.get("um_per_px") or 0) - um_px) < 0.005
     except ValueError:
         same_px = False
-    return (same_px and row.get("range") == range_mode
-            and os.path.normcase(os.path.abspath(row.get("stain_only") or ""))
-            == os.path.normcase(os.path.abspath(only_path)))
+    return same_px and row.get("range") == range_mode and index_key(row) == index_key(only_path)
 
 
 def save_png(img, path):
@@ -314,32 +403,51 @@ def save_png(img, path):
 
 
 def render_scene(read_nuc, read_mark, rect, b, fields_nm, ranges, range_mode,
-                 marker, colour):
+                 marker, colour, ceiling=65535):
     """(composite rgb, stain-only grey, row facts) for one scene, or None."""
     nf, mf = fields_nm
     nuc = read_scene(read_nuc, rect, b)
     if nuc is None:
         return None
-    nuc = apply_field(nuc, nf, b)
-    tissue = nuc > tissue_threshold(nuc) if range_mode == "section" else None
+    # A block mean at the ceiling means every native pixel in it clipped.
+    nclip = nuc >= ceiling - 0.5
+    nuc = apply_field(nuc, nf, b, nclip)
+    frozen_n = None if range_mode == "section" else ranges.get("DAPI")
+    frozen_m = None if range_mode == "section" else ranges.get(marker)
+    n_from = "scene" if pinned(frozen_n, ceiling) else "dataset"
+    m_from = "scene" if pinned(frozen_m, ceiling) else "dataset"
+    tissue = None
+    if "scene" in (n_from, m_from):
+        # Threshold from a sample, clipped pixels zeroed (left out, as 0 is):
+        # a full-size copy at 0.65 um/px would be most of a GB.
+        step = max(1, int(np.sqrt(nuc.size / RANGE_SAMPLE)))
+        sample = np.where(nclip[::step, ::step], 0, nuc[::step, ::step])
+        tissue = nuc > tissue_threshold(sample)
 
-    if range_mode == "dataset":
-        n_lo, n_hi = ranges["DAPI"]["lo"], ranges["DAPI"]["hi"]
-        m_lo, m_hi = ranges[marker]["lo"], ranges[marker]["hi"]
+    if n_from == "dataset":
+        n_lo, n_hi = frozen_n["lo"], frozen_n["hi"]
     else:
-        n_lo, n_hi = section_range(nuc, tissue)
+        n_lo, n_hi = section_range(nuc, tissue, nclip)
     nuc8 = to_8bit(nuc, n_lo, n_hi)
     del nuc
 
-    mark = apply_field(read_scene(read_mark, rect, b), mf, b)
-    if range_mode == "section":
-        m_lo, m_hi = section_range(mark, tissue)
+    mark = read_scene(read_mark, rect, b)
+    mclip = mark >= ceiling - 0.5
+    mark = apply_field(mark, mf, b, mclip)
+    if m_from == "dataset":
+        m_lo, m_hi = frozen_m["lo"], frozen_m["hi"]
+    else:
+        m_lo, m_hi = section_range(mark, tissue, mclip | nclip)
     mark8 = to_8bit(mark, m_lo, m_hi)
-    del mark
+    clipped_frac = float(mclip.mean())
+    del mark, mclip, nclip
 
     rgb = SR.composite(mark8, nuc8, colour, NUCLEAR_COLOUR)
     facts = {"nuclear_lo": "%.0f" % n_lo, "nuclear_hi": "%.0f" % n_hi,
+             "nuclear_range_from": n_from,
              "marker_lo": "%.0f" % m_lo, "marker_hi": "%.0f" % m_hi,
+             "marker_range_from": m_from,
+             "clipped_fraction_marker": "%.4f" % clipped_frac,
              "width": mark8.shape[1], "height": mark8.shape[0]}
     return rgb, mark8, facts
 
@@ -363,7 +471,7 @@ def main():
     ap.add_argument("--force", action="store_true",
                     help="redraw pictures that already exist (default skips them)")
     ap.add_argument("--limit", type=int, default=0, metavar="N",
-                    help="stop after N scenes (0 = all)")
+                    help="stop after trying N scenes, drawn or not (0 = all)")
     args = ap.parse_args()
 
     if args.um_px < MIN_UM_PX - 1e-9:
@@ -392,6 +500,12 @@ def main():
         print(f"no {RANGES_PATH} yet (01 writes it) - stretching each scene to "
               f"its own tissue instead")
         range_mode = "section"
+    ceilings = load_ceilings()
+    if range_mode == "dataset":
+        for name, rng in sorted(ranges.items()):
+            if pinned(rng):
+                print(f"{RANGES_PATH}: {name} is frozen at {rng['lo']}..{rng['hi']}, "
+                      "pinned at the clip ceiling - stretching it per scene instead")
 
     nuc_dir = "stain+" + nuclear_name()
     index = load_index()
@@ -399,7 +513,7 @@ def main():
     for r in scenes:
         by_file.setdefault(r["file"], []).append(r)
 
-    made = existing = 0
+    made = existing = tried = 0
     failed = []
     t0 = time.time()
     fields_cache = {}
@@ -409,10 +523,6 @@ def main():
         colour = MARKER_COLOURS.get(marker)
         if colour is None:
             failed += [(r["scene_uid"], f"no display colour for {marker}") for r in rows]
-            continue
-        if range_mode == "dataset" and ("DAPI" not in ranges or marker not in ranges):
-            failed += [(r["scene_uid"], f"{RANGES_PATH} has no range for {marker} - "
-                        "use --range section") for r in rows]
             continue
         n_idx, m_idx = SR.plane_indices(marker)
         if (n_idx, m_idx) not in fields_cache:
@@ -427,14 +537,20 @@ def main():
             both = [os.path.join(mdir, nuc_dir, uid + ".png"),
                     os.path.join(mdir, ONLY_DIR, uid + ".png")]
             if (not args.force and all(os.path.exists(p) for p in both)
-                    and same_drawing(index.get(uid), um_px, range_mode, both[1])):
+                    and same_drawing(index.get(index_key(both[1])), um_px, range_mode,
+                                     both[1])):
                 existing += 1
                 continue
             todo.append(r)
+        # --limit counts the scenes tried, not the ones drawn: a run where every
+        # scene is skipped (too little memory) must still stop after N.
         if args.limit:
-            todo = todo[:max(0, args.limit - made)]
+            todo = todo[:max(0, args.limit - tried)]
         if not todo:
+            if args.limit and tried >= args.limit:
+                break
             continue
+        tried += len(todo)
 
         path = os.path.join(SOURCE_DIR, fname)
         if not os.path.exists(path):
@@ -458,14 +574,14 @@ def main():
                     need = memory_needed(rects[si], b)
                     room = fits(need)
                     if room is not None:
-                        failed.append((uid, f"needs about {need / 1e9:.1f} GB (plus "
-                                       f"{MEMORY_HEADROOM / 1e9:.1f} GB kept free) at "
-                                       f"{um_px:.2f} um/px and {room / 1e9:.1f} GB "
-                                       "is free - close other programs or choose "
-                                       "a coarser resolution"))
+                        failed.append((uid, f"needs about {need / 1e9:.1f} GB at "
+                                       f"{um_px:.2f} um/px and only {room / 1e9:.1f} GB "
+                                       "can be had (memory and page file) - close "
+                                       "other programs or choose a coarser resolution"))
                         continue
                     got = render_scene(reader(n_idx), reader(m_idx), rects[si], b,
-                                       fields_nm, ranges, range_mode, marker, colour)
+                                       fields_nm, ranges, range_mode, marker, colour,
+                                       ceilings.get(fname, 65535))
                     if got is None:
                         failed.append((uid, "empty scene rectangle"))
                         continue
@@ -474,15 +590,15 @@ def main():
                     p_only = os.path.join(mdir, ONLY_DIR, uid + ".png")
                     save_png(rgb, p_rgb)
                     save_png(only, p_only)
-                    index[uid] = {
+                    index[index_key(p_only)] = {
                         "scene_uid": uid, "file": fname, "animal": r.get("animal", ""),
                         "slide": r.get("slide", ""), "variant": r.get("variant", ""),
                         "marker_channel": marker, "scene_index": si,
                         "section_order": r.get("section_order", ""),
                         "um_per_px": "%.2f" % um_px, "block": b, "range": range_mode,
                         "tilefield_applied": int(fields_nm[1] is not None),
-                        "stain_counterstain": os.path.abspath(p_rgb),
-                        "stain_only": os.path.abspath(p_only),
+                        "stain_counterstain_png": os.path.abspath(p_rgb),
+                        "stain_only_png": os.path.abspath(p_only),
                         "reader": "pylibCZIrw", **facts}
                     drawn.add(uid)
                     made += 1
@@ -495,10 +611,13 @@ def main():
         # drive that has dropped writes before.
         if index:
             IO.atomic_write_csv(INDEX_CSV, list(index.values()), INDEX_KEYS)
-        rate = made / max(time.time() - t0, 1e-9)
-        print(f"\r  drew {made} scenes  ({rate:.2f}/s, "
-              f"{(time.time() - t0) / 60:.1f} min)", end="")
-        if args.limit and made >= args.limit:
+        # Only when this file drew something: a run that skips every scene
+        # otherwise fills its log with one identical progress line per CZI.
+        if drawn:
+            rate = made / max(time.time() - t0, 1e-9)
+            print(f"\r  drew {made} scenes  ({rate:.2f}/s, "
+                  f"{(time.time() - t0) / 60:.1f} min)", end="")
+        if args.limit and tried >= args.limit:
             break
 
     print()

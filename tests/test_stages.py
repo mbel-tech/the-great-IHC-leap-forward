@@ -89,7 +89,7 @@ FIGURE = {
     "atlas_enforce", "atlas_rebuild",
     "reformat_pcna", "reformat_pcna_final",                      # 04a reformat
     "propagate_perk", "reformat_perk_final",
-    "exclusion", "symmetry", "rotation_curator",                 # 04f
+    "exclusion",                                                 # 04f
     "artifact_pcna", "artifact_perk",                            # 04g
     "censor_perk", "censor_pcna", "recensor",                    # 04j / 06f
     "worklist", "provenance", "roi_curator", "import_curation",  # 04l

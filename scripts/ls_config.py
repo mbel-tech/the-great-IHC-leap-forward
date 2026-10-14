@@ -99,7 +99,7 @@ class Key:
     def __init__(self, path, type, doc, required=False, default=None,
                  note=None, consumers=(), status=LIVE, choices=None,
                  materialise=False, example=_UNSET, consumers_pending=False,
-                 ui=None, label=None, in_example=True):
+                 ui=None, label=None, in_example=True, minimum=None):
         # How the settings dialog offers this key. None infers it from `type`;
         # False keeps it out of the dialog entirely, for a key the app writes
         # itself or one whose value is a table rather than a setting.
@@ -124,6 +124,9 @@ class Key:
         self.consumers = tuple(consumers)
         self.status = status
         self.choices = choices
+        # The smallest value a number may take, when the stage reading it refuses
+        # anything below - checked here so Set up refuses it before a run does.
+        self.minimum = minimum
         # A key the Fiji/Groovy stages read straight out of the JSON. They
         # cannot see a Python default, so it must be present as a literal in
         # every written config or they get null.
@@ -292,7 +295,7 @@ note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
              "already twice as sharp per pixel as the overview route, and the "
              "curator's zoom shows every pixel of it. Measurement (05c) always "
              "reads native pixels, whatever this says.",
-        consumers=["04o"]),
+        minimum=1.3, consumers=["04o"]),
 
     Key("scene_render.out_dir", "path_dir_opt",
         "Where the pictures of every scene go. Empty means "
@@ -315,11 +318,12 @@ note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
              "scale). Each picture pixel is the average of whole native 0.65 "
              "um pixels, so the value is rounded to a multiple of 0.65 and the "
              "table records what was drawn. Memory: a whole scene at 0.65 can "
-             "need several GB. Each scene is checked against the memory free "
+             "need several GB. Each scene is checked against the memory (RAM "
+             "plus page file) free "
              "at the time, and one that does not fit is skipped with a "
              "message rather than crashing the run; 1.3 needs a quarter of "
              "that, 2.6 a sixteenth.",
-        consumers=["01l"]),
+        minimum=0.65, consumers=["01l"]),
 
     Key("scene_render.range", "str",
         "How the scene pictures are brightened.",
@@ -330,7 +334,8 @@ note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
              "signal in every picture; the brightest nuclei can saturate at "
              "fine resolutions. `section` stretches each scene to its own "
              "tissue: every picture well exposed, but brightness no longer "
-             "compares between pictures.",
+             "compares between pictures. A frozen range pushed to the top by "
+             "clipped pixels is stretched per scene in either mode.",
         consumers=["01l"]),
 
     # ---- channels (replaced by the channels/markers sub-project) ---------
@@ -869,6 +874,8 @@ def _check(key, value):
             return f"expected a number, got {type(value).__name__}"
         if value <= 0:
             return f"must be greater than zero, got {value}"
+        if key.minimum is not None and value < key.minimum - 1e-9:
+            return f"must be at least {key.minimum}, got {value}"
     elif t == "bool":
         if not isinstance(value, bool):
             return f"expected true or false, got {type(value).__name__}"

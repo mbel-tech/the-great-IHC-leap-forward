@@ -45,6 +45,7 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QWidget
 
 import state as ST
+import theme as T
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -114,6 +115,10 @@ class CuratorView(QWidget):
     """One curator page, with a reload and a note of where exports land."""
 
     logged = Signal(str)
+    #: The full path of each export that finished downloading.
+    exported = Signal(str)
+    #: The Done button was pressed.
+    done_requested = Signal()
 
     def __init__(self, server, out_root, parent=None, project_source=None):
         super().__init__(parent)
@@ -126,15 +131,34 @@ class CuratorView(QWidget):
 
         self.view = QWebEngineView(self)
         self.title = QLabel("", self)
-        self.title.setStyleSheet("color:#9aa0a8;padding:2px 6px")
+        self.title.setStyleSheet(f"{T.QUIET};padding:2px 6px")
 
         reload_btn = QPushButton("Reload", self)
         reload_btn.clicked.connect(self.view.reload)
         browser_btn = QPushButton("Open in browser", self)
         browser_btn.clicked.connect(self._open_external)
+        # The page is one screen of controls above two canvases. Inside the app
+        # window on a laptop it gets about 840 x 320 px, which its header alone
+        # fills, so the canvases vanish and the last row of buttons is cut off.
+        # Its own maximised window gives it the whole screen.
+        self.window_btn = QPushButton("Own window", self)
+        self.window_btn.setCheckable(True)
+        self.window_btn.setToolTip("Open the curator in its own full-size window; "
+                                   "close that window to put it back here")
+        self.window_btn.toggled.connect(self._own_window)
+        self._home = None
+        # Shown only for a curator with a next phase (set_done). It sits in this
+        # bar rather than on the screen around it so it moves with the page into
+        # its own window.
+        self.done_btn = QPushButton("", self)
+        T.mark(self.done_btn, kind="primary")
+        self.done_btn.setVisible(False)
+        self.done_btn.clicked.connect(self.done_requested.emit)
 
         bar = QHBoxLayout()
         bar.addWidget(self.title, 1)
+        bar.addWidget(self.done_btn)
+        bar.addWidget(self.window_btn)
         bar.addWidget(reload_btn)
         bar.addWidget(browser_btn)
 
@@ -146,6 +170,62 @@ class CuratorView(QWidget):
         prof = self.view.page().profile()
         prof.downloadRequested.connect(self._on_download)
         self._install_state_bridge()
+
+    # ---- own window -------------------------------------------------------
+
+    def _own_window(self, on):
+        """Move this view into a maximised window of its own, or back home.
+
+        The same widget moves, not a copy, so the page, its unsaved state and
+        the bridge that saves it all stay as they are.
+        """
+        if on and self._home is None:
+            parent = self.parentWidget()
+            layout = parent.layout() if parent is not None else None
+            if layout is None:
+                self.window_btn.setChecked(False)
+                return
+            self._home = (layout, layout.indexOf(self))
+            layout.removeWidget(self)
+            self.setParent(None)
+            self.setWindowTitle(self.title.text() or "Curator")
+            self.window_btn.setText("Back to the app")
+            self.showMaximized()
+        elif not on and self._home is not None:
+            layout, index = self._home
+            self._home = None
+            self.hide()
+            layout.insertWidget(index, self, 1)
+            self.window_btn.setText("Own window")
+            self.show()
+
+    def closeEvent(self, e):
+        # Closing the separate window puts the curator back rather than losing it.
+        if self._home is not None:
+            e.ignore()
+            self.window_btn.setChecked(False)
+            return
+        super().closeEvent(e)
+
+    def set_done(self, label, tip=""):
+        """Offer the Done button with this label, or hide it for an empty one."""
+        self.done_btn.setText(label)
+        self.done_btn.setToolTip(tip)
+        self.done_btn.setVisible(bool(label))
+
+    def put_back(self):
+        """Return from its own window, if it is in one."""
+        self.window_btn.setChecked(False)
+
+    def run_export(self, on_started):
+        """Press the page's own Export, so its usual files are written.
+
+        `on_started(bool)` says whether the page had an Export to press: a page
+        that is not built yet, or not loaded, has none.
+        """
+        self.view.page().runJavaScript(
+            "typeof exportCsv === 'function' ? (exportCsv(), true) : false",
+            0, lambda ok: on_started(bool(ok)))
 
     # ---- curation state ---------------------------------------------------
 
@@ -224,6 +304,7 @@ class CuratorView(QWidget):
             done = QWebEngineDownloadRequest.DownloadState.DownloadCompleted
             if item.state() == done:
                 self.logged.emit(f"exported  {os.path.join(target, name)}")
+                self.exported.emit(os.path.join(target, name))
             else:
                 self.logged.emit(f"export of {name} did not complete ({item.state().name})")
         item.isFinishedChanged.connect(finished)
@@ -251,7 +332,7 @@ class CuratorView(QWidget):
         path = os.path.join(self.out_root, rel)
         if not os.path.exists(path):
             self.view.setHtml(
-                "<body style='background:#0e1014;color:#e6e6e6;font:14px system-ui;"
+                f"<body style='background:{T.BG};color:{T.TEXT};font:14px system-ui;"
                 "padding:24px'><h2>Not built yet</h2>"
                 f"<p><code>{rel}</code> does not exist. Run the stage that "
                 "generates it, then reload.</p></body>")

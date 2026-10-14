@@ -155,3 +155,6 @@ if (-not $NoR) {
 
 $size = (Get-ChildItem $Out -Recurse -File | Measure-Object Length -Sum).Sum / 1MB
 Write-Host ("Built {0} ({1:N0} MB)" -f $Out, $size)
+
+# compileall may exit non-zero (see above); that is not this script failing.
+exit 0

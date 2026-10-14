@@ -843,201 +843,258 @@ GROUPS = {
 PAGE = """<!doctype html>
 <meta charset="utf-8"><title>ROI curator</title>
 <style>
-:root{--bg:#14161a;--fg:#e8e8ea;--dim:#9aa0a8;--line:#2a2f37;--accent:#4da3ff;
-      --ok:#3fb950;--warn:#d29922;--done:#7c5cff}
+/* LIGHT THEME (docs/ui-handoff.md 3.1 and 6.3). The page used to be dark
+   throughout; it is now light around the pictures and dark only where a
+   fluorescence image is shown - the section and plate canvases, the strip and
+   Review thumbnails and the Review preview - because a dim marker on a white
+   ground is invisible and the whole point of those panes is seeing it. The
+   token NAMES are kept so every var(--dim) etc. already in the script follows
+   the swap without being touched. */
+:root{--bg:#f6f8fa;--fg:#1f2328;--dim:#59636e;--line:#d0d7de;--line-soft:#e6eaee;
+      --accent:#0969da;--ok:#1a7f37;--warn:#9a6700;--done:#6639ba;
+      --surface:#ffffff;--surface-hover:#eef1f4;--ink:#0e1014}
 *{box-sizing:border-box}
-/* The whole tool is one screen. body is a flex column, the panes take what is
-   left, and only the side card and the strip scroll - inside themselves.
-   Until the window is too short for that: inside the app on a laptop the page
-   gets about 320 px, the header alone is more, and with the body clipped the
-   canvases shrank to nothing and the last row of buttons was cut off. So the
-   panes keep a working height and the page scrolls instead of clipping. */
-html,body{height:100%}
-body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 system-ui,sans-serif;
-     display:flex;flex-direction:column;overflow-x:hidden;overflow-y:auto}
-header{flex:0 0 auto;background:var(--bg);border-bottom:1px solid var(--line);
-       padding:7px 14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-h1{font-size:15px;margin:0;font-weight:600}.grow{flex:1}
+/* THE PAGE SCROLLS; NOTHING IS CLIPPED. Inside the app on a laptop the page
+   can get about 320 px of height, and an earlier fixed layout shrank the
+   canvases to nothing and cut off the last row of buttons. So nothing here is
+   height:100% or overflow:hidden on the body: the panes keep a working height
+   of their own (clamp below), the tool rail, centre and info column wrap as
+   the width falls, and the document scrolls. Verified at 840 and 1360 px. */
+body{margin:0;min-height:100vh;background:var(--bg);color:var(--fg);
+     font:14px/1.5 "Segoe UI",system-ui,sans-serif;
+     display:flex;flex-direction:column;overflow-x:hidden}
+header{flex:0 0 auto;min-height:52px;background:var(--surface);border-bottom:1px solid var(--line);
+       padding:8px 14px;display:flex;gap:8px 10px;align-items:center;flex-wrap:wrap}
+h1{font-size:16px;margin:0 4px 0 0;font-weight:600;white-space:nowrap}.grow{flex:1 1 0}
 .row{color:var(--dim)}.row b{color:var(--fg)}
-button,select{background:#1c2027;color:var(--fg);border:1px solid var(--line);border-radius:7px;
-       padding:6px 10px;cursor:pointer;font:inherit}
+button,select{background:var(--surface);color:var(--fg);border:1px solid var(--line);border-radius:7px;
+       padding:6px 10px;cursor:pointer;font:inherit;min-height:34px}
 button:hover{border-color:var(--accent)}
-button.primary{background:var(--accent);border-color:var(--accent);color:#04121f;font-weight:600}
-#panes{flex:1 1 auto;min-height:360px;display:grid;grid-template-columns:1fr 1fr 250px;
-       grid-template-rows:minmax(0,1fr);gap:10px;padding:10px}
-.pane{position:relative;background:#0e1014;border:1px solid var(--line);border-radius:9px;
-      overflow:hidden;min-width:0;min-height:0}
+button:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-visible{
+       outline:2px solid var(--accent);outline-offset:2px}
+/* A canvas is focusable (tabindex) so the keys reach it; its ring sits inside
+   the pane. The mode outlines below are #cSec.<mode>, more specific than this,
+   so a live mode still shows its own colour while the canvas has focus. */
+canvas:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+button.primary:hover{background:#0860ca}
+button[disabled]{opacity:.4;cursor:default}
+button[disabled]:hover{border-color:var(--line)}
+label.chk{color:var(--dim);font-size:12.5px;display:inline-flex;align-items:center;gap:5px;
+          cursor:pointer;min-height:34px}
+/* The six counters, one unit so they wrap together rather than one at a time. */
+.counts{display:flex;gap:4px 12px;flex-wrap:wrap;font-size:12.5px;white-space:nowrap}
+/* THE EXPORT GROUP NEVER SPLITS. The bar wraps, and Shotgun used to be last in a
+   long wrapping run: at 1280 CSS px - what a 1920 screen gives at the 150%
+   scaling Windows commonly ships with - it broke onto a row of its own at the
+   far left, a lone amber button no longer beside the Export it belongs with.
+   nowrap keeps the group on one line; the group still wraps as a unit, and it
+   is narrow enough (well under 840 px) to always be on screen. */
+.deliver{display:flex;gap:6px;align-items:center;flex-wrap:nowrap}
+/* The export target, beside the button that changes it. Truncated rather than
+   wrapped: this group must stay one line. */
+.expdir{font-size:11px;color:var(--dim);max-width:150px;overflow:hidden;
+        text-overflow:ellipsis;white-space:nowrap}
+#expStat{font-size:12px;color:var(--dim)}
+kbd{display:inline-block;padding:0 5px;border:1px solid var(--line);border-radius:4px;
+    background:var(--surface);color:var(--fg);font:600 11px ui-monospace,Consolas,monospace}
+
+/* ---- Body: tool rail, centre, info column -------------------------------- */
+/* flex-wrap with bases rather than a fixed grid: at 1360 px the three sit in a
+   row; at 840 the info column drops below and spreads across (it is an
+   auto-fit grid); narrower still the rail goes full width above the panes. */
+#work{flex:1 0 auto;display:flex;flex-wrap:wrap;align-items:flex-start;gap:12px;padding:12px}
+#rail{flex:1 1 212px;max-width:300px;display:flex;flex-direction:column;gap:10px;min-width:0}
+#centre{flex:999 1 560px;display:flex;flex-direction:column;gap:10px;min-width:0}
+#side{flex:1 1 250px;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
+      align-content:start;gap:9px;min-width:0}
+.grp{background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:8px;
+     display:flex;flex-direction:column;gap:6px}
+.grp h3{margin:0 0 2px;font-size:11px;color:var(--dim);letter-spacing:.04em;
+        text-transform:uppercase;font-weight:600}
+.grp button{width:100%;display:flex;align-items:center;justify-content:flex-start;text-align:left}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.two button{padding:6px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Hide <marker> takes the marker's own ink (markBtnState); its "on" fill is
+   neutral, because no single tint suits every colour a marker can be. */
+#markBtn{--onbg:#eef1f4}
+/* SHORTCUT HINTS ARE CSS, NOT TEXT. status() rewrites these buttons'
+   textContent on every redraw ("Guided ✓", "Excluded ✕"), so a hint written
+   into the label would be wiped the first time anything happened. A data-k
+   attribute survives that, and the key it names is the binding in the keydown
+   handler - the title tooltip still says it too. */
+button[data-k]::after{content:"(" attr(data-k) ")";margin-left:auto;padding-left:8px;
+                      font-size:12px;font-weight:400;opacity:.7}
+.railfoot{font-size:12px;display:flex;flex-direction:column;gap:2px;padding:0 2px}
+#savedAt{color:var(--ok)}
+.disc{font-size:12px;color:var(--dim)}.disc b{color:var(--fg)}
+input[type=range]{width:100%;accent-color:var(--accent)}
+
+/* Coach line: the live mode and what to do in it, one sentence. Coloured like
+   the button that turns the mode on, so the line and the rail agree. */
+#coach{flex:0 0 auto;border:1px solid #4ac26b;background:#dafbe1;border-radius:8px;
+       padding:7px 12px}
+#coach b{color:#116329;white-space:nowrap;margin-right:10px}
+#coach.rot{border-color:#c297ff;background:#fbefff}#coach.rot b{color:#6639ba}
+#coach.bg{border-color:#e68bc4;background:#ffeff7}#coach.bg b{color:#99286e}
+/* display:contents, so each notice is its own row of #centre and a hidden one
+   (display:none, set by the script) leaves no gap behind. */
+#notices{display:contents;font-size:12.5px}
+
+#panes{display:flex;flex-wrap:wrap;gap:12px;min-height:360px}
+/* Each pane holds its own height, so the canvas has room at any window size;
+   two side by side when the centre is wide, stacked when it is not. */
+.pane{flex:1 1 340px;height:clamp(360px,56vh,540px);position:relative;background:var(--ink);
+      border:1px solid var(--line);border-radius:9px;overflow:hidden;min-width:0}
 
 /* Step buttons on each pane. Absolute over the canvas so they cost no layout,
    dim until pointed at so they do not compete with the tissue, and skipped by
    the tab order because the keyboard already has the same moves on the arrows.
    z-index above the h2 so the left one is not swallowed by the title. */
-.nav{position:absolute;top:50%;transform:translateY(-50%);z-index:4;
-     width:34px;height:54px;border-radius:8px;border:1px solid var(--line);
-     background:rgba(14,16,20,.55);color:var(--dim);font:600 20px system-ui;
-     cursor:pointer;opacity:.45;transition:opacity .12s,border-color .12s,color .12s;
+.nav{position:absolute;top:50%;transform:translateY(-50%);z-index:4;min-height:0;
+     width:34px;height:54px;border-radius:8px;border:1px solid #3a424d;
+     background:rgba(14,16,20,.6);color:#d0d7de;font:600 20px system-ui;
+     cursor:pointer;opacity:.55;transition:opacity .12s,border-color .12s,color .12s;
      display:flex;align-items:center;justify-content:center;padding:0}
 .pane:hover .nav{opacity:.9}
-.nav:hover{border-color:var(--accent);color:var(--accent);opacity:1}
-.nav:disabled{opacity:.12;cursor:default;border-color:var(--line);color:var(--dim)}
+.nav:hover{border-color:#54aeff;color:#54aeff;opacity:1}
+.nav:disabled{opacity:.12;cursor:default;border-color:#3a424d;color:#d0d7de}
 .nav.l{left:6px} .nav.r{right:6px}
-.pane h2{position:absolute;top:6px;left:8px;margin:0;font-size:11px;color:var(--dim);
-         z-index:3;pointer-events:none;text-shadow:0 0 6px #000}
+.pane h2{position:absolute;top:6px;left:8px;margin:0;font-size:11px;color:#b6bec8;
+         z-index:3;pointer-events:none;text-shadow:0 0 6px #000;max-width:calc(100% - 140px)}
+/* Zoom, as buttons beside the keys that already did it (+ - 0). */
+.zoombar{position:absolute;top:6px;right:8px;z-index:5;display:flex;gap:4px}
+.zoombar button{min-height:28px;padding:0 9px;background:rgba(14,16,20,.6);color:#d0d7de;
+                border-color:#3a424d;font-size:13px}
+.zoombar button:hover{border-color:#54aeff;color:#54aeff}
 canvas{display:block;width:100%;height:100%;object-fit:contain;cursor:crosshair;
        user-select:none;-webkit-user-drag:none}
 #cSec.rotmode{cursor:ew-resize}
-#cSec.bgmode{cursor:crosshair;outline:3px solid #f778ba;outline-offset:-3px}
-.btn-bg{border-color:#8b3d6b;color:#f778ba}
-.btn-bg:hover{border-color:#f778ba;color:#f778ba}
-.bg-on{border-color:#f778ba !important;background:#33132a;color:#ffb3d9 !important}
-/* Region mode. Green rather than pink, and matching the armed hull's ring on
-   the plate, so the two panes say the same thing about which mode is live. */
-#cSec.regionmode{cursor:crosshair;outline:3px solid #3fb950;outline-offset:-3px}
-.btn-region{border-color:#2d6a3e;color:#7ee787}
-.btn-region:hover{border-color:#3fb950;color:#7ee787}
-.reg-on{border-color:#3fb950 !important;background:#10261a;color:#7ee787 !important}
-/* The "which ROIs will you draw" pop-up. A fixed overlay toggled by display, the
-   same approach as #revImgCard.imgmax: it needs no browser feature that a
-   WebEngine view might lack. */
-.seldlg{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.62);
+#cSec.rotating{cursor:ew-resize}
+#cSec.bgmode{cursor:crosshair;outline:3px solid #bf3989;outline-offset:-3px}
+/* Guided mode. Green, matching the armed hull's ring on the plate, so the two
+   panes say the same thing about which mode is live. */
+#cSec.regionmode{cursor:crosshair;outline:3px solid #1a7f37;outline-offset:-3px}
+
+/* ---- Button colours by function (6.3) ------------------------------------
+   Resting: the hue's text and border on white. On: tinted fill, darker text,
+   stronger border. One set of variables per class and ONE rule for every "on"
+   class, so a hue cannot mean one thing resting and another switched on - the
+   existing on-classes (mode-on, fav-on, kill-on, bg-on, reg-on, guide-on) all
+   resolve through it, which is why the script that toggles them is unchanged.
+   Export stays .primary: solid fill is its own category, the one confirming
+   action. */
+.btn-plate {--c:#0969da;--b:#54aeff;--onbg:#ddf4ff;--ont:#0550ae}
+.btn-rot   {--c:#8250df;--b:#c297ff;--onbg:#fbefff;--ont:#6639ba}
+.btn-fav   {--c:#9a6700;--b:#d4a72c;--onbg:#fff8c5;--ont:#9a6700}
+.btn-excl  {--c:#bc4c00;--b:#e8873a;--onbg:#fff1e5;--ont:#bc4c00}
+.btn-kill  {--c:#cf222e;--b:#ff8182;--onbg:#ffebe9;--ont:#a40e26}
+.btn-bg    {--c:#bf3989;--b:#e68bc4;--onbg:#ffeff7;--ont:#99286e}
+.btn-region,.btn-guide{--c:#1a7f37;--b:#4ac26b;--onbg:#dafbe1;--ont:#116329}
+.btn-edit  {--c:#0a7280;--b:#56c2cf;--onbg:#e0f7fa;--ont:#0a7280}
+.btn-shot  {--c:#9a5b00;--b:#e0a54a;--onbg:#fff8ec;--ont:#9a5b00}
+.btn-plate,.btn-rot,.btn-fav,.btn-excl,.btn-kill,.btn-bg,.btn-region,.btn-guide,
+.btn-edit,.btn-shot{color:var(--c);border-color:var(--b)}
+.btn-plate:hover,.btn-rot:hover,.btn-fav:hover,.btn-excl:hover,.btn-kill:hover,.btn-bg:hover,
+.btn-region:hover,.btn-guide:hover,.btn-edit:hover,.btn-shot:hover{border-color:var(--c)}
+.mode-on,.fav-on,.kill-on,.bg-on,.reg-on,.guide-on{background:var(--onbg,#ddf4ff) !important;
+       color:var(--ont,#0550ae) !important;border-color:var(--c,#0969da) !important}
+/* Disabled, but never FAINT. Shotgun spends most of its life disabled - a page
+   opened from disk cannot build a deck at all, which is the normal way this
+   file gets opened - and under the global button[disabled]{opacity:.4} it read
+   as absent rather than unavailable. It was reported as "not visible" twice,
+   and both times it was there. It keeps its amber and says why in its title. */
+.btn-shot:disabled{opacity:1;background:#fff8ec;cursor:not-allowed}
+.btn-shot:disabled:hover{border-color:var(--b)}
+
+/* The "which ROIs will you draw" pop-up, and the shortcuts pop-up. A fixed
+   overlay toggled by display, the same approach as #revImgCard.imgmax: it needs
+   no browser feature that a WebEngine view might lack. */
+.seldlg{position:fixed;inset:0;z-index:10000;background:rgba(31,35,40,.5);
         display:none;align-items:center;justify-content:center}
 .selcard{width:min(560px,92vw);max-height:84vh;display:flex;flex-direction:column;
-         gap:8px;background:#0e1014;border:1px solid var(--line);border-radius:12px;
+         gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:12px;
          padding:14px}
 .selcard h2{margin:0;font-size:15px}
 .selcard p{margin:0;color:var(--dim);font-size:12.5px}
-#selFilter{background:#1c2027;color:var(--fg);border:1px solid var(--line);
+#selFilter{background:var(--surface);color:var(--fg);border:1px solid var(--line);
            border-radius:7px;padding:6px 10px;font:inherit}
 #selList{overflow:auto;flex:1 1 auto;min-height:140px;border:1px solid var(--line);
          border-radius:8px}
 .selrow{display:flex;gap:9px;align-items:center;padding:5px 9px;cursor:pointer;
-        border-bottom:1px solid #161a20}
-.selrow:hover{background:#151922}
+        border-bottom:1px solid var(--line-soft)}
+.selrow:hover{background:var(--surface-hover)}
 .selrow .sw{width:24px;height:24px;border-radius:50%;flex:0 0 auto;display:flex;
         align-items:center;justify-content:center;font:700 11px system-ui;
-        color:#04121f;border:2px solid #3a424d;background:#222831}
+        color:var(--fg);border:2px solid #bfc6ce;background:#eaeef2}
 .selrow.on .sw{border-color:transparent}
 .selrow .nm{flex:1 1 auto}.selrow .ct{color:var(--dim);font-size:12px}
 .selbar{display:flex;gap:8px;align-items:center}.selbar .grow{flex:1}
-#cSec.rotating{cursor:ew-resize}
-button[disabled]{opacity:.4;cursor:default}
-button[disabled]:hover{border-color:var(--line)}
-#side{display:flex;flex-direction:column;gap:9px;min-height:0;overflow-y:auto}
-.card{border:1px solid var(--line);border-radius:9px;padding:9px;background:#0e1014}
+.keyscard{width:min(660px,94vw);max-height:88vh;overflow:auto;background:var(--surface);
+          border:1px solid var(--line);border-radius:12px;padding:18px 22px;line-height:1.7}
+.keyscard h2{margin:0;font-size:16px;flex:1}
+.keyscols{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:0 28px;
+          margin-top:8px;color:var(--dim)}
+.keyscard p{margin:10px 0 0;color:var(--dim);font-size:12.5px}
+
+.card{border:1px solid var(--line);border-radius:9px;padding:9px;background:var(--surface)}
 .card h3{font-size:11px;margin:0 0 5px;color:var(--dim);font-weight:600;letter-spacing:.04em}
 .kv{font-size:12px;color:var(--dim)}.kv b{color:var(--fg)}
-input[type=range]{width:100%}
 .unlab{color:var(--warn);font-size:11px}
 .lab{color:var(--ok);font-size:11px}
-#lmlist{font:11px ui-monospace,monospace;color:var(--dim);max-height:130px;overflow-y:auto}
+#lmlist{font:11px ui-monospace,Consolas,monospace;color:var(--dim);max-height:130px;overflow-y:auto}
 #lmlist div{display:flex;justify-content:space-between}
-#lmlist .bad{color:#ff6b5e}
-#strip{flex:0 0 auto;display:flex;gap:4px;overflow-x:auto;overflow-y:hidden;
-       padding:7px 14px;border-top:1px solid var(--line);background:#101318}
+#lmlist .bad{color:#cf222e}
+
+/* ---- Section strip ------------------------------------------------------- */
+/* Sticky to the bottom of the window, so the place you are in the animal is
+   on screen however far the page has scrolled. Grouped by animal, each group
+   labelled with its count. */
+#strip{flex:0 0 auto;position:sticky;bottom:0;z-index:6;display:flex;gap:14px;
+       overflow-x:auto;overflow-y:hidden;padding:6px 14px;border-top:1px solid var(--line);
+       background:#f3f5f7}
+.sgrp{flex:0 0 auto;display:flex;flex-direction:column;gap:3px}
+.sglab{font-size:11px;color:var(--dim);font-weight:600;letter-spacing:.04em;
+       text-transform:uppercase;white-space:nowrap}
+.scells{display:flex;gap:4px}
 /* The strip is where the sections would have been, so it is where the reason
    they are not belongs. Sized like a cell so the bar does not collapse. */
 #strip .empty{flex:1 1 auto;display:flex;align-items:center;min-height:74px;
               color:var(--warn);font-size:13px;padding:0 4px}
 #strip .empty b{color:var(--fg)}
 .cell{flex:0 0 auto;width:74px;border:2px solid var(--line);border-radius:6px;padding:2px;
-      background:#0e1014;cursor:pointer;user-select:none}
+      background:var(--surface);cursor:pointer;user-select:none}
 .cell:hover{border-color:var(--accent)}
-/* Three times the resting border. The strip is scanned at a glance while the
-   eye is really on the section, and a 2px accent edge is not enough to find
-   your place in sixty near-identical thumbnails - especially once done,
-   plate-only and excluded are all colouring their borders too. box-sizing is
-   border-box globally, so the cell keeps its 74px and the strip does not
-   reflow as the selection moves. */
-.cell.active{border-color:var(--accent);border-width:6px;
-             box-shadow:0 0 0 2px rgba(77,163,255,.35)}
-.cell.done{border-color:var(--done);background:#141026}
-.cell.plateonly{border-color:var(--accent);background:#0d1520}
-.cell.noroi{border-color:#3a3f47;opacity:.55}
-.cell.fav{box-shadow:inset 0 0 0 2px #e3b341}
-.fav-on{border-color:#e3b341 !important;color:#e3b341}
-.mode-on{border-color:var(--accent) !important;color:var(--accent)}
-/* Resting colour by function, so the toolbar reads at a glance without text:
-   plate assignment, the rotation-tool group, the two per-section decisions
-   (each already escalates to a brighter/filled state on toggle - fav-on and
-   the inline no-roi green above - so this is deliberately the dimmer resting
-   shade of the same hue, not a competing colour), and point editing. Export
-   stays .primary: solid fill is its own category, the single confirming action. */
-.btn-plate{border-color:#3d6d99;color:#7fb8f0}
-.btn-plate:hover{border-color:var(--accent);color:var(--accent)}
-.btn-rot{border-color:#6e4d99;color:#bc8cff}
-.btn-rot:hover{border-color:#bc8cff;color:#bc8cff}
-.btn-fav{border-color:#8a7326;color:#e3b341}
-.btn-fav:hover{border-color:#e3b341;color:#e3b341}
-.btn-excl{border-color:#8a5a2e;color:#f0883e}
-.btn-excl:hover{border-color:#f0883e;color:#f0883e}
-.btn-kill{border-color:#8a2f36;color:#f85149}
-.btn-kill:hover{border-color:#f85149;color:#f85149}
-.kill-on{border-color:#f85149 !important;background:#3d1417;color:#ff9d96 !important}
-/* Anchored to the window rather than the pane: it is a decision about the pair,
-   not about the picture underneath it, and it must stay put when the section
-   pane resizes between a 3-column and a 4-column layout. */
-.cell.excl{border-color:#f85149;opacity:.5}
+.cell.done{border-color:#8250df;background:#f1ebff}
+.cell.plateonly{border-color:#0969da;background:#ddf4ff}
+.cell.noroi{border-color:#bfc6ce;opacity:.55}
+.cell.fav{box-shadow:inset 0 0 0 2px #9a6700}
+.cell.excl{border-color:#cf222e;opacity:.5}
 .cell.excl img{filter:grayscale(1)}
 /* Reinstated in Review mode: curatable now, but NOT in the index until 04a runs
    again, so it must not look like an ordinary section that was always there. */
-.cell.reinstated{border-color:#3fb950;border-style:dashed;opacity:1}
+.cell.reinstated{border-color:#1a7f37;border-style:dashed;opacity:1}
 .cell.reinstated img{filter:none}
-/* The seeds are drawn in the atlas's own colours on both panes, so the key has
-   to use those same colours - reading it off the seed rather than a table here
-   is what keeps the two from ever disagreeing. */
+/* Three times the resting border, and declared last so it wins over every
+   status colour. The strip is scanned at a glance while the eye is really on
+   the section, and a 2px accent edge is not enough to find your place in sixty
+   near-identical thumbnails once done, plate-only and excluded are all
+   colouring their borders too. box-sizing is border-box globally, so the cell
+   keeps its 74px and the strip does not reflow as the selection moves. */
+.cell.active{border-color:var(--accent);border-width:6px;box-shadow:0 0 0 2px rgba(9,105,218,.35)}
+.cell.active.fav{box-shadow:inset 0 0 0 2px #9a6700,0 0 0 2px rgba(9,105,218,.35)}
+/* The thumbnail is a fluorescence image, so it sits on dark like the panes. */
+.cell img{width:100%;aspect-ratio:1;object-fit:contain;display:block;border-radius:3px;background:var(--ink)}
+.cap{font-size:10px;color:var(--dim);text-align:center;line-height:1.15;margin-top:1px}
+
+/* #regKey: the seeds are drawn in the atlas's own colours on both panes, so
+   the key has to use those same colours - reading it off the seed rather than
+   a table here is what keeps the two from ever disagreeing. */
 #regKey{margin-top:7px;display:flex;flex-direction:column;gap:3px}
 #regKey div{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--dim)}
 #regKey i{width:11px;height:11px;border-radius:50%;border:1px solid #000;
           flex:0 0 auto;display:inline-block}
 #regKey b{color:var(--fg);font-weight:600}
-.btn-guide{border-color:#2ea043;color:#3fb950}
-.btn-guide:hover{border-color:#3fb950;color:#3fb950}
-.guide-on{border-color:#3fb950 !important;background:#0f2e18;color:#7ee787 !important}
-.btn-edit{border-color:#2c7a82;color:#39c5cf}
-.btn-edit:hover{border-color:#39c5cf;color:#39c5cf}
-/* Its own colour because it is the only button that writes a DELIVERABLE rather
-   than recording a decision - and the only one that reads the group key. */
-.btn-shot{border-color:#7a5c2e;color:#e8a33d}
-.btn-shot:hover{border-color:#e8a33d;color:#e8a33d}
-/* Disabled, but never FAINT. This button spends most of its life disabled -
-   a page opened from disk cannot build a deck at all, which is the normal way
-   this file gets opened - and under the global button[disabled]{opacity:.4} it
-   went grey at 40% on a dark header and read as absent rather than
-   unavailable. It was reported as "not visible" twice, and both times it was
-   there. It keeps its amber now, one step down, and says why beside itself. */
-.btn-shot:disabled{opacity:1;border-color:#6b5326;color:#c98f31;background:#1a1610;
-                   cursor:not-allowed}
-.btn-shot:disabled:hover{border-color:#6b5326;color:#c98f31}
-label.chk{color:var(--dim);font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer}
-/* The header wraps, and with a dozen counters between them the buttons used to
-   break across lines in whatever order the width happened to allow. Filters and
-   actions are each one flex box now, so they wrap as a UNIT: what narrows the
-   view sits by the sample selector, what acts on a section sits by Export. */
-.filters{display:flex;gap:8px;align-items:center;flex-wrap:wrap;
-         padding:3px 8px;border:1px solid var(--line);border-radius:8px;background:#12151a}
-.actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-left:auto}
-/* The two buttons that write a FILE, bound together so they cannot be split.
-   `.actions` wraps, and Shotgun was last in it: at 1280 CSS px - which is what a
-   1920 screen gives at the 150% scaling Windows commonly ships with - it broke
-   onto a new row on its own and landed at the far LEFT, a lone amber button
-   with nothing near it and no longer beside the Export it belongs with. It was
-   on screen and might as well not have been.
-
-   nowrap keeps the pair on one line; the pair still wraps as a unit, which is
-   the same rule .filters and .actions already follow. */
-.deliver{display:flex;gap:6px;align-items:center;flex-wrap:nowrap}
-/* The export target, beside the button that changes it. Truncated rather than
-   wrapped: this row must stay one line, and a long path is not worth the
-   header growing a second one. */
-.expdir{font-size:11px;opacity:.75;max-width:150px;overflow:hidden;
-        text-overflow:ellipsis;white-space:nowrap}
-#expStat{font-size:11px;opacity:.75}
-.cell img{width:100%;aspect-ratio:1;object-fit:contain;display:block;border-radius:3px}
-.cap{font-size:9px;color:var(--dim);text-align:center;line-height:1.15;margin-top:1px}
-footer{flex:0 0 auto;background:var(--bg);border-top:1px solid var(--line);
-       padding:6px 14px;font-size:12px;color:var(--dim)}
-kbd{display:inline-block;padding:1px 5px;border:1px solid var(--line);border-radius:4px;
-    background:#1c2027;font:600 11px ui-monospace,monospace}
 
 /* ---- Review mode ------------------------------------------------------- */
 /* The cell vocabulary is 04d_rotation_curator's, deliberately unchanged: a
@@ -1045,30 +1102,36 @@ kbd{display:inline-block;padding:1px 5px;border:1px solid var(--line);border-rad
    decision a person made. The operator already reads those two borders that
    way, and inventing a second language for the same distinction would be the
    worse choice even though this is a different page. */
-#review{flex:1 1 auto;display:none;min-height:0;overflow:hidden}
+/* Replaces the tool rail, panes and info column (#work) while it is on: the
+   card grid left, the side column right, wrapping below it on a narrow window.
+   The grid scrolls inside itself, capped to the window, so stepping through a
+   long animal does not scroll the decision buttons away. */
+#review{flex:1 0 auto;display:none;gap:10px;padding:10px;flex-wrap:wrap;align-items:flex-start}
 #review.on{display:flex}
-#revGrid{flex:1 1 auto;overflow:auto;padding:8px 10px}
-#revSide{flex:0 0 380px;border-left:1px solid var(--line);overflow:auto;padding:10px}
+#revGrid{flex:999 1 420px;min-width:0;min-height:360px;max-height:max(360px,calc(100vh - 90px));
+         overflow:auto;padding:8px 10px;background:var(--surface);border:1px solid var(--line);
+         border-radius:9px}
+#revSide{flex:1 1 300px;max-width:420px;display:flex;flex-direction:column;gap:9px;min-width:0}
 .revGroup{margin-bottom:14px}
 .revGroup h4{margin:0 0 5px;font:600 11px ui-monospace,monospace;color:var(--dim);
-             letter-spacing:.06em;position:sticky;top:0;background:var(--bg);padding:3px 0;z-index:1}
+             letter-spacing:.06em;position:sticky;top:0;background:var(--surface);padding:3px 0;z-index:1}
 .revCells{display:grid;grid-template-columns:repeat(auto-fill,minmax(78px,1fr));gap:5px}
 .rc{position:relative;border:2px solid var(--line);border-radius:4px;overflow:hidden;
     cursor:pointer;background:#0f1216}
 .rc img{width:100%;aspect-ratio:1;object-fit:contain;display:block}
 .rc .n{position:absolute;left:2px;top:1px;font:600 9px ui-monospace,monospace;
        color:#c9d1d9;text-shadow:0 0 3px #000}
-.rc.sel{border-color:#7c5cff;box-shadow:0 0 0 2px rgba(124,92,255,.35)}
-.rc.excluded{border-color:#c0392b;background:#1c1010}
+.rc.sel{border-color:#8250df;box-shadow:0 0 0 2px rgba(130,80,223,.35)}
+.rc.excluded{border-color:#cf222e;background:#1c1010}
 .rc.excluded img{opacity:.32;filter:grayscale(1)}
 .rc.proposed{border-style:dashed;border-color:var(--warn)}
-.rc.measured{border-color:#3fb950}
-.rc.censored{border-color:#e3b341}
+.rc.measured{border-color:#1a7f37}
+.rc.censored{border-color:#d4a72c}
 .rc .flag{position:absolute;right:2px;bottom:1px;font:700 8px ui-monospace,monospace;
           padding:0 3px;border-radius:2px}
-.rc .flag.rs{background:#1f6feb;color:#fff}
-.rc .flag.dr{background:#c0392b;color:#fff}
-.rc .flag.um{background:#8957e5;color:#fff}
+.rc .flag.rs{background:#0969da;color:#fff}
+.rc .flag.dr{background:#cf222e;color:#fff}
+.rc .flag.um{background:#8250df;color:#fff}
 #revImg{width:100%;border:1px solid var(--line);border-radius:4px;background:#000;
         display:block;aspect-ratio:1;object-fit:contain}
 #revImgWrap{position:relative}
@@ -1098,7 +1161,9 @@ kbd{display:inline-block;padding:1px 5px;border:1px solid var(--line);border-rad
    and requestFullscreen resolves having done nothing. So the class is what
    actually does the work and native fullscreen is a bonus layered on top. Both
    selectors carry the same rules so the two cannot drift. */
-#revImgCard:fullscreen,#revImgCard.imgmax{background:#000;padding:10px;
+/* The frame is light like the rest of the page; the image keeps its own black
+   ground (#revImg), so only the fluorescence is shown dark. */
+#revImgCard:fullscreen,#revImgCard.imgmax{background:var(--bg);padding:10px;
         display:flex;flex-direction:column;gap:6px;box-sizing:border-box}
 #revImgCard.imgmax{position:fixed;inset:0;z-index:9999;margin:0;border-radius:0;
         overflow:auto}
@@ -1120,69 +1185,43 @@ kbd{display:inline-block;padding:1px 5px;border:1px solid var(--line);border-rad
         color:var(--dim);font:11px ui-monospace,monospace;min-width:74px;
         text-align:center}
 .revChain{font:11px ui-monospace,monospace;line-height:1.5}
-.revChain .st{display:flex;gap:6px;padding:3px 0;border-bottom:1px solid #1b1f26}
+.revChain .st{display:flex;gap:6px;padding:3px 0;border-bottom:1px solid var(--line-soft)}
 .revChain .st b{flex:0 0 96px;color:var(--dim);font-weight:600}
-.revChain .st span{flex:1 1 auto;color:#c9d1d9;word-break:break-word}
-.revChain .st.no b,.revChain .st.no span{color:#5b6270}
+.revChain .st span{flex:1 1 auto;color:var(--fg);word-break:break-word}
+.revChain .st.no b,.revChain .st.no span{color:#8c959f}
 .revWhy{width:100%;box-sizing:border-box;margin:6px 0;padding:5px;border-radius:4px;
-        border:1px solid var(--line);background:#0f1216;color:#e6e6e6;font:11px ui-monospace,monospace}
+        border:1px solid var(--line);background:var(--surface);color:var(--fg);font:11px ui-monospace,monospace}
 </style>
 <header>
   <h1>ROI curator</h1>
-  <span class="row" id="scope" style="color:#7c5cff"></span>
-  <span class="filters">
-    <select id="animal" onchange="render(); this.blur()"></select>
-    <select id="marker" onchange="onMarker(); this.blur()"></select>
-    <label class="chk"><input type="checkbox" id="favOnly" onchange="render(); this.blur()">favourites only</label>
-    <label class="chk"><input type="checkbox" id="hideExcl" onchange="render(); this.blur()">hide excluded</label>
-    <span class="row" style="margin-left:6px">bg disc <b id="roiSizeVal"></b> px</span>
-    <input type="range" id="roiSize" min="2" max="60" step="1"
-           title="Default radius for a background disc - the only thing still placed as a circle. Dragging as you place one still overrides it."
-           oninput="onRoiSize(this.value)" onchange="this.blur()"
-           style="width:90px;vertical-align:middle">
+  <span class="row" id="scope" style="color:var(--done)"></span>
+  <label class="chk">Animal
+    <select id="animal" onchange="render(); this.blur()"></select></label>
+  <label class="chk">Marker
+    <select id="marker" onchange="onMarker(); this.blur()"></select></label>
+  <label class="chk"><input type="checkbox" id="favOnly" onchange="render(); this.blur()">favourites only</label>
+  <label class="chk"><input type="checkbox" id="hideExcl" onchange="render(); this.blur()">hide excluded</label>
+  <span class="grow"></span>
+  <span class="counts">
+    <span class="row"><b id="nsec"></b> shown</span>
+    <span class="row" style="color:#6639ba"><b id="ndone" style="color:inherit"></b> registered</span>
+    <span class="row" style="color:#0969da"><b id="nassign" style="color:inherit"></b> plate only</span>
+    <span class="row"><b id="nnoroi"></b> no ROI</span>
+    <span class="row" style="color:#9a6700"><b id="nfav" style="color:inherit"></b> &#9733; favourite</span>
+    <span class="row" style="color:#cf222e"><b id="nexcl" style="color:inherit"></b> excluded</span>
   </span>
-  <span class="row"><b id="nsec"></b> shown</span>
-  <span class="row" style="color:#7c5cff"><b id="ndone"></b> registered</span>
-  <span class="row" style="color:#4da3ff"><b id="nassign"></b> plate only</span>
-  <span class="row" style="color:#9aa0a8"><b id="nnoroi"></b> no ROI</span>
-  <span class="row" style="color:#e3b341"><b id="nfav"></b> favourite</span>
-  <span class="row" style="color:#f85149"><b id="nexcl"></b> excluded</span>
-  <span class="row" id="savedAt" style="color:#3fb950"></span>
-  <span class="row" id="seedOffer" style="display:none"></span>
-  <span class="row" id="plateWarn" style="display:none;color:#e8a33d"></span>
-  <span class="row" id="shotStat" style="color:#e8a33d"></span>
-  <span class="row"><b id="npair"></b> pairs on this section</span>
-  <span class="row" id="fit"></span>
-  <span class="actions">
-  <button class="btn-plate" onclick="markAssigned()">Assign plate</button>
-  <button id="rotBtn" class="btn-rot" onclick="toggleRotMode()">Rotate</button>
-  <button id="rotReset" class="btn-rot" onclick="restoreTilt()">Restore original tilt</button>
-  <button id="favBtn" class="btn-fav" onclick="toggleFav()">Favourite</button>
-  <button id="noroiBtn" class="btn-excl" onclick="toggleNoRoi()">No ROI here</button>
-  <button id="exclBtn" class="btn-kill" onclick="toggleExcl()">Exclude</button>
-  <button id="dapiBtn" class="btn-plate" onclick="toggleDapi()">__NUCLEAR__</button>
-  <button id="bgBtn" class="btn-bg" onclick="toggleBgMode()">Background</button>
-  <button id="hullBtn" class="btn-region" onclick="toggleHulls()">Hulls</button>
-  <button id="selBtn" class="btn-region" onclick="selOpen()"
-          title="choose which regions you will draw (o)">ROIs...</button>
-  <button id="undoPolyBtn" class="btn-edit" onclick="undoPoly()">Undo region</button>
-  <button id="guideBtn" class="btn-guide" onclick="toggleGuided()">Guided</button>
-  <button id="skipBtn" class="btn-guide" onclick="skipRoi()">Skip ROI</button>
-  <button class="btn-edit" onclick="undoPt()">Undo point</button>
-  <button id="undoBtn" class="btn-rot" onclick="undoLast()" disabled
-          title="Nothing to undo (u)">Undo</button>
-  <button class="btn-edit" onclick="clearPts()"
-          title="take back everything placed on this section - landmarks, an unfinished outline and the regions. u puts it back">Clear section</button>
   <span class="deliver">
     <button id="revBtn" class="btn-guide" onclick="toggleReview()">Review</button>
+    <button id="keysBtn" onclick="keysOpen()" aria-label="Keyboard shortcuts"
+            title="Keyboard shortcuts and what the colours mean (?)" style="min-width:34px;padding:6px 0">?</button>
+  </span>
+  <span class="deliver">
     <button id="expDirBtn" class="btn-edit" onclick="chooseExportDir()"
             title="pick the folder exports are written into">Folder...</button>
     <span id="expDirLbl" class="expdir"></span>
     <button class="primary" onclick="exportCsv()">Export</button>
     <button id="shotBtn" class="btn-shot" onclick="shotgun()">Shotgun</button>
     <button id="shotRegBtn" class="btn-shot" onclick="shotgun('region')">By region</button>
-    <span id="expStat"></span>
-  </span>
   </span>
 </header>
 <!-- The Review pane's colour filters are NOT written out here. They are built
@@ -1219,9 +1258,11 @@ kbd{display:inline-block;padding:1px 5px;border:1px solid var(--line);border-rad
     <div class="card"><h3 id="revTitle">SECTION REVIEW</h3>
       <div class="kv" id="revHint">pick a section on the left</div>
       <div class="deliver" style="margin-top:5px">
-        <button class="btn-edit" onclick="revStep(-1)" title="Previous section (up arrow)">&lsaquo;</button>
+        <button class="btn-edit" onclick="revStep(-1)" title="Previous section (up arrow)"
+                aria-label="Previous section">&lsaquo;</button>
         <span class="kv" id="revPos" style="flex:1 1 auto;text-align:center">-</span>
-        <button class="btn-edit" onclick="revStep(1)" title="Next section (down arrow)">&rsaquo;</button>
+        <button class="btn-edit" onclick="revStep(1)" title="Next section (down arrow)"
+                aria-label="Next section">&rsaquo;</button>
       </div>
       <select id="revFilter" onchange="revRender(); this.blur()" style="width:100%;margin-top:5px">
         <option value="all">every scanned section</option>
@@ -1275,77 +1316,151 @@ kbd{display:inline-block;padding:1px 5px;border:1px solid var(--line);border-rad
         Export review decisions</button></div>
   </div>
 </div>
-<div id="panes">
-  <div class="pane"><h2 id="secTitle">SECTION - click to place a point</h2>
-    <canvas id="cSec" tabindex="0" onmousedown="secPanStart(event); secDown(event)"
-            onwheel="secWheel(event)" oncontextmenu="return false"
-            ondblclick="if(draft) commitPoly()"></canvas>
-    <button class="nav l" id="secPrev" tabindex="-1" title="Previous section (up arrow)"
-            onclick="stepSection(-1)">&lsaquo;</button>
-    <button class="nav r" id="secNext" tabindex="-1" title="Next section (down arrow)"
-            onclick="stepSection(1)">&rsaquo;</button></div>
-  <div class="pane"><h2 id="plTitle">ATLAS PLATE - click the matching point</h2>
-    <canvas id="cPl" tabindex="0" onclick="clickPl(event)"></canvas>
-    <button class="nav l" id="plPrev" tabindex="-1" title="Previous plate (left arrow)"
-            onclick="stepPlate(-1)">&lsaquo;</button>
-    <button class="nav r" id="plNext" tabindex="-1" title="Next plate (right arrow)"
-            onclick="stepPlate(1)">&rsaquo;</button></div>
-  <div id="side">
+<div id="work">
+  <!-- THE TOOL RAIL. Grouped by what a button acts on, each group labelled, so a
+       new operator reads "This section / Atlas plate / Look / Draw ROIs /
+       Background discs / Undo" instead of one row of twenty buttons. Every id
+       and handler is the one the old header row had: the suites, the app and
+       the Shotgun deck reach these by name. -->
+  <nav id="rail" aria-label="Tools">
+    <div class="grp"><h3>This section</h3>
+      <button id="favBtn" class="btn-fav" data-k="f" onclick="toggleFav()">Favourite</button>
+      <button id="noroiBtn" class="btn-excl" onclick="toggleNoRoi()">No ROI here</button>
+      <button id="exclBtn" class="btn-kill" data-k="x" onclick="toggleExcl()">Exclude</button></div>
+    <div class="grp"><h3>Atlas plate</h3>
+      <button id="assignBtn" class="btn-plate" data-k="a" onclick="markAssigned()">Assign plate</button></div>
+    <div class="grp"><h3>Look</h3>
+      <div class="two">
+        <button id="dapiBtn" class="btn-plate" onclick="toggleDapi()">__NUCLEAR__</button>
+        <button id="markBtn" class="btn-fav" onclick="toggleMarker()">Marker</button></div>
+      <button id="hullBtn" class="btn-region" data-k="h" onclick="toggleHulls()">Hulls</button>
+      <button id="rotBtn" class="btn-rot" onclick="toggleRotMode()">Rotate</button>
+      <button id="rotReset" class="btn-rot" data-k="r" onclick="restoreTilt()">Restore tilt</button></div>
+    <div class="grp"><h3>Draw ROIs</h3>
+      <button id="guideBtn" class="btn-guide" data-k="g" onclick="toggleGuided()">Guided</button>
+      <button id="selBtn" class="btn-region" data-k="o" onclick="selOpen()"
+              title="choose which regions you will draw (o)">ROIs...</button>
+      <button id="skipBtn" class="btn-guide" data-k="s" onclick="skipRoi()">Skip ROI</button></div>
+    <div class="grp"><h3>Background discs</h3>
+      <button id="bgBtn" class="btn-bg" data-k="d" onclick="toggleBgMode()">Background</button>
+      <label class="disc">disc size <kbd>[</kbd> <kbd>]</kbd> &middot; <b id="roiSizeVal"></b> px
+        <input type="range" id="roiSize" min="2" max="60" step="1"
+               title="Default radius for a background disc - the only thing still placed as a circle. Dragging as you place one still overrides it."
+               oninput="onRoiSize(this.value)" onchange="this.blur()"></label></div>
+    <div class="grp"><h3>Undo</h3>
+      <div class="two">
+        <button class="btn-edit" data-k="z" onclick="undoPt()" title="drop the last corner or point (z)">Point</button>
+        <button id="undoPolyBtn" class="btn-edit" onclick="undoPoly()" title="undo the last region drawn">Region</button></div>
+      <button id="undoBtn" class="btn-rot" data-k="u" onclick="undoLast()" disabled
+              title="Nothing to undo (u)">Undo last</button>
+      <button class="btn-edit" onclick="clearPts()"
+              title="take back everything placed on this section - landmarks, an unfinished outline and the regions. u puts it back">Clear section</button></div>
+    <!-- Saved state and what the deliverable buttons can do, under the tools
+         rather than across the top of the panes: Shotgun's "off" reason is a
+         paragraph, and on a file:// page it is there all the time. -->
+    <div class="railfoot"><span id="savedAt"></span><span id="expStat"></span>
+      <span id="shotStat" style="color:#9a5b00"></span></div>
+  </nav>
+
+  <main id="centre">
+    <div id="notices"><span class="row" id="seedOffer" style="display:none"></span><span
+      class="row" id="plateWarn" style="display:none;color:#9a5b00"></span></div>
+    <!-- The coach line: which mode the mouse is in and what a click does there.
+         Pure presentation of state the page already keeps (guided, bgMode,
+         rotMode); coach() is called from status(), which every mode change
+         already ends with. -->
+    <div id="coach" role="status" aria-live="polite"><b id="coachMode">Landmarks</b><span id="coachText"></span></div>
+    <div id="panes">
+      <div class="pane"><h2 id="secTitle">SECTION - click to place a point</h2>
+        <canvas id="cSec" tabindex="0" aria-label="Section" onmousedown="secPanStart(event); secDown(event)"
+                onwheel="secWheel(event)" oncontextmenu="return false"
+                ondblclick="if(draft) commitPoly()"></canvas>
+        <div class="zoombar">
+          <button onclick="secZoom(1/1.5)" aria-label="Zoom out" title="Zoom out (-)">&minus;</button>
+          <button id="zoomLvl" onclick="secFit()" aria-label="Fit the section to the pane" title="Fit (0)">100%</button>
+          <button onclick="secZoom(1.5)" aria-label="Zoom in" title="Zoom in (+)">+</button></div>
+        <button class="nav l" id="secPrev" tabindex="-1" title="Previous section (up arrow)"
+                aria-label="Previous section" onclick="stepSection(-1)">&lsaquo;</button>
+        <button class="nav r" id="secNext" tabindex="-1" title="Next section (down arrow)"
+                aria-label="Next section" onclick="stepSection(1)">&rsaquo;</button></div>
+      <div class="pane"><h2 id="plTitle">ATLAS PLATE - click the matching point</h2>
+        <canvas id="cPl" tabindex="0" aria-label="Atlas plate" onclick="clickPl(event)"></canvas>
+        <button class="nav l" id="plPrev" tabindex="-1" title="Previous plate (left arrow)"
+                aria-label="Previous plate" onclick="stepPlate(-1)">&lsaquo;</button>
+        <button class="nav r" id="plNext" tabindex="-1" title="Next plate (right arrow)"
+                aria-label="Next plate" onclick="stepPlate(1)">&rsaquo;</button></div>
+    </div>
+  </main>
+
+  <aside id="side" aria-label="About this section">
     <div class="card"><h3>SECTION</h3><div class="kv" id="secInfo">-</div>
       <div class="kv" id="rotInfo"></div></div>
     <div class="card"><h3>PLATE</h3>
-      <input type="range" id="slider" min="0" max="0" value="0" oninput="onSlideUser(this.value)" onchange="this.blur()">
+      <input type="range" id="slider" min="0" max="0" value="0" aria-label="Atlas plate"
+             oninput="onSlideUser(this.value)" onchange="this.blur()">
       <div class="kv"><b id="plName">-</b></div>
       <div id="plLab"></div>
     </div>
     <div class="card"><h3>LANDMARKS</h3>
+      <div class="kv"><b id="npair"></b> on this section</div>
       <div class="kv" id="lmHint">click section, then plate</div>
       <div id="lmlist"></div>
     </div>
     <div class="card"><h3>ROIs PLACED</h3>
+      <div class="kv" id="fit"></div>
       <div class="kv" id="regInfo">needs 3 pairs</div>
       <div id="regKey"></div></div>
-  </div>
+    <div class="card"><h3>BACKGROUND DISCS</h3>
+      <div class="kv" id="bgInfo">-</div></div>
+  </aside>
 </div>
 <div id="strip"></div>
-<footer>
-  <kbd>g</kbd> guided: the plate's ROIs one at a time - <kbd>click</kbd> each
-  corner of the region on the section, then <kbd>Enter</kbd>, a double-click or
-  the first corner to close it &middot;
-  <kbd>z</kbd> drops a corner &middot;
-  <kbd>s</kbd> skip an ROI that is not on this section &middot;
-  once closed a region stays live: <kbd>drag</kbd> a corner to move it, click an
-  edge to add one, <kbd>Delete</kbd> removes the one under the cursor - any time
-  you are not part-way through drawing another &middot;
-  <kbd>h</kbd> hides the shapes on the plate &middot;
-  with guided OFF, <kbd>click</kbd> section then plate to add a landmark pair &middot;
-  <kbd>&larr;</kbd><kbd>&rarr;</kbd> plate &middot;
-  <kbd>&uarr;</kbd>/<kbd>&darr;</kbd> previous / next section (the plate stays put,
-  or use the arrows on the panes) &middot;
-  <kbd>a</kbd> assign plate &middot;
-  <kbd>Rotate</kbd> then drag the section left/right (<kbd>shift</kbd> fine) - kept on release,
-  <kbd>r</kbd> restores the original &middot;
-  <kbd>f</kbd> favourite &middot; <kbd>x</kbd> exclude this section &middot;
-  <kbd>d</kbd> background disc: mark tissue with NO signal, 2-3 per section - it is
-  measured by the same detector, so it reports the false-positive rate here. It is
-  the only thing still placed as a circle, and it does not move the ROI cursor &middot;
-  <kbd>Review</kbd> every scanned section and what each stage decided about it -
-  reinstate one the pipeline excluded, or reject its artifact mask. There,
-  <kbd>&uarr;</kbd>/<kbd>&darr;</kbd> step one section at a time through whatever
-  the filter shows (including the excluded ones), and the layers are independent:
-  <kbd>d</kbd> DAPI on/off, <kbd>k</kbd> the marker on/off, <kbd>v</kbd> artifacts
-  in red, <kbd>c</kbd> censored pixels in cyan, <kbd>m</kbd> apply the mask to see
-  what 04a removed, <kbd>f</kbd> fullscreen (or double-click the image) &middot;
-  <kbd>[</kbd><kbd>]</kbd> background disc size (or drag as you place one) &middot;
-  <kbd>u</kbd> undo the last thing, whatever it was (<kbd>z</kbd> stays
-  corner-only) &middot;
-  <span style="color:#7c5cff">purple</span> = registered &middot;
-  <span style="color:#4da3ff">blue</span> = plate assigned only &middot;
-  <span style="color:#e3b341">gold edge</span> = favourite &middot;
-  <span style="color:#f778ba">pink</span> = background disc &middot;
-  faded = marked no-ROI &middot; autosaves &middot;
-  filters (sample, channel, favourites, excluded) are top left, actions top right
-</footer>
+<!-- The shortcuts, behind the ? button. This was a paragraph in a footer
+     across the whole bottom of the window - every key and every colour in one
+     run-on line - which a new operator never read and an experienced one no
+     longer needed on screen. Same content, laid out in two columns. -->
+<div id="keysDlg" class="seldlg" onclick="if(event.target===this) keysClose()">
+  <div class="keyscard" role="dialog" aria-modal="true" aria-labelledby="keysH">
+    <div style="display:flex;align-items:center"><h2 id="keysH">Keyboard shortcuts</h2>
+      <button id="keysClose" onclick="keysClose()">Close</button></div>
+    <div class="keyscols">
+      <div><kbd>g</kbd> guided: the plate's ROIs one at a time<br>
+        <kbd>s</kbd> skip an ROI that is not on this section<br>
+        <kbd>z</kbd> drop a corner<br>
+        <kbd>u</kbd> undo the last thing, whatever it was<br>
+        <kbd>h</kbd> hide the shapes on the plate<br>
+        <kbd>o</kbd> choose which ROIs you will draw<br>
+        <kbd>[</kbd> <kbd>]</kbd> background disc size</div>
+      <div><kbd>+</kbd> <kbd>-</kbd> <kbd>0</kbd> zoom in / out / fit<br>
+        <kbd>a</kbd> assign plate<br>
+        <kbd>f</kbd> favourite<br>
+        <kbd>x</kbd> exclude this section<br>
+        <kbd>d</kbd> background disc mode<br>
+        <kbd>&larr;</kbd> <kbd>&rarr;</kbd> previous / next plate<br>
+        <kbd>&uarr;</kbd> <kbd>&darr;</kbd> previous / next section<br>
+        <kbd>r</kbd> restore the original tilt</div>
+    </div>
+    <p><b>Drawing a region.</b> In guided mode click each corner of the region on
+      the section, then <kbd>Enter</kbd>, a double-click or the first corner closes
+      it. A closed region stays live: <kbd>drag</kbd> a corner to move it, click an
+      edge to add one, <kbd>Delete</kbd> removes the one under the cursor - any
+      time you are not part-way through drawing another. With guided off, click
+      the section then the plate to add a landmark pair.</p>
+    <p><b>Rotate</b>, then drag the section left or right (<kbd>shift</kbd> for
+      fine steps); it is kept on release. <b>Background</b> discs mark tissue with
+      NO signal, 2-3 per section: they are measured by the same detector, so they
+      report its false-positive rate.</p>
+    <p><b>Review</b> shows every scanned section and what each stage decided. There
+      <kbd>&uarr;</kbd> <kbd>&darr;</kbd> step through the filter, <kbd>d</kbd>
+      __NUCLEAR__, <kbd>k</kbd> the marker, <kbd>v</kbd> artifacts, <kbd>c</kbd>
+      censored pixels, <kbd>m</kbd> apply the mask, <kbd>f</kbd> fullscreen.</p>
+    <p style="color:var(--fg)"><span style="color:#6639ba">purple</span> registered &middot;
+      <span style="color:#0969da">blue</span> plate only &middot;
+      <span style="color:#9a6700">gold edge</span> favourite &middot;
+      <span style="color:#bf3989">pink</span> background disc &middot;
+      faded = no ROI &middot; red = excluded. Everything autosaves.</p>
+  </div>
+</div>
 <div id="selDlg" class="seldlg" onclick="if(event.target===this) selCancel()">
   <div class="selcard">
     <h2>Which ROIs will you draw?</h2>
@@ -1723,7 +1838,7 @@ const st = uid => S[uid] || (S[uid] = {plate: 0, pairs: [], assigned: false,
                                        excl: false});
 
 const secImg = new Image();
-secImg.onload = ()=>{ markerCache=null; drawSec(); };   // cache belongs to one section
+secImg.onload = ()=>{ markerCache=null; nuclearCache=null; drawSec(); };   // caches belong to one section
 
 // All 101 plates preloaded - 7.4 MB total, median 71 KB. Setting plImg.src on
 // every slider step made each step wait on a disk read and a JPEG decode, which
@@ -1888,11 +2003,14 @@ function toggleDapi(){
 function dapiBtnState(){
   const rgb = hasRgb(active), on = rgb && dapiOn;
   el("dapiBtn").disabled = !rgb;
-  el("dapiBtn").classList.toggle("mode-on", on);
+  // Tinted while the layer is HIDDEN: the resting look is the normal view, and
+  // the button that is lit is the one that changed it - so "Show DAPI" on a
+  // blue fill reads as "something is switched off here".
+  el("dapiBtn").classList.toggle("mode-on", rgb && !dapiOn);
   // FILTERS.nuclearLabel, not "DAPI". The label in the button's HTML comes
   // from the study; relabelling it from a literal here would put the word back
   // the first time a section was shown, so the template alone was never enough.
-  el("dapiBtn").textContent = FILTERS.nuclearLabel + (on ? " ✓" : "");
+  el("dapiBtn").textContent = (on || !rgb ? "Hide " : "Show ") + FILTERS.nuclearLabel;
   el("dapiBtn").title = rgb ? ""
     : "no colour composite for this section - run 04o_section_rgb.py --all";
 }
@@ -1911,20 +2029,67 @@ function dapiBtnState(){
 // to the ON-SCREEN section, so it applies only when this is called with no
 // argument; Shotgun passes each deck image in and gets an uncached copy, which
 // is right - those are built once each and never redrawn.
-let markerCache = null;
-function markerOnly(img){
-  const src = img || secImg;
-  if(src === secImg && markerCache) return markerCache;
+let markerCache = null, nuclearCache = null;
+function channelCopy(src, keep){
   const w=src.naturalWidth, h=src.naturalHeight;
   if(!w) return src;
   const c=document.createElement("canvas"); c.width=w; c.height=h;
   const x=c.getContext("2d");
   x.drawImage(src,0,0);
   x.globalCompositeOperation="multiply";
-  x.fillStyle="#ffff00";          // keep red and green, zero blue
+  x.fillStyle=keep;
   x.fillRect(0,0,w,h);
-  if(src === secImg) markerCache=c;
   return c;
+}
+function markerOnly(img){
+  const src = img || secImg;
+  if(src === secImg && markerCache) return markerCache;
+  const c = channelCopy(src, "#ffff00");      // keep red and green, zero blue
+  if(src === secImg && c !== src) markerCache=c;
+  return c;
+}
+// The other half of the same trick, for Hide <marker>: keep blue, zero red and
+// green. Exactly as exact as markerOnly and for the same reason - the
+// counterstain IS the blue channel of 04o's composite - so a marker drawn in a
+// colour that has blue in it (magenta, cyan) leaves that part behind; it is
+// the counterstain's channel and there is no reading it apart without pixels.
+function nuclearOnly(){
+  if(nuclearCache) return nuclearCache;
+  const c = channelCopy(secImg, "#0000ff");
+  if(c !== secImg) nuclearCache=c;
+  return c;
+}
+// Hide the marker: the second half of the Look group, beside Hide DAPI. A
+// view flag like dapiOn - page-wide rather than per section, never saved, and
+// read only by drawSec - so nothing that is stored or exported can depend on
+// it. Review mode keeps its own marker layer (revLayer('mark'), key k).
+let markOn = true;
+function toggleMarker(){
+  if(!hasRgb(active)) return;
+  markOn = !markOn;
+  markBtnState();
+  drawSec();
+}
+// The section's OWN marker, not the selector's: with "both channels" chosen
+// the strip interleaves the two, and the button names whichever is on screen.
+// Its colour is the one the study draws the marker in, darkened enough to
+// read as text on white - the named colour itself (pure green, yellow) does not.
+const MARK_INK = {red:"#cf222e", green:"#1a7f37", blue:"#0969da", cyan:"#0a7280",
+                  magenta:"#bf3989", yellow:"#9a6700", orange:"#bc4c00"};
+function markBtnState(){
+  const b = el("markBtn"); if(!b) return;
+  const rgb = hasRgb(active), m = MARKERS.find(k => k.id === D_BY[active]?.m);
+  const name = m ? m.label : "marker";
+  b.disabled = !rgb;
+  b.classList.toggle("mode-on", rgb && !markOn);
+  b.textContent = (markOn || !rgb ? "Hide " : "Show ") + name;
+  // Through the button's own colour variables rather than color/borderColor,
+  // so the "on" rule (tinted fill, stronger border) uses the marker's ink too
+  // instead of falling back to the gold of the class underneath.
+  const ink = m && MARK_INK[m.colour];
+  if(b.style.setProperty) for(const v of ["--c", "--b", "--ont"]) b.style.setProperty(v, ink || "");
+  b.title = rgb ? "show or hide the " + name + " channel on the section"
+    : "no colour composite for this section - run 04o_section_rgb.py --all";
 }
 
 // ---- zoom and pan on the section -----------------------------------------
@@ -2012,8 +2177,14 @@ function drawSec(){
   // than smoothed: zooming in is for seeing what the scan actually holds.
   x.imageSmoothingEnabled = 1 / uiScale(c) < 2;
   x.save(); x.translate(g.D/2,g.D/2); x.rotate(g.a);
-  // Hiding DAPI means drawing the blue-stripped copy instead - see markerOnly().
-  x.drawImage((hasRgb(active) && !dapiOn) ? markerOnly() : secImg, -g.w/2, -g.h/2);
+  // Hiding DAPI means drawing the blue-stripped copy instead - see markerOnly() -
+  // and hiding the marker the blue-only one. Both hidden draws nothing: the
+  // canvas is cleared above, so the pane shows its own dark ground and the
+  // landmarks and regions on it, which is the point of hiding both.
+  const rgbNow = hasRgb(active);
+  if(!rgbNow || (dapiOn && markOn)) x.drawImage(secImg, -g.w/2, -g.h/2);
+  else if(markOn) x.drawImage(markerOnly(), -g.w/2, -g.h/2);
+  else if(dapiOn) x.drawImage(nuclearOnly(), -g.w/2, -g.h/2);
   x.restore();
   const s=st(active), T=transform(s), u=uiScale(c);
   // NP went with the region labels; mark() sizes its own badge from ns.
@@ -2588,7 +2759,7 @@ const selNote = s => {
   if(SEL === null) return "";
   const P = plateAt(s);
   const out = polysOf(s).filter(pg => { const h = hullOf(P, pg); return !h || !isSel(h); }).length;
-  return out ? `<div style="color:#9aa0a8;margin-top:4px">${out} drawn outside the `
+  return out ? `<div style="color:var(--dim);margin-top:4px">${out} drawn outside the `
              + `current selection</div>` : "";
 };
 
@@ -3265,12 +3436,12 @@ function status(){
     el("lmHint").innerHTML = tgt
       ? `<b style="color:${selColour(tgt)}">ROI ${dispLabel(tgt)}</b> &middot; `
         + `<b>${nameOf(tgt)}</b> &middot; ${nDone} of ${nRois} drawn`
-        + `<br><span style="color:#9aa0a8">click each corner &middot; `
+        + `<br><span style="color:var(--dim)">click each corner &middot; `
         + `<b>Enter</b>, a double-click or the first corner closes it &middot; `
         + `z drops a corner &middot; Skip if it is not on this section</span>`
       : `all ${nRois} ROIs drawn - click one on the plate to redo it`;
     if(!draft && nPoly) el("lmHint").innerHTML +=
-      `<br><span style="color:#9aa0a8">drag a corner to move it &middot; click an`
+      `<br><span style="color:var(--dim)">drag a corner to move it &middot; click an`
       + ` edge to add one &middot; Delete removes one</span>`;
   } else {
     el("secTitle").textContent = pending
@@ -3289,9 +3460,9 @@ function status(){
     el("secTitle").textContent = "SECTION - click tissue with NO signal (background "
                               + (nBg + 1) + ")";
     el("lmHint").innerHTML =
-      `<b style="color:${BG_COL}">background mode</b> &middot; ${nBg} placed`
-      + `<br><span style="color:#9aa0a8">click tissue you judge to carry no real`
-      + ` signal &middot; 2-3 per section &middot; b to leave</span>`;
+      `<b style="color:#bf3989">background mode</b> &middot; ${nBg} placed`
+      + `<br><span style="color:var(--dim)">click tissue you judge to carry no real`
+      + ` signal &middot; 2-3 per section &middot; d to leave</span>`;
   }
   // Zoomed in, the title says so, and how to get back: a section that looks
   // cropped with nothing saying why reads as a broken image.
@@ -3306,7 +3477,7 @@ function status(){
   if(ptDrag){
     el("lmHint").innerHTML =
       `radius <b>${(ptDrag.r/imgK()).toFixed(1)} px</b> `
-      + `<span style="color:#9aa0a8">drag out to size &middot; release to place</span>`;
+      + `<span style="color:var(--dim)">drag out to size &middot; release to place</span>`;
   }
   // Residual per landmark: a mis-clicked pair shows as a large error instead of
   // quietly dragging the whole fit.
@@ -3322,7 +3493,7 @@ function status(){
     // background discs the section carried - a fit quietly reported as better
     // than it is, and better the more background was marked.
     el("fit").innerHTML = T.kind==="tps"
-      ? `<b style="color:#7c5cff">thin-plate spline</b> on ${nRoi} points `
+      ? `<b style="color:var(--done)">thin-plate spline</b> on ${nRoi} points `
         + `&middot; residual is 0 by construction`
       : `<b>affine</b> &middot; mean residual <b>${(tot/nRoi).toFixed(1)} px</b>`;
     const P=plateAt(s);
@@ -3336,26 +3507,33 @@ function status(){
     const names = [...new Set(P.seeds.filter(isSel).map(x => x.amb || x.region))];
     const gold = new Set(P.seeds.filter(x => x.amb).map(x => x.amb));
     const shown = names.map(n => gold.has(n)
-      ? `<span style="color:#e3b341">${n}</span>` : n).join(", ");
+      ? `<span style="color:#9a6700">${n}</span>` : n).join(", ");
     el("regInfo").innerHTML = P.seeds.length
       ? `<b>${roisOf(s).filter(h => usedRois(s).has(h.roi)).length}</b> of `
         + `<b>${roisOf(s).length}</b> drawn: ${shown}`
-        + selNote(s) + bgLine(s)
-        + (gold.size ? `<div style="color:#9aa0a8;margin-top:4px">`
-                  + `<span style="color:#e3b341">gold</span> is ONE group whose members`
+        + selNote(s)
+        + (gold.size ? `<div style="color:var(--dim);margin-top:4px">`
+                  + `<span style="color:#9a6700">gold</span> is ONE group whose members`
                   + ` cannot be told apart without the rostrocaudal level.`
                   + ` Every other region listed is a distinct place.</div>` : "")
       : "<span class='unlab'>this plate has no region seeds</span>";
   } else {
     el("fit").textContent = "";
     el("regInfo").innerHTML = `${nRoi} landmark${nRoi === 1 ? "" : "s"} placed`
-      + bgLine(s);
+      + " - three pairs make a fit";
     roiPairs(s).forEach((_,i)=>html+=`<div><span>#${i+1}</span><span>-</span></div>`);
   }
   el("lmlist").innerHTML = html;
   const sa = st(active);
   el("noroiBtn").textContent = sa.noroi ? "No ROI here ✓" : "No ROI here";
-  el("noroiBtn").style.borderColor = sa.noroi ? "#3fb950" : "";
+  el("noroiBtn").classList.toggle("mode-on", !!sa.noroi);
+  // Its own card now rather than a line under the ROIs, because a disc is not
+  // an ROI and the advice (2-3 per section) is about the section.
+  el("bgInfo").innerHTML = bgLine(sa);
+  // The plate button says whether this section's plate is a decision yet - the
+  // same `assigned` the strip's blue "plate only" reads.
+  el("assignBtn").textContent = sa.assigned ? "Plate assigned ✓" : "Assign plate";
+  el("assignBtn").classList.toggle("mode-on", !!sa.assigned);
   el("favBtn").textContent = sa.fav ? "Favourite ★" : "Favourite";
   el("favBtn").classList.toggle("fav-on", !!sa.fav);
   el("exclBtn").textContent = sa.excl ? "Excluded ✕" : "Exclude";
@@ -3369,15 +3547,40 @@ function status(){
   regionKey(plateAt(st(active)), st(active));
   navState();
   dapiBtnState();
+  markBtnState();
+  coach();
+  el("zoomLvl").textContent = Math.round(secView.z * 100) + "%";
   el("rotBtn").textContent = rotMode ? "Rotate ✓" : "Rotate";
   el("rotBtn").classList.toggle("mode-on", rotMode);
   el("rotReset").disabled = !(saved || draftRot);
-  const dim = t => `<span style="color:#9aa0a8">${t}</span>`;
+  const dim = t => `<span style="color:var(--dim)">${t}</span>`;
   el("rotInfo").innerHTML =
       rotDrag ? `tilt <b>${effRot().toFixed(1)}&deg;</b> ` + dim("release to keep")
     : rotMode ? `tilt <b>${saved.toFixed(1)}&deg;</b> ` + dim("drag left/right &middot; shift = fine &middot; kept on release")
     : saved   ? `tilted <b>${saved.toFixed(1)}&deg;</b> ` + dim("view only, landmarks unaffected")
     : dim("press Rotate to tilt the view");
+}
+
+// The coach line names the mode the mouse is in and what a click does there.
+// Read from the same flags the click handlers branch on, in the same order of
+// precedence (Background, then Rotate, then Guided), so the line cannot claim a
+// mode the section is not in. The canvas outline follows the same state.
+function coach(){
+  const mode = bgMode ? "bg" : rotMode ? "rot" : guided ? "guide" : "lm";
+  const tgt = guided ? gRoi() : null;
+  const words = {
+    bg:    ["Background", "Click tissue with no signal to place a disc. Two or three per section."],
+    rot:   ["Rotate", "Drag the section left or right to turn it upright. Shift for fine steps."
+                    + " This is the only rotation step."],
+    guide: ["Guided", tgt
+      ? `Click where ROI ${dispLabel(tgt)} belongs on the section. Enter or double-click closes the region.`
+      : "Every chosen ROI on this plate is drawn. Click one on the plate to redo it."],
+    lm:    ["Landmarks", "Click the section, then the matching point on the plate."
+                       + " Wheel zooms; middle or right drag pans."]}[mode];
+  el("coach").className = mode === "bg" ? "bg" : mode === "rot" ? "rot" : "";
+  el("coachMode").textContent = words[0];
+  el("coachText").textContent = words[1];
+  el("cSec").classList.toggle("regionmode", mode === "guide");
 }
 
 // Called by the slider's oninput, which fires ONLY on user interaction -
@@ -3515,7 +3718,7 @@ function select(uid, keep){
   const s = st(uid);
   el("secInfo").innerHTML = `<b>${d.uid}</b><br>section ${d.order} &middot; `
     + (i >= 0 ? `${i + 1} of ${list.length}`
-              : `<span style="color:var(--warn,#d29922)">hidden by the current filter</span>`);
+              : `<span style="color:var(--warn,#9a6700)">hidden by the current filter</span>`);
   // The plate slider does NOT follow the section. Serial sections sit at
   // neighbouring atlas levels, so the plate just scrubbed to is nearly always
   // still the right one; reloading each section's stored plate meant every z/x
@@ -3598,15 +3801,17 @@ function counts(){
 // numbers those seeds carry are the order they are placed in.
 function bgLine(s){
   const n = bgPairs(s).length;
-  if(n >= 2) return `<div style="margin-top:4px;color:${BG_COL}">`
+  if(n >= 2) return `<div style="color:#bf3989">`
                   + `<b>${n}</b> background discs</div>`;
   // Only nag where it matters. A section nobody has decided to measure does not
   // need a background level yet, so the prompt waits for the favourite.
-  const want = s.fav ? `<div style="margin-top:4px;color:#d29922">`
+  const want = s.fav ? `<div style="color:var(--warn)">`
                      + `<b>${n}</b> background ${n === 1 ? "disc" : "discs"} - `
                      + `2-3 give this section a reference level and a `
-                     + `false-positive rate (press b)</div>`
-             : `<div style="margin-top:4px;color:#9aa0a8">${n} background discs</div>`;
+                     + `false-positive rate (press d)</div>`
+             : `<div style="color:var(--dim)"><b>${n}</b> placed. Aim for 2 to 3 on`
+               + ` tissue with no signal; they report the detector's`
+               + ` false-positive rate.</div>`;
   return want;
 }
 
@@ -3632,11 +3837,11 @@ function regionKey(P, s){
                        + ` without the rostrocaudal level` : "")
               + (isDone ? "  -  drawn" : "  -  not drawn yet");
     return `<div title="${tip}"><i style="background:${selColour(h)}"></i>`
-         + `<b style="${h.amb ? "color:#e3b341" : ""}${isDone ? ";opacity:.45" : ""}">`
+         + `<b style="${h.amb ? "color:#9a6700" : ""}${isDone ? ";opacity:.45" : ""}">`
          + `${dispLabel(h)}. ${h.region}${h.unk ? "?" : ""}`
          + `${h.n_parts > 1 ? " /" + h.part : ""}</b>`
          + `<span>${isDone ? "\u2713" : ""}</span>`
-         + (h.amb ? `<span style="color:#e3b341">&#9670;</span>` : "")
+         + (h.amb ? `<span style="color:#9a6700">&#9670;</span>` : "")
          + `</div>`;
   }).join("")
     // Background is not a region on the plate, so it has no seed to read a
@@ -3673,7 +3878,7 @@ function paintCell(uid){
   if(!c) return;
   c.className = "cell " + cellClass(uid) + (active===uid ? " active" : "");
   const cap=c.querySelector(".cap");
-  if(cap) cap.innerHTML = `${DATA.find(d=>d.uid===uid).order}<br>${cellTag(uid)}`;
+  if(cap) cap.innerHTML = `#${DATA.find(d=>d.uid===uid).order}<br>${cellTag(uid)}`;
   paintCellRot(uid);
   counts();
 }
@@ -3686,6 +3891,10 @@ function paintCell(uid){
 // a fact, and it is also exactly what the operator needs in order to act.
 function emptyNote(){
   const a = el("animal").value, m = el("marker").value;
+  // The two checkboxes hid everything there is. Said first and plainly,
+  // because it is the one cause the operator made a moment ago and can undo.
+  if(inScope().length) return `Nothing matches these filters. Untick <b>favourites only</b>`
+                            + ` or <b>hide excluded</b>.`;
   const mine = DATA.filter(d => d.animal === a);
   if(!mine.length) return `<b>${a}</b> has no sections in this page at all.`;
   const label = {}; MARKERS.forEach(k => label[k.id] = k.label);
@@ -3706,7 +3915,9 @@ function emptyNote(){
 // An empty strip with someone else's tissue above it is worse than an error.
 function showEmpty(){
   const note = emptyNote();
-  el("strip").innerHTML = `<div class="empty">${note}</div>`;
+  // In a span: .empty is a flex box, and bare text beside a <b> would become
+  // separate flex items with the spaces between them dropped.
+  el("strip").innerHTML = `<div class="empty"><span>${note}</span></div>`;
   el("secTitle").textContent = "SECTION - nothing to show";
   el("plTitle").textContent = "ATLAS PLATE";
   el("secInfo").innerHTML = note;
@@ -3715,6 +3926,7 @@ function showEmpty(){
   el("lmlist").innerHTML = "";
   el("regInfo").textContent = "";
   el("regKey").innerHTML = "";
+  el("bgInfo").textContent = "";
   el("fit").textContent = "";
   el("npair").textContent = "0";
   el("plName").textContent = "-";
@@ -3730,11 +3942,24 @@ function showEmpty(){
 function render(){
   const list=rows();
   counts();
-  el("strip").innerHTML = list.map(d=>
+  // Grouped by animal AFTER filtering, each group labelled with what it holds.
+  // rows() is one animal today, so this is one group; the grouping is by value
+  // rather than assumed, so a strip that ever spans animals labels each run.
+  const groups = [];
+  for(const d of list){
+    const g = groups[groups.length - 1];
+    if(g && g.animal === d.animal) g.rows.push(d);
+    else groups.push({animal: d.animal, rows: [d]});
+  }
+  el("strip").innerHTML = groups.map(g =>
+    `<div class="sgrp"><div class="sglab">${esc(g.animal)} &middot; ${g.rows.length}`
+    + ` section${g.rows.length === 1 ? "" : "s"}</div><div class="scells">`
+    + g.rows.map(d=>
     `<div class="cell ${cellClass(d.uid)} ${active===d.uid?"active":""}"
-      data-uid="${esc(d.uid)}">
+      data-uid="${esc(d.uid)}" title="${esc(d.uid)}">
       <img src="${d.img}" loading="lazy" alt="" style="transform:${rotCss(rotOf(d.uid))}">
-      <div class="cap">${d.order}<br>${cellTag(d.uid)}</div></div>`).join("");
+      <div class="cap">#${d.order}<br>${cellTag(d.uid)}</div></div>`).join("")
+    + `</div></div>`).join("");
   if(active && !list.some(d=>d.uid===active)) active=null;
   if(list.length) select(active && list.some(d=>d.uid===active) ? active : list[0].uid, true);
   else showEmpty();
@@ -3749,6 +3974,12 @@ addEventListener("keydown", e=>{
   // letters go to its filter box rather than to the shortcuts underneath.
   if(selIsOpen()){
     if(e.key === "Escape"){ selCancel(); e.preventDefault(); }
+    return;
+  }
+  // The shortcuts pop-up the same way: while it is open no letter may act on
+  // the section hidden behind it.
+  if(keysIsOpen()){
+    if(e.key === "Escape" || e.key === "?"){ keysClose(); e.preventDefault(); }
     return;
   }
   // A focused control eats its own keys - but only the ones it actually uses.
@@ -3768,6 +3999,9 @@ addEventListener("keydown", e=>{
     if(t.type==="range" && e.key.startsWith("Arrow")) return;
     if(t.type==="text" || t.type==="search" || t.type==="number") return;
   }
+  // ? opens the list of the others. Above the Review branch and the `active`
+  // guard, because the list is wanted most exactly when nothing is selected.
+  if(e.key === "?"){ keysOpen(); e.preventDefault(); return; }
   // Review mode has its OWN keys and must not fall through to the ROI ones.
   // Every letter below is bound: `x` excludes a section from measurement, `b`
   // starts a background disc. Firing those from a screen that is about the
@@ -3840,6 +4074,16 @@ addEventListener("keydown", e=>{
     el("roiSize").value = v; onRoiSize(v); e.preventDefault();
   }
 });
+
+function keysIsOpen(){ return el("keysDlg").style.display === "flex"; }
+function keysOpen(){
+  el("keysDlg").style.display = "flex";
+  el("keysClose").focus();
+}
+function keysClose(){
+  el("keysDlg").style.display = "none";
+  el("keysBtn").focus();
+}
 
 function exportCsv(){
   // THREE files, because there are three different decisions and collapsing them
@@ -4215,7 +4459,7 @@ try { if(!localStorage.getItem(KEY) && Object.keys(S).length) save(); } catch(e)
   if(!missing) return;
   const el2 = el("seedOffer");
   el2.style.display = "";
-  el2.innerHTML = `<span style="color:#d29922">this page carries `
+  el2.innerHTML = `<span style="color:var(--warn)">this page carries `
     + `<b>${seedN}</b> curated sections, ${missing} not in this browser</span> `
     + `<button class="btn-plate" style="padding:2px 8px;font-size:12px" `
     + `onclick="adoptSeed()">Load them</button>`;
@@ -5057,6 +5301,10 @@ function toggleReview(){
   revOn = !revOn;
   el("review").classList.toggle("on", revOn);
   el("panes").style.display = revOn ? "none" : "";
+  // The rail, coach line and info column act on the section in the panes, so
+  // they go with them - a Rotate button beside the Review grid would act on a
+  // section that is not on screen.
+  el("work").style.display = revOn ? "none" : "";
   el("strip").style.display = revOn ? "none" : "";
   el("revBtn").classList.toggle("mode-on", revOn);
   if(revOn) revRender();
@@ -5205,7 +5453,7 @@ function revDetail(){
   revImg();
   const r = revOf(revSel);
   el("revState").innerHTML = r
-    ? `<b style="color:#7c5cff">${esc(r.act)}</b> - ${esc(r.why || "no reason given")}`
+    ? `<b style="color:var(--done)">${esc(r.act)}</b> - ${esc(r.why || "no reason given")}`
     : "no decision recorded";
   el("revWhy").value = r ? (r.why || "") : "";
   // Reinstating something that was never excluded, or rejecting a mask that

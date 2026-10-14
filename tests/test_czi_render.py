@@ -21,6 +21,7 @@ can go wrong is quiet:
 Run:  python tests/test_czi_render.py
 """
 
+import contextlib
 import csv
 import os
 import sys
@@ -225,6 +226,17 @@ old = RF.reformat(DAPI_PNG, light_background=False, companion=MARK_PNG, render_s
 chk("...and one blob on the overview route, at any output size",
     not resolved(pair_profile(old[5], old[5].shape[0])))
 
+tis = d8 > 0
+for name, img in (("DAPI", d8), ("marker", m8)):
+    sat = float((img[tis] == 255).mean())
+    # 0.1% at or above the top, plus the half-step that rounds up to 255.
+    chk(f"about 0.1% of the tissue saturates, no more ({name})", sat <= 0.002, f"{sat:.4%}")
+old_sat = float((old[0][old[0] > 0] == 255).mean())
+chk("...where 04a's rule alone would saturate the nuclei",
+    old_sat > float((d8[tis] == 255).mean()), f"{old_sat:.2%} on the 768 route")
+chk("the render is drawn in strips, and they join",
+    side13 > O.STRIP_ROWS and not (d8[O.STRIP_ROWS - 1:O.STRIP_ROWS + 1].sum(axis=1) == 0).any(), "")
+
 print()
 print("--- tile field, scene edge, masks ---")
 field = np.full((153, 153), 2.0)
@@ -270,8 +282,17 @@ class _Doc:
         return PLANES[plane["C"]][y - RY:y - RY + h, x - RX:x - RX + w][:, :, None]
 
 
+# pylibCZIrw's open_czi is a generator-based context manager: the DOCUMENT is
+# what entering it returns, and the manager itself has no
+# scenes_bounding_rectangle. Modelled that way, because a stand-in that was its
+# own document hid exactly that bug until a real CZI found it.
+@contextlib.contextmanager
+def _open_czi(path):
+    yield _Doc()
+
+
 fake = types.ModuleType("pylibCZIrw")
-fake.czi = types.SimpleNamespace(open_czi=lambda path: _Doc())
+fake.czi = types.SimpleNamespace(open_czi=_open_czi)
 sys.modules["pylibCZIrw"] = fake
 sys.modules["pylibCZIrw.czi"] = fake.czi
 
@@ -314,6 +335,17 @@ sys.argv = ["04o", "--marker", "AF568", "--include-excluded", "--source", "overv
 O.main()
 chk("--source overview still builds the 768 composite",
     Image.open(out).size == (768, 768), Image.open(out).size)
+
+import shutil  # noqa: E402
+tdir = paths["sections"] + "_rgb_thumb"
+shutil.rmtree(tdir)
+sys.argv = ["04o", "--marker", "AF568", "--include-excluded", "--thumbs", "--force",
+            "--um-px", "2.6"]
+O.main()
+th = os.path.join(tdir, UID + ".png")
+chk("one run with --thumbs builds the composite AND its thumbnail",
+    os.path.exists(th) and Image.open(th).size == (256, 256)
+    and Image.open(out).size[0] == O.render_side(M, NATIVE, 2.6))
 
 print()
 print("FAILED: %d" % fails if fails else "all passed")

@@ -420,6 +420,46 @@ def bg_row(uid, roi_index, marker, seg_on, backend, labels, report):
             round(float(report.get("below_background", 0.0)), 4)]
 
 
+MANIFEST_FILES_CSV = os.path.join(OUT_ROOT, "manifest", "manifest_files.csv")
+#: What a file with no recorded ceiling is assumed to clip at - the same
+#: fallback, with the same warning, as 01_overviews.ceiling_for().
+DEFAULT_CEILING = 65535
+
+
+def load_ceilings(path=None):
+    """CZI file name -> the value its marker plane clips at, from the manifest.
+
+    Recorded per file by 00_manifest rather than assumed: 65535 is right only
+    while every channel of every file is genuinely 16-bit.
+    """
+    path = path or MANIFEST_FILES_CSV
+    out = {}
+    if os.path.exists(path):
+        with open(path, newline="", encoding="utf-8") as fh:
+            for r in csv.DictReader(fh):
+                try:
+                    out[r["file"]] = int(r["clip_ceiling"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+    if not out:
+        print(f"  !! no clip_ceiling in {path} - assuming {DEFAULT_CEILING}; "
+              f"re-run 00_manifest.py to record it")
+    return out
+
+
+def clipped(vals, ceiling):
+    """Whether any of this object's own marker pixels sits at the ceiling.
+
+    The `censored` flag, decided on the native 16-bit pixels under the object's
+    mask, before any tile field. It used to be read off 04j's mask on the 256
+    grid - about 31 um a cell against a 7 um nucleus, at one point per nucleus -
+    which is why 06f had to re-derive it after every run. A nucleus is censored
+    if its value is lost anywhere inside it: one clipped pixel already means its
+    mean and p90 are lower bounds, not measurements.
+    """
+    return bool(np.size(vals)) and float(np.max(vals)) >= ceiling
+
+
 def point_in_poly(px, py, v):
     """Is (px, py) inside the ring `v`, an (N, 2) array of canonical-grid points?
 
@@ -989,6 +1029,7 @@ def main():
 
     px_area = BASE_PX_UM ** 2
     min_area_px = min_area_px_for()
+    ceilings = load_ceilings()
     total_nuc = 0
     total_rel = 0
     total_bg = 0
@@ -999,7 +1040,7 @@ def main():
                       [float(g["m10"]), float(g["m11"]), float(g["m12"])]])
         Minv = G5.invert_affine(M)              # CZI px -> 256 grid
         art = mask_at(uid, "artifact")
-        cen = mask_at(uid, "censor")
+        ceiling = ceilings.get(g["czi_file"], DEFAULT_CEILING)
         # The DAPI tissue silhouette 04a_reformat.py carried into this same 256
         # frame - the tissue definition every other stage and the curator use.
         # Without it there is no way to tell a nucleus on the section from one
@@ -1150,7 +1191,7 @@ def main():
                         round(float(vals.mean()), 1),
                         round(float(np.median(vals)), 1),
                         round(float(np.percentile(vals, 90)), 1),
-                        int(inb(cen)), int(inb(art)), off_tis,
+                        int(clipped(vals, ceiling)), int(inb(art)), off_tis,
                         seg_on, seg_backend, seg_shaped])
 
                 # CO-LOCALISATION, while both label images exist for this ROI.

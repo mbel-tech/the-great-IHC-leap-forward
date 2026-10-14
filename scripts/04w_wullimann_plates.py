@@ -31,8 +31,9 @@ the stippled micrograph of the other on the right. `midline_frac` is where they
 meet, as a fraction of the width; 04x reads the drawing to its left and 04l mirrors
 polygons about it.
 
-The plates are not ours to redistribute, so nothing here goes in git - the
-`atlas/` folder is ignored.
+The cut-out sections come from 04v. Both they and the plate set this builds
+ship in the repository's atlas/ folder; atlas/README.md says how to cite the
+book.
 
 Run:  python 04w_wullimann_plates.py [--src DIR] [--out DIR]
 """

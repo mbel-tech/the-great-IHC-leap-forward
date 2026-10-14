@@ -138,7 +138,9 @@ Things that differ from salmon, so they are not a surprise later:
   crop. On real stippled zebrafish micrographs against salmon sections it is untested: compare
   `roi_regions_refined.csv` with the curator's `roi_regions.csv` before trusting it.
 - Needs tesseract for the name proposals: `requirements-wullimann.txt`.
-- The plates come from a book that is not ours to redistribute; `atlas/` is ignored by git.
+- The plates ship in `atlas/plates_wullimann/` (with the 04x outlines, not yet reviewed) and the cut-out cross sections in
+  `atlas/wullimann1996/`; `04v` cuts them out of the book's PDF again if needed. Cite the book - see
+  [Atlases, and how to cite them](#atlases-and-how-to-cite-them).
 
 ### Using an atlas of your own
 

@@ -76,6 +76,12 @@ chk("a configured atlas_pdf is kept",
 final = os.path.join(AT.BUNDLED, "plates_final")
 chk("plates_final ships 64 plates",
     len([f for f in os.listdir(final) if f.endswith(".png")]), 64)
+wull = os.path.join(AT.BUNDLED, AT.WULLIMANN_SET)
+chk("plates_wullimann ships 42 plates",
+    len([f for f in os.listdir(wull) if f.startswith("wplate_") and f.endswith("micrograph.png")]), 42)
+chk("plates_wullimann ships its outlines", os.path.isfile(os.path.join(wull, "polygons.csv")), True)
+chk("an empty atlas_pdf is not a config error",
+    [e for e in LC.validate({"atlas_pdf": ""})[0] if "atlas_pdf" in e], [])
 chk("atlas/README.md names Marco A. Vindas",
     "Marco A. Vindas" in open(os.path.join(AT.BUNDLED, "README.md"), encoding="utf-8").read(), True)
 

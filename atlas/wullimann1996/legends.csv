@@ -1,0 +1,778 @@
+cross_section,pdf_page,abbreviation,definition
+23,3,GL,glomerular layer of olfactory bulb
+23,3,ECL,external cellular layer of olfactory
+23,3,POF,primary olfactory fiber layer
+31,3,GL,glomerular layer of olfactory bulb
+31,3,ECL,external cellular layer of olfactory
+31,3,ICL,internal cellular layer of olfactory
+50,4,TelV,telencephalic ventricle
+50,4,Vd,dorsal nucleus of V
+50,4,V,ventral telencephalic area
+50,4,GL,glomerular layer of olfactory bulb
+50,4,ECL,external cellular layer of olfactory bulb including mitral cells
+50,4,MOT,medial olfactory tract
+50,4,ICL,internal cellular layer of olfactory bulb
+50,4,D,dorsal telencephalic area
+50,4,LOT,lateral olfactory tract
+60,5,TelV,telencephalic ventricle
+60,5,V,ventral telencephalic area
+60,5,Vc,central nucleus of V
+60,5,Vd,dorsal nucleus of V
+60,5,Vv,ventral nucleus of V
+60,5,VI,lateral nucleus of V
+60,5,D,dorsal telencephalic area
+60,5,MOT,medial olfactory tract
+60,5,LOT,lateral olfactory tract
+71,6,V,ventral telencephalic area
+71,6,Vc,central nucleus of V
+71,6,Vd,dorsal nucleus of V
+71,6,Vv,ventral nucleus of V
+71,6,VI,lateral nucleus of V
+71,6,Dc,central zone of 0
+71,6,Op,posterior zone of 0
+71,6,D,dorsal telencephalic area
+71,6,Om,medial zone of 0
+71,6,LOT,lateral olfactory tract
+71,6,MOT,medial olfactory tract
+85,7,TelV,telencephalic ventricle
+85,7,Vd,dorsal nucleus of V
+85,7,V,ventral telencephalic area
+85,7,Vv,ventral nucleus of V
+85,7,Sy,sulcus ypsiloniformis
+85,7,Cantd,"commissura anterior, pars dorsalis"
+85,7,ENd,"entopeduncular nucleus, dorsal part"
+85,7,Dc,central zone of 0
+85,7,MOT,medial olfactory tract
+85,7,LOT,lateral olfactory tract
+85,7,D,dorsal telencephalic area
+85,7,Od,dorsal zone of 0
+85,7,Om,medial zone of 0
+85,7,Op,posterior zone of 0
+92,8,Cantd,"commissura anterior, pars dorsalis"
+92,8,Cantv,"commissura anterior, pars ventralis"
+92,8,Vs,supracommissural nucleus of V
+92,8,V,ventral telencephalic area
+92,8,Dc,central zone of 0
+92,8,ENd,"entopeduncular nucleus, dorsal part"
+92,8,Sy,sulcus ypsiloniformis
+92,8,D,dorsal telencephalic area
+92,8,DiV,diencephalic ventricle
+92,8,Om,medial zone of 0
+92,8,Op,posterior zone of 0
+92,8,Od,dorsal zone of 0
+92,8,MOT,medial olfactory tract
+92,8,PPa,"parvocellular preoptic nucleus, anterior part"
+92,8,ENv,"entopeduncular nucleus, ventral part"
+92,8,LFB,lateral forebrain bundle
+92,8,LOT,lateral olfactory tract
+98,9,TelV,telencephalic ventricle
+98,9,V,ventral telencephalic area
+98,9,Vp,postcommissural nucleus of V
+98,9,Sy,sulcus ypsiloniformis
+98,9,D,dorsal telencephalic area
+98,9,ENd,"entopeduncular nucleus, dorsal part"
+98,9,ENv,"entopeduncular nucleus, ventral part"
+98,9,Dc,central zone of D
+98,9,Dd,dorsal zone of D
+98,9,DiV,diencephalic ventricle
+98,9,Dm,medial zone of D
+98,9,Dp,posterior zone of D
+98,9,MFB,medial forebrain bundle
+98,9,NT,nucleus taeniae
+98,9,PPa,"parvocellular preoptic nucleus, anterior part"
+98,9,LFB,lateral forebrain bundle
+98,9,LOT,lateral olfactory tract
+98,9,DI,lateral zone of D
+107,10,TelV,telencephalic ventricle
+107,10,Vp,postcommissural nucleus of V
+107,10,V,ventral telencephalic area
+107,10,CO,chiasma opticum
+107,10,ON,optic nerve
+107,10,OT,optic tract
+107,10,D,dorsal telencephalic area
+107,10,ENv,"entopeduncular nucleus, ventral part"
+107,10,Dc,central zone of D
+107,10,DiV,diencephalic ventricle
+107,10,Dm,medial zone of D
+107,10,Dp,posterior zone of D
+107,10,MFB,medial forebrain bundle
+107,10,PPa,"parvocellular preoptic nucleus, anterior part"
+107,10,LFB,lateral forebrain bundle
+107,10,DI,lateral zone of D
+107,10,NT,nucleus taeniae
+114,11,CO,chiasma opticum
+114,11,TelV,telencephalic ventricle
+114,11,VM,ventromedial thalamic nucleus
+114,11,ENv,"entopeduncular nucleus, ventral part"
+114,11,D,dorsal telencephalic area
+114,11,OT,optic tract
+114,11,SC,suprachiasmatic nucleus
+114,11,PPp,"parvocellular preoptic nucleus, posterior part"
+114,11,DiV,diencephalic ventricle
+114,11,Dm,medial zone of D
+114,11,Dp,posterior zone of D
+114,11,MFB,medial forebrain bundle
+114,11,NT,nucleus taeniae
+114,11,PM,magnocellular preoptic nucleus
+114,11,LFB,lateral forebrain bundle
+114,11,DI,lateral zone of D
+121,12,Chor,commissura horizontalis
+121,12,Cpop,commissura postoptica
+121,12,VL,ventrolateral thalamic nucleus
+121,12,OT,optic tract
+121,12,SC,suprachiasmatic nucleus
+121,12,SD,saccus dorsalis
+121,12,VM,ventromedial thalamic nucleus
+121,12,D,dorsal telencephalic area
+121,12,Hav,ventral habenular nucleus
+121,12,PMg,gigantocellular part of magnocellular preoptic nucleus
+121,12,PPp,"parvocellular preoptic nucleus, posterior part"
+121,12,PSp,parvocellular superficial pretectal nucleus
+121,12,DiV,diencephalic ventricle
+121,12,MFB,medial forebrain bundle
+121,12,LFB,lateral forebrain bundle
+125,13,Chor,commissura horizontalis
+125,13,VL,ventrolateral thalamic nucleus
+125,13,VM,ventromedial thalamic nucleus
+125,13,VOT,ventrolateral optic tract
+125,13,Cpop,commissura postoptica
+125,13,SC,suprachiasmatic nucleus
+125,13,SD,saccus dorsalis
+125,13,R,rostrolateral nucleus (of Butler & Saidel 91)
+125,13,Hav,ventral habenular nucleus
+125,13,PPp,"parvocellular preoptic nucleus, posterior part"
+125,13,PSp,parvocellular superficial pretectal nucleus
+125,13,D,dorsal telencephalic area
+125,13,DiV,diencephalic ventricle
+125,13,DOT,dorsomedial optic tract
+125,13,MFB,medial forebrain bundle
+125,13,LFB,lateral forebrain bundle
+127,14,TeO,tectum opticum
+127,14,VL,ventrolateral thalamic nucleus
+127,14,VM,ventromedial thalamic nucleus
+127,14,VOT,ventrolateral optic tract
+127,14,Cpop,commissura postoptica
+127,14,Chor,commissura horizontalis
+127,14,CPN,central pretectal nucleus
+127,14,SC,suprachiasmatic nucleus
+127,14,SD,saccus dorsalis
+127,14,Hav,ventral habenular nucleus
+127,14,Hv,ventral zone of periventricular hypothalamus
+127,14,PPp,"parvocellular preoptic nucleus, posterior part"
+127,14,PSp,parvocellular superficial pretectal nucleus
+127,14,DAO,dorsal accessory optic nucleus
+127,14,DiV,diencephalic ventricle
+127,14,DOT,dorsomedial optic tract
+127,14,FR,fasciculus retroflexus
+127,14,PSm,magnocellular superficial pretectal nucleus
+127,14,LFB,lateral forebrain bundle
+127,14,I,intermediate thalamic nucleus
+127,14,MFB,medial forebrain bundle
+131,15,TeO,tectum opticum
+131,15,A,anterior thalamic nucleus
+131,15,VL,ventrolateral thalamic nucleus
+131,15,VM,ventromedial thalamic nucleus
+131,15,VOT,ventrolateral optic tract
+131,15,DOT,dorsomedial optic tract
+131,15,FR,fasciculus retroflexus
+131,15,Chor,commissura horizontalis
+131,15,CPN,central pretectal nucleus
+131,15,DAO,dorsal accessory optic nucleus
+131,15,SD,saccus dorsalis
+131,15,Had,dorsal habenular nucleus
+131,15,Hav,ventral habenular nucleus
+131,15,Hv,ventral zone of peri ventricular hypothalamus
+131,15,MFB,medial forebrain bundle
+131,15,PPp,"parvocellular preoptic nucleus, posterior part"
+131,15,PSm,magnocellular superficial pretectal nucleus
+131,15,PSp,parvocellular superficial pretectal nucleus
+131,15,LFB,lateral forebrain bundle
+131,15,DiV,diencephalic ventricle
+136,16,APN,accessory pretectal nucleus (of Wullimann &
+136,16,ATN,anterior tuberal nucleus
+136,16,A,anterior thalamic nucleus
+136,16,Chab,commissura habenularum
+136,16,Chor,commissura horizontalis
+136,16,CPN,central pretectal nucleus
+136,16,E,epiphysis
+136,16,DAO,dorsal accessory optic nucleus
+136,16,DOT,dorsomedial optic tract
+136,16,DiV,diencephalic ventricle
+136,16,Had,dorsal habenular nucleus
+136,16,Hav,ventral habenular nucleus
+136,16,Hv,ventral zone of periventricular hypothalamus
+136,16,FR,fasciculus retroflexus
+136,16,TeO,tectum opticum
+136,16,TPM,tractus pretectomamillaris
+136,16,TPp,periventricular nucleus of posterior tuberculum
+136,16,VAO,ventral accessory optic nucleus
+136,16,VL,ventrolateral thalamic nucleus
+136,16,VM,ventromedial thalamic nucleus
+136,16,VOT,ventrolateral optic tract
+136,16,ZL,zona limitans
+136,16,MFB,medial forebrain bundle
+136,16,LFB,lateral forebrain bundle
+136,16,PGa,anterior preglomerular nucleus
+136,16,PGI,lateral preglomerular nucleus
+136,16,PGZ,periventricular gray zone of optic tectum
+136,16,PO,posterior pretectal nucleus (of Wullimann & Meyer
+149,17,LFB,lateral forebrain bundle
+149,17,LH,lateral hypothalamic nucleus
+149,17,LR,lateral recess of diencephalic ventricle
+149,17,ATN,anterior tuberal nucleus
+149,17,Hv,ventral zone of peri ventricular hypothalamus
+149,17,Hd,dorsal zone of periventricular hypothalamus
+149,17,MFB,medial forebrain bundle
+149,17,FR,fasciculus retroflexus
+149,17,DiV,diencephalic ventricle
+149,17,Chor,commissura horizontalis
+149,17,Cpost,commissura posterior
+149,17,Ctec,commissura tecti
+149,17,CP,central posterior thalamic nucleus
+149,17,DP,dorsal posterior thalamic nucleus
+149,17,OIL,diffuse nucleus of the inferior lobe
+149,17,TPM,tractus pretectomamillaris
+149,17,TPp,periventricular nucleus of posterior tuberculum
+149,17,TeO,tectum opticum
+149,17,TL,torus longitudinalis
+149,17,TLa,torus lateralis
+149,17,SCO,subcommissural organ
+149,17,VOT,ventrolateral optic tract
+149,17,PGI,lateral preglomerular nucleus
+149,17,PGm,medial preglomerular nucleus
+149,17,PGZ,periventricular gray zone of optic tectum
+149,17,PPv,"periventricular pretectal nucleus, ventral part"
+149,17,PPd,"periventricular pretectal nucleus, dorsal part"
+149,17,PCN,paracommissural nucleus
+149,17,PTN,posterior tuberal nucleus
+153,18,ATN,anterior tuberal nucleus
+153,18,Chor,commissura horizontalis
+153,18,CP,central posterior thalamic nucleus
+153,18,Cpost,commissura posterior
+153,18,Ctec,commissura tecti
+153,18,OIL,diffuse nucleus of the inferior lobe
+153,18,OP,dorsal posterior thalamic nucleus
+153,18,DiV,diencephalic ventricle
+153,18,Hv,ventral zone of periventricular hypothalamus
+153,18,Hd,dorsal zone of periventricular hypothalamus
+153,18,FR,fasciculus retroflexus
+153,18,LH,lateral hypothalamic nucleus
+153,18,LR,lateral recess of diencephalic ventricle
+153,18,PGI,lateral preglomerular nucleus
+153,18,TeO,tectum opticum
+153,18,TeV,tectal ventricle
+153,18,TL,torus longitudinalis
+153,18,TLa,torus lateralis
+153,18,TPM,tractus pretectomamiliaris
+153,18,TPp,periventricular nucleus of posterior tuberculum
+153,18,VOT,ventrolateral optic tract
+153,18,PPv,"periventricular pretectal nucleus, ventral part"
+153,18,PGm,medial preglomerular nucleus
+153,18,PGZ,periventricular gray zone of optic tectum
+153,18,Pit,pituitary
+153,18,PPd,"periventricular pretectal nucleus, dorsal part"
+153,18,PTN,posterior tuberal nucleus
+158,19,Hd,dorsal zone of periventricular hypothalamus
+158,19,Ctec,commissura tecti
+158,19,DiV,diencephalic ventricle
+158,19,FR,fasciculus retroflex us
+158,19,Hv,ventral zone of periventricular hypothalamus
+158,19,MNV,mesencephalic nucleus of trigeminal nerve
+158,19,LH,lateral hypothalamic nucleus
+158,19,Chor,commissura horizontalis
+158,19,Cpost,commissura posterior
+158,19,OIL,diffuse nucleus of the inferior lobe
+158,19,LR,lateral recess of diencephalic ventricle
+158,19,P,posterior thalamic nucleus
+158,19,PGI,lateral preglomerular nucleus
+158,19,TeO,tectum opticum
+158,19,TeV,tecta I ventricle
+158,19,TL,torus longitudinalis
+158,19,TLa,torus lateralis
+158,19,TPM,tractus pretectomamiliaris
+158,19,TPp,periventricular nucleus of posterior tuberculum
+158,19,Pit,pituitary
+158,19,PGm,medial preglomerular nucleus
+158,19,PGZ,periventricular gray zone of optic tectum
+158,19,VOT,ventrolateral optic tract
+158,19,PTN,posterior tuberal nucleus
+158,19,PVO,paraventricular organ
+158,19,PPv,"periventricular pretectal nucleus, ventral part"
+162,20,Chor,commissura horizontalis
+162,20,Cpost,commissura posterior
+162,20,Ctec,commissura tecti
+162,20,Hc,caudal zone of periventricular hypothalamus
+162,20,OIL,diffuse nucleus of the inferior lobe
+162,20,DiV,diencephalic ventricle
+162,20,FR,fasciculus retroflex us
+162,20,Hd,dorsal zone of periventricular hypothalamus
+162,20,LR,lateral recess of diencephalic ventricle
+162,20,P,posterior thalamic nucleus
+162,20,PGm,medial preglomerular nucleus
+162,20,PGZ,periventricular gray zone of optic tectum
+162,20,TLa,torus lateralis
+162,20,TPM,tractus pretectomamillaris
+162,20,TPp,periventricular nucleus of posterior tuberculum
+162,20,TeO,tectum opticum
+162,20,TeV,tecta I ventricle
+162,20,TL,torus longitudinalis
+162,20,TGN,tertiary gustatory nucleus (of Wullimann 88)
+162,20,TS,torus semicircularis
+162,20,VOT,ventrolateral optic tract
+162,20,Pit,pituitary
+162,20,PTN,posterior tuberal nucleus
+162,20,RT,rostral tegmental nucleus (of Grover & Sharma 81)
+168,21,NMLF,nucleus of MLF
+168,21,PGm,medial preglomerular nucleus
+168,21,LLF,lateral longitudinal fascicle
+168,21,LR,lateral recess of diencephalic ventricle
+168,21,Hc,caudal zone of periventricular hypothalamus
+168,21,Hd,dorsal zone of periventricular hypothalamus
+168,21,NR,nucleus ruber
+168,21,PGZ,periventricular gray zone of optic tectum
+168,21,Cpost,commissura posterior
+168,21,Ctec,commissura tecti
+168,21,OIL,diffuse nucleus of the inferior lobe
+168,21,DiV,diencephalic ventricle
+168,21,FR,fasciculus retroflexus
+168,21,TL,torus longitudinalis
+168,21,TSvl,ventrolateral nucleus of torus semicircularis
+168,21,TeO,tectum opticum
+168,21,TeV,tectal ventricle
+168,21,TLa,torus lateralis
+168,21,TPM,tractus pretectomamillaris
+168,21,TSc,central nucleus of torus semicircularis
+168,21,TGN,tertiary gustatory nucleus (of Wullimann 88)
+168,21,Val,lateral division of valvula cerebelli
+168,21,Vas,vascular lacuna of area postrema
+168,21,SG,subglomerular nucleus
+168,21,Pit,pituitary
+168,21,RT,rostral tegmental nucleus (of Grover & Sharma 81)
+173,22,Ctec,commissura tecti
+173,22,Ctub,commissure of the posterior tuberculum
+173,22,Cil,central nucleus of the inferior lobe
+173,22,CM,corpus mamillare
+173,22,DTN,dorsal tegmental nucleus
+173,22,OIL,diffuse nucleus of the inferior lobe
+173,22,EW,Edinger-Westphal nucleus
+173,22,FR,fasciculus retroflexus
+173,22,Hc,caudal zone of periventricular hypothalamus
+173,22,Hd,dorsal zone of periventricular hypothalamus
+173,22,LLF,lateral longitudinal fascicle
+173,22,LR,lateral recess of diencephalic ventricle
+173,22,MLF,medial longitudinal fascicle
+173,22,NMLF,nucleus of MlF
+173,22,Vas,vascular lacuna of area postrema
+173,22,TL,torus longitudinalis
+173,22,TLa,torus lateralis
+173,22,nB,tractus tectobulbaris
+173,22,TPM,tractus pretectomamillaris
+173,22,TeO,tectum opticum
+173,22,TeV,tecta I ventricle
+173,22,TSc,central nucleus of torus semicircularis
+173,22,TSvl,ventrolateral nucleus of torus semicircularis
+173,22,Val,lateral division of valvula cerebelli
+173,22,PGc,caudal preglomerular nucleus
+173,22,Pit,pituitary
+173,22,PGZ,periventricular gray zone of optic tectum
+173,22,PR,posterior recess of diencephalic ventricle
+179,23,NIII,oculomotor nucleus
+179,23,PGZ,periventricular gray zone of optic tectum
+179,23,CM,corpus mamillare
+179,23,Ctec,commissura tecti
+179,23,CIL,central nucleus of the inferior lobe
+179,23,Hd,dorsal zone of periventricular hypothalamus
+179,23,NLL,nucleus of the lateral lemniscus (of Prasada Rao et al. 87)
+179,23,NMLF,nucleus of MLF
+179,23,LLF,lateral longitudinal fascicle
+179,23,MLF,medial longitudinal fascicle
+179,23,OIL,diffuse nucleus of the inferior lobe
+179,23,Cans,commissura ansulata
+179,23,DTN,dorsal tegmental nucleus
+179,23,FR,fasciculus retroflexus
+179,23,LR,lateral recess of diencephalic ventricle
+179,23,nB,tractus tectobulbaris
+179,23,TeO,tectum opticum
+179,23,TeV,tecta I ventricle
+179,23,TL,torus longitudinalis
+179,23,TLa,torus lateralis
+179,23,TMCa,tractus mesencephalocerebellaris anterior
+179,23,TPM,tractus pretectomamillaris
+179,23,TSc,central nucleus of torus semicircularis
+179,23,TSvl,ventrolateral nucleus of torus semicircularis
+179,23,Val,lateral division of valvula cerebelli
+179,23,Vam,medial division of valvula cerebelli
+179,23,III,oculomotor nerve
+179,23,Vas,vascular lacuna of area postrema
+179,23,PL,perilemniscal nucleus
+185,24,GIL,central nucleus of the inferior lobe
+185,24,CM,corpus mamillare
+185,24,LLF,lateral longitudinal fascicle
+185,24,Ctec,commissura tecti
+185,24,Hd,dorsal zone of periventricular hypothalamus
+185,24,Nln,nucleus interpeduncularis
+185,24,NLL,nucleus of the lateral lemniscus (of Prasada Rao et al. 87)
+185,24,MLF,medial longitudinal fascicle
+185,24,OIL,diffuse nucleus of the inferior lobe
+185,24,OTN,dorsal tegmental nucleus
+185,24,LR,lateral recess of diencephalic ventricle
+185,24,NLV,nucleus lateralis valvulae
+185,24,NLLI,oculomotor nucleus
+185,24,TL,torus longitudinalis
+185,24,TLa,torus lateralis
+185,24,TMCa,tractus mesencephalocerebellaris anterior
+185,24,TSc,central nucleus of torus semicircularis
+185,24,TSvl,ventrolateral nucleus of torus semicircularis
+185,24,TeO,tectum opticum
+185,24,TeV,tecta I ventricle
+185,24,nB,tractus tectobulbaris
+185,24,nBc,tractus tectobulbaris cruciatus
+185,24,Val,lateral division of valvula cerebelli
+185,24,Vam,medial division of valvula cerebelli
+185,24,PGZ,periventricular gray zone of optic tectum
+185,24,PL,perilemniscal nucleus
+196,25,SRF,superior reticular formation
+196,25,PL,perilemniscal nucleus
+196,25,PGZ,periventricular gray zone of optic tectum
+196,25,Ctec,commissura tecti
+196,25,RV,rhombencephalic ventricle
+196,25,Nln,nucleus interpeduncularis
+196,25,NLV,nucleus lateralis valvulae
+196,25,MLF,medial longitudinal fascicle
+196,25,OIL,diffuse nucleus of the inferior lobe
+196,25,GC,griseum centrale
+196,25,NIV,trochlear nucleus
+196,25,LLF,lateral longitudinal fascicle
+196,25,OTN,dorsal tegmental nucleus
+196,25,TeO,tectum opticum
+196,25,TeV,tecta I ventricle
+196,25,TL,torus longitudinalis
+196,25,TMCa,tractus mesencephalocerebellaris anterior
+196,25,TMCp,tractus mesencephalocerebellaris posterior
+196,25,TSc,central nucleus of torus semicircularis
+196,25,TSvl,ventrolateral nucleus of torus semicircularis
+196,25,nB,tractus tectobulbaris
+196,25,nBc,tractus tectobulbaris cruciatus
+196,25,nBr,tractus tectobulbaris rectus
+196,25,Val,lateral division of valvula cerebelli
+196,25,Vam,medial division of valvula cerebelli
+201,26,AC,anterior cerebellar tract
+201,26,Ctec,commissura tecti
+201,26,Cven,commissura ventralis rhombencephali
+201,26,GC,griseum centrale
+201,26,OIL,diffuse nucleus of the inferior lobe
+201,26,LLF,lateral longitudinal fascicle
+201,26,SR,superior raphe
+201,26,PGZ,periventricular gray zone of optic tectum
+201,26,MLF,medial longitudinal fascicle
+201,26,RV,rhombencephalic ventricle
+201,26,NLV,nucleus lateralis valvulae
+201,26,TSc,central nucleus of torus semicircularis
+201,26,TSvl,ventrolateral nucleus of torus semicircularis
+201,26,TeO,tectum opticum
+201,26,TL,torus longitudinalis
+201,26,nB,tractus tectobulbaris
+201,26,nBc,tractus tectobulbaris cruciatus
+201,26,nBr,tractus tectobulbaris rectus
+201,26,SRF,superior reticular formation
+201,26,IV,trochlear nerve
+201,26,Val,lateral division of valvula cerebelli
+201,26,Vam,medial division of valvula cerebelli
+204,27,PGZ,periventricular gray zone of optic tectum
+204,27,LLF,lateral longitudinal fascicle
+204,27,NI,nucleus isthmi
+204,27,CCe,corpus cerebelli
+204,27,AC,anterior cerebellar tract
+204,27,NLV,nucleus lateral is valvulae
+204,27,MLF,medial longitudinal fascicle
+204,27,LC,locus coeruleus
+204,27,Cven,commissura ventralis rhombencephali
+204,27,GC,griseum centrale
+204,27,OIL,diffuse nucleus of the inferior lobe
+204,27,DIV,trochlear decussation
+204,27,TeO,tectum opticum
+204,27,TL,torus longitudinalis
+204,27,TSc,central nucleus of torus semicircularis
+204,27,TSvl,ventrolateral nucleus of torus semicircularis
+204,27,nB,tractus tectobulbaris
+204,27,nBc,tractus tectobulbaris cruciatus
+204,27,nBr,tractus tectobulbaris rectus
+204,27,Val,lateral division of valvula cerebelii
+204,27,Vam,medial division of valvula cerebelli
+204,27,SRF,superior reticular formation
+204,27,SR,superior raphe
+204,27,RV,rhombencephalic ventricle
+208,28,AC,anterior cerebellar tract
+208,28,Cven,commissura ventralis rhombencephali
+208,28,GGe,corpus cerebelli
+208,28,GC,griseum centrale
+208,28,PGZ,periventricular gray zone of optic tectum
+208,28,MLF,medial longitudinal fascicle
+208,28,LLF,lateral longitudinal fascicle
+208,28,NI,nucleus isthmi
+208,28,NVmd,"trigeminal motor nucleus, dorsal part"
+208,28,NLV,nucleus lateralis valvulae
+208,28,RV,rhombencephalic ventricle
+208,28,TeO,tectum opticum
+208,28,TSc,central nucleus of torus semicircularis
+208,28,TSvl,ventrolateral nucleus of torus semicircularis
+208,28,nB,tractus tectobulbaris
+208,28,nBc,tractus tectobulbaris cruciatus
+208,28,nBr,tractus tectobulbaris rectus
+208,28,IV,trochlear nerve
+208,28,Vam,medial division of valvula cerebelli
+208,28,SRF,superior reticular formation
+208,28,SR,superior raphe
+213,29,PGZ,periventricular gray zone of optic tectum
+213,29,RV,rhombencephalic ventricle
+213,29,GGe,corpus cerebelli
+213,29,Gcer,commissura cerebelli
+213,29,NVmv,"trigeminal motor nucleus, ventral part"
+213,29,GC,griseum centrale
+213,29,Ggus,commissure of the secondary gustatory nuclei
+213,29,Cven,commissura ventralis rhombencephali
+213,29,MLF,medial longitudinal fascicle
+213,29,NI,nucleus isthmi
+213,29,LLF,lateral longitudinal fascicle
+213,29,TSc,central nucleus of torus semicircularis
+213,29,TeO,tectum opticum
+213,29,TSvl,ventrolateral nucleus of torus semicircularis
+213,29,nBc,tractus tectobulbaris cruciatus
+213,29,nBr,tractus tectobulbaris rectus
+213,29,Vam,medial division of valvula cerebelli
+213,29,V,trigeminal nerve
+213,29,IV,trochlear nerve
+213,29,SRF,superior reticular formation
+213,29,SGN,secondary gustatory nucleus
+219,30,ALLN,anterior lateral line nerves
+219,30,GGe,corpus cerebelli
+219,30,Cven,commissura ventralis rhombencephali
+219,30,Gcer,commissura cerebelli
+219,30,GC,griseum centrale
+219,30,LLF,lateral longitudinal fascicle
+219,30,EG,eminentia granularis
+219,30,MLF,medial longitudinal fascicle
+219,30,NVmd,"trigeminal motor nucleus, dorsal part"
+219,30,NVmv,"trigeminal motor nucleus, ventral part"
+219,30,NVs,primary sensory trigeminal nucleus
+219,30,nBc,tractus tectobulbaris cruciatus
+219,30,nBr,tractus tectobulbaris rectus
+219,30,TeO,tectum opticum
+219,30,Vmd,dorsal motor root of the trigeminal nerve
+219,30,VII,facial nerve
+219,30,Vs,sensory root of the trigeminal nerve
+219,30,SGT,secondary gustatory tract
+219,30,SRF,superior reticular formation
+219,30,PG,posterior cerebellar tract
+219,30,PGZ,periventricular gray zone of optic tectum
+219,30,RV,rhombencephalic ventricle
+223,31,AON,anterior octaval nucleus
+223,31,ALLN,anterior lateral line nerves
+223,31,NVmv,"trigeminal motor nucleus, ventral part"
+223,31,GC,griseum centrale
+223,31,LLF,lateral longitudinal fascicle
+223,31,MLF,medial longitudinal fascicle
+223,31,PC,posterior cerebellar tract
+223,31,EG,eminentia granularis
+223,31,DV,descending trigeminal root
+223,31,CCe,corpus cerebelli
+223,31,Cven,commissura ventralis rhombencephali
+223,31,TeO,tectum opticum
+223,31,nBc,tractus tectobulbaris cruciatus
+223,31,nBr,tractus tectobulbaris rectus
+223,31,SGT,secondary gustatory tract
+223,31,SRF,superior reticular formation
+223,31,Vmv,ventral motor root «f the trigeminal nerve
+223,31,VIr,rostral root of the abducens nerve
+223,31,VII,facial nerve
+223,31,PGZ,periventricular gray zone of optic tectum
+223,31,RV,rhombencephalic ventricle
+230,32,AON,anterior octaval nucleus
+230,32,ALLN,anterior lateral line nerves
+230,32,CCe,corpus cerebelli
+230,32,Cven,commissura ventralis rhombencephali
+230,32,DV,descending trigeminal root
+230,32,IMRF,intermediate reticular formation
+230,32,LCa,lobus caudalis cerebelli
+230,32,MLF,medial longitudinal fascicle
+230,32,EG,eminentia granularis
+230,32,MAC,Mauthner cell
+230,32,TeO,tectum opticum
+230,32,nBc,tractus tectobulbaris cruciatus
+230,32,nBr,tractus tectobulbaris rectus
+230,32,VIIs,sensory root of the facial nerve
+230,32,VIII,octaval nerve
+230,32,SGT,secondary gustatory tract
+230,32,MON,medial octavolateralis nucleus
+230,32,RV,rhombencephalic ventricle
+237,33,ALLN,anterior lateral line nerves
+237,33,CC,crista cerebeliaris
+237,33,CCe,corpus cerebelii
+237,33,Cven,commissura ventralis rhombencephali
+237,33,IMRF,intermediate reticular formation
+237,33,IAF,inner arcuate fibers
+237,33,MA,Mauthner axon
+237,33,LCa,lobus caudal is cerebelii
+237,33,MLF,medial longitudinal fascicle
+237,33,EG,eminentia granularis
+237,33,DV,descending trigeminal root
+237,33,II',... . _ ......
+237,33,nBc,tractus tectobulbaris cruciatus
+237,33,T,tangential nucleus
+237,33,SGT,secondary gustatory tract
+237,33,SO,secondary octaval population (of
+237,33,Vic,caudal root of the abducens nerve
+237,33,VIIs,sensory root of the facial nerve
+237,33,VIII,octaval nerve
+237,33,NVlc,"abducens nucleus, caudal part"
+237,33,RV,rhombencephalic ventricle
+237,33,MON,medial octavolateralis nucleus
+239,34,ALLN,anterior lateral line nerves
+239,34,CCe,corpus cerebelli
+239,34,even,commissura ventralis
+239,34,ee,crista cerebellaris
+239,34,DON,descending octaval nucleus
+239,34,DV,descending trigeminal root
+239,34,IMRF,intermediate reticular formation
+239,34,IAF,inner arcuate fibers
+239,34,EG,eminentia granularis
+239,34,MA,Mauthner axon
+239,34,LCa,lobus caudalis cerebelli
+239,34,T,tangential nucleus
+239,34,SO,secondary octaval population (of
+239,34,VIII,octaval nerve
+239,34,VIIs,sensory root of the facial nerve
+239,34,NDV,nucleus of the descending trigeminal
+239,34,SGT,secondary gustatory tract
+239,34,RV,rhombencephalic ventricle
+239,34,MLF,medial longitudinal fascicle
+239,34,NVlc,"abducens nucleus, caudal part"
+239,34,MON,medial octavolateralis nucleus
+251,35,ee,crista cerebellaris
+251,35,CCe,corpus cerebelli
+251,35,Cven,commissura ventralis rhombencephali
+251,35,IMRF,intermediate reticular formation
+251,35,LCa,lobus caudalis cerebelli
+251,35,DON,descending octaval nucleus
+251,35,DV,descending trigeminal root
+251,35,MON,medial octavolateralis nucleus
+251,35,MA,Mauthner axon
+251,35,MLF,medial longitudinal fascicle
+251,35,SGT,secondary gustatory tract
+251,35,VIII,octaval nerve
+251,35,VIIs,sensory root of the facial nerve
+251,35,PLLN,posterior lateral line nerve
+251,35,NVIIm,facial motor nucleus
+251,35,RV,rhombencephalic ventricle
+251,35,NOV,nucleus of the descending
+260,36,ee,crista cerebellaris
+260,36,IMRF,intermediate reticular formation
+260,36,DON,descending octaval nucleus
+260,36,DV,descending trigeminal root
+260,36,TBS,tractus bulbospinalis
+260,36,VIII,octaval nerve
+260,36,LCa,lobus caudalis cerebelli
+260,36,SGT,secondary gustatory tract
+260,36,VIIs,sensory root of the facial nerve
+260,36,PLLN,posterior lateral line nerve
+260,36,MA,Mauthner axon
+260,36,MLF,medial longitudinal fascicle
+260,36,MON,medial octavolateralis nucleus
+260,36,RV,rhombencephalic ventricle
+260,36,NOV,nucleus of the descending trigeminal root
+260,36,LVII,lobus facialis
+272,37,ee,crista cerebellaris
+272,37,Cven,commissura ventralis rhombencephali
+272,37,TBS,tractus bulbospinalis
+272,37,CON,caudal octavolateralis nucleus
+272,37,TVS,tractus vestibulospinalis
+272,37,VIII,octaval nerve
+272,37,IRF,inferior reticular formation
+272,37,IR,interior raphe
+272,37,DON,descending octaval nucleus
+272,37,MLF,medial longitudinal fascicle
+272,37,IX,glossopharyngeal nerve
+272,37,LVLL,lobus facialis
+272,37,LIX,lobus glossopharyngeus
+272,37,DV,descending trigeminal root
+272,37,SGT,secondary gustatory tract
+272,37,MA,Mauthner axon
+272,37,PLLN,posterior lateral line nerve
+272,37,RV,rhombencephalic ventricle
+279,38,CON,caudal octavolateralis nucleus
+279,38,ee,crista cerebellaris
+279,38,IAF,inner arcuate fibers
+279,38,LRN,lateral reticular nucleus
+279,38,DV,descending trigeminal root
+279,38,LVIT,lobus facialis
+279,38,TBS,tractus bulbospinalis
+279,38,TVS,tractus vestibulospinalis
+279,38,X,vagal nerve
+279,38,IRF,inferior reticular formation
+279,38,IR,inferior raphe
+279,38,MA,Mauthner axon
+279,38,MLF,medial longitudinal fascicle
+279,38,RV,rhombencephalic ventricle
+279,38,NXm,vagal motor nucleus
+279,38,LX,lobus vagus
+279,38,SGT,secondary gustatory tract
+279,38,PON,posterior octaval nucleus
+283,39,TBS,tractus bulbospinalis
+283,39,TVS,tractus vestibulospinalis
+283,39,X,vagal nerve
+283,39,CON,caudal octavolateralis nucleus
+283,39,SGT,secondary gustatory tract
+283,39,IRF,inferior reticular formation
+283,39,IR,inferior raphe
+283,39,MA,Mauthner axon
+283,39,MLF,medial longitudinal fascicle
+283,39,RV,rhombencephalic ventricle
+283,39,LID,lobus facial is
+283,39,NXm,vagal motor nucleus
+283,39,LX,lobus vagus
+283,39,DV,descending trigeminal root
+290,40,TBS,tractus bulbospinalis
+290,40,TVS,tractus vestibulospinalis
+290,40,DV,descending trigeminal root
+290,40,SGT,secondary gustatory tract
+290,40,X,vagal nerve
+290,40,IRF,inferior reticular formation
+290,40,IR,inferior raphe
+290,40,MA,Mauthner axon
+290,40,MLF,medial longitudinal fascicle
+290,40,RV,rhombencephalic ventricle
+290,40,NXm,vagal motor nucleus
+290,40,LX,lobus vagus
+303,41,TBS,tractus bulbospinalis
+303,41,SGT,secondary gustatory tract
+303,41,IRF,inferior reticular formation
+303,41,Flv,funiculus lateralis pars ventralis
+303,41,Fv,funiculus ventralis
+303,41,MA,Mauthner axon
+303,41,MFN,medial funicular nucleus
+303,41,MLF,medial longitudinal fascicle
+303,41,DV,descending trigeminal root
+303,41,RV,rhombencephalic ventricle
+303,41,NXm,vagal motor nucleus
+303,41,LX,lobus vagus
+319,42,TBS,tractus bulbospinalis
+319,42,Cinf,commissura infima of Haller
+319,42,C,central canal
+319,42,IRF,inferior reticular formation
+319,42,Flv,funiculus lateralis pars ventralis
+319,42,MA,Mauthner axon
+319,42,MFN,medial funicular nucleus
+319,42,MLF,medial longitudinal fascicle
+319,42,NC,commissural nucleus of Cajal
+319,42,DV,descending trigeminal root
+319,42,Fv,funiculus ventralis
+363,42,VH,ventral horn
+363,42,C,central canal
+363,42,Fld,funiculus lateralis pars dorsalis (including TBS)
+363,42,Flv,funiculus lateralis pars ventralis
+363,42,Fd,funiculus dorsalis
+363,42,DH,dorsal horn
+363,42,DR,dorsal root
+363,42,Fv,funiculus ventralis (including part of MLF)
+363,42,MA,Mauthner axon
+363,42,MLF,medial longitudinal fascicle

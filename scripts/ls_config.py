@@ -1006,6 +1006,12 @@ def validate(cfg, path="<config>", strict_paths=False):
 
     for key in SPEC:
         found, value = _get(cfg, key.parts)
+        # An optional path left as "" is the same as absent: the settings
+        # dialog writes "" for a cleared field, and `atlas_pdf` then falls back
+        # to the shipped atlas (apply_defaults).
+        if (not key.required and key.type == "path_file"
+                and isinstance(value, str) and not value.strip()):
+            value = None
         if not found or value is None:
             if key.required and key.default is None:
                 errors.append(f"{path}: `{key.path}` is required - {key.doc}")

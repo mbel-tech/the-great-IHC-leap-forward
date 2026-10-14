@@ -155,3 +155,7 @@ if (-not $NoR) {
 
 $size = (Get-ChildItem $Out -Recurse -File | Measure-Object Length -Sum).Sum / 1MB
 Write-Host ("Built {0} ({1:N0} MB)" -f $Out, $size)
+
+# compileall exits non-zero over the test fixtures that are not valid Python
+# (see above); that is expected, and must not fail the build.
+exit 0

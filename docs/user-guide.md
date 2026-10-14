@@ -4,20 +4,20 @@
 
 This guide takes you from a folder of slide scans to a spreadsheet of per-region cell counts using the LS IHC desktop app. It is written for someone who has never used the app. Read sections 1 to 3 once, then use the rest as a reference while you work.
 
-> **Which parts are in the app today.** Every stage, setting and output described here is already in the code on `main`. The app's new layout is not yet: it arrives with app PR #19. Until that merges, these parts look different or are missing in the app you run: the six screens and the step bar on the left; the Next up card naming missing settings; the Set up cards, including *Curation pictures* and *Scene pictures*; the Options panel and (i) buttons on each stage; **Continue Prepare**; and the scene pictures' own Run button. Meanwhile, set those settings directly in `config.json` and run stages as in section 9, *Running stages outside the app*. Screenshots and example images will be added once the screens are final.
+> **Up to date with the redesigned app** (light theme, numbered steps, one curation stop). The pictures were taken on a made-up study, so the animal names and numbers in them are only examples.
 
 ## 1. Quick start
 
-The app has six screens down the left, in the order you work. Do them top to bottom. On each one there is usually only one thing to do.
+The step list on the left shows six screens in the order you work, each with a one-line description and how far it has got. Do them top to bottom. Every screen opens with a blue **Your part** line that says what you do there; usually it is one thing.
 
 | # | Screen | What you do there | You are done when |
 | --- | --- | --- | --- |
 | ⌂ | **Project** | Open or create your study's project. Read the **Next up** card (if settings are missing, it names each Set up card and what it lacks) and press **Go**. | You know which screen to go to next. |
-| 1 | **Set up** | Point the app at your slides, then fill in the cards in order: folders, file names, microscope and channels, atlas, nucleus detection. Press **Apply** on each card. | No red rows on the Slides tab, and every card says *Applied*. |
-| 2 | **Prepare** | Press **Run all remaining**. It runs on its own and stops when it needs you. | It says it is waiting for a curator. |
-| 3 | **Curate** | Work through each curator tab, press its **Export** button, then **Continue Prepare**. Last comes the ROI curator, where you draw the brain regions. | All curators exported; the ROI curator's Export has written its files. |
+| 1 | **Set up** | Point the app at your slides, then fill in the tabs in order: folders, file names, microscope and channels, pictures, atlas, nucleus detection. Press **Apply** on each. | No red rows on the Slides tab, and the step list says every card is applied. |
+| 2 | **Prepare** | Press **Run all remaining**. It runs straight through to the ROI curator. | The step list shows Prepare done and Next up sends you to Curate. |
+| 3 | **Curate** | In the ROI curator, bring back any section that was set aside by mistake, match each section to its atlas plate and draw the brain regions. Then press **Done: export and go to Measure**. | The curator is exported. |
 | 4 | **Measure** | Press **Run all remaining**. Nucleus detection takes hours and can be stopped and resumed. | Every section is measured. |
-| 5 | **Results** | Confirm unblinding, then build the spreadsheets and figures. | `roi_dataset.xlsx` is in your results folder. |
+| 5 | **Results** | Press **Unblind**, check the sampling workbook, confirm, then build the spreadsheets and figures. | `roi_dataset.xlsx` is in your results folder. |
 
 Three habits will save you trouble:
 
@@ -33,61 +33,61 @@ There are far too many sections to measure by hand, so the program does the repe
 
 1. **Read and check the slides.** Every slide file is listed, checked, and every section on it saved as a small picture.
 2. **Standardise every section.** Each section is cleaned, turned upright, centred and resized to the same square, so a position means the same thing on every section.
-3. **Curate.** You check the rotations, accept or overrule proposed exclusions, match each section to an atlas plate, and draw the brain regions to measure.
+3. **Curate.** You bring back any section the program set aside by mistake, match each section to an atlas plate, and draw the brain regions to measure.
 4. **Measure.** Your regions are mapped back onto the original full-resolution scan. Every nucleus inside them is found (on DAPI, or for PCNA on its own channel) and the marker is measured in each.
 5. **Unblind and report.** Only now are the animals joined to their treatment groups, and the spreadsheets and figures are written.
 
 ```mermaid
 flowchart LR
-    A[Set up<br/>slides and settings] --> B[Prepare, part 1<br/>read, check, reformat]
-    B --> C{{Rotation curator<br/>upright? usable?}}
-    C --> D[Prepare, part 2<br/>censor, final pictures]
-    D --> E{{ROI curator<br/>plate and regions}}
-    E --> F[Measure<br/>find nuclei]
+    A[Set up<br/>slides and settings] --> B[Prepare<br/>read, check, clean]
+    B --> E{{ROI curator<br/>plate and regions}}
+    E --> F[Measure<br/>find and count nuclei]
     F -. blinding ends here .-> G[Unblind<br/>join treatment groups]
     G --> H[Results<br/>spreadsheets, figures]
 ```
 
-The two hexagons are where the run stops for you. The atlas plate boxes (salmon atlas only) are a third, short stop during Prepare, part 1.
+The hexagon is the one place the run stops for you: the ROI curator. The atlas plate boxes (salmon atlas only) are a second, short stop during Prepare.
 
 ### Three rules the pipeline never breaks
 
-- **The program proposes, you decide.** Exclusions, rotations and atlas matching are proposed automatically where possible, but a person makes the final call. Automatic atlas matching was tried twice on this data and failed.
+- **The program proposes, you decide.** Exclusions and rotations are made automatically, and you can reverse any exclusion in the ROI curator's Review. Atlas matching is always done by a person. Automatic atlas matching was tried twice on this data and failed.
 - **Nothing is deleted.** A section that is set aside keeps a flag saying so and why. You can reinstate it later without re-reading any scans.
 - **Blind until the end.** No stage before *Unblind* on the Results screen reads which treatment group an animal is in. Two exceptions are deliberate and do not touch a measurement: the order detection measures sections in, and the ROI curator's Shotgun slide deck.
 
 ### Where you make decisions
 
-There are four places where the pipeline waits for you. All four are tabs on the **Curate** screen.
+There are three places where the pipeline waits for you. All three are on the **Curate** screen, and for most studies only the ROI curator matters.
 
 | Curator | What you decide | Needed for |
 | --- | --- | --- |
 | Atlas plate boxes | One box per brain section on each atlas figure (salmon atlas only) | Building the atlas plates |
-| Rotation and exclusion | Is each section upright, and is it usable at all? | The second half of Prepare |
-| ROI curator | Which atlas plate each section matches, and the outline of each region | Measure |
+| ROI curator | Which sections to bring back, which atlas plate each section matches, and the outline of each region | Measure |
 | Import browser exports | Only if you curated in a web browser instead of the app | Measure |
+
+> **No separate rotation curator any more.** Each section is levelled automatically, and sections with no usable tissue are set aside automatically. You undo a wrong exclusion in the ROI curator's Review. Studies that already have rotation decisions keep them unchanged. Mirroring a section is no longer possible, so in a new study a section mounted face down shows mirrored.
 
 ## 3. Opening the app and finding your way around
 
 ### Starting the app
 
-- **From the packaged build:** double-click `LS pipeline.exe`. Its settings file, `config.json`, sits beside the program, not inside it. On the very first start it asks for three folders and writes that file.
+- **Installing it (Windows):** download the newest `LS-IHC-Setup-<version>.exe` from the repository's Releases page and run it. It needs no administrator rights and brings everything with it, including Python, StarDist for Measure and R for the figures. Start **LS IHC pipeline** from the Start menu. Installing a newer version over it upgrades in place; your studies and settings live in `%USERPROFILE%\.ls-pipeline` and survive upgrades.
 - **From the code:** double-click `run_app.bat`. The first time, run `build_app.bat` once; it sets up a Python 3.13 environment in `work/appenv`. Python 3.13 is needed because the library that reads Zeiss CZI files has no 3.14 version yet.
-- **Checking a copy on another computer:** run `"LS pipeline.exe" --self-test`. It reports PASS or FAIL for each check in `lsapp-selftest.log`.
+- **Checking a copy on another computer:** start the app with `--self-test`. It reports PASS or FAIL for each check in `lsapp-selftest.log`.
 
-Nucleus detection needs StarDist, which only the `work/appenv` environment has. In the packaged .exe that stage is greyed out with the reason.
+Nucleus detection needs StarDist. The installer and `work/appenv` both have it. A copy without it greys that stage out and says why.
 
 ### The main window
 
-- **Step bar (left).** The six screens, each with its progress read from the output folder. Progress is right even for work done outside the app.
-- **Screen header.** A short sentence on what the screen is for, and an **(i)** button with more detail: what goes in and what comes out.
-- **Stage rows.** Each stage shows a coloured dot, its name, its number (for example `04g`), one plain sentence on what it does, and its status. Its buttons are:
+- **Step list (left).** The six screens, each with a numbered circle, a one-line description and a progress mark such as *5 of 6 cards* or *10 of 19 stages*. A finished step turns green with a tick; the current one is blue. Progress is read from the output folder, so it is right even for work done outside the app. Under **Advanced** at the foot are *All stages* and *Instrument characterisation*.
+- **Screen header.** The screen's title and (i), a short sentence on what it is for, and a blue **Your part** box saying what you do there.
+- **Notices.** An amber box above the stages warns you about something to fix first, for example results measured before a fix (section 10).
+- **Stage rows.** Each stage shows a status dot (green done, grey to do, purple waiting for you, blue running, red failed, amber waiting), its name, its number (for example `04g`) and one plain sentence on what it does. Its buttons are:
   - **Run** runs that stage on its own. On a curator stage the button says **Build page**.
-  - **Open** shows a curator page or the stage's output.
+  - **Open** shows a curator page. Stages that make pictures or results have their own Open button instead: *Open pictures*, *Open sheets* or *Open results* opens that folder.
   - **Options** lists the stage's switches. It says *Options (2 changed)* when you have changed any.
   - **(i)** explains what the stage needs first, what it leaves behind, when it last ran, and the technical detail underneath.
-- **Run all remaining.** On Prepare, Measure and Results, runs every stage on that screen that has not finished, in order. It stops at the first failure and never runs past a curator you have not exported.
-- **Status bar (bottom).** Shows what is running and its last log line. **Show log** opens the full log; **Stop after this stage** finishes the current stage cleanly and stops.
+- **Run all remaining.** On Prepare, Measure and Results, runs every stage on that screen that has not finished, in order. It stops at the first failure and never runs past a curator you have not exported. It never unblinds: that always waits for you to press it and confirm. It also leaves out the scene pictures, which you run on their own.
+- **Status bar (bottom).** Shows what is running and its last log line. When a run finishes, it says if a stage could not make everything (for example *3 scenes not drawn, see log*). **Show log** opens the full log; **Stop after this stage** finishes the current stage cleanly and stops.
 
 ### Menus
 
@@ -110,7 +110,7 @@ To hand a study to someone else, use **File > Export a copy**. The output folder
 
 ## 4. Set up: telling the app about your study
 
-Set up is where you describe the study once: where the slides are, how their files are named, how they were imaged, which atlas to use and how nuclei are counted. On a new study, do the tabs left to right: Slides, then seven cards of settings. Come back any time to change a setting; stages read the new value the next time they run.
+Set up is where you describe the study once: where the slides are, how their files are named, how they were imaged, which atlas to use and how nuclei are counted. On a new study, do the tabs left to right: Slides, then six cards of settings (Study and folders, Slide file names, Microscope and channels, Pictures, Atlas, Nucleus detection). Come back any time to change a setting; stages read the new value the next time they run.
 
 Every field has a short hint, an **(i)** with the full reasoning and which stages read it, and a **↺** button that puts it back to its default. Changes are kept when you press **Apply** on that card, and saved automatically before any stage runs.
 
@@ -162,9 +162,13 @@ In the LS study the pattern also accepts a suffix after a dash, so a name such a
 
 **Channels and markers…** opens a table of channels. **Detect from a CZI file…** reads each channel's dye and colour from a real slide and fills the table in. The file knows the dye, not the antibody, so you type or pick the marker name yourself. A marker's name becomes part of folder and file names, so the app asks before you rename one.
 
-### Curation pictures
+**Find nuclei** (paired studies only) has one row per marker. Leave it on *On the counterstain (DAPI)* unless a marker's scan has no usable DAPI. For such a marker, choose *On this marker's own channel*. The LS study needs this for PCNA (AF488), because its DAPI plane is noise at full resolution. Use it only for a marker whose signal is in the nucleus, as PCNA's is. Its fraction positive and total cell density are then not reported; positive density is. Section 7 explains why.
 
-How sharp the colour pictures in the ROI curator are, and where their pixels come from. Measuring always reads the scan's own pixels, whatever you set here.
+### Pictures
+
+This card has two parts: the pictures the ROI curator shows, and the optional pictures of whole scenes.
+
+**Curation pictures.** How sharp the colour pictures in the ROI curator are, and where their pixels come from. Measuring always reads the scan's own pixels, whatever you set here.
 
 | Setting | What it means | Default |
 | --- | --- | --- |
@@ -173,15 +177,13 @@ How sharp the colour pictures in the ROI curator are, and where their pixels com
 
 A change here only affects pictures made afterwards. Existing pictures stay until stage 04o is run again with Redo switched on (section 5, Part 5).
 
-### Scene pictures
-
-Settings for the optional pictures of every scene (stage 01l, section 5 Part 1). They are for looking at only, so nothing here changes any measurement.
+**Scene pictures.** Settings for the optional pictures of every scene (stage 01l, section 5 Part 1). They are for looking at only, so nothing here changes any measurement.
 
 | Setting | What it means | Default |
 | --- | --- | --- |
 | Scene pictures folder | Where the pictures go. Pick any folder with the folder picker, even one outside the study. | Empty, which means `scene_renders` in your Analysis output folder (`D:\LS-analysis\scene_renders` on the lab laptop) |
-| Scene picture resolution (µm per px) | How sharp the pictures are; larger numbers give smaller, softer pictures. The finest is 0.65, the scan's own pixels. A whole scene at 0.65 can need several GB of memory, so each scene is checked against free memory first and one that does not fit is skipped with a message. 1.3 needs a quarter of that memory, 2.6 a sixteenth. | 2.6 |
-| Scene picture brightness | **Same for all**: every picture uses the dataset's brightness range, so a brighter picture means more signal. **Per scene**: each scene is stretched to its own tissue, so every picture is well exposed but brightness no longer compares. | Same for all |
+| Scene picture resolution (µm per px) | How sharp the pictures are; larger numbers give smaller, softer pictures. The finest is 0.65, the scan's own pixels. A whole scene at 0.65 can need several GB of memory, so each scene is checked first against free memory (RAM plus the Windows page file), and one that does not fit is skipped with a message. 1.3 needs a quarter of that memory, 2.6 a sixteenth. | 2.6 |
+| Scene picture brightness | **Same for all**: every picture uses the dataset's brightness range, so a brighter picture means more signal. **Per scene**: each scene is stretched to its own tissue, so every picture is well exposed but brightness no longer compares. In either mode, a scene whose bright pixels are clipped is stretched on its own, so it does not come out nearly black. | Same for all |
 
 Changing the resolution or brightness makes the next run redraw the pictures.
 
@@ -206,27 +208,17 @@ Changing the resolution or brightness makes the next run redraw the pictures.
 | Threshold: MAD multiplier | 3 | Only for markers counted on their own channel (not nuclei); see (i) |
 | Threshold: minimum object area (µm²) | 5 | As above |
 
-**Markers counted on their own channel (paired studies).** A marker whose scan has no usable counterstain can be counted on its own channel instead of inside DAPI nuclei. The LS study needs this for PCNA (AF488), because its DAPI plane is noise at full resolution. This setting is not in Set up yet: add it to the study's `config.json` under `acquisition`:
-
-```json
-"marker_segmentation": {
-  "AF488": {"segment": "own", "backend": "stardist", "nucleus_shaped": true}
-}
-```
-
-Use it only for a marker whose signal is in the nucleus, as PCNA's is. Section 7 explains what it changes in the results.
+Markers whose nuclei are found on their own channel (PCNA in the LS study) are set on the **Microscope and channels** card, under **Find nuclei**. You no longer edit `config.json` by hand for this.
 
 **Other settings** collects anything not yet sorted into a card. You rarely need it.
 
 ## 5. Prepare: the automatic part
 
-Prepare reads the slides, checks them, builds the atlas, and turns every section into a clean, upright, masked picture ready for curation. Press **Run all remaining** and let it go. It runs in two halves: the first stops at the rotation and exclusion curator, and after you export there, **Continue Prepare** on the Curate screen runs the second half.
+Prepare reads the slides, checks them, builds the atlas, and turns every section into a clean, upright, masked picture ready for curation. Press **Run all remaining** and let it go. It runs straight through to the ROI curator, with one short stop for the atlas plate boxes if you use the salmon atlas.
 
 **Goes in:** the slide files and your Set up settings. **Comes out:** one standard picture per section, the list of sections that can be measured, and the pages the curators show you. Everything is written under your Analysis output folder; the paths below are relative to it.
 
 > In the LS study the first marker is pERK and the second is PCNA. Stage names in the app use your own marker names. All curation is done on the PCNA scans first and then copied onto the matching pERK scans.
-
-> **Streamlined order.** This section follows the shorter stage order that is in review now. It reads each slide file two times instead of three and reformats sections in three passes instead of seven. What you do and what comes out stay the same.
 
 ### Common options
 
@@ -271,24 +263,23 @@ Only the stages for the atlas you chose in Set up run; the others are greyed out
 | 04w Wullimann plates | Builds the plates from the Wullimann 1996 zebrafish atlas | `atlas/plates_wullimann/` |  |
 | 04x Wullimann polygons | Turns region outlines into numbered shapes and guesses their names for a person to review | `atlas/plates_wullimann/polygons.csv` | Save check pictures; keep reviewed names; do not guess names |
 
-### Part 3: Before rotation curation
+### Part 3: Make the section images
 
 | Stage | What it does | Makes | Options |
 | --- | --- | --- | --- |
-| 04g Mask artifacts (PCNA, pERK) | Finds bubbles, clumps and fibres inside every scanned section and masks them out. Runs straight after the overviews, on excluded sections too, so Review can show them. | `artifacts/artifact_summary.csv` | First N (excluded sections are always masked too) |
+| 04g Mask artifacts (PCNA, pERK) | Finds bubbles, clumps and fibres inside every scanned section and masks them out. Runs on excluded sections too, so Review can show them. | `artifacts/artifact_summary.csv` | First N (excluded sections are always masked too) |
 | 04a Reformat (PCNA) | A first standard picture of each section: cleaned, turned so its long axis is level, centred, cropped and resized to a 256-pixel square | `reformatted/reformat_index.csv` |  |
-| 04f Propose unmeasurable sections | Proposes sections with no usable tissue (largest piece under 2.5 mm²). Only clear-cut cases; you decide. | `reformatted/exclusion_candidates.csv` | Sections in the proposal sheet |
-| 04h Propose rotations | Proposes a small extra rotation so each section's midline is vertical | `reformatted/symmetry_proposals.csv` | First N |
+| 04f Propose unmeasurable sections | Finds sections with no usable tissue (largest piece under 2.5 mm²) or no resolvable nuclear detail. Only clear-cut cases, each with its numbers. They are set aside automatically by the final reformat; you bring back any wrong one in the ROI curator's Review. | `reformatted/exclusion_candidates.csv` | Sections in the proposal sheet |
 
-Prepare now stops and the Curate screen asks for the **rotation and exclusion curator**.
+There is no stop here any more. Prepare carries straight on to Part 4.
 
-### Part 4: After rotation curation
+### Part 4: Final images
 
 | Stage | What it does | Makes | Options |
 | --- | --- | --- | --- |
-| 04j Censor clipped pixels (PCNA) | Takes your exclusions, sets aside sections with too much saturated tissue, and flags saturated pixels in the rest | The PCNA analysis set | Set-aside threshold (default 0.01 = 1%) |
-| 04a Reformat final (PCNA) | Final pictures: your rotations and exclusions applied, artifacts masked, saturation flagged | `reformatted/sections/` |  |
-| 04i Carry curation to pERK | Copies your PCNA decisions onto the matching pERK scans | pERK overrides | First N |
+| 04j Censor clipped pixels (PCNA) | Takes the exclusions, sets aside sections with too much saturated tissue, and flags saturated pixels in the rest | The PCNA analysis set | Set-aside threshold (default 0.01 = 1%) |
+| 04a Reformat final (PCNA) | Final pictures: rotations and exclusions applied, artifacts masked, saturation flagged | `reformatted/sections/` |  |
+| 04i Carry curation to pERK | Copies the PCNA exclusions onto the matching pERK scans and lines each pERK section up with its PCNA twin | pERK overrides | First N |
 | 04j Censor clipped pixels (pERK) | The same set-aside and flagging for pERK; writes the list of measurable sections | The pERK analysis set | Set-aside threshold |
 | 04a Reformat final (pERK) | Final pERK pictures, ready for measuring, plus pictures of excluded sections for Review | pERK pictures and index |  |
 | 04m Every section and its fate | A table of every pERK section and what happened to it | sections dataset |  |
@@ -300,20 +291,27 @@ Prepare now stops and the Curate screen asks for the **rotation and exclusion cu
 | Stage | What it does | Makes | Options |
 | --- | --- | --- | --- |
 | 04n Order the ROI queue | Orders sections so stopping part way still covers every animal and brain level equally | `reformatted/roi_worklist.csv` | Hold out animals with fewer than N sections (10) |
-| 04o Colour pictures and thumbnails (pERK, PCNA) | Colour pictures for the curator: nuclei blue, marker in colour. One run per marker also makes the 256 px thumbnails for the curator's Review grid. Drawn from the original scan, with no 8-bit loss and with the mid-tones lifted so tissue looks about as bright as in the old previews (nothing is clipped to do it), at 2.6 µm per pixel by default (setting `curation_render.um_per_px` in `config.json`). 1.3 µm is the finest allowed, because a whole section at full resolution is too large for the curator to hold; the scan is read in strips, so memory stays bounded. Measurement always reads the full 0.65 µm scan. If some sections could not be built, the finished-run message says how many, and the log says why. | colour section pictures | Picture size (×256 px, default 3 = 768 px; only used when Curation pictures come from the overviews); include excluded; thumbnail size (256 px); redo |
+| 04o Colour pictures and thumbnails (pERK, PCNA) | Colour pictures for the curator: nuclei blue, marker in colour. One run per marker also makes the 256 px thumbnails for the curator's Review grid. Drawn from the original scan, with no 8-bit loss and with the mid-tones lifted so tissue looks about as bright as in the old previews (nothing is clipped to do it), at 2.6 µm per pixel by default (setting `curation_render.um_per_px` in `config.json`). 1.3 µm is the finest allowed, because a whole section at full resolution is too large for the curator to hold; the scan is read in strips, so memory stays bounded. Measurement always reads the full 0.65 µm scan. If some sections could not be built, the finished-run message says how many, and the log says why. | colour section pictures | Picture size (×256 px, default 3 = 768 px; only used when curation pictures come from the overviews); include excluded; thumbnail size (256 px); redo |
 | 04p Trace every section | Follows every scanned section through every decision, for Review | `reformatted/section_provenance.csv` | Build tissue outlines (slow, once); redo |
 
 **What good looks like.** In the curator, every section is upright, centred and the same size, with debris gone and no pen marks around the tissue. The colour pictures look sharp when zoomed.
 
-> **Going back to the old previews.** If the new pictures cause trouble, set *Curation images from* to **overview** on Set up's *Curation pictures* card (`curation_render.source` in `config.json`). The curator then shows the old 768 px pictures made from the 5.2 µm overview, which are softer (about 8 µm per screen pixel). Both kinds use the same frame, so landmarks and regions you already placed stay where they are, and measurement is unchanged. Pictures that already exist are kept until you rebuild them: run this stage with **Redo … already done** switched on, or from a command prompt run `python scripts/04o_section_rgb.py --marker AF568 --all --thumbs --force` and then the same with `--marker AF488`.
+> **Going back to the old previews.** If the new pictures cause trouble, set *Curation images from* to **overview** on Set up's *Pictures* card (`curation_render.source` in `config.json`). The curator then shows the old 768 px pictures made from the 5.2 µm overview, which are softer (about 8 µm per screen pixel). Both kinds use the same frame, so landmarks and regions you already placed stay where they are, and measurement is unchanged. Pictures that already exist are kept until you rebuild them: run this stage with **Redo … already done** switched on, or from a command prompt run `python scripts/04o_section_rgb.py --marker AF568 --all --thumbs --force` and then the same with `--marker AF488`.
 
-**Common problems.** A section rotated badly after curation means its rotation was not exported; check the rotation curator's Export. Many sections set aside for saturation in one animal is a property of that animal's scans, not a bug; note it for the analysis.
+**Common problems.** A good section missing from the curator was set aside automatically; open **Review** in the ROI curator, select it and press **Reinstate**, then export. Many sections set aside for saturation in one animal is a property of that animal's scans, not a bug; note it for the analysis.
 
 ## 6. Curate: where you decide
 
-The Curate screen has one tab per curator page. In each one you work through the sections, then press the page's **Export** button. Your work is saved into the project as you go, so closing the app loses nothing, but **only Export hands your decisions to the stages that come after.**
+The Curate screen shows one curator page at a time, with a row of buttons above it. For most studies the only page you need is the **ROI curator**. Your work is saved into the project as you go, so closing the app loses nothing, but **only Export hands your decisions to the stages that come after.**
 
-Above the tabs, the screen says what is waiting and offers the next button: **Continue Prepare** after the atlas or rotation curator, **Bring in browser exports** if you curated in a web browser, and **Go to Measure** once the ROI curator is exported.
+The buttons above the page are:
+
+- **Reload** reloads the page, for example after Prepare has rebuilt its pictures.
+- **Open in browser** opens the same page in your web browser.
+- **Own window** moves the page into a window of its own, which you can make full screen. The button then says **Back to the app** and puts it back.
+- **Done: export and go to Measure** (ROI curator only) exports for you and opens the Measure screen. Measure does not start by itself; you press **Run all remaining** there.
+
+The Curate screen also offers **Continue Prepare** after the atlas plate boxes, and **Bring in browser exports** if you curated in a web browser.
 
 In every curator, **a dashed amber border is a proposal the program made; a solid red border is a decision a person made.**
 
@@ -323,29 +321,18 @@ Some atlas figures show several brain sections side by side, but the ROI curator
 
 **Export** writes `atlas/plate_boxes.csv`. Then press **Continue Prepare** to render the final plates.
 
-### Rotation and exclusion
-
-Every section is shown with the program's proposed rotation already applied. For each one you answer two questions: is it upright, and is it usable at all?
-
-1. **Drag** any section that is not upright until its midline is vertical.
-2. For each proposed exclusion (dashed amber), **accept** it or **overrule** it. The numbers that produced the proposal are shown beside it.
-3. You may also exclude a section the program did not propose, for example a torn one.
-4. Press **Export**, then **Continue Prepare**.
-
-Export writes `reformatted/rotation_overrides.csv`. An excluded section drops out of everything downstream but is not deleted; you can reinstate it later.
-
-| Option | What it does |
-| --- | --- |
-| Start without proposals | No rotation or exclusion pre-marked, so every section is judged from scratch |
-| Picture size (px) | Bigger pictures give finer control when dragging (default 170) |
-
-**Tip.** Judge exclusions generously in favour of keeping a section. A wrongly kept section adds a little noise that anyone can find later; a wrongly excluded one silently takes its evidence with it.
-
 ### ROI curator
 
-This is the main curation job. For each section you choose the matching atlas plate and draw the brain regions to measure, plus background spots for comparison. The queue is ordered so that stopping part way still leaves every animal and brain level covered.
+This is the main curation job, and the only stop in a normal run. For each section you check it is the right way up and should be used, choose the matching atlas plate, and draw the brain regions to measure, plus background spots for comparison. The queue is ordered so that stopping part way still leaves every animal and brain level covered.
 
-**The window.** Toolbar along the top (filters on the left, actions on the right), the section on the left, the atlas plate in the middle, a sidebar on the right, and a strip of every section along the bottom.
+**The page, top to bottom.**
+
+- **Top bar.** *Animal* and *Marker* menus and two tick boxes (*favourites only*, *hide excluded*) choose which sections are shown. On the right are counts (shown, registered, plate only, no ROI, favourites, excluded), then **Review**, **?** (all keyboard shortcuts), and the export group: **Folder…**, **Export**, **Shotgun** and **By region**.
+- **Tool rail (left).** Every tool, in labelled groups, with its key in brackets: *This section* (★ Favourite **f**, No ROI here, Exclude **x**); *Atlas plate* (Assign plate **a**); *Look* (Hide DAPI, Hide the marker, Hulls **h**, Rotate, Restore tilt **r**); *Draw ROIs* (Guided **g**, ROIs… **o**, Skip ROI **s**); *Background discs* (Background **d** and a disc-size slider, keys **\[** and **\]**); *Undo* (Point **z**, Region, Undo last **u**, Clear section). Under the rail it says when your work was last saved.
+- **Coach line.** One coloured line above the pictures that names the tool you are in and says what a click will do.
+- **Two panes.** The section on the left, the atlas plate on the right. On a narrow screen they stack, and the page scrolls.
+- **Info cards (right or below).** The section, the plate, its landmarks, the regions placed, and the background discs, each with a short count or advice.
+- **Section strip (bottom).** Every section, grouped by animal, as small pictures you click to jump to.
 
 **The first time you open it**, a pop-up asks which regions you will draw. The choice applies to the whole study; press **o** or **ROIs…** to change it. Chosen regions are numbered 1, 2, 3 on the plate in the order you picked them; the rest are greyed out.
 
@@ -361,9 +348,11 @@ This is the main curation job. For each section you choose the matching atlas pl
 
 **Zoom and pan.** Scroll to zoom about the cursor, drag with the middle or right button to pan, **+** and **−** zoom about the centre, **0** fits the whole section. Zooming shows the scan's real pixels, not a smoothed version.
 
-**Rotate** tilts the view to make drawing easier. It is a viewing aid only and changes no coordinates. **r** restores the original tilt.
+**Rotate** turns a section that is not upright: press it, then drag the section left or right (hold Shift for fine steps). It is the only rotation step in the pipeline. It changes the view and the way your clicks are read, not the saved coordinates, so everything you place stays correct; the angle is recorded in `roi_plates.csv` for reference. **r** restores the original tilt. Mirroring a section is not possible.
 
-**Review** shows every scanned section and what happened to it, including those the pipeline excluded. Its keys: ↑ ↓ move between sections; **d** DAPI, **k** marker, **v** artifact mask, **c** censored pixels, **m** apply mask; **f** full screen. **Reinstate** puts an excluded section back into the pipeline; **Reject mask** discards an artifact mask that covered real tissue.
+**Hide DAPI** and **Hide \<marker>** (the button carries your marker's name, for example *Hide pERK*) switch one colour off, so you can see the other on its own.
+
+**Review** shows every scanned section and what happened to it, including those the pipeline excluded. Its keys: ↑ ↓ move between sections; **d** DAPI, **k** marker, **v** artifact mask, **c** censored pixels, **m** apply mask; **f** full screen. **Reinstate** puts an excluded section back into the pipeline, including one the program set aside automatically; **Reject mask** discards an artifact mask that covered real tissue.
 
 **Reading the strip.** Purple border: registered (three or more landmarks). Blue: plate assigned only. Gold inner edge: favourite. Red and greyed: excluded. Faded: no ROI.
 
@@ -395,6 +384,8 @@ The curator pages also work in an ordinary browser (run `serve_curators.bat`). W
 Measure puts your regions back onto the original slides, finds every nucleus inside them, and measures the marker in each. It is still blind: nothing here knows which animal is in which group. Press **Run all remaining**.
 
 **Goes in:** the regions you drew in the ROI curator. **Comes out:** `results/roi_nuclei.csv`, one row per nucleus, and the per-region numbers built from it.
+
+> **The amber "measured before the 14 Oct fixes" notice.** If your nuclei were measured before the fixes to region placement (half a pixel) and to the saturated-nucleus flag (now read from the scan's own pixels), Measure and Results show an amber notice. Do what it says: run *Place the ROIs on the slide* again, then *Detect and measure nuclei* with **Options > Redo … already done**, then rebuild Results. The notice goes away once the nuclei are measured again.
 
 | Stage | What it does | Makes | Options |
 | --- | --- | --- | --- |
@@ -464,7 +455,7 @@ For PCNA, only the positive density is reported; see *PCNA: counted on its own c
 
 **What good looks like.** The check pictures show nuclei outlined one by one, with few red ones. The false-positive rate is low and similar across animals.
 
-**Common problems.** "Detection greyed out" means the app was started without StarDist; use `run_app.bat` with `work/appenv`, not the packaged .exe. A section with no background disc is left out of positivity; go back to the ROI curator and add one. A section refused in 05a has geometry that cannot be rebuilt; check it in the curator's Review.
+**Common problems.** "Detection greyed out" means the app was started without StarDist; use `the installed app, or run_app.bat with work/appenv`. A section with no background disc is left out of positivity; go back to the ROI curator and add one. A section refused in 05a has geometry that cannot be rebuilt; check it in the curator's Review.
 
 ### Repair older outputs
 
@@ -478,7 +469,9 @@ Three tools fix results files written by older versions of the pipeline. They ar
 
 ## 8. Results: unblinding, spreadsheets and figures
 
-Results joins the measurements to the experiment's treatment groups and writes the spreadsheets and figures. **The first stage unblinds the analysis**, so the app asks you to confirm before it runs it.
+Results joins the measurements to the experiment's treatment groups and writes the spreadsheets and figures. **The first stage unblinds the analysis.** When the measurements are in, Next up says *Measurements are in. Unblind and build the results.* **Run all remaining never unblinds**; it always waits for you.
+
+Pressing **Run** on *Join the treatment groups* opens a box titled **Unblind the analysis?** It explains that this stage reads the treatment groups for the first time, and that everything before it was keyed by animal only. The **Sampling workbook (.xlsx)** field shows which workbook will be read; leave it empty to use the one in the slide folder, or press **Choose…** to pick another. Do this once the regions and detection settings are final. Press **Unblind and run** to go ahead, or **Cancel**.
 
 | Stage | What it does | Makes |
 | --- | --- | --- |
@@ -490,7 +483,7 @@ Results joins the measurements to the experiment's treatment groups and writes t
 
 ### Before you unblind
 
-- **The sampling workbook.** By default 06b looks for `large scale exp sampling data.xlsx` in the slides folder. Its header must match what the stage expects; if it does not, the stage names the mismatched columns.
+- **The sampling workbook.** Unless you choose another in the Unblind box, 06b looks for `large scale exp sampling data.xlsx` in the slides folder. Its header must match what the stage expects; if it does not, the stage names the mismatched columns.
 - **Check measurement is finished**, or decide consciously to look at a partial result. The spreadsheets can be rebuilt at any time, including while detection runs.
 - **Look at the coverage sheet** in `roi_dataset.xlsx`. Some animals may have few measurable sections because of saturation; note this before comparing groups.
 
@@ -529,8 +522,8 @@ Every stage is a script in `scripts/` and can also be run from a terminal; the (
 
 - **Stages skip finished work.** Pressing Run again only fills the gaps, so it is cheap and safe.
 - **After changing a setting**, re-run the stages that read it with **Redo … already done** switched on in Options. The setting's (i) says which stages read it. Then switch Redo off again.
-- **Changing a curator decision** after Measure has run: export again, then re-run Prepare's second half and Measure. Nuclei detection keeps finished sections, so use Redo there only for sections whose regions changed.
-- **Results measured before the region fixes of 14 October 2026** (the half-pixel correction and native-pixel clipped-nucleus flags; see section 7) keep the old region placement and the old flags. To bring them up to date, re-run *05a Place the regions on the slides* and *05c Detect and measure nuclei* with **Redo … already done** switched on, then the Results stages.
+- **Changing a curator decision** after Measure has run: export again, then re-run Measure. Nuclei detection keeps finished sections, so use Redo there only for sections whose regions changed.
+- **Results measured before the region fixes of 14 October 2026** (the half-pixel correction and native-pixel clipped-nucleus flags; see section 7) keep the old region placement and the old flags, and the app shows an amber notice on Measure and Results. To bring them up to date, re-run *05a Place the regions on the slides* and *05c Detect and measure nuclei* with **Redo … already done** switched on, then the Results stages.
 - **Nothing is deleted.** Excluded sections can be reinstated in the ROI curator's Review. Repair tools back up the results file before changing it.
 - **Stop cleanly** with **Stop after this stage** on the status bar, rather than closing the app mid-stage.
 
@@ -542,11 +535,11 @@ Every stage is a script in `scripts/` and can also be run from a terminal; the (
 | Fewer sections than expected | Unmatched file names, or an incomplete copy | Check the Slides tab and the 00b result |
 | Run all remaining stops at a stage | That stage failed, or it waits for a curator | Read the screen's note and **Show log**. A waiting stage names the curator to export. |
 | "Finish Set up" on the Next up card | A required setting is empty | The card names each Set up card and the settings it lacks; open Set up and fill those in |
-| A curator's decisions are ignored | You did not press **Export** | Open the curator and press Export, then Continue Prepare |
+| A curator's decisions are ignored | You did not press **Export** | Open the curator and press Export (in the ROI curator, Done: export and go to Measure does it for you) |
 | Curation made in a browser is missing | Browser work is stored in that browser only | **Tools > Migrate browser curation**, or **Bring in browser exports** |
-| Nucleus detection is greyed out | No StarDist in this Python | Start with `run_app.bat` (uses `work/appenv`), not the packaged .exe |
+| Nucleus detection is greyed out | No StarDist in this Python | Use the installer, or start with `run_app.bat` (uses `work/appenv`) |
 | The overview stage fails on Python 3.14 | The CZI reader has no 3.14 version | Use Python 3.13 via `run_app.bat` |
-| A curator pane is blank in the .exe | The packaged files are incomplete | Run `"LS pipeline.exe" --self-test` and read `lsapp-selftest.log` |
+| A curator pane is blank in the .exe | The packaged files are incomplete | Start the app with `--self-test` and read `lsapp-selftest.log`; reinstall if it fails |
 | The app will not start | A missing library or a broken environment | Read `lsapp-crash.log`. To keep curating meanwhile, run `serve_curators.bat` and use a browser. |
 | Build results cannot find R | R is not on PATH and not in Program Files | Install R, or add `Rscript` to PATH |
 | 06b says the workbook header does not match | The sampling workbook's columns differ | Fix the workbook's column names to the ones it lists |

@@ -1153,9 +1153,15 @@ def main():
                 # That is why a drawn region needs no new machinery: the test
                 # changes from "inside this circle" to "inside this ring", and
                 # everything either side of it stays as it was.
-                sx, sy = float(b["sec_x"]), float(b["sec_y"])
+                #
+                # The shape is moved into grid-index coordinates first, because
+                # `gx, gy` below are grid indices and the curator stored pixel
+                # edges - see 05a's CURATOR_PX_OFFSET.
+                sx, sy = G5.curator_to_grid(float(b["sec_x"]), float(b["sec_y"]))
                 sr = float(b["sec_r"] or 0)
                 poly = G5.parse_poly(b.get("sec_poly", ""))
+                if poly is not None:
+                    poly = np.column_stack(G5.curator_to_grid(poly[:, 0], poly[:, 1]))
                 inside = ((lambda gx, gy: point_in_poly(gx, gy, poly))
                           if poly is not None else
                           (lambda gx, gy: (gx - sx) ** 2 + (gy - sy) ** 2 <= sr * sr))

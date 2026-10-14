@@ -166,7 +166,9 @@ squashed square by 04a and resampled three times, shown at about 8 µm per pixel
 
 `04o_section_rgb.py` now renders the ROI curator's composites **from the CZI** by default: the
 16-bit planes, tile field applied, sampled once through the same grid-to-slide map 05a uses, at
-`curation_render.um_per_px` (2.6 by default; 0.65 is native). The frame is unchanged, so
+`curation_render.um_per_px` (2.6 by default, 1.3 at the finest: a whole section at the native
+0.65 would be one picture of 10,000+ px a side, more than a laptop renders or a browser shows
+comfortably). The CZI is read in bands, so memory stays at a few hundred MB at either setting. The frame is unchanged, so
 landmarks already placed stay where they are; the curator scales them to the larger picture.
 Existing composites are kept until it runs with `--force`:
 

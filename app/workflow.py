@@ -938,10 +938,18 @@ def curators(study):
             if applies(S.BY_ID[sid], study)[0]]
 
 
-def next_up(study, setup_ok=True):
-    """(screen id, what to say, stage id or None) - the single next thing to do."""
+def next_up(study, setup_ok=True, setup_missing=()):
+    """(screen id, what to say, stage id or None) - the single next thing to do.
+
+    `setup_missing` is [(card title, [settings with no value])], so the words
+    can say which settings rather than only that some are missing.
+    """
     if not setup_ok:
-        return "setup", "Finish Set up: some required settings are missing.", None
+        if not setup_missing:
+            return "setup", "Finish Set up: some required settings are missing.", None
+        gaps = "; ".join("%s needs %s" % (title, ", ".join(keys))
+                         for title, keys in setup_missing)
+        return "setup", "Finish Set up: %s." % gaps, None
     plan, held = run_plan("prepare", study)
     if plan:
         first = S.BY_ID[plan[0]]

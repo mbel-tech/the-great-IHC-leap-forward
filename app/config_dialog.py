@@ -265,7 +265,12 @@ class SettingsForm(QWidget):
 
     def complete(self):
         """True when every required key this form shows has a value."""
-        return all(get() not in (None, "") for key, get in self.rows.values() if key.required)
+        return not self.missing()
+
+    def missing(self):
+        """The labels of the required keys this form shows that have no value."""
+        return [key.label or key.path for key, get in self.rows.values()
+                if key.required and get() in (None, "")]
 
     @staticmethod
     def _atlas_names(cfg):

@@ -414,20 +414,23 @@ class HomeScreen(QWidget):
         except OSError:
             return None
 
-    def refresh(self, study, project, setup_done, setup_total, busy=False):
+    def refresh(self, study, project, setup_done, setup_total, busy=False,
+                setup_missing=()):
         name = project.name if project is not None else "?"
         files = self._rows(os.path.join(study.out_root, "manifest", "manifest_files.csv"))
         scenes = self._rows(os.path.join(study.out_root, "manifest", "manifest_scenes.csv"))
         size = (f" · {files:,} slide files · {scenes:,} sections"
                 if files is not None and scenes is not None else " · slides not read yet")
-        markers = ", ".join(study.marker_label(i) for i in range(len(study.markers))) or "none declared"
+        markers = (", ".join(study.marker_label(i) for i in range(len(study.markers)))
+                   or "none declared (Set up > Microscope and channels)")
         self.project_line.setText(
             f"<b>{esc(name)}</b>{size} · markers: {esc(markers)} · atlas: "
             f"{esc(study.atlas_source)}<br><span style='{QUIET}'>project file "
             f"{esc(project.path if project is not None else '')}<br>outputs "
             f"{esc(study.out_root)}</span>")
 
-        target, words, _sid = W.next_up(study, setup_ok=setup_done >= setup_total)
+        target, words, _sid = W.next_up(study, setup_ok=setup_done >= setup_total,
+                                        setup_missing=setup_missing)
         self._next_target = target + (":run" if target in ("prepare", "measure") else "")
         self.next_text.setText(words)
         self.next_btn.setText("Open" if target in ("setup", "curate", "results", "home")
@@ -497,6 +500,10 @@ class SetupScreen(QWidget):
             "<p>A file name has to fit the pattern under <b>Slide file names</b>, or the "
             "file is invisible to every stage.</p>"))
         sl.addLayout(top)
+        self.current = QLabel("")
+        self.current.setWordWrap(True)
+        self.current.setTextFormat(Qt.RichText)
+        sl.addWidget(self.current)
         sl.addWidget(importer, 1)
         self.tabs.addTab(self._slides_tab, "Slides")
         self.build()
@@ -553,9 +560,35 @@ class SetupScreen(QWidget):
         status.setStyleSheet(f"color:{COLOUR['failed']}")
         return False
 
-    def update_marks(self):
+    def update_marks(self, study=None):
         for i, (sid, (form, _s, title)) in enumerate(self.forms.items(), start=1):
             self.tabs.setTabText(i, ("✓ " if form.complete() else "") + title)
+        source = self.session.project.get("source_dir")
+        self.tabs.setTabText(0, ("✓ " if source else "") + "Slides")
+        if not source:
+            self.current.setText("No slide folder is set for this study yet.")
+            return
+        files = None
+        if study is not None:
+            files = HomeScreen._rows(os.path.join(study.out_root, "manifest",
+                                                  "manifest_files.csv"))
+        count = (f" The slide headers list {files:,} files from it." if files is not None
+                 else " The slide headers have not been read yet (Prepare does that).")
+        self.current.setText(
+            f"This study reads its slides from <b>{esc(source)}</b>.{count} "
+            f"<span style='{QUIET}'>Choose a folder or files below only to change "
+            f"that.</span>")
+
+    def missing(self):
+        """[(card title, [required settings with no value])] for the incomplete cards."""
+        out = []
+        if not self.session.project.get("source_dir"):
+            out.append(("Slides", ["the slide folder"]))
+        for form, _s, title in self.forms.values():
+            gaps = form.missing()
+            if gaps:
+                out.append((title, gaps))
+        return out
 
     def completion(self):
         """(cards complete, cards) - Slides counts as complete when a slides folder is set."""

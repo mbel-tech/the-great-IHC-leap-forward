@@ -511,9 +511,9 @@ class MainWindow(QMainWindow):
         for scr in self.lists.values():
             scr.refresh(study, self._running, project, busy)
         self.curate.refresh(study, self._running, project, busy)
-        self.setup.update_marks()
+        self.setup.update_marks(study)
         sd, st = self.setup.completion()
-        self.home.refresh(study, project, sd, st, busy)
+        self.home.refresh(study, project, sd, st, busy, self.setup.missing())
         for i, scr in enumerate(W.STEPS):
             it = self.nav.item(i)
             if scr.sid == "home":

@@ -172,6 +172,9 @@ chk("...once it is there", W.decided("roi_curator", s0), True)
 where, words, _sid = W.next_up(s0)
 chk("Next up on a fresh study is Prepare", (where, words.startswith("Run Prepare")), ("prepare", True))
 chk("Next up sends an unfinished Set up back to it", W.next_up(s0, setup_ok=False)[0], "setup")
+chk("...and names the settings it is missing",
+    W.next_up(s0, setup_ok=False, setup_missing=[("Atlas", ["Atlas PDF"])])[1],
+    "Finish Set up: Atlas needs Atlas PDF.")
 d, t = W.progress("prepare", s0)
 chk("progress counts only stages the app runs here", (d <= t, t > 10), (True, True))
 chk("a run's duration in words",
@@ -213,6 +216,10 @@ if MW:
         chk(f"goto {sid} shows it", w.stack.currentWidget() is w.pages[sid])
     chk("Set up has a card for slides and one per settings group",
         w.setup.tabs.count(), 1 + len(W.setting_sections(LC.dialog_fields())))
+    chk("Set up says where this study's slides come from",
+        CFG["source_dir"] in w.setup.current.text(), True)
+    chk("...and lists what each incomplete card is missing",
+        all(gaps for _t, gaps in w.setup.missing()), True)
     row = w.lists["measure"].rows["detect"]
     chk("a stage with options offers them", row.opt_btn.isVisibleTo(w.lists["measure"]), True)
     chk("its (i) explains it in plain words first",

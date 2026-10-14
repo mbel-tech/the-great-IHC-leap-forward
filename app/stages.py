@@ -346,7 +346,7 @@ STAGES = [
           blurb="Every scene of every slide drawn from the CZI, read in bands "
                 "so memory stays small. Two folders per marker: the stain over "
                 "the counterstain, and the stain alone in grey. The folder, "
-                "resolution (2.6 um/px by default, 1.3 at the finest) and "
+                "resolution (2.6 um/px by default, 0.65 at the finest) and "
                 "brightness are study settings (scene_render). For looking at "
                 "only; nothing downstream reads them."),
 

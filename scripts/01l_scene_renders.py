@@ -25,14 +25,14 @@ picture is which and how it was drawn.
 How the pixels are made
 -----------------------
 
-At `--um-px` (default 2.6, finest 1.3) from the CZI's own 16-bit planes,
+At `--um-px` (default 2.6, finest the native 0.65) from the CZI's own 16-bit planes,
 always naming the scene (czi_read). The native 0.65 um/px pixels are read in
 bands of rows and block-averaged down before the next band is fetched - 04o's
 `read_region`, borrowed rather than restated - so the memory used is one band
 plus the finished picture, whatever the scene's size. Block averaging is why
 the picture cannot alias: every native pixel contributes, none is skipped.
 The resolution is therefore a whole number of native pixels: 2.6 is 4x4
-blocks, 1.3 is 2x2. A value in between is rounded to the nearest whole block
+blocks, 1.3 is 2x2, 0.65 is the scan's own pixels. A value in between is rounded to the nearest whole block
 and the CSV records what was drawn.
 
 The tile-field correction is applied as 01 applies it, when 01f has built one.
@@ -52,6 +52,7 @@ pictures look like.
 
 Run:  python 01l_scene_renders.py
       python 01l_scene_renders.py --um-px 1.3 --marker AF488
+      python 01l_scene_renders.py --um-px 0.65 --limit 5
       python 01l_scene_renders.py --range section --force --limit 10
 """
 
@@ -94,10 +95,17 @@ INDEX_CSV = os.path.join(QC_DIR, "scene_renders.csv")
 
 DEFAULT_UM_PX = float(_SR.get("um_per_px", 2.6))
 DEFAULT_RANGE = _SR.get("range", "dataset")
-#: The finest picture made. Native 0.65 um/px is a picture 4x the area of 1.3,
-#: and on the operator's laptop it ran out of memory - in the PNG encoder and
-#: in whatever opens it, not just here.
-MIN_UM_PX = 1.3
+#: The finest picture made: the native pixels themselves. Banded reading keeps
+#: the read small at any resolution, but the finished picture is held whole,
+#: and at 0.65 that is 4x the area of 1.3 - so each scene is checked against
+#: the memory this computer has free before it is drawn (see `fits`).
+MIN_UM_PX = NATIVE_UM
+#: Bytes held per output pixel at the peak: two float32 planes (counterstain
+#: and marker), the tile-field gain, the 8-bit planes, the RGB composite and
+#: PIL's copy of it while encoding. Rounded up.
+BYTES_PER_PX = 24
+#: Keep this much free for the operating system and anything else running.
+MEMORY_HEADROOM = 1.5e9
 #: Native rows per read. Smaller than 04o's 2048 because a whole scene is wider
 #: than a cut section; at 1024 rows a band of a 20,000 px wide scene is 40 MB.
 BAND_ROWS = 1024
@@ -173,7 +181,8 @@ def apply_field(plane, field, b):
         return (np.round((native % SR.PITCH_PX) / SR.FIELD_DIVISOR).astype(np.int64)) % n
 
     gain = field[np.ix_(idx(plane.shape[0]), idx(plane.shape[1]))].astype(np.float32)
-    out = plane.astype(np.float32)
+    # In place: at 0.65 um/px a second float32 copy of a scene is a GB.
+    out = plane if plane.dtype == np.float32 else plane.astype(np.float32)
     ok = gain > 0.05
     out[ok] /= gain[ok]
     np.clip(out, 0, 65535, out=out)
@@ -226,6 +235,58 @@ def load_index():
         return {}
     with open(INDEX_CSV, newline="", encoding="utf-8") as fh:
         return {r["scene_uid"]: r for r in csv.DictReader(fh)}
+
+
+def available_memory():
+    """Bytes of memory free now, or None when this platform will not say."""
+    try:
+        import psutil
+        return int(psutil.virtual_memory().available)
+    except Exception:  # noqa: BLE001 - psutil is optional
+        pass
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            class _Status(ctypes.Structure):
+                _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                            ("ullTotalPhys", ctypes.c_ulonglong),
+                            ("ullAvailPhys", ctypes.c_ulonglong),
+                            ("ullTotalPageFile", ctypes.c_ulonglong),
+                            ("ullAvailPageFile", ctypes.c_ulonglong),
+                            ("ullTotalVirtual", ctypes.c_ulonglong),
+                            ("ullAvailVirtual", ctypes.c_ulonglong),
+                            ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+            st = _Status()
+            st.dwLength = ctypes.sizeof(_Status)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st)):
+                return int(st.ullAvailPhys)
+        except Exception:  # noqa: BLE001
+            return None
+        return None
+    try:
+        with open("/proc/meminfo", encoding="ascii") as fh:
+            for line in fh:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) * 1024
+    except OSError:
+        pass
+    return None
+
+
+def memory_needed(rect, b):
+    """Peak bytes to draw one scene at b x b native pixels per output pixel."""
+    return (rect[2] // b) * (rect[3] // b) * BYTES_PER_PX + 2 * BAND_ROWS * rect[2] * 2
+
+
+def fits(need):
+    """None when `need` bytes fit in free memory (or nobody can say), else the
+    bytes free. Checked per scene, so a big scene is skipped with a reason and
+    the run carries on, rather than the whole run dying part way."""
+    free = available_memory()
+    if free is None or need + MEMORY_HEADROOM <= free:
+        return None
+    return free
 
 
 def same_drawing(row, um_px, range_mode, only_path):
@@ -307,10 +368,8 @@ def main():
 
     if args.um_px < MIN_UM_PX - 1e-9:
         raise SystemExit(
-            f"--um-px {args.um_px}: the finest picture this stage makes is "
-            f"{MIN_UM_PX} um/px. A whole scene at the native {NATIVE_UM} is four "
-            f"times the pixels again - more than the laptop holds - and nothing "
-            f"is measured from these pictures anyway.")
+            f"--um-px {args.um_px}: the scan's own pixels are {NATIVE_UM} um, "
+            f"so that is the finest picture there is.")
     out_dir = args.out_dir or OUT_DIR
     b = block_for(args.um_px)
     um_px = b * NATIVE_UM
@@ -396,6 +455,15 @@ def main():
                         return lambda x, y, w, h: CR.read_plane(
                             doc, SR.GEO._Rect(x, y, w, h), idx, scene=si)
 
+                    need = memory_needed(rects[si], b)
+                    room = fits(need)
+                    if room is not None:
+                        failed.append((uid, f"needs about {need / 1e9:.1f} GB (plus "
+                                       f"{MEMORY_HEADROOM / 1e9:.1f} GB kept free) at "
+                                       f"{um_px:.2f} um/px and {room / 1e9:.1f} GB "
+                                       "is free - close other programs or choose "
+                                       "a coarser resolution"))
+                        continue
                     got = render_scene(reader(n_idx), reader(m_idx), rects[si], b,
                                        fields_nm, ranges, range_mode, marker, colour)
                     if got is None:

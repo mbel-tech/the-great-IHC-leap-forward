@@ -114,6 +114,10 @@ class CuratorView(QWidget):
     """One curator page, with a reload and a note of where exports land."""
 
     logged = Signal(str)
+    #: The full path of each export that finished downloading.
+    exported = Signal(str)
+    #: The Done button was pressed.
+    done_requested = Signal()
 
     def __init__(self, server, out_root, parent=None, project_source=None):
         super().__init__(parent)
@@ -142,9 +146,16 @@ class CuratorView(QWidget):
                                    "close that window to put it back here")
         self.window_btn.toggled.connect(self._own_window)
         self._home = None
+        # Shown only for a curator with a next phase (set_done). It sits in this
+        # bar rather than on the screen around it so it moves with the page into
+        # its own window.
+        self.done_btn = QPushButton("", self)
+        self.done_btn.setVisible(False)
+        self.done_btn.clicked.connect(self.done_requested.emit)
 
         bar = QHBoxLayout()
         bar.addWidget(self.title, 1)
+        bar.addWidget(self.done_btn)
         bar.addWidget(self.window_btn)
         bar.addWidget(reload_btn)
         bar.addWidget(browser_btn)
@@ -193,6 +204,26 @@ class CuratorView(QWidget):
             self.window_btn.setChecked(False)
             return
         super().closeEvent(e)
+
+    def set_done(self, label, tip=""):
+        """Offer the Done button with this label, or hide it for an empty one."""
+        self.done_btn.setText(label)
+        self.done_btn.setToolTip(tip)
+        self.done_btn.setVisible(bool(label))
+
+    def put_back(self):
+        """Return from its own window, if it is in one."""
+        self.window_btn.setChecked(False)
+
+    def run_export(self, on_started):
+        """Press the page's own Export, so its usual files are written.
+
+        `on_started(bool)` says whether the page had an Export to press: a page
+        that is not built yet, or not loaded, has none.
+        """
+        self.view.page().runJavaScript(
+            "typeof exportCsv === 'function' ? (exportCsv(), true) : false",
+            0, lambda ok: on_started(bool(ok)))
 
     # ---- curation state ---------------------------------------------------
 
@@ -271,6 +302,7 @@ class CuratorView(QWidget):
             done = QWebEngineDownloadRequest.DownloadState.DownloadCompleted
             if item.state() == done:
                 self.logged.emit(f"exported  {os.path.join(target, name)}")
+                self.exported.emit(os.path.join(target, name))
             else:
                 self.logged.emit(f"export of {name} did not complete ({item.state().name})")
         item.isFinishedChanged.connect(finished)

@@ -125,6 +125,8 @@ CURATE = Screen(
     "<p>Your work in a curator is saved into the project as you go, so closing "
     "the app loses nothing. <b>Export</b> is what hands the decisions to the "
     "stages that come after.</p>"
+    "<p>When the ROI curator is finished, press <b>Done: export and go to "
+    "Measure</b> above the page. It exports for you and opens the next phase.</p>"
     "<p>The ROI curator's own <b>Review</b> button shows every scanned section and "
     "what happened to it, including the ones the pipeline excluded.</p>",
     parts=[
@@ -343,7 +345,9 @@ CURATOR_HELP = {
                    "animal.</p>"
                    "<p><b>Review</b> in the page shows every scanned section and every "
                    "decision made about it. <b>Export</b> writes the three CSV files "
-                   "Measure reads.</p>",
+                   "Measure reads.</p>"
+                   "<p>When you have finished, press <b>Done: export and go to "
+                   "Measure</b> above the page: it exports and takes you on.</p>",
 }
 
 #: What counts as "you have exported your decisions" for each curator. done()

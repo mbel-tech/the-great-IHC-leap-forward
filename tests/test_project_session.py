@@ -352,6 +352,8 @@ stub = types.ModuleType("curator_view")
 
 class CuratorView(QWidget):
     logged = _S(str)
+    exported = _S(str)
+    done_requested = _S()
 
     def __init__(self, server, out_root, parent=None, project_source=None):
         super().__init__(parent)
@@ -365,6 +367,9 @@ class CuratorView(QWidget):
         pass
 
     def refresh_seed(self):
+        pass
+
+    def set_done(self, *a):
         pass
 
 

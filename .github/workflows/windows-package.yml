@@ -1,0 +1,87 @@
+# Builds the Windows installer, checks it, and publishes it.
+#
+#   pull request touching packaging/   build + checks, installer kept as an artifact
+#   Actions tab > Run workflow         same, on demand
+#   push a tag v1.2.3                  same, then a GitHub Release with the installer
+name: Windows package
+
+on:
+  pull_request:
+    paths:
+      - "packaging/**"
+      - ".github/workflows/windows-package.yml"
+      - "requirements*.txt"
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version
+        id: v
+        run: |
+          $v = if ($env:GITHUB_REF_TYPE -eq "tag") { $env:GITHUB_REF_NAME.TrimStart("v") } else { "0.0.0-dev.$env:GITHUB_RUN_NUMBER" }
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Build the bundle
+        run: packaging/windows/build.ps1 -Out dist/LS-IHC
+
+      - name: Smoke test (libraries, offline StarDist, R)
+        run: dist/LS-IHC/runtime/python.exe packaging/windows/smoke_test.py dist/LS-IHC
+
+      - name: App self-test (window, local server, curator in QtWebEngine)
+        timeout-minutes: 5
+        run: |
+          # A throwaway study, so the first-run study picker never opens.
+          $env:LS_HOME = "$env:RUNNER_TEMP\ls-home"
+          $env:LS_CONFIG = (Resolve-Path config.example.json).Path
+          $p = Start-Process dist/LS-IHC/runtime/python.exe -ArgumentList "-m", "app", "--self-test" -WorkingDirectory dist/LS-IHC -Wait -PassThru -NoNewWindow
+          Get-Content dist/LS-IHC/lsapp-selftest.log -ErrorAction SilentlyContinue
+          Get-Content dist/LS-IHC/lsapp-crash.log -ErrorAction SilentlyContinue
+          Remove-Item dist/LS-IHC/lsapp-*.log -ErrorAction SilentlyContinue
+          if ($p.ExitCode -ne 0) { throw "self-test exited $($p.ExitCode)" }
+
+      - name: Installer
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) {
+            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+            if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
+            $env:PATH = "${env:ProgramFiles(x86)}\Inno Setup 6;$env:PATH"
+          }
+          iscc /Q "/DAppVersion=${{ steps.v.outputs.version }}" "/DBundle=$PWD\dist\LS-IHC" packaging/windows/installer.iss
+          if ($LASTEXITCODE) { throw "iscc failed" }
+          Get-ChildItem dist/*.exe | ForEach-Object { "{0}  {1:N0} MB" -f $_.Name, ($_.Length / 1MB) }
+
+      - name: Install silently and run the installed copy
+        timeout-minutes: 10
+        run: |
+          $setup = (Get-ChildItem dist/LS-IHC-Setup-*.exe).FullName
+          $p = Start-Process $setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/CURRENTUSER", "/DIR=$env:RUNNER_TEMP\installed" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "installer exited $($p.ExitCode)" }
+          & "$env:RUNNER_TEMP\installed\runtime\python.exe" packaging/windows/smoke_test.py "$env:RUNNER_TEMP\installed"
+          if ($LASTEXITCODE) { throw "smoke test on the installed copy failed" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LS-IHC-Setup-${{ steps.v.outputs.version }}
+          path: dist/LS-IHC-Setup-*.exe
+          retention-days: 14
+          compression-level: 0
+
+      - name: Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$env:GITHUB_REF_NAME" (Get-ChildItem dist/LS-IHC-Setup-*.exe).FullName --title "LS IHC pipeline $env:GITHUB_REF_NAME" --generate-notes

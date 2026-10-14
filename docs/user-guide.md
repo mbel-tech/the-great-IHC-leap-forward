@@ -110,7 +110,7 @@ To hand a study to someone else, use **File > Export a copy**. The output folder
 
 ## 4. Set up: telling the app about your study
 
-Set up is where you describe the study once: where the slides are, how their files are named, how they were imaged, which atlas to use and how nuclei are counted. On a new study, do the tabs left to right. Come back any time to change a setting; stages read the new value the next time they run.
+Set up is where you describe the study once: where the slides are, how their files are named, how they were imaged, which atlas to use and how nuclei are counted. On a new study, do the tabs left to right: Slides, then six cards of settings. Come back any time to change a setting; stages read the new value the next time they run.
 
 Every field has a short hint, an **(i)** with the full reasoning and which stages read it, and a **↺** button that puts it back to its default. Changes are kept when you press **Apply** on that card, and saved automatically before any stage runs.
 
@@ -161,6 +161,17 @@ In the LS study the pattern also accepts a suffix after a dash, so a name such a
 | DAPI index, Marker index | Which channel in the CZI file is which | 0 and 1 |
 
 **Channels and markers…** opens a table of channels. **Detect from a CZI file…** reads each channel's dye and colour from a real slide and fills the table in. The file knows the dye, not the antibody, so you type or pick the marker name yourself. A marker's name becomes part of folder and file names, so the app asks before you rename one.
+
+### Curation pictures
+
+How sharp the colour pictures in the ROI curator are, and where their pixels come from. Measuring always reads the scan's own pixels, whatever you set here.
+
+| Setting | What it means | Default |
+| --- | --- | --- |
+| Curation images from | **czi**: drawn from the original 16-bit scan in one step. **overview**: the old, softer 768 px pictures made from the 5.2 µm overview. | czi |
+| Curation image resolution (µm per px) | How sharp the czi pictures are. 1.3 is the finest allowed; the full 0.65 µm scan is too large to show a whole section. | 2.6 |
+
+A change here only affects pictures made afterwards. Existing pictures stay until stage 04o is run again with Redo switched on (section 5, Part 5).
 
 ### Atlas
 
@@ -224,7 +235,7 @@ What you change is remembered in the project and used every time that stage runs
 | 00d CZI self-test | Checks for faults that would make every measurement wrong, such as images shifted between zoom levels | `qc/czi_selftest.csv` | Also read N files' pixels; only the first N files |
 | 01 Export section overviews | Saves a picture of every section at one fixed size and brightness, scores focus, and saves a mask of pixels where the camera hit its maximum | `overviews/`, `qc/focus.csv` | Redo; first N |
 | 01d Contact sheets | Each animal's sections side by side in brain order, to browse quickly | `contactsheets/` | Which picture (RGB, marker only, DAPI only); sections per row; thumbnail size |
-| 01l Pictures of every scene (coming with PR #26) | Draws every scene of every slide straight from the scan, at 2.6 µm per pixel (1.3 at the finest), so you can look at the raw tissue before anything is cropped or rotated. For viewing only: no later stage reads these pictures and nothing is measured from them. | scene\_renders/\<marker>/stain+DAPI/ (stain over the counterstain) and stain\_only/ (stain alone, in grey) | Resolution (2.6 or 1.3 µm); brightness: same for all (the dataset's range, so scenes compare; default) or per scene (each stretched to its own tissue); one marker only; redo |
+| 01l Pictures of every scene (coming with PR #26) | Draws every scene of every slide straight from the scan, at 2.6 µm per pixel (1.3 at the finest), so you can look at the raw tissue before anything is cropped or rotated. For viewing only: no later stage reads these pictures and nothing is measured from them. Rendering every scene takes a long time, so Run all remaining skips this stage and it does not count towards Prepare's progress: press its own Run button when you want the pictures. | scene\_renders/\<marker>/stain+DAPI/ (stain over the counterstain) and stain\_only/ (stain alone, in grey) | Resolution (2.6 or 1.3 µm); brightness: same for all (the dataset's range, so scenes compare; default) or per scene (each stretched to its own tissue); one marker only; redo |
 | 02 Pair the two marker passes | Works out which pERK scan and which PCNA scan show the same physical section (paired studies only) | `pairs.csv` |  |
 | 00c Infer marker identity | Suggests which dye carries which marker from how the signal looks. Reports only; changes nothing. | `qc/channel_identity/` |  |
 | 01k Clipping on the raw plane | Now only fills in clipping masks for sections exported before 01 made them, and checks them at full resolution. Skips sections that already have one. | `qc/saturation_raw.csv`, `qc/censor_raw/` | Redo; full-resolution check on N sections (default 30); first N |
@@ -282,7 +293,7 @@ Prepare now stops and the Curate screen asks for the **rotation and exclusion cu
 
 **What good looks like.** In the curator, every section is upright, centred and the same size, with debris gone and no pen marks around the tissue. The colour pictures look sharp when zoomed.
 
-> **Going back to the old previews.** If the new pictures cause trouble, set `curation_render.source` to `overview` in `config.json` (shown in Set up as *Curation images from*). The curator then shows the old 768 px pictures made from the 5.2 µm overview, which are softer (about 8 µm per screen pixel). Both kinds use the same frame, so landmarks and regions you already placed stay where they are, and measurement is unchanged. Pictures that already exist are kept until you rebuild them: run this stage with **Redo … already done** switched on, or from a command prompt run `python scripts/04o_section_rgb.py --marker AF568 --all --thumbs --force` and then the same with `--marker AF488`.
+> **Going back to the old previews.** If the new pictures cause trouble, set *Curation images from* to **overview** on Set up's *Curation pictures* card (`curation_render.source` in `config.json`). The curator then shows the old 768 px pictures made from the 5.2 µm overview, which are softer (about 8 µm per screen pixel). Both kinds use the same frame, so landmarks and regions you already placed stay where they are, and measurement is unchanged. Pictures that already exist are kept until you rebuild them: run this stage with **Redo … already done** switched on, or from a command prompt run `python scripts/04o_section_rgb.py --marker AF568 --all --thumbs --force` and then the same with `--marker AF488`.
 
 **Common problems.** A section rotated badly after curation means its rotation was not exported; check the rotation curator's Export. Many sections set aside for saturation in one animal is a property of that animal's scans, not a bug; note it for the analysis.
 

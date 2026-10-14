@@ -273,6 +273,28 @@ gallery. This is the first time anybody sees the whole dataset at once. Because 
 was frozen in the previous step, differences across a sheet are real. Sections flagged by quality
 control are marked rather than dropped, so a gap in a series is never silently invented.
 
+## 01l  Pictures of every scene, for viewing {#stage-scene_renders}
+
+*`scripts/01l_scene_renders.py` → `scene_renders/<marker>/stain+DAPI/`, `scene_renders/<marker>/stain_only/`, `scene_renders/scene_renders.csv`*
+
+Every scene of every slide, drawn straight from the scan file, to be looked at in a file viewer.
+The overviews are too coarse to see nuclei and the curation pictures are already cut and rotated;
+this is the slide as it was scanned. Each marker gets two folders: the stain over the counterstain,
+in the same colours as the curation pictures, and the stain alone in grey, which uses the screen's
+whole brightness range so faint signal stays readable.
+
+The pictures are 2.6 µm per pixel by default and 1.3 at the finest. They are made by averaging whole
+blocks of the native 0.65 µm pixels (4 × 4 for 2.6, 2 × 2 for 1.3), so every native pixel contributes
+and two nuclei one output pixel apart stay two. The scan is read a band of rows at a time and each
+band is averaged down before the next is read, so memory stays at one band plus the finished picture
+however large the scene. Full native resolution is refused: a whole scene at 0.65 µm is more than
+the laptop holds, and nothing is measured from these pictures.
+
+Brightness is the overviews' frozen range by default, so the same brightness means the same signal in
+every picture. Because a nucleus is no longer averaged with its surroundings at this resolution, the
+brightest ones can saturate; the per-scene option stretches each scene to its own tissue instead, at
+the cost of brightness no longer comparing between pictures. The table records which was used.
+
 ## 02  Pair the two marker passes {#stage-pair}
 
 *`scripts/02_pair_passes.py` → `pairs.csv`*

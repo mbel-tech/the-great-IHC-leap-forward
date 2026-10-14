@@ -218,7 +218,7 @@ except SystemExit as exc:
 print()
 print("--- a scene that does not fit in memory is skipped, not fatal ---")
 real = L.available_memory
-L.available_memory = lambda: L.MEMORY_HEADROOM + 1000   # less than a scene
+L.available_memory = lambda: int(L.MEMORY_HEADROOM) + 1000   # less than a scene
 before = os.path.getmtime(pic("stain_only", UIDS[0]))
 run("--um-px", "0.65", "--force")
 chk("nothing drawn when it does not fit",

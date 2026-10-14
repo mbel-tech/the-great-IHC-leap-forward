@@ -191,7 +191,7 @@ RESULTS = Screen(
         ("Spreadsheets and figures", "The tables you analyse and the figures drawn from them.",
          ["build_results", "excel_sample", "excel_slide", "refresh_loop"]),
     ],
-    role="Press Run on Join the treatment groups once you are sure the regions are "
+    role="Press Run on Join the experiment once you are sure the regions are "
          "final, then build the spreadsheets.",
     subtitle="Unblind, then tables and figures")
 

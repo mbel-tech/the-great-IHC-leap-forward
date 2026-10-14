@@ -345,6 +345,49 @@ if MW:
         CFG["source_dir"] in w.setup.current.text(), True)
     chk("...and lists what each incomplete card is missing",
         all(gaps for _t, gaps in w.setup.missing()), True)
+    import atlas_dialog as AD
+    chk("without the Fiji importer the Atlas card offers no button",
+        AD.available() or not hasattr(w.setup, "fiji_btn"), True)
+    import importlib.machinery, types
+    _ij = types.ModuleType("ls_atlas_imagej")
+    _ij.__spec__ = importlib.machinery.ModuleSpec("ls_atlas_imagej", None)
+    _ij.calls = []
+
+    def _ij_main(argv):
+        # Stands in for the real command: it writes the config on disk, as the
+        # import does when it registers and selects the atlas.
+        _ij.calls.append(argv)
+        if "bad" in argv[0]:
+            print("not built - fix these in Fiji and run again:")
+            print("  - plate_01.tif: no ROI Manager .zip beside it")
+            return 1
+        cfg = json.load(open(argv[argv.index("--config") + 1]))
+        cfg["study"]["name"] = "after fiji"
+        json.dump(cfg, open(argv[argv.index("--config") + 1], "w"))
+        print("2 plates, 5 regions -> x")
+        return 0
+    _ij.main = _ij_main
+    sys.modules["ls_atlas_imagej"] = _ij
+    w.setup.build()
+    chk("with it, the Atlas card offers Add atlas from Fiji",
+        w.setup.fiji_btn.text(), "Add atlas from Fiji…")
+    chk("the command line it runs",
+        AD.argv_for("/f", "zf", "Zebrafish", True, "/c.json"),
+        ["/f", "--name", "zf", "--label", "Zebrafish", "--mirror", "--config", "/c.json"])
+    dlg = AD.FijiAtlasDialog(w.session, w)
+    chk("it cannot run without a folder and a valid name", dlg.go.isEnabled(), False)
+    dlg.folder.setText(os.path.join(TMP, "bad"))
+    dlg.name.setText("zf")
+    chk("...and can with both", dlg.go.isEnabled(), True)
+    chk("a folder Fiji got wrong is refused", dlg.build(), False)
+    chk("...with each problem on its own line",
+        dlg.output.toPlainText().splitlines()[-1], "  - plate_01.tif: no ROI Manager .zip beside it")
+    dlg.folder.setText(os.path.join(TMP, "good"))
+    chk("a good one is added", dlg.build(), True)
+    chk("...and the project is read back with what the import wrote",
+        w.session.project.cfg["study"]["name"], "after fiji")
+    del sys.modules["ls_atlas_imagej"]
+    w.setup.build()
     row = w.lists["measure"].rows["detect"]
     chk("a stage with options offers them", row.opt_btn.isVisibleTo(w.lists["measure"]), True)
     chk("its (i) explains it in plain words first",

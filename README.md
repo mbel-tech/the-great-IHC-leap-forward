@@ -157,6 +157,30 @@ not `plate_001`) so they are not mistaken for the salmon plates, and number them
 `--micrograph-half` is for plates that draw the atlas beside a micrograph of the same section (registration then
 reads only that half) and `--mirror` for outlines that cover one hemisphere.
 
+### The pictures the curators show, and what they lose
+
+Measurement never loses resolution: `05c` reads the CZI at its native 0.65 µm/px, 16-bit. The
+pictures the operator places ROIs on are another matter. The old route built them from the 01
+overview: 5.20 µm/px (64x fewer pixels), 8-bit through a display range that clips the top 0.5%,
+squashed square by 04a and resampled three times, shown at about 8 µm per pixel.
+
+`04o_section_rgb.py` now renders the ROI curator's composites **from the CZI** by default: the
+16-bit planes, tile field applied, sampled once through the same grid-to-slide map 05a uses, at
+`curation_render.um_per_px` (2.6 by default; 0.65 is native). The frame is unchanged, so
+landmarks already placed stay where they are; the curator scales them to the larger picture.
+Existing composites are kept until it runs with `--force`:
+
+```bash
+work/czienv/Scripts/python.exe scripts/04o_section_rgb.py --marker AF568 --all --force
+```
+
+**Zoom in the ROI curator** to see that detail: the mouse wheel zooms about the cursor, the middle or
+right button drags to pan, `+` / `-` zoom about the centre and `0` fits the section again. The zoom is
+only a view; it changes nothing that is stored or exported.
+
+`--source overview` (or `curation_render.source: "overview"`) is the old route. What no
+software step can undo is the scan's own JPEG-XR tile compression, fixed at acquisition.
+
 ### Reviewing the decisions made before the ROI curator
 
 Four stages decide a section's fate before it reaches the ROI curator, which loads only the

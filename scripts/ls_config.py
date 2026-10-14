@@ -271,6 +271,27 @@ SPEC = [
         required=True, default=5.2, materialise=True,
         consumers=["01_overviews", "01_overviews.groovy"]),
 
+    Key("curation_render.source", "str",
+        "Where the curation composites take their pixels from.",
+        default="czi", choices=["czi", "overview"], label="Curation images from",
+        note="`czi` renders each composite from the CZI's own 16-bit pixels "
+             "in ONE resampling, onto the same frame the landmarks are stored "
+             "in. `overview` is the old route: the 8-bit 5.2 um/px overview, "
+             "squashed square and resampled three times, which shows about "
+             "8 um per screen pixel. Existing composites are kept until 04o "
+             "runs with --force.",
+        consumers=["04o"]),
+
+    Key("curation_render.um_per_px", "float",
+        "Resolution of the curation composites rendered from the CZI.",
+        default=2.6, label="Curation image resolution (um/px)",
+        note="0.65 is the scan's native pixel and loses nothing. The ROI "
+             "curator draws the whole section on one canvas and has no zoom, "
+             "so below about 1.3 it gets slow to redraw without showing more "
+             "on a normal screen. Measurement (05c) always reads native "
+             "pixels, whatever this says.",
+        consumers=["04o"]),
+
     # ---- channels (replaced by the channels/markers sub-project) ---------
     # ---- acquisition ------------------------------------------------------
     Key("acquisition.layout", "str",

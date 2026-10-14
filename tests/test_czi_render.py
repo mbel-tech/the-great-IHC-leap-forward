@@ -234,6 +234,24 @@ for name, img in (("DAPI", d8), ("marker", m8)):
 old_sat = float((old[0][old[0] > 0] == 255).mean())
 chk("...where 04a's rule alone would saturate the nuclei",
     old_sat > float((d8[tis] == 255).mean()), f"{old_sat:.2%} on the 768 route")
+# A few very bright objects must not darken the whole section. Tissue around
+# 1000 with 0.5% debris at 8000: the 99.9th percentile is the debris, and a
+# linear map from there would put the tissue at the bottom of the range.
+rng = np.random.default_rng(3)
+vals = rng.normal(1000, 100, (400, 400)).astype(np.float32)
+vals.flat[rng.choice(vals.size, vals.size // 200, replace=False)] = 8000
+alltis = np.ones(vals.shape, bool)
+out = O.stretch(vals.copy(), alltis)
+chk("debris does not darken the tissue: its median sits where 04a puts it",
+    abs(float(np.median(out)) - 0.2 * 255) <= 3, float(np.median(out)))
+chk("...and still nothing saturates beyond the cap",
+    float((out == 255).mean()) <= 0.006, f"{float((out == 255).mean()):.3%}")
+plain = rng.normal(1000, 100, (400, 400)).astype(np.float32)
+med = float(np.median(plain))
+mad = float(np.median(np.abs(plain - med))) * 1.4826
+want = np.rint(np.clip((plain - (med - mad)) / (5 * mad), 0, 1) * 255)
+chk("where 04a's top is already high enough, the picture is exactly 04a's",
+    O.display_gamma(0.2) == 1.0 and np.abs(O.stretch(plain.copy(), alltis) - want).max() <= 1)
 chk("the render is drawn in strips, and they join",
     side13 > O.STRIP_ROWS and not (d8[O.STRIP_ROWS - 1:O.STRIP_ROWS + 1].sum(axis=1) == 0).any(), "")
 

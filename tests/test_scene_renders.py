@@ -19,6 +19,7 @@ Run:  python tests/test_scene_renders.py
 
 import contextlib
 import csv
+import io
 import json
 import os
 import sys
@@ -218,11 +219,23 @@ except SystemExit as exc:
 print()
 print("--- a scene that does not fit in memory is skipped, not fatal ---")
 real = L.available_memory
-L.available_memory = lambda: L.MEMORY_HEADROOM + 1000   # less than a scene
+L.available_memory = lambda: int(L.MEMORY_HEADROOM) + 1000   # less than a scene
 before = os.path.getmtime(pic("stain_only", UIDS[0]))
 run("--um-px", "0.65", "--force")
 chk("nothing drawn when it does not fit",
     os.path.getmtime(pic("stain_only", UIDS[0])) == before)
+# Two CZIs this time: the limit has to hold across files, not only within one.
+open(os.path.join(STUDY.source_dir, "LS1_1b.czi"), "wb").close()
+kept = open(L.MANIFEST_CSV, encoding="utf-8").read()
+with open(L.MANIFEST_CSV, "a", newline="", encoding="utf-8") as fh:
+    csv.writer(fh).writerow(["LS1_1b_s00", "LS1_1b.czi", "LS1", "1", "b", "AF568", 0, 2])
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    run("--um-px", "0.65", "--force", "--limit", "1")
+chk("--limit counts skipped scenes too", "1 not drawn" in buf.getvalue(),
+    buf.getvalue().strip().splitlines()[-3:])
+with open(L.MANIFEST_CSV, "w", newline="", encoding="utf-8") as fh:
+    fh.write(kept)
 L.available_memory = lambda: None           # platform cannot say: draw anyway
 chk("...and a platform that cannot say does not block", L.fits(10 ** 12) is None)
 L.available_memory = real

@@ -104,8 +104,10 @@ MIN_UM_PX = NATIVE_UM
 #: and marker), the tile-field gain, the 8-bit planes, the RGB composite and
 #: PIL's copy of it while encoding. Rounded up.
 BYTES_PER_PX = 24
-#: Keep this much free for the operating system and anything else running.
-MEMORY_HEADROOM = 1.5e9
+#: Left over after a scene is allocated, so the allocation itself is not what
+#: tips the computer over. Small, because `available_memory` already counts
+#: only memory that can be had without taking it from anything running.
+MEMORY_HEADROOM = 0.25e9
 #: Native rows per read. Smaller than 04o's 2048 because a whole scene is wider
 #: than a cut section; at 1024 rows a band of a 20,000 px wide scene is 40 MB.
 BAND_ROWS = 1024
@@ -238,10 +240,18 @@ def load_index():
 
 
 def available_memory():
-    """Bytes of memory free now, or None when this platform will not say."""
+    """Bytes a new allocation can get now, or None when the platform will not say.
+
+    Free RAM PLUS free page file (swap), because that is the limit an
+    allocation actually fails at. Free RAM alone was the first version: on the
+    laptop it read 0.5 GB with the usual programs open, and every scene was
+    skipped - including 2.6 um/px ones a few hundred MB in size, which Windows
+    hands out from the page file without complaint. Exceeding free RAM makes a
+    scene slower, not impossible.
+    """
     try:
         import psutil
-        return int(psutil.virtual_memory().available)
+        return int(psutil.virtual_memory().available + psutil.swap_memory().free)
     except Exception:  # noqa: BLE001 - psutil is optional
         pass
     if sys.platform == "win32":
@@ -260,16 +270,21 @@ def available_memory():
             st = _Status()
             st.dwLength = ctypes.sizeof(_Status)
             if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st)):
-                return int(st.ullAvailPhys)
+                # The commit limit left: RAM and page file together.
+                return int(st.ullAvailPageFile)
         except Exception:  # noqa: BLE001
             return None
         return None
     try:
+        got = {}
         with open("/proc/meminfo", encoding="ascii") as fh:
             for line in fh:
-                if line.startswith("MemAvailable:"):
-                    return int(line.split()[1]) * 1024
-    except OSError:
+                key, _, rest = line.partition(":")
+                if key in ("MemAvailable", "SwapFree"):
+                    got[key] = int(rest.split()[0]) * 1024
+        if "MemAvailable" in got:
+            return got["MemAvailable"] + got.get("SwapFree", 0)
+    except (OSError, ValueError):
         pass
     return None
 
@@ -363,7 +378,7 @@ def main():
     ap.add_argument("--force", action="store_true",
                     help="redraw pictures that already exist (default skips them)")
     ap.add_argument("--limit", type=int, default=0, metavar="N",
-                    help="stop after N scenes (0 = all)")
+                    help="stop after trying N scenes, drawn or not (0 = all)")
     args = ap.parse_args()
 
     if args.um_px < MIN_UM_PX - 1e-9:
@@ -399,7 +414,7 @@ def main():
     for r in scenes:
         by_file.setdefault(r["file"], []).append(r)
 
-    made = existing = 0
+    made = existing = tried = 0
     failed = []
     t0 = time.time()
     fields_cache = {}
@@ -431,10 +446,15 @@ def main():
                 existing += 1
                 continue
             todo.append(r)
+        # --limit counts the scenes tried, not the ones drawn: a run where every
+        # scene is skipped (too little memory) must still stop after N.
         if args.limit:
-            todo = todo[:max(0, args.limit - made)]
+            todo = todo[:max(0, args.limit - tried)]
         if not todo:
+            if args.limit and tried >= args.limit:
+                break
             continue
+        tried += len(todo)
 
         path = os.path.join(SOURCE_DIR, fname)
         if not os.path.exists(path):
@@ -458,11 +478,10 @@ def main():
                     need = memory_needed(rects[si], b)
                     room = fits(need)
                     if room is not None:
-                        failed.append((uid, f"needs about {need / 1e9:.1f} GB (plus "
-                                       f"{MEMORY_HEADROOM / 1e9:.1f} GB kept free) at "
-                                       f"{um_px:.2f} um/px and {room / 1e9:.1f} GB "
-                                       "is free - close other programs or choose "
-                                       "a coarser resolution"))
+                        failed.append((uid, f"needs about {need / 1e9:.1f} GB at "
+                                       f"{um_px:.2f} um/px and only {room / 1e9:.1f} GB "
+                                       "can be had (memory and page file) - close "
+                                       "other programs or choose a coarser resolution"))
                         continue
                     got = render_scene(reader(n_idx), reader(m_idx), rects[si], b,
                                        fields_nm, ranges, range_mode, marker, colour)
@@ -495,10 +514,13 @@ def main():
         # drive that has dropped writes before.
         if index:
             IO.atomic_write_csv(INDEX_CSV, list(index.values()), INDEX_KEYS)
-        rate = made / max(time.time() - t0, 1e-9)
-        print(f"\r  drew {made} scenes  ({rate:.2f}/s, "
-              f"{(time.time() - t0) / 60:.1f} min)", end="")
-        if args.limit and made >= args.limit:
+        # Only when this file drew something: a run that skips every scene
+        # otherwise fills its log with one identical progress line per CZI.
+        if drawn:
+            rate = made / max(time.time() - t0, 1e-9)
+            print(f"\r  drew {made} scenes  ({rate:.2f}/s, "
+                  f"{(time.time() - t0) / 60:.1f} min)", end="")
+        if args.limit and tried >= args.limit:
             break
 
     print()

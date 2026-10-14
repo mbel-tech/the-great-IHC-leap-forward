@@ -378,7 +378,7 @@ def main():
     ap.add_argument("--force", action="store_true",
                     help="redraw pictures that already exist (default skips them)")
     ap.add_argument("--limit", type=int, default=0, metavar="N",
-                    help="stop after N scenes (0 = all)")
+                    help="stop after trying N scenes, drawn or not (0 = all)")
     args = ap.parse_args()
 
     if args.um_px < MIN_UM_PX - 1e-9:
@@ -414,7 +414,7 @@ def main():
     for r in scenes:
         by_file.setdefault(r["file"], []).append(r)
 
-    made = existing = 0
+    made = existing = tried = 0
     failed = []
     t0 = time.time()
     fields_cache = {}
@@ -446,10 +446,15 @@ def main():
                 existing += 1
                 continue
             todo.append(r)
+        # --limit counts the scenes tried, not the ones drawn: a run where every
+        # scene is skipped (too little memory) must still stop after N.
         if args.limit:
-            todo = todo[:max(0, args.limit - made)]
+            todo = todo[:max(0, args.limit - tried)]
         if not todo:
+            if args.limit and tried >= args.limit:
+                break
             continue
+        tried += len(todo)
 
         path = os.path.join(SOURCE_DIR, fname)
         if not os.path.exists(path):
@@ -515,7 +520,7 @@ def main():
             rate = made / max(time.time() - t0, 1e-9)
             print(f"\r  drew {made} scenes  ({rate:.2f}/s, "
                   f"{(time.time() - t0) / 60:.1f} min)", end="")
-        if args.limit and made >= args.limit:
+        if args.limit and tried >= args.limit:
             break
 
     print()

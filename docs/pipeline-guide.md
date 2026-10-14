@@ -283,12 +283,14 @@ this is the slide as it was scanned. Each marker gets two folders: the stain ove
 in the same colours as the curation pictures, and the stain alone in grey, which uses the screen's
 whole brightness range so faint signal stays readable.
 
-The pictures are 2.6 µm per pixel by default and 1.3 at the finest. They are made by averaging whole
-blocks of the native 0.65 µm pixels (4 × 4 for 2.6, 2 × 2 for 1.3), so every native pixel contributes
+The folder, the resolution and the brightness are study settings. The pictures are 2.6 µm per pixel
+by default, and anything down to the scan's own 0.65 µm can be chosen. They are made by averaging
+whole blocks of the native pixels (4 × 4 for 2.6, 2 × 2 for 1.3), so every native pixel contributes
 and two nuclei one output pixel apart stay two. The scan is read a band of rows at a time and each
 band is averaged down before the next is read, so memory stays at one band plus the finished picture
-however large the scene. Full native resolution is refused: a whole scene at 0.65 µm is more than
-the laptop holds, and nothing is measured from these pictures.
+however large the scene. The finished picture is still held whole, and at 0.65 µm that can be several
+gigabytes, so each scene is checked against the memory free at the time and one that does not fit is
+skipped with a message saying how much it needs, rather than stopping the run.
 
 Brightness is the overviews' frozen range by default, so the same brightness means the same signal in
 every picture. Because a nucleus is no longer averaged with its surroundings at this resolution, the

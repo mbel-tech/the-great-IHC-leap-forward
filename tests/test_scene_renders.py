@@ -183,7 +183,7 @@ whole = L.read_scene(read, RECTS[0], 2)
 chk("8-row bands equal one read", np.array_equal(banded, whole))
 chk("...and equal the 2x2 block mean", np.allclose(whole, block_mean(PLANES[0][1], 2)))
 half = np.full((L.SR.PITCH_PX // L.SR.FIELD_DIVISOR,) * 2, 0.5, np.float32)
-chk("the tile field divides out", np.allclose(L.apply_field(whole, half, 2),
+chk("the tile field divides out", np.allclose(L.apply_field(whole.copy(), half, 2),
                                              np.minimum(whole * 2, 65535)))
 
 print()
@@ -206,11 +206,29 @@ chk("rounding to whole native pixels", (L.block_for(2.6), L.block_for(1.3), L.bl
 OTHER = os.path.join(STUDY.root, "elsewhere")
 run("--out-dir", OTHER, "--limit", "1")
 chk("--out-dir sends one run elsewhere", os.path.exists(pic("stain_only", UIDS[0], OTHER)))
+run("--um-px", "0.65", "--force")
+only065 = np.asarray(Image.open(pic("stain_only", UIDS[0])))
+chk("--um-px 0.65 draws the native pixels", only065.shape == (H, W), only065.shape)
 try:
-    run("--um-px", "0.65")
-    chk("finer than 1.3 is refused", False)
+    run("--um-px", "0.3")
+    chk("finer than native is refused", False)
 except SystemExit as exc:
-    chk("finer than 1.3 is refused", "1.3" in str(exc))
+    chk("finer than native is refused", "0.65" in str(exc))
+
+print()
+print("--- a scene that does not fit in memory is skipped, not fatal ---")
+real = L.available_memory
+L.available_memory = lambda: L.MEMORY_HEADROOM + 1000   # less than a scene
+before = os.path.getmtime(pic("stain_only", UIDS[0]))
+run("--um-px", "0.65", "--force")
+chk("nothing drawn when it does not fit",
+    os.path.getmtime(pic("stain_only", UIDS[0])) == before)
+L.available_memory = lambda: None           # platform cannot say: draw anyway
+chk("...and a platform that cannot say does not block", L.fits(10 ** 12) is None)
+L.available_memory = real
+chk("memory estimate scales with the area", L.memory_needed((0, 0, 4000, 4000), 1)
+    > 5 * L.memory_needed((0, 0, 4000, 4000), 4))
+chk("this machine reports its free memory", isinstance(real(), int))
 
 print()
 print("ALL PASS" if not fails else f"{fails} FAILED")

@@ -310,12 +310,15 @@ note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
     Key("scene_render.um_per_px", "float",
         "Resolution of the scene pictures, in micrometres per pixel.",
         default=2.6, label="Scene picture resolution (um/px)",
-        note="1.3 at the finest; larger numbers give smaller, softer pictures "
-             "(5.2 is the overviews' scale). Each picture pixel is the average "
-             "of whole native 0.65 um pixels, so the value is rounded to a "
-             "multiple of 0.65 and the table records what was drawn. The "
-             "native 0.65 itself is refused: a whole scene at that size ran "
-             "the laptop out of memory.",
+        note="0.65 is the scan's own pixels, the finest there is; larger "
+             "numbers give smaller, softer pictures (5.2 is the overviews' "
+             "scale). Each picture pixel is the average of whole native 0.65 "
+             "um pixels, so the value is rounded to a multiple of 0.65 and the "
+             "table records what was drawn. Memory: a whole scene at 0.65 can "
+             "need several GB. Each scene is checked against the memory free "
+             "at the time, and one that does not fit is skipped with a "
+             "message rather than crashing the run; 1.3 needs a quarter of "
+             "that, 2.6 a sixteenth.",
         consumers=["01l"]),
 
     Key("scene_render.range", "str",

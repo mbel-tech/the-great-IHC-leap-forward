@@ -63,7 +63,7 @@ def _report(exc_type, exc, tb):
         from PySide6.QtWidgets import QApplication, QMessageBox
         if QApplication.instance():
             QMessageBox.critical(
-                None, "LS pipeline stopped",
+                None, "The Great IHC Leap Forward stopped",
                 f"{exc_type.__name__}: {exc}\n\nWritten to:\n{CRASH_LOG}")
     except Exception:                                       # noqa: BLE001
         pass
@@ -97,7 +97,7 @@ def main():
         return 1
 
     app = QApplication(sys.argv)
-    app.setApplicationName("LS IHC pipeline")
+    app.setApplicationName("The Great IHC Leap Forward")
     # Before any window exists, so the study picker is drawn light too.
     import theme
     theme.apply(app)

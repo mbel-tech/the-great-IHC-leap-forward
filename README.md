@@ -1,4 +1,6 @@
-# LS whole-brain IHC pipeline
+# The Great IHC Leap Forward
+
+Whole-brain IHC pipeline for LS (formerly `ls-ihc-pipeline`).
 
 Automated screening of pERK and PCNA immunofluorescence across whole-brain transverse sections
 of a salmonid, from Zeiss CZI whole-slide scans.

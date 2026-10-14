@@ -1,4 +1,4 @@
-; Inno Setup script: wraps the folder build.ps1 makes into LS-IHC-Setup.exe.
+; Inno Setup script: wraps the folder build.ps1 makes into The-Great-IHC-Leap-Forward-Setup.exe.
 ;
 ;   iscc /DAppVersion=1.2.0 /DBundle=dist\LS-IHC packaging\windows\installer.iss
 ;
@@ -16,24 +16,24 @@
 
 [Setup]
 AppId={{6C1E4B0A-7D52-4E43-9C0B-2F5A8E1D3B77}
-AppName=LS IHC pipeline
+AppName=The Great IHC Leap Forward
 AppVersion={#AppVersion}
 AppPublisher=mbel-tech
-AppPublisherURL=https://github.com/mbel-tech/ls-ihc-pipeline
-DefaultDirName={autopf}\LS IHC pipeline
-DefaultGroupName=LS IHC pipeline
+AppPublisherURL=https://github.com/mbel-tech/the-great-IHC-leap-forward
+DefaultDirName={autopf}\The Great IHC Leap Forward
+DefaultGroupName=The Great IHC Leap Forward
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=..\..\dist
-OutputBaseFilename=LS-IHC-Setup-{#AppVersion}
+OutputBaseFilename=The-Great-IHC-Leap-Forward-Setup-{#AppVersion}
 Compression=lzma2/max
 SolidCompression=yes
 LZMANumBlockThreads=4
 WizardStyle=modern
-UninstallDisplayName=LS IHC pipeline {#AppVersion}
+UninstallDisplayName=The Great IHC Leap Forward {#AppVersion}
 
 [InstallDelete]
 ; An upgrade replaces the code and the interpreter wholesale. Files a newer
@@ -50,15 +50,15 @@ Type: filesandordirs; Name: "{app}\keras"
 Source: "{#Bundle}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\LS IHC pipeline"; Filename: "{app}\runtime\pythonw.exe"; Parameters: "-m app"; WorkingDir: "{app}"
-Name: "{group}\Uninstall LS IHC pipeline"; Filename: "{uninstallexe}"
-Name: "{userdesktop}\LS IHC pipeline"; Filename: "{app}\runtime\pythonw.exe"; Parameters: "-m app"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{group}\The Great IHC Leap Forward"; Filename: "{app}\runtime\pythonw.exe"; Parameters: "-m app"; WorkingDir: "{app}"
+Name: "{group}\Uninstall The Great IHC Leap Forward"; Filename: "{uninstallexe}"
+Name: "{userdesktop}\The Great IHC Leap Forward"; Filename: "{app}\runtime\pythonw.exe"; Parameters: "-m app"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"
 
 [Run]
-Filename: "{app}\runtime\pythonw.exe"; Parameters: "-m app"; WorkingDir: "{app}"; Description: "Start LS IHC pipeline"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\runtime\pythonw.exe"; Parameters: "-m app"; WorkingDir: "{app}"; Description: "Start The Great IHC Leap Forward"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
 ; Written by the app at run time, beside itself.

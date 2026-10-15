@@ -579,7 +579,7 @@ Every stage is a script in `scripts/` and can also be run from a terminal; the (
 | Nucleus detection is greyed out | No StarDist in this Python | Use the installer, or start with `run_app.bat` (uses `work/appenv`) |
 | The overview stage fails on Python 3.14 | The CZI reader has no 3.14 version | Use Python 3.13 via `run_app.bat` |
 | A curator pane is blank in the .exe | The packaged files are incomplete | Start the app with `--self-test` and read `lsapp-selftest.log`; reinstall if it fails |
-| The app will not start | A missing library or a broken environment | Read `lsapp-crash.log`. To keep curating meanwhile, run `serve_curators.bat` and use a browser. |
+| The app will not start | A missing library or a broken environment | Read `lsapp-crash.log`, in `%LOCALAPPDATA%\The Great IHC Leap Forward\logs` on Windows (`~/.local/state/The Great IHC Leap Forward/logs` elsewhere; the message box names it). To keep curating meanwhile, run `serve_curators.bat` and use a browser. |
 | No new figures in results/ROI\_plots | The R figure steps are switched off for now | Run the scripts in `analysis/` by hand with `Rscript` (section 8) |
 | 06b says the workbook header does not match | The sampling workbook's columns differ | Fix the workbook's column names to the ones it lists |
 

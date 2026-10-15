@@ -3,7 +3,8 @@
 ;   iscc /DAppVersion=1.2.0 /DBundle=dist\LS-IHC packaging\windows\installer.iss
 ;
 ; Per-user, no administrator rights: installs to %LOCALAPPDATA%\Programs, which
-; the app can write to (it keeps its crash and self-test logs beside itself).
+; the app can write to (it keeps its self-test log beside itself; the crash log
+; is per-user, in %LOCALAPPDATA%\The Great IHC Leap Forward\logs).
 ; Studies and settings live in %USERPROFILE%\.ls-pipeline and are never touched
 ; by installing, upgrading or uninstalling.
 
@@ -65,7 +66,8 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"
 Filename: "{app}\runtime\pythonw.exe"; Parameters: "-m app"; WorkingDir: "{app}"; Description: "Start The Great IHC Leap Forward"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
-; Written by the app at run time, beside itself.
+; Written by the app at run time, beside itself (the crash log only by older
+; versions; it now lives in %LOCALAPPDATA%).
 Type: files; Name: "{app}\lsapp-crash.log"
 Type: files; Name: "{app}\lsapp-selftest.log"
 Type: filesandordirs; Name: "{app}\keras"

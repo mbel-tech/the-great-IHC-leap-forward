@@ -16,7 +16,7 @@ The step list on the left shows six screens in the order you work, each with a o
 | 1 | **Set up** | Check the few cards it shows: the folders, the file names, the section thickness and markers, and the atlas. Everything the slide files can tell the app is already filled in; the rest is under **Show advanced settings**. Press **Apply** on any card you change. | No red rows on the Slides tab, and the step list says every card is applied. |
 | 2 | **Prepare** | Press **Run all remaining**. It runs straight through to the ROI curator. | The step list shows Prepare done and Next up sends you to Curate. |
 | 3 | **Curate** | In the ROI curator, bring back any section that was set aside by mistake, match each section to its atlas plate and draw the brain regions. Then press **Done: export and go to Measure**. | The curator is exported. |
-| 4 | **Measure** | Press **Run all remaining**. Nucleus detection takes hours and can be stopped and resumed. | Every section is measured. |
+| 4 | **Measure** | Press **Run all remaining**. It first checks signal quality and tunes detection (05b); nucleus detection then takes hours and can be stopped and resumed. | Every section is measured. |
 | 5 | **Results** | Press **Run** on *Join the experiment*, check the sampling workbook in the box that opens and press **Unblind and run**. Then press **Run all remaining** for the spreadsheets and figures. | `roi_dataset.xlsx` is in your results folder. |
 
 Three habits will save you trouble:
@@ -87,7 +87,7 @@ Nucleus detection needs StarDist. The installer and `work/appenv` both have it. 
   - **Options** lists the stage's switches. It says *Options (2 changed)* when you have changed any.
   - **(i)** explains what the stage needs first, what it leaves behind, when it last ran, and the technical detail underneath.
 - **Run all remaining.** On Prepare, Measure and Results, runs every stage on that screen that has not finished, in order. It stops at the first failure and never runs past a curator you have not exported. It never unblinds: that always waits for you to press it and confirm. It also leaves out the scene pictures, which you run on their own.
-- **Status bar (bottom).** Shows what is running and its last log line. When a run finishes, it says if a stage could not make everything (for example *3 scenes not drawn, see log*). **Show log** opens the full log; **Stop after this stage** finishes the current stage cleanly and stops.
+- **Status bar (bottom).** Shows what is running and its last log line, with a progress bar that also appears on the running stage's row. It slides until the stage reports a count, then fills, for example 12 of 454 sections (3%). When a run finishes, it says if a stage could not make everything (for example *3 scenes not drawn, see log*). **Show log** opens the full log; **Stop after this stage** finishes the current stage cleanly and stops.
 
 ![The step list: six steps with their descriptions and progress, and the Advanced group at the foot](img/user-guide/10-step-list.png)
 
@@ -118,7 +118,7 @@ Set up is where you describe the study once: where the slides are, how their fil
 
 Every field has a short hint, an **(i)** with the full reasoning and which stages read it, and a **↺** button that puts it back to its default. Changes are kept when you press **Apply** on that card, and saved automatically before any stage runs.
 
-> **Starting a new study.** Use **File > New project** (or **New study…** in the study picker). It asks for two folders, the folder with the `.czi` files and an output folder, plus the section thickness and the atlas. The slides are read straight away and their pixel size, file names and channels are filled in. The study's file (`study.json`), the curation, the pictures and the results all go in the output folder, so a study is one folder you can move or back up whole. Choosing an output folder that already holds a study opens it. To continue an existing study, use **File > Open project** or **Tools > Switch study**; studies made before this keep working where they are.
+> **Starting a new study.** Use **File > New project** (or **New study…** in the study picker). It asks for two folders, the folder with the `.czi` files and an output folder, plus the section thickness and the atlas. The slides are read straight away and their pixel size, file names and channels are filled in. The study's file (`study.json`), the curation, the pictures and the results all go in the output folder, so a study is one folder you can move or back up whole. Choosing an output folder that already holds a study opens it. To continue an existing study, use **File > Open project** or **Tools > Switch study**; studies made before this keep working where they are. The app reopens the study you had open last.
 
 ### Slides tab
 
@@ -202,14 +202,17 @@ Changing the resolution or brightness makes the next run redraw the pictures.
 
 | Setting | What it means |
 | --- | --- |
-| Atlas | **salmon** (default), **wullimann1996** (zebrafish), or one you imported |
+| Atlas | **salmon** (default), **wullimann1996** (zebrafish), or one you added |
 | Rebuild atlas plates | Advanced, off. The salmon and Wullimann plates ship ready-made with the app, so the plate-building stages are left out. Turn on only to make a plate set again from the PDF. |
 | Atlas PDF | The salmon atlas file the plates and regions are taken from (only used when rebuilding) |
 | Mirror atlas polygons | For an atlas whose outlines cover only one side of the brain (Wullimann) |
 | Atlas plate set | Which set of plates the ROI curator shows. Leave at `plates`. |
 | Two-section figures | Salmon only: the figure numbers that show two sections each, for example `31-47` |
 
-**Import atlas…** adds an atlas of your own: a folder of plate images plus a table of region outlines. The app checks the folder first, names every problem with its file and line, and copies nothing unless it passes.
+**Your own atlas.** Two ways to add one:
+
+- **Add atlas from Fiji…** (on the Atlas card): put one image per plate in a folder, outline and name each region in Fiji's ROI Manager, and save the ROI Manager as a `.zip` beside each image. The dialog takes the folder, checks it and selects the new atlas. The step-by-step guide is `docs/adding-your-own-atlas.md`.
+- **Import atlas…**: a folder of plate images plus a table of region outlines. The app checks the folder first, names every problem with its file and line, and copies nothing unless it passes.
 
 ### Nucleus detection
 
@@ -217,6 +220,9 @@ Changing the resolution or brightness makes the next run redraw the pictures.
 | --- | --- | --- |
 | Nucleus diameter (µm) | 7 | Your species or cell type has clearly larger or smaller nuclei |
 | Abercrombie correction | On | Leave on. It corrects for nuclei cut across two sections. |
+| Use auto-tuned detection settings | On | Leave on. Off uses the model's own thresholds, as every count made before 05b did. |
+| StarDist: probability threshold | Empty (the 05b value, or 0.479) | Only to override 05b. Lower finds more, dimmer objects and more noise; higher finds fewer. |
+| StarDist: overlap threshold | Empty (0.3) | Not tuned. Raise it only if touching nuclei are merged in the check pictures. |
 | Threshold: MAD multiplier | 3 | Only for markers counted on their own channel (not nuclei); see (i) |
 | Threshold: minimum object area (µm²) | 5 | As above |
 
@@ -265,7 +271,7 @@ What you change is remembered in the project and used every time that stage runs
 
 ### Part 2: Build the atlas
 
-The salmon and Wullimann plates ship ready-made with the app and are copied into the study when it first needs them, so with either atlas this whole part is greyed out ("Not needed") and Prepare goes straight past it. It runs only for a plate set that does not ship (for example `plates_merged`) or when **Rebuild atlas plates** is on in Set up > Atlas, and then only the stages for the atlas you chose.
+The salmon and Wullimann plates ship ready-made with the app and are copied into the study when it first needs them, so with either atlas this whole part is greyed out ("Not needed") and Prepare goes straight past it. It runs only for a plate set that does not ship (for example `plates_merged`) or when **Rebuild atlas plates** is on in Set up > Atlas, and then only the stages for the atlas you chose. The Wullimann outlines have all been checked by hand, so the ROI curator shows every named region.
 
 | Stage | What it does | Makes | Options |
 | --- | --- | --- | --- |
@@ -346,7 +352,7 @@ This is the main curation job, and the only stop in a normal run. For each secti
 **The page, top to bottom.**
 
 - **Top bar.** *Animal* and *Marker* menus and two tick boxes (*favourites only*, *hide excluded*) choose which sections are shown. On the right are counts (shown, registered, plate only, no ROI, favourites, excluded), then **Review**, **?** (all keyboard shortcuts), and the export group: **Folder…**, **Export**, **Shotgun** and **By region**.
-- **Tool rail (left).** Every tool, in labelled groups, with its key in brackets: *This section* (★ Favourite **f**, No ROI here, Exclude **x**); *Atlas plate* (Assign plate **a**); *Look* (Hide DAPI, Hide the marker, Hulls **h**, Rotate, Restore tilt **r**); *Draw ROIs* (Guided **g**, ROIs… **o**, Skip ROI **s**); *Background discs* (Background **d** and a disc-size slider, keys **\[** and **\]**); *Undo* (Point **z**, Region, Undo last **u**, Clear section). Under the rail it says when your work was last saved.
+- **Tool rail (left).** Every tool, in labelled groups, with its key in brackets: *This section* (★ Favourite **f**, No ROI here, Exclude **x**); *Atlas plate* (Assign plate **a**); *Look* (Hide DAPI, Hide the marker, Hulls **h**, Rotate, Restore tilt **r**); *Draw ROIs* (Guided **g**, ROIs… **o**, Skip ROI **s, ADD ROI n**); *Background discs* (Background **d** and a disc-size slider, keys **\[** and **\]**); *Undo* (Point **z**, Region, Undo last **u**, Clear section). Under the rail it says when your work was last saved.
 - **Coach line.** One coloured line above the pictures that names the tool you are in and says what a click will do.
 - **Two panes.** The section on the left, the atlas plate on the right. On a narrow screen they stack, and the page scrolls.
 - **Info cards (right or below).** The section, the plate, its landmarks, the regions placed, and the background discs, each with a short count or advice.
@@ -359,7 +365,7 @@ This is the main curation job, and the only stop in a normal run. For each secti
 **For each section:**
 
 1. **Find the plate.** Use ← and → (or the plate slider) until the plate matches the section, then press **a** (*Assign plate*). The plate stays put when you move to the next section with ↓, so neighbouring sections are quick.
-2. **Draw each region.** With **Guided** on (**g**), the cursor walks through your chosen regions in order. Click the region's corners on the section; close the outline with **Enter**, a double-click, or a click on the first corner. The cursor then moves to the next region. Press **s** to skip a region that is not on this section. Clicking a region on the plate re-aims the cursor at it.
+2. **Draw each region.** With **Guided** on (**g**), the cursor walks through your chosen regions in order. Click the region's corners on the section; close the outline with **Enter**, a double-click, or a click on the first corner. The cursor then moves to the next region. Press **s** to skip a region that is not on this section. For a region the plate has no outline for, press n (ADD ROI): give it a name, and it gets the plate's next free number and becomes the next region you draw. It is exported like any other region. Clicking a region on the plate re-aims the cursor at it.
 3. **Place background discs (d).** Put at least one disc on tissue with no real signal. Detection measures it the same way as a region and uses it to set the positivity cut for this section. **A section without a background disc cannot be used for positivity.**
 4. **Optional: landmarks.** With Guided off, click a point on the section, then the matching point on the plate. Landmarks record how well the plate fits; the sidebar lists each with its error, so a mis-click shows up as a large number.
 5. Mark the section if needed: **f** *Favourite* (a section you want in the quantified subset), **No ROI here** (the section is fine but has nothing to measure), or **x** *Exclude* (the section should not be used).
@@ -413,8 +419,11 @@ Measure puts your regions back onto the original slides, finds every nucleus ins
 | --- | --- | --- | --- |
 | 05a Verify the inverse transform | Checks that regions map back onto the slides accurately before anything is measured | A pass or fail in the log |  |
 | 05a Place the regions on the slides | Maps every region from the 256-pixel curation picture back onto the slide's own 0.65 µm pixels | Region geometry and boxes for each marker | Every section with a region (also those without a background disc); first N |
+| 05b Check signal quality and tune detection | Measures how bright, clean and even the signal is on a sample of regions, gives a verdict (good, marginal or poor) with its reasons, and picks the nucleus-detection setting that suits it. One setting per marker for the whole study. | `qc/detection_tuning.md` and `.csv`; the tuned setting in the study file | Sections to sample (12 per marker); report only |
 | 05c Detect and measure nuclei | Reads each region at full resolution, finds nuclei with StarDist (on DAPI; PCNA on its own channel, see below), measures the marker in each, and flags nuclei that sit on clipped pixels | `results/roi_nuclei.csv` | Order sections are measured in; save check pictures; redo; first N |
 | 06a Per-region dataset | Turns nuclei into per-region numbers: how many cells, how many positive, per mm² | `results/roi_measurements.csv`, `results/detector_specificity.csv` |  |
+
+**About 05b.** It reads three regions from each of twelve sections per marker, spread over every animal, at full resolution, on the plane detection uses (DAPI, or the marker itself for PCNA). It then counts nuclei at a range of StarDist probability cuts and keeps the cut where the count changes least, so the count reflects the nuclei rather than the cut. It never reads the treatment groups, and it never tunes per section, because a per-section setting would follow brightness and so could follow treatment. Read `qc/detection_tuning.md` before you start 05c: a *poor* verdict means fix the scans or the settings first. 05c uses the tuned cut unless you set one yourself or switch off *Use auto-tuned detection settings* (Set up > Show advanced settings > Nucleus detection). **05c records the settings each marker was measured with and refuses to add sections measured with different ones**, so if you change them mid-study, re-measure that marker with **Redo … already done**.
 
 ### How your regions get from the curator to the slide
 
@@ -573,8 +582,10 @@ Every stage is a script in `scripts/` and can also be run from a terminal; the (
 ### Where to look for more detail
 
 - The **(i)** button on any stage or setting.
+- **The project wiki** on GitHub: short, question-led pages (Quick Start, Setting Up a Study, Prepare, Curate, Measure, Results, Atlases, Troubleshooting, Glossary). It is written from `docs/wiki/` in the repository and kept in step with this guide.
 - `docs/pipeline-guide.md`: every stage explained in depth, with the reasoning behind it.
 - `docs/setting-up-a-study.md`: settings, channels and the segmentation choices in detail.
+- `docs/adding-your-own-atlas.md`: drawing an atlas's regions in Fiji and adding it.
 - `docs/nuclei-detection-after-roi-curation.md`: detection step by step.
 - `LOGS.md`: the running record of what went wrong and how it was fixed.
 

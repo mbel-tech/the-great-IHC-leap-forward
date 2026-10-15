@@ -818,6 +818,7 @@ class SetupScreen(QWidget):
         import slide_report as SR
         report, full = self._slide_report()
         if not report:
+            self.detect_line.setText("No slide file in the slides folder could be read.")
             return None
         dlg = SR.SlideReportDialog(report, full, self)
         dlg.exec()

@@ -767,7 +767,7 @@ class MainWindow(QMainWindow):
                 words, complete = "", False
             else:
                 done, total = (sd, st) if scr.sid == "setup" else W.step_progress(scr.sid, study)
-                words = W.progress_words(scr.sid, done, total)
+                words = W.progress_words(scr.sid, done, total, study)
                 complete = bool(total) and done >= total
             self.nav.set_step(i, title=scr.title, badge=str(i) if i else "⌂",
                               sub=scr.subtitle, progress=words, complete=complete)

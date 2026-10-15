@@ -93,6 +93,10 @@ def stage_status(st, study, running, held=None):
         return "done", "Decisions exported"
     if state == "todo" and held and st.sid in held:
         return "waiting", waiting_words(held[st.sid], study)
+    part = W.incomplete(st, study) if state == "todo" else None
+    if part:
+        # Its output exists after the first section; Run picks up where it stopped.
+        return state, "Detection %s, resume" % part
     if state == "outdated":
         words = "Out of date: %s" % W.outdated(st, study)
         if "--force" in W.run_values(st.sid, {}, study):
@@ -492,7 +496,7 @@ class CurateScreen(QWidget):
             self.tabs.blockSignals(False)
         block = project.block if project is not None else {}
         for i, sid in enumerate(self.sids):
-            mark = "✓ " if W.decided(sid, study) and S.BY_ID[sid].done(study.out_root, study.names) else ""
+            mark = "✓ " if W.curator_finished(sid, study) else ""
             self.tabs.setTabText(i, mark + W.display_title(S.BY_ID[sid], study))
         for sid, row in self.rows.items():
             st = S.BY_ID[sid]
@@ -652,7 +656,7 @@ class HomeScreen(QWidget):
             bar.setMaximum(max(total, 1))
             bar.setValue(done)
             T.mark(bar, complete=bool(total) and done >= total)
-            self.counts[sid].setText(W.progress_words(sid, done, total))
+            self.counts[sid].setText(W.progress_words(sid, done, total, study))
 
         runs = list(reversed((project.block.get("runs") if project is not None else None) or []))[:6]
         if not runs:

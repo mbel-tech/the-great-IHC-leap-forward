@@ -128,6 +128,8 @@ Every field has a short hint, an **(i)** with the full reasoning and which stage
 4. Press **Use these slides**.
 5. Press **Read settings from the slides** to fill in what the slide headers say (pixel size, file-name rule, channels) for any setting not yet set. It never overwrites a setting you chose; where the files say something else, it tells you.
 
+Everything the headers say is kept, not only what was used. A summary goes into the study file and the complete list of header fields into `slide_metadata.json` in the output folder. Press **What the slides say…** next to the button to see it: the instrument, the channels, the scenes, the optical resolution, which values set what, and where files differ. What it sets is the pixel size, the picture resolutions, the colours, the file naming and the channels. What it only checks is the exposure, the bit depth, the objective and whether the pixels are small enough to show the detail the lens can resolve; anything odd is listed under *Things to look at*.
+
 ![The Slides tab: one file whose name does not fit the pattern is shown in red and would be ignored](img/user-guide/02-setup-slides.png)
 
 Once a folder is set, the top of the Slides tab says which folder the study reads and how many files the slide headers list, and the tab gets a ✓. For the LS study that is 444 files from `D:\SLIDES HE DEC 2025 LS`. Use the buttons only to change it.

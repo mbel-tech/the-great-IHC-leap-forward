@@ -709,11 +709,16 @@ class SetupScreen(QWidget):
                                    "files' headers and fill in the settings not yet set")
         self.detect_btn.clicked.connect(self.detect_from_slides)
         read.addWidget(self.detect_btn)
+        self.report_btn = QPushButton("What the slides say…")
+        self.report_btn.setToolTip("Everything the slide headers say, and what the app did with it")
+        self.report_btn.clicked.connect(self.show_slide_report)
+        read.addWidget(self.report_btn)
         self.detect_line = QLabel("")
         self.detect_line.setWordWrap(True)
         self.detect_line.setStyleSheet(QUIET)
         read.addWidget(self.detect_line, 1)
         sl.addLayout(read)
+        self._sync_report_btn()
         self.current = QLabel("")
         self.current.setWordWrap(True)
         self.current.setTextFormat(Qt.RichText)
@@ -726,6 +731,7 @@ class SetupScreen(QWidget):
         """(Re)make the settings cards from the open project."""
         import ls_config as LC
         from config_dialog import SettingsForm
+        self._sync_report_btn()
         while self.tabs.count() > 1:
             w = self.tabs.widget(1)
             self.tabs.removeTab(1)
@@ -784,6 +790,39 @@ class SetupScreen(QWidget):
         self.build()
         self.tabs.setCurrentIndex(min(current, self.tabs.count() - 1))
 
+    def _slide_report(self):
+        """(summary, full-file path or None): the study's, else read from the folder."""
+        project = self.session.project
+        block = project.get("project") or {}
+        out_root = project.get("out_root")
+        full = os.path.join(out_root, "slide_metadata.json") if out_root else None
+        if full and not os.path.isfile(full):
+            full = None
+        if block.get("slides"):
+            return block["slides"], full
+        import autodetect as AD
+        found = AD.cached(project.get("source_dir"))
+        if found and found.report:
+            summary = {k: v for k, v in found.report.items() if k != "fields"}
+            summary["notes"], summary["problems"] = list(found.notes), list(found.problems)
+            return summary, full
+        return None, full
+
+    def _sync_report_btn(self):
+        project = self.session.project
+        source = project.get("source_dir")
+        self.report_btn.setEnabled(bool((project.get("project") or {}).get("slides")
+                                        or (source and os.path.isdir(source))))
+
+    def show_slide_report(self):
+        import slide_report as SR
+        report, full = self._slide_report()
+        if not report:
+            return None
+        dlg = SR.SlideReportDialog(report, full, self)
+        dlg.exec()
+        return dlg
+
     def detect_from_slides(self, quiet=False):
         """Read the slide headers and fill in every setting the study has not set.
 
@@ -807,6 +846,7 @@ class SetupScreen(QWidget):
             project.note_slides(found.report, found.notes, found.problems, AD.REPORT_FILE)
             AD.write_report(project.get("out_root"), found)
             self.session.touch()
+        self._sync_report_btn()
         fills = AD.fill(project.cfg, found)
         for key, value in fills.items():
             project.set(key, value, by="read from the slides")

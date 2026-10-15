@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.join(REPO, "app"))
 
 import make_update as MU                                    # noqa: E402
 import updates as UP                                        # noqa: E402
+import update_apply as UA                                   # noqa: E402
 
 os.environ["no_proxy"] = os.environ["NO_PROXY"] = "127.0.0.1,localhost"
 
@@ -231,6 +232,97 @@ try:
     chk("last_result then gone", UP.last_result(inst), None)
     chk("source tree is not an install", UP.installed_info(REPO) is None
         or not os.path.exists(os.path.join(REPO, "runtime", "python.exe")), True)
+
+    # ------------------------------------------------------------ applying
+    def snapshot(root, skip=("updates",) + UA.PARTS):
+        """Every file outside the managed parts and updates/, with its content."""
+        out = {}
+        for dirpath, dirnames, filenames in os.walk(root):
+            rel = os.path.relpath(dirpath, root)
+            if rel != "." and rel.split(os.sep)[0] in skip:
+                continue
+            for n in filenames:
+                if rel == "." and n in skip:
+                    continue
+                out[os.path.join(rel, n)] = open(os.path.join(dirpath, n), "rb").read()
+        return out
+
+    def marker(root, part="app"):
+        return open(os.path.join(root, part, "marker.txt")).read()
+
+    def make_update(inst):
+        """A staged new-1.3 whose markers say 'new', and which drops scripts/old.py."""
+        new = os.path.join(inst, "updates", "new-1.3")
+        shutil.rmtree(new, ignore_errors=True)
+        for part in ("app", "scripts", "analysis"):
+            os.makedirs(os.path.join(new, part))
+            with open(os.path.join(new, part, "marker.txt"), "w") as fh:
+                fh.write("new " + part)
+        shutil.copyfile(os.path.join(inst, "README.md"), os.path.join(new, "README.md"))
+        with open(os.path.join(new, "VERSION.json"), "w") as fh:
+            json.dump(dict(same, version="1.3"), fh)
+        return new
+
+    def fresh_install(name):
+        inst = fake_install(os.path.join(TMP, name))
+        with open(os.path.join(inst, "scripts", "old.py"), "w") as fh:
+            fh.write("gone in 1.3")
+        os.makedirs(os.path.join(inst, "studies"))
+        with open(os.path.join(inst, "studies", "study.json"), "w") as fh:
+            fh.write("{}")
+        return inst
+
+    inst = fresh_install("apply-ok")
+    before = snapshot(inst)
+    ok = UA.apply(inst, make_update(inst), check=lambda r: True)
+    chk("apply: returns True", ok, True)
+    chk("apply: new app in place", marker(inst), "new app")
+    chk("apply: version is 1.3", UP.installed_info(inst)["version"], "1.3")
+    chk("apply: file the release dropped is gone",
+        os.path.exists(os.path.join(inst, "scripts", "old.py")), False)
+    chk("apply: atlas (not in the update) kept", marker(inst, "atlas"), "atlas")
+    chk("apply: old app kept in previous/", marker(os.path.join(inst, "updates", "previous")), "app")
+    chk("apply: undo possible", UP.can_undo(inst), True)
+    chk("apply: staged folder removed", os.path.exists(os.path.join(inst, "updates", "new-1.3")), False)
+    chk("apply: nothing else touched", snapshot(inst) == before, True)
+
+    ok = UA.undo(inst, check=lambda r: True)
+    chk("undo: returns True", ok, True)
+    chk("undo: old app back", marker(inst), "app")
+    chk("undo: version is 1.2", UP.installed_info(inst)["version"], "1.2")
+    chk("undo: dropped file back", os.path.exists(os.path.join(inst, "scripts", "old.py")), True)
+    chk("undo: atlas kept", marker(inst, "atlas"), "atlas")
+    chk("undo: nothing else touched", snapshot(inst) == before, True)
+
+    inst = fresh_install("apply-check-fails")
+    ok = UA.apply(inst, make_update(inst), check=lambda r: False)
+    chk("check fails: returns False", ok, False)
+    chk("check fails: old app back", marker(inst), "app")
+    chk("check fails: old scripts back", marker(inst, "scripts"), "scripts")
+    chk("check fails: version is 1.2", UP.installed_info(inst)["version"], "1.2")
+    chk("check fails: no undo offered", UP.can_undo(inst), False)
+
+    inst = fresh_install("apply-move-fails")
+    real_move = UA._move
+
+    def locked(src, dst):
+        if os.path.basename(src) == "analysis" and "updates" not in os.path.relpath(src, inst):
+            raise PermissionError("locked by another program")
+        return real_move(src, dst)
+
+    UA._move, UA.RETRY_DELAY = locked, 0
+    try:
+        ok = UA.apply(inst, make_update(inst), check=lambda r: True)
+    finally:
+        UA._move, UA.RETRY_DELAY = real_move, 1.0
+    chk("move fails: returns False", ok, False)
+    chk("move fails: app back", marker(inst), "app")
+    chk("move fails: scripts back", marker(inst, "scripts"), "scripts")
+    chk("move fails: analysis untouched", marker(inst, "analysis"), "analysis")
+    chk("move fails: version is 1.2", UP.installed_info(inst)["version"], "1.2")
+
+    src_main = open(os.path.join(REPO, "app", "__main__.py")).read()
+    chk("app/__main__.py handles --check-install", "--check-install" in src_main, True)
 finally:
     shutil.rmtree(TMP, ignore_errors=True)
 

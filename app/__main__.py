@@ -96,6 +96,9 @@ def main():
         _report(type(e), e, e.__traceback__)
         return 1
 
+    if "--check-install" in sys.argv:
+        return _check_install()
+
     app = QApplication(sys.argv)
     app.setApplicationName("The Great IHC Leap Forward")
     # Before any window exists, so the study picker is drawn light too.
@@ -123,6 +126,26 @@ def main():
     except BaseException as e:                              # noqa: BLE001
         _report(type(e), e, e.__traceback__)
         return 1
+
+
+def _check_install():
+    """Import what the window needs, open nothing, print ok.
+
+    update_apply.py runs this on freshly swapped-in code and undoes the update
+    when it fails, so a release that cannot even import never becomes the copy
+    someone starts. Offscreen, so it shows nothing and needs no display.
+    """
+    # Caught here rather than by _report: its message box, on an offscreen
+    # application nobody can see, would hang the check until it timed out.
+    try:
+        from PySide6.QtWidgets import QApplication
+        app = QApplication([sys.argv[0], "-platform", "offscreen"])     # noqa: F841
+        import main_window, stages, workflow                            # noqa: F401,E401
+    except BaseException:                                   # noqa: BLE001
+        traceback.print_exc()
+        return 1
+    print("ok")
+    return 0
 
 
 def _self_test(app, w):

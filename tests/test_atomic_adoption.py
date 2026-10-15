@@ -59,6 +59,23 @@ chk("01_overviews.py: clipping mask written atomically",
     "with IO.atomic_save(mask_path) as tmp:" in src, True)
 chk("01_overviews.py: saturation_raw.csv written atomically",
     "IO.atomic_write_csv(SAT_RAW_CSV" in src, True)
+chk("01_overviews.py: display_ranges.json in-place write gone",
+    'with open(RANGES_PATH, "w"' in src, False)
+chk("01_overviews.py: display_ranges.json written atomically",
+    "JS.write_json_atomic(RANGES_PATH, ranges)" in src, True)
+
+# 00 and 02 also import ls_io by name. Every manifest CSV in 00 and every
+# output of 02 (pairs.csv among them) goes through one writer each.
+NAMED = {
+    "00_manifest.py": ('with open(path, "w"', "IO.atomic_write_csv(path, rows, keys)"),
+    "02_pair_passes.py": ('with open(path, "w"', "IO.atomic_write_csv(path, rows, list(rows[0].keys()))"),
+}
+for name, (gone, present) in NAMED.items():
+    with open(os.path.join(SCRIPTS, name), encoding="utf-8") as fh:
+        src = fh.read()
+    chk(f"{name}: in-place write gone", gone in src, False)
+    chk(f"{name}: atomic write present", present in src, True)
+    chk(f"{name}: imports ls_io", "import ls_io as IO" in src, True)
 
 print("\n" + ("ALL PASS" if not fails else f"{fails} FAILED"))
 raise SystemExit(1 if fails else 0)

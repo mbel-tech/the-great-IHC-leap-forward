@@ -218,6 +218,27 @@ class NewStudyDialog(QDialog):
         self.status.setStyleSheet(f"color:{T.WARN}" if why else "")
         self.ok.setEnabled(why is None)
 
+    def _go_ahead(self):
+        """True to make the study: the read found nothing wrong, or the person said so.
+
+        Files that could not be read, no pixel size, names the rule misses: each
+        is listed under the folder, but Create used to go ahead without a word,
+        and the study then started with files every stage ignores. It is still
+        the person's call - those can be fixed in Set up - so this asks rather
+        than refuses.
+        """
+        problems = list(getattr(self.detection, "problems", None) or [])
+        if not problems:
+            return True
+        answer = QMessageBox.question(
+            self, "Create the study anyway?",
+            "Reading the slides found things to look at:\n\n"
+            + "\n\n".join("• " + p for p in problems)
+            + "\n\nCreate the study anyway? You can fix these afterwards in Set up. "
+              "No goes back to change the folders.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        return answer == QMessageBox.Yes
+
     def _create(self):
         out = self.output.value()
         if self._existing():
@@ -229,6 +250,8 @@ class NewStudyDialog(QDialog):
         if self.slide_read.busy:
             self._create_when_read = True   # _slides_read comes back here
             self.ok.setEnabled(False)
+            return
+        if not self._go_ahead():
             return
         try:
             os.makedirs(out, exist_ok=True)

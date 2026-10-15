@@ -1034,7 +1034,8 @@ class SetupScreen(QWidget):
         for i, (sid, (form, _s, title)) in enumerate(self.forms.items(), start=1):
             self.tabs.setTabText(i, ("✓ " if form.complete() else "") + title)
         source = self.session.project.get("source_dir")
-        self.tabs.setTabText(0, ("✓ " if source else "") + "Slides")
+        left = self.slides_left()
+        self.tabs.setTabText(0, ("" if left else "✓ ") + W.SLIDES_CARD)
         if not source:
             self.current.setText("No slide folder is set for this study yet.")
             return
@@ -1044,16 +1045,41 @@ class SetupScreen(QWidget):
                                                   "manifest_files.csv"))
         count = (f" The slide headers list {files:,} files from it." if files is not None
                  else " The slide headers have not been read yet (Prepare does that).")
+        todo = ""
+        if left:
+            todo = (f"<br><span style='color:{COLOUR['failed']}'>Still to do on this tab: "
+                    f"{esc('; '.join(left))}.</span>")
         self.current.setText(
             f"This study reads its slides from <b>{esc(source)}</b>.{count} "
             f"<span style='{QUIET}'>Choose a folder or files below only to change "
-            f"that.</span>")
+            f"that.</span>{todo}")
+
+    def slides_left(self):
+        """What the Slides tab still needs (workflow.slides_left); [] when done.
+
+        Read means this folder's headers were read and kept in the study (New
+        study and Read settings from the slides both do), or Prepare has listed
+        its files in the manifest - a study made before the headers were kept.
+        """
+        import autodetect as AD
+        project = self.session.project
+        source = project.get("source_dir")
+        kept = (project.get("project") or {}).get("slides") or {}
+        out_root = project.get("out_root")
+        read = (_same_folder(kept.get("source_dir"), source)
+                or bool(out_root and os.path.isfile(
+                    os.path.join(out_root, "manifest", "manifest_files.csv"))))
+        return W.slides_left(project.cfg, read, AD.slide_files(source) if source else [])
 
     def missing(self):
-        """[(card title, [required settings with no value])] for the incomplete cards."""
+        """[(card title, [required settings with no value])] for the incomplete cards.
+
+        The Slides entry lists phrases (what is left to do there), not settings.
+        """
         out = []
-        if not self.session.project.get("source_dir"):
-            out.append(("Slides", ["the slide folder"]))
+        left = self.slides_left()
+        if left:
+            out.append((W.SLIDES_CARD, left))
         for form, _s, title in self.forms.values():
             gaps = form.missing()
             if gaps:
@@ -1061,7 +1087,6 @@ class SetupScreen(QWidget):
         return out
 
     def completion(self):
-        """(cards complete, cards) - Slides counts as complete when a slides folder is set."""
+        """(cards complete, cards) - Slides counts once nothing is left on it (slides_left)."""
         done = sum(1 for form, _s, _t in self.forms.values() if form.complete())
-        has_slides = bool(self.session.project.get("source_dir"))
-        return done + has_slides, len(self.forms) + 1
+        return done + (not self.slides_left()), len(self.forms) + 1

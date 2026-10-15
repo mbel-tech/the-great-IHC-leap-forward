@@ -371,6 +371,44 @@ chk("Next up sends an unfinished Set up back to it", W.next_up(s0, setup_ok=Fals
 chk("...and names the settings it is missing",
     W.next_up(s0, setup_ok=False, setup_missing=[("Atlas", ["Atlas PDF"])])[1],
     "Finish Set up: Atlas needs Atlas PDF.")
+
+print("--- the Slides card is done only when there is nothing left to do on it ---")
+# Set up used to tick Slides as soon as a folder was set: unread slides, file
+# names the rule misses (files every stage ignores) and markers still called
+# Marker1 all read as Done.
+NAMED = json.loads(json.dumps(CFG))
+NAMED["acquisition"]["channels"][1]["name"] = "pERK"
+FIT = ["AB12_3a.czi", "AB12_4.czi"]
+chk("no folder: choose it", W.slides_left(dict(NAMED, source_dir=""), False, []),
+    ["choose the slides folder"])
+chk("a folder whose slides were never read is not done",
+    W.slides_left(NAMED, False, FIT), ["read the slides (Read settings from the slides)"])
+chk("read, every name fits, markers named: done", W.slides_left(NAMED, True, FIT), [])
+chk("file names the rule misses are counted",
+    W.slides_left(NAMED, True, FIT + ["scan 7.czi", "LS_x.czi"]),
+    ["2 file names don't fit the rule (Slide file names)"])
+chk("...one of them in the singular",
+    W.slides_left(NAMED, True, FIT + ["scan 7.czi"]),
+    ["1 file name doesn't fit the rule (Slide file names)"])
+NAME_IT = "name the markers (Microscope and channels > Channels and markers...)"
+chk("a marker still called Marker1 is not a name", W.slides_left(CFG, True, FIT), [NAME_IT])
+chk("...nor is Channel2, what a read gives a channel with no name",
+    W.slides_left(json.loads(json.dumps(NAMED).replace('"pERK"', '"Channel2"')), True, FIT),
+    [NAME_IT])
+chk("...but a confirmed antibody for it is",
+    W.slides_left(dict(CFG, marker_identity={"Marker1": "pERK"}), True, FIT), [])
+chk("a study with no marker at all is asked for them",
+    W.slides_left(dict(NAMED, acquisition={"layout": "paired", "markers": []}), True, FIT),
+    [NAME_IT])
+chk("a paired study's dye names are names",
+    W.slides_left(dict(NAMED, acquisition={"layout": "paired", "markers": ["AF568", "AF488"]}),
+                  True, FIT), [])
+chk("Next up says what the Slides card still needs, in its own words",
+    W.next_up(s0, setup_ok=False, setup_missing=[
+        ("Slides", ["2 file names don't fit the rule (Slide file names)", NAME_IT]),
+        ("Atlas", ["Atlas PDF"])])[1],
+    "Finish Set up: 2 file names don't fit the rule (Slide file names); %s; "
+    "Atlas needs Atlas PDF." % NAME_IT)
 d, t = W.progress("prepare", s0)
 chk("progress counts only stages the app runs here", (d <= t, t > 10), (True, True))
 chk("Run all remaining never unblinds",
@@ -485,6 +523,17 @@ if MW:
         CFG["source_dir"] in w.setup.current.text(), True)
     chk("...and lists what each incomplete card is missing",
         all(gaps for _t, gaps in w.setup.missing()), True)
+    # This study's folder is set but its slides were never read, and its marker
+    # is the template's Marker1: Slides is not done, whatever the folder says.
+    slides_gaps = dict(w.setup.missing()).get("Slides")
+    chk("Set up's Slides card waits for the slides to be read and the markers named",
+        slides_gaps, ["read the slides (Read settings from the slides)", NAME_IT])
+    done_cards, all_cards = w.setup.completion()
+    chk("...so Set up is not Done", done_cards < all_cards, True)
+    chk("...and the Slides tab carries no tick", w.setup.tabs.tabText(0), "Slides")
+    chk("...and says what is left",
+        "Still to do on this tab" in w.setup.current.text()
+        and "name the markers" in w.setup.current.text(), True)
     import atlas_dialog as AD
     chk("without the Fiji importer the Atlas card offers no button",
         AD.available() or not hasattr(w.setup, "fiji_btn"), True)

@@ -101,6 +101,11 @@ class Art:
     marker each stage handles is a fact about the pipeline's shape, which is
     what this file is for; what that marker is CALLED is a fact about the
     study, which is not.
+
+    `marker` None is one file PER marker, any of which satisfies it: 05a
+    writes a pair for each marker its export holds, and a paired study may
+    curate its second marker first. Which markers ought to have one is a fact
+    about that export, so workflow.outdated asks it of each (export_markers).
     """
 
     def __init__(self, artifact, marker):
@@ -118,6 +123,14 @@ class Art:
         it. A stage then reads as not-done, which is the honest answer to "has
         this been run?" when nobody has said for which study.
         """
+        if self.marker is None:
+            # Shown under the first marker's name, as it was before there was
+            # a pair per marker; satisfied by any marker's.
+            each = [Art(self.artifact, i).resolve(names)
+                    for i in range(len(names.markers) if names is not None else 0)]
+            if not each:
+                return f"{self.artifact} {{marker0}}", []
+            return each[0][0], [p for _shown, paths in each for p in paths]
         token = "{marker%d}" % self.marker
         if names is None or self.marker >= len(names.markers):
             return f"{self.artifact} {token}", []
@@ -690,7 +703,7 @@ STAGES = [
 
     Stage("roi_geometry", "05a  Place the ROIs on the slide", "Quantification",
           script="05a_roi_geometry.py",
-          outputs=[Art("roi_geometry", 0), Art("roi_boxes", 0)],
+          outputs=[Art("roi_geometry", None), Art("roi_boxes", None)],
           needs=["roi_curator"],
           made_from=["roi_curator"],
           settings=["pixel_size_um", "acquisition.markers"],

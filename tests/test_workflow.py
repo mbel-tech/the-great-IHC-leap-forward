@@ -279,6 +279,45 @@ for _p in _stale_files:
     if os.path.exists(_p):
         os.remove(_p)
 
+# 05a writes one pair of files per marker the export holds rows for (PR #99), so
+# its status asks after each of those markers, not the first declared one: a
+# paired study can curate the second marker first, and a re-export that changes
+# only the second marker's regions must not pass on the first marker's files.
+print("--- 05a is placed for every marker the ROI export holds ---")
+_GEO = S.BY_ID["roi_geometry"]
+for _layout in ("paired", "multiplex"):
+    _c = json.loads(json.dumps(CFG))
+    _c.pop("project", None)
+    _c.setdefault("acquisition", {}).update(layout=_layout, markers=["AF568", "AF488"])
+    _s = study(_c)
+
+    def _place(marker, when):
+        for _a in ("roi_geometry", "roi_boxes"):
+            _put(_s.names.path(_a, marker), "g\n", when)
+
+    _put(_export, "scene_uid,marker\nB,AF488\n", _T0)
+    _place("AF488", _T0 + 10)
+    chk(f"{_layout}: only the second marker curated, and placed: 05a is done",
+        W.state(_GEO, _s), "done")
+    _put(_export, "scene_uid,marker\nA,AF568\nB,AF488\n", _T0 + 20)
+    chk(f"{_layout}: the export now holds a marker with no boxes: out of date, naming it",
+        (W.state(_GEO, _s), "AF568" in (W.outdated(_GEO, _s) or "")), ("outdated", True))
+    _runs = _c.setdefault("project", {}).setdefault("runs", [])
+    _runs.append({"stage": "roi_geometry", "ok": True,
+                  "inputs": W.fingerprint("roi_geometry", _s)})
+    chk(f"{_layout}: ...even with a run on record that read this export",
+        W.state(_GEO, study(_c)), "outdated")
+    _c["project"]["runs"] = []
+    _place("AF568", _T0 + 30)
+    chk(f"{_layout}: first marker placed again, second older than the export: out of date",
+        W.state(_GEO, study(_c)), "outdated")
+    _place("AF488", _T0 + 30)
+    chk(f"{_layout}: every marker in the export placed since it: done",
+        W.state(_GEO, study(_c)), "done")
+    for _p in _stale_files:
+        if os.path.exists(_p):
+            os.remove(_p)
+
 print("--- the settings a stage reads are the ones ls_config says it reads ---")
 _spec = {k.path: k for k in LC.SPEC}
 for st in S.STAGES:

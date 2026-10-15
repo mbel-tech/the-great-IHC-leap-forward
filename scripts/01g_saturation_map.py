@@ -338,10 +338,10 @@ def main():
         figure(samples, fig_path)
         print(f"wrote {fig_path}")
 
-    report(results, args.marker)
+    report(results, args.marker, fallbacks)
 
 
-def report(results, marker):
+def report(results, marker, fallbacks=()):
     print()
     print("=" * 72)
 

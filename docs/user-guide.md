@@ -13,7 +13,7 @@ The step list on the left shows six screens in the order you work, each with a o
 | # | Screen | What you do there | You are done when |
 | --- | --- | --- | --- |
 | ⌂ | **Project** | Open or create your study's project. Read the **Next up** card (if settings are missing, it names each Set up card and what it lacks) and press **Go**. | You know which screen to go to next. |
-| 1 | **Set up** | Point the app at your slides, then fill in the tabs in order: folders, file names, microscope and channels, pictures, atlas, nucleus detection. Press **Apply** on each. | No red rows on the Slides tab, and the step list says every card is applied. |
+| 1 | **Set up** | Check the few cards it shows: the folders, the file names, the section thickness and markers, and the atlas. Everything the slide files can tell the app is already filled in; the rest is under **Show advanced settings**. Press **Apply** on any card you change. | No red rows on the Slides tab, and the step list says every card is applied. |
 | 2 | **Prepare** | Press **Run all remaining**. It runs straight through to the ROI curator. | The step list shows Prepare done and Next up sends you to Curate. |
 | 3 | **Curate** | In the ROI curator, bring back any section that was set aside by mistake, match each section to its atlas plate and draw the brain regions. Then press **Done: export and go to Measure**. | The curator is exported. |
 | 4 | **Measure** | Press **Run all remaining**. Nucleus detection takes hours and can be stopped and resumed. | Every section is measured. |
@@ -114,11 +114,11 @@ To hand a study to someone else, use **File > Export a copy**. The output folder
 
 ## 4. Set up: telling the app about your study
 
-Set up is where you describe the study once: where the slides are, how their files are named, how they were imaged, which atlas to use and how nuclei are counted. On a new study, do the tabs left to right: Slides, then six cards of settings (Study and folders, Slide file names, Microscope and channels, Pictures, Atlas, Nucleus detection). Come back any time to change a setting; stages read the new value the next time they run.
+Set up is where you describe the study once: where the slides are, how their files are named, how they were imaged, which atlas to use and how nuclei are counted. Only what the slide files cannot tell the app is asked: the two folders, the section thickness, the markers and the atlas. The pixel size, the file-name rule, the channels and how the markers were scanned are read from the slide files themselves, and every other folder sits inside the output folder. All of those are still there, filled in: tick **Show advanced settings** at the top of Set up to see and change them (the Pictures and Nucleus detection cards, among others). A required setting that is still empty is always shown. Come back any time to change a setting; stages read the new value the next time they run.
 
 Every field has a short hint, an **(i)** with the full reasoning and which stages read it, and a **↺** button that puts it back to its default. Changes are kept when you press **Apply** on that card, and saved automatically before any stage runs.
 
-> **Starting a new study.** Use **File > New project**, give it a name, then come here. To continue an existing study, use **File > Open project** or **Tools > Switch study**.
+> **Starting a new study.** Use **File > New project** (or **New study…** in the study picker). It asks for two folders, the folder with the `.czi` files and an output folder, plus the section thickness and the atlas. The slides are read straight away and their pixel size, file names and channels are filled in. The study's file (`study.json`), the curation, the pictures and the results all go in the output folder, so a study is one folder you can move or back up whole. Choosing an output folder that already holds a study opens it. To continue an existing study, use **File > Open project** or **Tools > Switch study**; studies made before this keep working where they are.
 
 ### Slides tab
 
@@ -126,6 +126,7 @@ Every field has a short hint, an **(i)** with the full reasoning and which stage
 2. Read the table. It shows what the app read from each file name: animal, slide and replicate.
 3. **Fix every red row before you go on.** A red row is a file whose name does not fit the naming pattern, and every stage would silently ignore it. Fix the pattern on the *Slide file names* card, or rename the file.
 4. Press **Use these slides**.
+5. Press **Read settings from the slides** to fill in what the slide headers say (pixel size, file-name rule, channels) for any setting not yet set. It never overwrites a setting you chose; where the files say something else, it tells you.
 
 ![The Slides tab: one file whose name does not fit the pattern is shown in red and would be ignored](img/user-guide/02-setup-slides.png)
 
@@ -146,7 +147,7 @@ Choosing a folder only records where the slides are; nothing is moved. Picking s
 
 The app reads which animal and slide each file is from its name, and builds the section ID (`scene_uid`, for example `LS105_s10a_sc03`) that every later table joins on.
 
-- **Filename pattern.** Press **Build…** rather than typing it. The dialog shows a real file name: select a run of characters and press **Mark as…** to say what it is (animal, slide, replicate). Everything you do not mark must match exactly. Underneath, every file found is checked against the pattern, misses first.
+- **Filename pattern.** Usually filled in for you from the slides. To set it yourself press **Set up from an example…**. Type one of your file names (or pick one). The app splits it into pieces and shows its reading, for example *animal LS53 · slide 2 · replicate b*; to change it, press **Animal ID**, **Slide number** or **Replicate letter** and click the piece in the name (**Not in the name** if there is none). The app writes the pattern and checks it against every file. When some files do not fit, it tries the usual causes one at a time (upper/lower case, a different ending such as `-_A568`, a missing replicate letter, other separators) and lists each change it made and how many files it brought in. Files that still do not fit are listed with the likely reason. The pattern itself stays hidden unless you tick **Show the pattern**.
 - **Example filename.** One real name, used for that preview.
 - **Case-insensitive names.** On by default; leave it on.
 - **Section order convention.** How the order of serial sections is worked out. There is one choice, scan order.
@@ -202,7 +203,8 @@ Changing the resolution or brightness makes the next run redraw the pictures.
 | Setting | What it means |
 | --- | --- |
 | Atlas | **salmon** (default), **wullimann1996** (zebrafish), or one you imported |
-| Atlas PDF | The salmon atlas file the plates and regions are taken from |
+| Rebuild atlas plates | Advanced, off. The salmon and Wullimann plates ship ready-made with the app, so the plate-building stages are left out. Turn on only to make a plate set again from the PDF. |
+| Atlas PDF | The salmon atlas file the plates and regions are taken from (only used when rebuilding) |
 | Mirror atlas polygons | For an atlas whose outlines cover only one side of the brain (Wullimann) |
 | Atlas plate set | Which set of plates the ROI curator shows. Leave at `plates`. |
 | Two-section figures | Salmon only: the figure numbers that show two sections each, for example `31-47` |
@@ -263,7 +265,7 @@ What you change is remembered in the project and used every time that stage runs
 
 ### Part 2: Build the atlas
 
-Only the stages for the atlas you chose in Set up run; the others are greyed out.
+The salmon and Wullimann plates ship ready-made with the app and are copied into the study when it first needs them, so with either atlas this whole part is greyed out ("Not needed") and Prepare goes straight past it. It runs only for a plate set that does not ship (for example `plates_merged`) or when **Rebuild atlas plates** is on in Set up > Atlas, and then only the stages for the atlas you chose.
 
 | Stage | What it does | Makes | Options |
 | --- | --- | --- | --- |
@@ -329,7 +331,9 @@ The Curate screen also offers **Continue Prepare** after the atlas plate boxes, 
 
 In every curator, **a dashed amber border is a proposal the program made; a solid red border is a decision a person made.**
 
-### Atlas plate boxes (salmon atlas only)
+### Atlas plate boxes (only when rebuilding the salmon plates)
+
+This tab appears only when the salmon plates are being made again (Set up > Atlas > Rebuild atlas plates); the plates that ship with the app are already boxed.
 
 Some atlas figures show several brain sections side by side, but the ROI curator needs one section per plate. Here you draw one box around each section on each figure. Boxes are proposed from the bands of tissue, so usually only figures with several sections need a look.
 
@@ -553,7 +557,7 @@ Every stage is a script in `scripts/` and can also be run from a terminal; the (
 
 | What you see | Likely cause | What to do |
 | --- | --- | --- |
-| Red rows on the Slides tab | File names do not fit the naming pattern | Fix the pattern with **Build…** on *Slide file names*, or rename the files |
+| Red rows on the Slides tab | File names do not fit the naming pattern | Fix the pattern with **Set up from an example…** on *Slide file names*, or rename the files |
 | Fewer sections than expected | Unmatched file names, or an incomplete copy | Check the Slides tab and the 00b result |
 | Run all remaining stops at a stage | That stage failed, or it waits for a curator | Read the screen's note and **Show log**. A waiting stage names the curator to export. |
 | "Finish Set up" on the Next up card | A required setting is empty | The card names each Set up card and the settings it lacks; open Set up and fill those in |

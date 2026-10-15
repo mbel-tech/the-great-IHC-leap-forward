@@ -35,6 +35,8 @@ def chk(name, got, want=True):
 TMP = tempfile.mkdtemp()
 PATH = write_study(os.path.join(TMP, "s"))
 os.environ["LS_CONFIG"] = PATH
+# Set up remembers "Show advanced settings" in the app's settings file.
+os.environ["LS_HOME"] = os.path.join(TMP, "home")
 
 import ls_config as LC                                          # noqa: E402
 import ls_project as LP                                         # noqa: E402
@@ -215,6 +217,26 @@ chk("the ROI curator page itself is built",
     "roi_curator" in plan or held.get("roi_curator") == "atlas_reframe", True)
 chk("stages for another atlas are left out",
     "atlas_wullimann_plates" in plan, s0.atlas_source == "wullimann1996")
+_bundle = os.environ.pop("LS_ATLAS_BUNDLE", None)
+salmon = study(dict(CFG, atlas_source="salmon"))
+chk("built-in plates ship, so the extraction stages are not part of the study",
+    [W.applies(S.BY_ID[sid], salmon)[0] for sid in ("atlas_extract", "atlas_reframe")],
+    [False, False])
+chk("...and Prepare does not plan or wait on them",
+    [sid for sid in W.run_plan("prepare", salmon)[0] if sid in W.ATLAS_BUILD]
+    + [w for w in W.run_plan("prepare", salmon)[1].values() if w in W.ATLAS_BUILD], [])
+chk("...nor is the plate-box curator a Curate tab", W.curators(salmon), ["roi_curator"])
+chk("Rebuild atlas plates brings them back",
+    W.applies(S.BY_ID["atlas_extract"], study(dict(CFG, atlas_source="salmon",
+                                                    atlas_rebuild_plates=True)))[0], True)
+chk("a plate set that does not ship is still built",
+    W.applies(S.BY_ID["atlas_remerge"], study(dict(CFG, atlas_plate_set={"dir": "plates_merged"})))[0],
+    True)
+chk("the Wullimann plates ship too",
+    W.applies(S.BY_ID["atlas_wullimann_plates"], study(dict(CFG, atlas_source="wullimann1996")))[0],
+    False)
+if _bundle is not None:
+    os.environ["LS_ATLAS_BUNDLE"] = _bundle
 chk("stages run outside the app are left out", "fiji_export" in W.run_plan("instrument", s0)[0], False)
 chk("the superseded level curator is never planned",
     "level_curator" in plan + W.run_plan("all", s0)[0], False)
@@ -339,8 +361,16 @@ if MW:
         w.stack.currentWidget() is w.curate, True)
     w.curate.show_curator("atlas_reframe")
     chk("other curators have no Done", w.curator.done_btn.isVisibleTo(w.curator), False)
-    chk("Set up has a card for slides and one per settings group",
+    basic = W.setting_sections(LC.dialog_fields(), advanced=False)
+    chk("Set up shows Slides and only the cards with something to ask",
+        [w.setup.tabs.tabText(i).lstrip("✓ ") for i in range(w.setup.tabs.count())],
+        ["Slides"] + [t for _s, t, _i, _k in basic])
+    chk("...which leaves out the cards the slide files and defaults answer",
+        [sid for sid, *_ in basic if sid in ("pictures", "detection")], [])
+    w.setup.advanced.setChecked(True)
+    chk("Show advanced settings brings every card back",
         w.setup.tabs.count(), 1 + len(W.setting_sections(LC.dialog_fields())))
+    w.setup.advanced.setChecked(False)
     chk("Set up says where this study's slides come from",
         CFG["source_dir"] in w.setup.current.text(), True)
     chk("...and lists what each incomplete card is missing",

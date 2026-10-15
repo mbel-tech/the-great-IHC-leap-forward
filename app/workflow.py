@@ -87,8 +87,8 @@ SETUP = Screen(
     "are saved automatically before any stage runs.</p>"
     "<p>Each field shows a short hint; its (i) button gives the full reasoning "
     "and which stages read it. The ↺ button puts a field back to its default.</p>",
-    role="Fill in each tab once, in order, and press Apply on each. Nothing runs yet, "
-         "so you cannot break anything.",
+    role="Check each tab and press Apply on any you change. What the slide files say "
+         "is already filled in. Nothing runs yet, so you cannot break anything.",
     subtitle="Tell the app about your slides")
 
 PREPARE = Screen(
@@ -392,6 +392,34 @@ ATLAS_ONLY = {
                "atlas_rebuild"},
     "wullimann1996": {"atlas_wullimann_plates", "atlas_wullimann_polygons"},
 }
+
+#: The stages that make an atlas's plates. The built-in atlases' plates ship with
+#: the app (the repository's atlas/ folder) and are copied into the study when it
+#: first needs them, so for those these stages are not part of the study unless
+#: Set up > Atlas > Rebuild atlas plates is on.
+ATLAS_BUILD = ATLAS_ONLY["salmon"] | ATLAS_ONLY["wullimann1996"]
+
+#: Where the shipped plate sets are; LS_ATLAS_BUNDLE moves them (empty: none ship).
+BUNDLED_ATLAS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                             "atlas")
+
+
+def plates_ship(study):
+    """True when the study's atlas plates come ready-made with the app."""
+    cfg = getattr(study, "cfg", None) or {}
+    if cfg.get("atlas_rebuild_plates"):
+        return False
+    bundle = os.environ.get("LS_ATLAS_BUNDLE", BUNDLED_ATLAS)
+    if not bundle:
+        return False
+    source = study.atlas_source
+    if source == "wullimann1996":
+        set_dir = "plates_wullimann"
+    elif source == "salmon":
+        set_dir = (cfg.get("atlas_plate_set") or {}).get("dir") or "plates"
+    else:
+        return False
+    return os.path.isfile(os.path.join(bundle, set_dir, "plates.csv"))
 
 
 # ---------------------------------------------------------------------------
@@ -712,8 +740,8 @@ SETTING_SECTIONS = [
       "scene_render.out_dir", "scene_render.um_per_px", "scene_render.range"]),
     ("atlas", "Atlas",
      "Which brain atlas the regions come from. Choose a built-in one or import your own.",
-     ["atlas_source", "atlas_pdf", "atlas_polygon_mirror", "atlas_plate_set.dir",
-      "atlas_figure_sections.two_sections"]),
+     ["atlas_source", "atlas_rebuild_plates", "atlas_pdf", "atlas_polygon_mirror",
+      "atlas_plate_set.dir", "atlas_figure_sections.two_sections"]),
     ("detection", "Nucleus detection",
      "How nuclei are found and counted inside your regions.",
      ["detection.nucleus_diameter_um", "detection.abercrombie.enabled",
@@ -736,21 +764,46 @@ SECTION_HEADINGS = {
 OTHER_SECTION = ("other", "Other settings",
                  "Settings not yet sorted into a card above.")
 
+#: The settings Set up asks every study for. Everything else either has one right
+#: answer the slide files give (pixel size, how files are named, the channels:
+#: see autodetect.py), lives under the output folder by default, or is a method
+#: choice with a sound default - and sits under "Show advanced settings". A
+#: setting that is required and still empty is shown whatever this says, so
+#: hiding never hides something Set up is waiting for.
+BASIC = {
+    "source_dir", "out_root",
+    "slide_naming.pattern",
+    "section_thickness_um",
+    "atlas_source",
+}
 
-def setting_sections(fields):
+
+def is_basic(path):
+    return path in BASIC
+
+
+def setting_sections(fields, advanced=True, empty=()):
     """[(sid, title, intro, [Key])] for the given dialog fields; unsorted keys go last.
 
     A key added to ls_config.SPEC appears in Set up without anyone editing this
     file: it lands in Other settings until it is placed.
+
+    With `advanced` False only the BASIC settings are offered, plus any key named
+    in `empty` (required ones with no value yet); a card left with nothing to
+    show is left out.
     """
     by_path = {k.path: k for k in fields}
     placed, out = set(), []
     for sid, title, intro, paths in SETTING_SECTIONS:
         keys = [by_path[p] for p in paths if p in by_path]
         placed.update(k.path for k in keys)
+        if not advanced:
+            keys = [k for k in keys if is_basic(k.path) or k.path in empty]
         if keys:  # a card whose settings this ls_config does not have yet stays hidden
             out.append((sid, title, intro, keys))
     rest = [k for k in fields if k.path not in placed]
+    if not advanced:
+        rest = [k for k in rest if k.path in empty]
     if rest:
         out.append(OTHER_SECTION + (rest,))
     return out
@@ -833,6 +886,9 @@ def applies(stage, study):
         for source, ids in ATLAS_ONLY.items():
             if stage.sid in ids and study.atlas_source != source:
                 return False, f"Not used with the {study.atlas_source} atlas."
+        if stage.sid in ATLAS_BUILD and plates_ship(study):
+            return False, ("Not needed: this atlas's plates come ready-made with the app. "
+                           "Turn on Set up > Atlas > Rebuild atlas plates to make them again.")
     return True, ""
 
 

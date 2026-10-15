@@ -586,6 +586,19 @@ note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
              "value here.",
         consumers=["04e", "04k", "04l", "04w", "04x"]),
 
+    Key("atlas_rebuild_plates", "bool",
+        "Build the built-in atlas's plates again from its source instead of using "
+        "the plates that ship with the app.",
+        default=False, label="Rebuild atlas plates",
+        note="The salmon and Wullimann plates ship ready-made in the repository's "
+             "atlas/ folder and are copied into <out_root>/atlas/ when a study first "
+             "needs them, so the extraction stages (04a-04a4, 04w, 04x) are not part "
+             "of a study that uses them. Turn this on only to remake a plate set from "
+             "the PDF - for example plates_merged, which does not ship. Plates made "
+             "again are different pictures: sections curated against the shipped "
+             "ones then read as changed.",
+        consumers=["app"]),
+
     Key("atlas_polygon_mirror", "bool",
         "Mirror the plate outlines about the midline, for an atlas whose "
         "outlines cover one hemisphere (Wullimann).",

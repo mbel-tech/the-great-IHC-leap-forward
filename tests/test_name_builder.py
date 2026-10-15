@@ -243,6 +243,41 @@ else:
     subjects = {NM.parse_name(n, pat)["subject"] for n in names}
     chk("and gives the twelve animals", len(subjects), 12)
 
+# --------------------------------------------------------------------------
+print()
+print("--- guided: one example, the program writes the rest ---")
+
+LS = ["LS22_1a.czi", "LS22_1b.czi", "LS45_8b.czi", "LS105_10a.czi",
+      "LS53_2b-_A568.czi", "LS85_7b-.czi", "LS45_8b_A488.czi"]
+chk("the name splits into clickable pieces",
+    [t[2] for t in B.tokens("LS53_2b-_A568.czi")],
+    ["LS", "53", "_", "2", "b", "-", "_", "A", "568"])
+g = B.guess_spans("LS53_2b-_A568.czi")
+chk("the program reads animal, slide and replicate",
+    B.readout("LS53_2b-_A568.czi", g), "animal LS53 · slide 2 · replicate b")
+chk("...a name with no replicate letter has none",
+    [s.name for s in B.guess_spans("Fish12_3.czi")], ["subject", "slide"])
+got = B.generalise("LS22_1a.czi", B.guess_spans("LS22_1a.czi"), LS)
+chk("a varying ending is allowed, and said so",
+    (got["result"]["failed"], len(got["steps"]), "differ" in got["steps"][0]), (0, 1, True))
+m = re.match(got["pattern"], "LS53_2b-_A568.czi")
+chk("...and kept as an extra column", (m.group("slide"), m.group("suffix")), ("2", "-_A568"))
+chk("...files told apart only by it are not a clash",
+    B.preview(["LS53_2b.czi", "LS53_2b-_A568.czi"], got["pattern"])["problems"], [])
+chk("a strict example needs no change", B.generalise(
+    "LS22_1a.czi", B.guess_spans("LS22_1a.czi"), LS[:4])["steps"], [])
+mixed = ["AB1_2a.czi", "AB1_2.czi", "ab3_4B.CZI"]
+got = B.generalise("AB1_2a.czi", B.guess_spans("AB1_2a.czi"), mixed)
+chk("case and a missing replicate are worked out", got["result"]["failed"], 0)
+chk("...one change at a time, each with what it brought in",
+    [s.split(" (")[0].split(".")[0] for s in got["steps"]],
+    ["Upper and lower case are treated the same", "The replicate letter may be missing"])
+auto = B.auto(LS + ["notes.txt"])
+chk("with no one asked, the commonest shape is the example",
+    (auto["example"], auto["result"]["failed"]), ("LS22_1a.czi", 1))
+chk("a file that is not a slide is explained", B.why_not("notes.txt", "LS22_1a.czi"),
+    "it is not a .czi file")
+
 print()
 print("ALL PASS" if not failures else f"{len(failures)} FAILED")
 sys.exit(1 if failures else 0)

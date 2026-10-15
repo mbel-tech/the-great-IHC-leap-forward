@@ -11,6 +11,7 @@ I looking at" has to be visible and deliberate, which is why the chosen study's
 name sits in the status bar for the rest of the session.
 """
 
+import json
 import os
 import subprocess
 import sys
@@ -86,11 +87,24 @@ class StudyPicker(QDialog):
     def _refresh(self):
         self.list.clear()
         active = LC.read_settings().get("active_study")
+        last = LC.read_settings().get("last_project")
+        listed = set()
         for slug, name, path in LC.list_studies():
             item = QListWidgetItem(f"{name}    ({slug})")
             item.setData(Qt.UserRole, (slug, path))
             self.list.addItem(item)
+            listed.add(os.path.normcase(os.path.abspath(path)))
             if slug == active:
+                self.list.setCurrentItem(item)
+        # Studies kept in their own output folder (study.json there) are found
+        # through the recent list rather than the studies folder.
+        for path in LC.recent_projects():
+            if os.path.normcase(os.path.abspath(path)) in listed:
+                continue
+            item = QListWidgetItem(f"{_study_name(path)}    ({path})")
+            item.setData(Qt.UserRole, (None, path))
+            self.list.addItem(item)
+            if last and os.path.normcase(path) == os.path.normcase(last):
                 self.list.setCurrentItem(item)
         if self.list.count() and self.list.currentItem() is None:
             self.list.setCurrentRow(0)
@@ -108,26 +122,15 @@ class StudyPicker(QDialog):
         return name.strip() if ok and name.strip() else None
 
     def _new(self):
-        """A study with no settings yet: made here, filled in by the dialog."""
-        name = self._ask_name("New study", "Name for this study:")
-        if not name:
+        """Two folders and the slides answer the rest; the study opens straight away."""
+        from new_study import NewStudyDialog
+        dlg = NewStudyDialog(self)
+        if dlg.exec() != QDialog.Accepted or not dlg.path:
             return
-        from config_dialog import ConfigDialog
-        try:
-            path = LC.study_path(name)
-        except SystemExit as exc:
-            QMessageBox.warning(self, "Name", str(exc))
-            return
-        if os.path.exists(path):
-            QMessageBox.warning(self, "Already exists",
-                                f"A study called {os.path.basename(path)} is "
-                                f"already there.")
-            return
-        dlg = ConfigDialog(self.repo_root, path=path, study_name=name,
-                           parent=self)
-        if dlg.exec() == QDialog.Accepted:
-            LC.write_settings({"active_study": LC.slugify(name)})
-            self._refresh()
+        LC.remember_project(dlg.path)
+        LC.clear_cache()
+        self.chosen = dlg.path
+        self.accept()
 
     def _migrate(self):
         """Bring the pre-study config.json in under a name, leaving it in place."""
@@ -150,10 +153,20 @@ class StudyPicker(QDialog):
         if item is None:
             return
         slug, path = item.data(Qt.UserRole)
-        LC.write_settings({"active_study": slug})
+        if slug:
+            LC.write_settings({"active_study": slug})
+        LC.remember_project(path)
         LC.clear_cache()
         self.chosen = path
         self.accept()
+
+
+def _study_name(path):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return (json.load(fh).get("study") or {}).get("name") or os.path.basename(path)
+    except (OSError, ValueError, AttributeError):
+        return os.path.basename(path)
 
 
 def ensure_study(repo_root, parent=None):
@@ -163,6 +176,12 @@ def ensure_study(repo_root, parent=None):
     is used without asking. Only a first run, or a settings file pointing at a
     study that has since been deleted, brings the picker up.
     """
+    if not (os.environ.get("LS_CONFIG") or os.environ.get("LS_STUDY")):
+        # The study open when the app last closed - which may live in its own
+        # output folder, outside the studies folder the slug rule looks in.
+        last = LC.read_settings().get("last_project")
+        if isinstance(last, str) and os.path.isfile(last):
+            return os.path.abspath(last)
     try:
         path = LC.resolve_path()
         if os.path.exists(path):

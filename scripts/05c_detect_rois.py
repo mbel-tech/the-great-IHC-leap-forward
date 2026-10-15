@@ -157,6 +157,38 @@ NORM_CSV = os.path.join(RESULTS, "roi_normalisation.csv")
 NORM_COLUMNS = ["scene_uid", "marker", "segmented_on", "norm_lo", "norm_hi",
                 "n_crops"]
 
+#: The shape each ROI was MEASURED ON, one row per (section, marker, ROI),
+#: copied from the roi_boxes row 05c read. 06a joins nuclei to the CURRENT
+#: roi_boxes file by position, and 05a rewrites that file from the newest
+#: curator export - so a disc dragged or resized, or a polygon redrawn, after
+#: detection keeps its index, kind and region, the resume below skips the
+#: section because it already has rows, and 06a divided the old count by the
+#: new area. This record is what lets 06a see that. Per section rather than as
+#: columns of roi_nuclei.csv for NORM_CSV's reason, and also because a disc
+#: with no nuclei has no row there to carry it.
+#:
+#: Written for every section this run measures and dropped for the sections it
+#: is about to measure, so it describes exactly the sections whose rows are in
+#: roi_nuclei.csv. A section measured before this file existed has no row, and
+#: 06a reports it as unverified rather than refusing it.
+GEOMETRY_CSV = os.path.join(RESULTS, "roi_measured_geometry.csv")
+#: The box columns that decide which nuclei are in an ROI and what it is
+#: divided by: the shape as drawn, and the area 05a mapped it to.
+GEOMETRY_FIELDS = ["roi_kind", "region", "sec_x", "sec_y", "sec_r", "sec_poly",
+                   "area_um2"]
+GEOMETRY_COLUMNS = ["scene_uid", "marker", "roi_index"] + GEOMETRY_FIELDS
+
+
+def geometry_rows(uid, boxes):
+    """GEOMETRY_CSV rows for one section's boxes, numbered as the ROI loop does.
+
+    Every box, including one too small to read: its index is still taken, and
+    06a still emits a row for it. `.get` because a box file written before
+    polygons or before 05a wrote area_um2 has no such column; blank is then
+    what 06a reads from the same file, so the two still agree."""
+    return [[uid, b["marker"], bi] + [b.get(f, "") for f in GEOMETRY_FIELDS]
+            for bi, b in enumerate(boxes, 1)]
+
 BASE_PX_UM = CONFIG["pixel_size_um"]
 DAPI_C = CONFIG["channels"]["dapi_index"]
 MARK_C = CONFIG["channels"]["marker_index"]
@@ -1314,6 +1346,18 @@ def main():
     nfh = nw = None
     no_norm = []
 
+    # The measured-geometry record, by the same rule as the normalisation
+    # record: the sections about to be measured lose their old rows first.
+    geo_exists = os.path.exists(GEOMETRY_CSV)
+    if geo_exists:
+        check_header(GEOMETRY_CSV, GEOMETRY_COLUMNS)
+        drop_rows(GEOMETRY_CSV, args.marker, todo)
+    gfh = open(GEOMETRY_CSV, "a" if geo_exists else "w", newline="",
+               encoding="utf-8")
+    gw = csv.writer(gfh)
+    if not geo_exists:
+        gw.writerow(GEOMETRY_COLUMNS)
+
     fh = open(NUCLEI_CSV, "a" if exists else "w", newline="", encoding="utf-8")
     w = csv.writer(fh)
     dfh = open(DONE_LOG, "a" if exists else "w", newline="", encoding="utf-8")
@@ -1553,6 +1597,11 @@ def main():
 
                 if args.qc:
                     write_overlay(uid, bi, b, seg_img, labels, kept)
+        # The geometry BEFORE the nuclei, so a run that stops between the two
+        # leaves a record with no nuclei - a section that is not done and is
+        # redone, record and all - never nuclei with no record.
+        gw.writerows(geometry_rows(uid, by_sec[uid]))
+        gfh.flush()
         w.writerows(rows)
         fh.flush()
         # On disk before the section is logged as whole - see DONE_LOG.
@@ -1590,6 +1639,7 @@ def main():
         print(f"\r  {n}/{len(todo)}  {uid}  {len(rows)} nuclei  "
               f"({total_nuc} total)          ", end="")
     fh.close()
+    gfh.close()
     dfh.close()
     if cfh is not None:
         cfh.close()

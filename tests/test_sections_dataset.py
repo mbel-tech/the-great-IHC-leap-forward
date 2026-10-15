@@ -249,6 +249,36 @@ with temp_study(acquisition={"layout": "paired",
     chk("...and a section whose partner had none is blank, as before",
         wl_by["U3"]["partner_focus_score"], "")
 
+    # A crash mid-write. The worklist was written with open(path, "w"), which
+    # truncates first: a run that died partway left a half-ranked queue that
+    # still parses, and 04l --worklist would then curate from it. Through a
+    # temp file and a swap, the replace is the only moment the file changes,
+    # so failing it must leave last run's worklist byte for byte.
+    with open(N.OUT_CSV, "rb") as fh:
+        before = fh.read()
+    real_replace = N.IO.os.replace
+
+    def crash(src, dst):
+        raise RuntimeError("killed mid-write")
+    N.IO.os.replace = crash
+    sys.argv = ["04n_roi_worklist.py", "--min-sections", "0"]
+    raised = ""
+    try:
+        N.main()
+    except RuntimeError as exc:
+        raised = str(exc)
+    finally:
+        N.IO.os.replace = real_replace
+        sys.argv = saved_argv
+    chk("04n writes the worklist by swapping a temp file in",
+        raised, "killed mid-write")
+    with open(N.OUT_CSV, "rb") as fh:
+        chk("...so a crash leaves the previous worklist intact",
+            fh.read() == before, True)
+    chk("...and no temp file beside it",
+        [f for f in os.listdir(os.path.dirname(N.OUT_CSV))
+         if f.startswith("roi_worklist") and f != "roi_worklist.csv"], [])
+
     print()
     print("--- the same overrides file under the generic header ---")
     # `pick_column` is asked once against the header, so BOTH spellings read.

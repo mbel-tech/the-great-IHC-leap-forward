@@ -70,11 +70,21 @@ def atomic_write_csv(path, rows, keys, attempts=5):
     tmp = path + ".tmp"
 
     def go():
-        with open(tmp, "w", newline="", encoding="utf-8") as fh:
-            w = csv.DictWriter(fh, fieldnames=keys, extrasaction="ignore")
-            w.writeheader()
-            w.writerows(rows)
-        os.replace(tmp, path)
+        try:
+            with open(tmp, "w", newline="", encoding="utf-8") as fh:
+                w = csv.DictWriter(fh, fieldnames=keys, extrasaction="ignore")
+                w.writeheader()
+                w.writerows(rows)
+            os.replace(tmp, path)
+        except BaseException:
+            # The old file is intact either way; a half-written temp beside it
+            # is litter that looks like an output, so it goes too. A retry
+            # writes it afresh.
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            raise
 
     retry(go, path, attempts)
 

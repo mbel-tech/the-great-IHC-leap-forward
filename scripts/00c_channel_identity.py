@@ -62,6 +62,7 @@ if _HERE not in sys.path:
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
 import ls_channels as CH  # noqa: E402
 import ls_progress as PG  # noqa: E402
+import ls_jsonio  # noqa: E402
 
 MARKERS = list(CH.marker_names(CONFIG))
 
@@ -304,6 +305,31 @@ def make_call(summary, declared):
     return dict(declared), lines
 
 
+def accept(call, path=None):
+    """Record `call` in the study file's `marker_identity` block.
+
+    The study file is also the project, curation and all, so two things matter
+    here and the old `open(path, "w")` + `json.dump(CONFIG)` got both wrong.
+    It is re-read from disk, not taken from `CONFIG`: that is the DEFAULTED
+    config as it stood at import, so writing it back dropped any key another
+    writer (05b, the app) added since and wrote every default in as if the
+    person had chosen it. And it goes through `ls_jsonio.write_json_atomic`,
+    the way 05b writes `detection.auto`: a temp file swapped in, with a backup,
+    so a crash mid-write leaves the previous file whole instead of a torn JSON
+    the app refuses to open.
+    """
+    path = path or CONFIG_PATH
+    with open(path, encoding="utf-8") as fh:
+        cfg = json.load(fh)
+    block = cfg.get("marker_identity")
+    block = block if isinstance(block, dict) else {}
+    block.update(call)
+    block["_confirmed"] = "00c_channel_identity.py --accept"
+    cfg["marker_identity"] = block
+    ls_jsonio.write_json_atomic(path, cfg, backups=1, compact=("curation",))
+    return path
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--accept", action="store_true")
@@ -377,11 +403,7 @@ def main():
     print("=" * 72)
 
     if call and args.accept:
-        CONFIG.setdefault("marker_identity", {}).update(call)
-        CONFIG["marker_identity"]["_confirmed"] = "00c_channel_identity.py --accept"
-        with open(CONFIG_PATH, "w", encoding="utf-8") as fh:
-            json.dump(CONFIG, fh, indent=2)
-        print("  written into config.json")
+        print(f"  written into {accept(call)}")
     elif call:
         print("  re-run with --accept once the figure agrees.")
 

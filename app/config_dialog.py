@@ -463,12 +463,10 @@ class SettingsForm(QWidget):
         cfg = self._load()
         if self.channel_edits is not None and self.channel_layout == layout:
             cfg = CE.apply(cfg, self.channel_edits)         # carry on from earlier edits
-        scans = []
-        if layout == "paired":
-            import autodetect as AD
-            scans = AD.scan_marker_names(self._source_dir())
+        # A paired study's scan names come from the slide headers; the editor
+        # reads them itself, off the window's thread, as the folder may be slow.
         dlg = ChannelEditor(cfg, layout, self, on_detected=lambda f, ch: self.detected.append((f, ch)),
-                            scan_names=scans)
+                            source_dir=self._source_dir() if layout == "paired" else None)
         if dlg.exec() == QDialog.Accepted and dlg.result_edits is not None:
             self.channel_edits, self.channel_layout = dlg.result_edits, layout
             if getattr(self, "seg_row", None) is not None:

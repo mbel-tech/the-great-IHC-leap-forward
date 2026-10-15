@@ -924,7 +924,11 @@ def is_cached(source_dir):
 
 def scan_marker_names(source_dir):
     """The marker channel names a paired study's scans carry (AF568, AF488), or []."""
-    found = cached(source_dir)
+    return scan_names_of(cached(source_dir))
+
+
+def scan_names_of(found):
+    """scan_marker_names for a Detection already read (the channel editor reads it off-thread)."""
     if not found or found.values.get("acquisition.layout") != CH.LAYOUT_PAIRED:
         return []
     return list(found.values.get("acquisition.markers") or [])

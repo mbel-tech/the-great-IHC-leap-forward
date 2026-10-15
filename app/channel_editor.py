@@ -8,6 +8,12 @@ result and writes it with the rest of the settings when you press Save.
 Multiplex studies edit a channel table (name, role, how the file names it, how
 the marker is found); paired studies edit a plain list of marker names, because
 each of their scans carries the counterstain plus one marker.
+
+A paired study's scan channel names come from the slide headers. On a USB stick
+or a OneDrive folder that read takes a second a file, so it runs on slide_read's
+worker thread: the editor opens at once, says it is reading, and fills the names
+in when they arrive. OK waits for them, as they are what a marker is checked
+against.
 """
 
 import copy
@@ -19,9 +25,11 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QSpinBox,
     QTableWidget, QVBoxLayout)
 
+import autodetect as AD
 import ls_channel_edit as E
 import ls_channel_guess as G
 import ls_channels as CH
+import slide_read as SRD
 import theme as T
 
 DEFAULT_TEXT = "(default)"
@@ -77,11 +85,14 @@ class ChannelEditor(QDialog):
     currently chosen in settings. `result_edits` is {dotted key: value} after OK.
     """
 
-    def __init__(self, cfg, layout, parent=None, on_detected=None, scan_names=None):
+    def __init__(self, cfg, layout, parent=None, on_detected=None, scan_names=None,
+                 source_dir=None):
         super().__init__(parent)
         # Paired only: the marker channel names the slide files carry (AF568, ...),
         # when they were read. A marker named anything else matches no scan.
+        # Given `source_dir` instead, they are read from its headers off-thread.
         self.scan_names = list(scan_names or [])
+        self._note = ""                     # how that read is going, above the verdict
         self.on_detected = on_detected      # called (file, channels) after a CZI is read
         self.cfg = copy.deepcopy(cfg)
         self.layout = layout
@@ -104,16 +115,7 @@ class ChannelEditor(QDialog):
             self.table.setColumnWidth(self.cols.index("CZI channel name"), 140)
             self.table.setColumnWidth(self.cols.index("Detected"), 300)
 
-        intro = QLabel(
-            "Each marker is a channel of the scan. The name becomes folder and file "
-            "names and the marker column in every output, so rename with care." if not self.paired
-            else "A paired study has one scan per marker. Name each marker as its scans "
-                 "name the channel (AF568, AF488): that is how each scan is matched to its "
-                 "marker, and it becomes folder and file names. Write the antibody (pERK, "
-                 "PCNA) under 'What it stains'; the screens use that. The counterstain "
-                 "(DAPI) is in every scan and is not a marker."
-                 + (" The slides name: %s." % ", ".join(self.scan_names)
-                    if self.scan_names else ""))
+        self.intro = intro = QLabel(self._intro_text())
         intro.setWordWrap(True)
         intro.setStyleSheet(T.HINT)
         self.status = QLabel("")
@@ -150,6 +152,56 @@ class ChannelEditor(QDialog):
 
         self._meta = []
         self._populate(E.load_rows(self.cfg, layout))
+
+        self._read = SRD.SlideRead(self)
+        self._read.progress.connect(lambda k, n: self._noted(SRD.words(k, n)))
+        self._read.finished.connect(self._names_read)
+        self._read.failed.connect(
+            lambda _src, why: self._noted("Could not read the slides' channel names: " + why))
+        self._read_for = None
+        if self.paired and source_dir and not self.scan_names:
+            self._read_for = source_dir
+            # Through autodetect's cache, as scan_marker_names was: a folder
+            # already read this session answers at once.
+            self._read.start(source_dir, fresh=False)
+            self._noted("Reading slide headers…")
+
+    def _intro_text(self):
+        return ("Each marker is a channel of the scan. The name becomes folder and file "
+                "names and the marker column in every output, so rename with care."
+                if not self.paired else
+                "A paired study has one scan per marker. Name each marker as its scans "
+                "name the channel (AF568, AF488): that is how each scan is matched to its "
+                "marker, and it becomes folder and file names. Write the antibody (pERK, "
+                "PCNA) under 'What it stains'; the screens use that. The counterstain "
+                "(DAPI) is in every scan and is not a marker."
+                + (" The slides name: %s." % ", ".join(self.scan_names)
+                   if self.scan_names else ""))
+
+    # ---- the slides' channel names, read off the window's thread -----------
+
+    def _noted(self, text):
+        self._note = text
+        self._refresh()
+
+    def _names_read(self, src, found):
+        if src != self._read_for:
+            return
+        self.scan_names = AD.scan_names_of(found)
+        for i in range(self.table.rowCount()):
+            box = self._w(i, "Name")
+            typed = box.currentText()       # what the row says stays as it is
+            box.blockSignals(True)
+            box.clear()
+            box.addItems(self.scan_names)
+            box.setEditText(typed)
+            box.blockSignals(False)
+        self.intro.setText(self._intro_text())
+        self._noted("")
+
+    def done(self, result):
+        self._read.cancel()                 # closed mid-read: its late answer is dropped
+        super().done(result)
 
     # ---- building the table ------------------------------------------------
 
@@ -314,9 +366,13 @@ class ChannelEditor(QDialog):
             warnings = warnings or ["nothing declared yet"]
         lines = [f"<span style='color:{T.DANGER}'>%s</span>" % _esc(e) for e in errors[:5]]
         lines += [f"<span style='color:{T.WARN}'>%s</span>" % _esc(w) for w in warnings[:3]]
-        self.status.setText("<br>".join(lines) if lines else
-                            f"<span style='color:{T.OK}'>The pipeline accepts this table.</span>")
-        self.buttons.button(QDialogButtonBox.Ok).setEnabled(not errors)
+        verdict = ("<br>".join(lines) if lines else
+                   f"<span style='color:{T.OK}'>The pipeline accepts this table.</span>")
+        self.status.setText(_esc(self._note) + "<br>" + verdict if self._note else verdict)
+        # Until the names are in, a marker named by its protein cannot be told
+        # apart from one named as its scans name it; Cancel still works.
+        reading = getattr(self, "_read", None) is not None and self._read.busy
+        self.buttons.button(QDialogButtonBox.Ok).setEnabled(not errors and not reading)
 
     # ---- actions -----------------------------------------------------------
 

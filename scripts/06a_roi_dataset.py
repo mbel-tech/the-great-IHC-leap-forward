@@ -564,6 +564,13 @@ def main(argv=None):
                  DONE_LOG, {(k[0], k[1]) for k in firsts})
              if u in box_by}
     uids |= {u for u, _ in empty}
+    # MEASURED IS PER MARKER. Under `multiplex` every marker's boxes share the
+    # section's uid, so a uid in `uids` says only that SOME marker was looked
+    # at there. A marker 05c has not run on it yet has no rows and no log
+    # entry, and must stay absent as an unmeasured section does - not report
+    # zeros, which read as "looked and found none". Under `paired` a section
+    # has one marker and this is the uid test above unchanged.
+    measured = {(k[0], k[1]) for k in firsts} | empty
     print(f"{n_all} nuclei over {len(uids)} sections"
           + (f" ({len(empty)} measured with none found)" if empty else ""))
     check_join(firsts.values(), box_by)
@@ -635,6 +642,8 @@ def main(argv=None):
         # numbered them. Under `paired` there is exactly one group per section
         # and this is the old single loop unchanged.
         for mk, mboxes in split_by_marker(box_by.get(uid, [])).items():
+            if (uid, mk) not in measured:
+                continue
             for i, b in enumerate(mboxes, 1):
                 here = by_idx.get((uid, mk, i))
                 area = roi_area_um2(b)

@@ -46,7 +46,7 @@ report = dict(found.report)
 report["notes"], report["problems"] = list(found.notes), list(found.problems)
 
 import slide_report as SR                                       # noqa: E402
-from PySide6.QtWidgets import QApplication, QPushButton         # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel, QPushButton  # noqa: E402
 
 app = QApplication.instance() or QApplication([])
 
@@ -76,6 +76,35 @@ empty = SR.SlideReportDialog({})
 chk("a report with nothing in it still builds", empty.tables, {})
 odd = SR.SlideReportDialog({"extra": 1, "instrument": {"x": {"value": "1"}}})
 chk("...and with a section it does not know", odd.tables["Instrument"].rowCount(), 1)
+
+print("--- plain words ---")
+chk("the third column is headed Note",
+    t["Instrument"].horizontalHeaderItem(2).text(), "Note")
+used = [t["What each value did"].item(r, 2).text() for r in range(t["What each value did"].rowCount())]
+chk("uses name settings by their label, not their key",
+    any("Curation image resolution (um/px)" in u for u in used)
+    and not any("curation_render.um_per_px" in u for u in used), True)
+chk("...and a field that is a setting too",
+    t["What each value did"].item(0, 0).text() != "pixel_size_um", True)
+optics = " ".join(t["Optics"].item(r, 1).text() for r in range(t["Optics"].rowCount()))
+chk("no Nyquist in the optics", ("Nyquist" in optics, "Fine enough to resolve it: no" in optics),
+    (False, True))
+scenes = [t["Scenes"].item(r, 0).text() for r in range(t["Scenes"].rowCount())]
+chk("scenes per file says fewest / typical / most",
+    "Scenes per file (fewest / typical / most)" in scenes, True)
+chk("a short list says nothing about a cut", dlg.varying_line, None)
+cut = SR.SlideReportDialog(dict(report, varying_total=180))
+chk("a cut list says how many it shows",
+    cut.varying_line.text(), "Showing the first %d of 180 fields that differ." % len(report["varying"]))
+dropped = {k: v for k, v in report.items() if k != "varying"}
+dropped["varying_dropped"] = True
+dr = SR.SlideReportDialog(dropped)
+texts = [lab.text() for lab in dr.findChildren(QLabel)]
+chk("a dropped list never says every file agrees", "Every file agrees." in texts, False)
+chk("...and says where the list is", "slide_metadata.json" in dr.varying_line.text(), True)
+none = SR.SlideReportDialog({k: v for k, v in report.items() if k != "varying"})
+chk("an empty list still says every file agrees",
+    "Every file agrees." in [lab.text() for lab in none.findChildren(QLabel)], True)
 
 print("--- the button in Set up ---")
 PATH = write_study(os.path.join(TMP, "s"))
@@ -112,6 +141,28 @@ if MW:
     s.build()
     chk("a kept report keeps the button on even if the folder is gone",
         s.report_btn.isEnabled(), True)
+    chk("the kept report names the folder it was read from",
+        project.get("project")["slides"]["source_dir"], SLIDES)
+    chk("...so it is not shown for another folder", s._slide_report(), (None, None))
+
+    other = os.path.join(TMP, "other")
+    os.makedirs(other)
+    write_czi(os.path.join(other, "LS22_1a.czi"), xml([DAPI, AF568], objective=(40, 0.95, "Air")))
+    project.set("source_dir", other, by="test")
+    got, path = s._slide_report()
+    chk("a kept report of another folder is not used: this one is read",
+        (got["instrument"]["objective_magnification"]["value"], "full_report" in got, path),
+        ("40", False, None))
+
+    junk = os.path.join(TMP, "junk")
+    os.makedirs(junk)
+    open(os.path.join(junk, "A1_1.czi"), "wb").write(b"junk" * 100)
+    project.set("source_dir", junk, by="test")
+    project.block.pop("slides", None)
+    s.detect_line.setText("")
+    chk("nothing readable: no window", s.show_slide_report(), None)
+    chk("...and the line says so", s.detect_line.text(),
+        "No slide file in the slides folder could be read.")
 
 print("\n%s" % ("FAILED: %s" % failures if failures else "all passed"))
 sys.exit(1 if failures else 0)

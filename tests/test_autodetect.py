@@ -155,7 +155,7 @@ with tempfile.TemporaryDirectory() as tmp:
     rep = d.report
     chk("the report is JSON", bool(json.dumps(rep)), True)
     chk("its sections", sorted(rep), ["channels", "fields", "instrument", "optics", "read",
-                                      "scenes", "uses", "varying"])
+                                      "scenes", "uses", "varying", "varying_total"])
     chk("files read and found", (rep["read"]["files_read"], rep["read"]["files_found"]), (4, 4))
     chk("the objective's NA", rep["instrument"]["objective_na"]["value"], "0.8")
     chk("the immersion, from the flat fields", rep["instrument"]["objective_immersion"]["value"],
@@ -222,6 +222,94 @@ with tempfile.TemporaryDirectory() as tmp:
         "Information/Instrument/Objectives/Objective/LensNA" in d.report["varying"], True)
     chk("the report is JSON", bool(json.dumps(d.report)), True)
 
+print("--- colours that would clash are left to the person ---")
+with tempfile.TemporaryDirectory() as tmp:
+    for i in range(2):
+        write_czi(os.path.join(tmp, f"Mouse{i + 1}_s1.czi"),
+                  xml([DAPI, AF568, ("AF594", 617)]))
+    d = A.detect(tmp)
+    chk("two red markers: no marker colours filled in", "display.colours" in d.values, False)
+    chk("...and a note says why, in plain words",
+        [n for n in d.notes if "both emit" in n],
+        ["AF568 and AF594 both emit red; pick their colours in Set up so they can be "
+         "told apart."])
+    chk("...the counterstain is still blue", d.values["display.nuclear_colour"], "blue")
+    chk("...and fill proposes no colours", "display.colours" in A.fill({}, d), False)
+with tempfile.TemporaryDirectory() as tmp:
+    for i in range(2):
+        write_czi(os.path.join(tmp, f"Mouse{i + 1}_s1.czi"),
+                  xml([("DRAQ5", 697), AF488, ("AF647", 668)]))
+    d = A.detect(tmp)
+    chk("a far-red counterstain is found as the counterstain", d.values["channels.dapi_index"], 0)
+    chk("...its colour is left unset, never a marker's", "display.nuclear_colour" in d.values,
+        False)
+    chk("...and the far-red marker keeps its own", d.values["display.colours"],
+        {"AF488": "green", "AF647": "magenta"})
+
+print("--- the objective comes from Information/Instrument ---")
+with tempfile.TemporaryDirectory() as tmp:
+    hw = ("<HardwareSetting><ParameterCollection Id=\"MTBObjectiveChanger\"><Objective>"
+          "<Immersion>Oil</Immersion><Manufacturer><Model>Plan-Apochromat 63x/1.4 Oil</Model>"
+          "</Manufacturer></Objective></ParameterCollection>"
+          "<Microscope Name=\"Other scope\"/></HardwareSetting>")
+    for name in ("LS22_1a.czi", "LS22_1b.czi"):
+        text = xml([DAPI, AF568], objective=(20, 0.8, "Air"))
+        write_czi(os.path.join(tmp, name), text.replace("<Metadata>", "<Metadata>" + hw, 1))
+    d = A.detect(tmp)
+    inst = d.report["instrument"]
+    chk("a HardwareSetting objective slot listed first does not win the immersion",
+        inst["objective_immersion"]["value"], "Air")
+    chk("...nor the name", inst["objective_name"]["value"], "Plan-Apochromat 20x/0.8")
+    chk("...and the HardwareSetting one stands in when Information has none",
+        A.by_tag({"HardwareSetting/Objective/Immersion": "Oil"}, "Objective/Immersion",
+                 under="Information/Instrument/"), "Oil")
+chk("by_tag looks under Information/Instrument first, whatever the order",
+    A.by_tag({"HardwareSetting/P/Objective/Immersion": "Oil",
+              "Information/Instrument/Objectives/Objective/Immersion": "Air"},
+             "Objective/Immersion", under="Information/Instrument/"), "Air")
+
+print("--- the objective check compares numbers ---")
+def obj_flat(mag, na):
+    return {"Information/Instrument/Objectives/Objective/NominalMagnification": mag,
+            "Information/Instrument/Objectives/Objective/LensNA": na}
+d = A.Detection()
+heads = [("a.czi", {}, [], obj_flat("20", "0.8")), ("b.czi", {}, [], obj_flat("20.0", "0.80"))]
+d.files = ["a.czi", "b.czi"]
+A._report(d, heads)
+chk("20 and 20.0, 0.8 and 0.80 are one objective",
+    any("objective" in p for p in d.problems), False)
+d = A.Detection()
+d.files = ["a.czi", "b.czi"]
+A._report(d, [("a.czi", {}, [], obj_flat("20", "0.8")), ("b.czi", {}, [], obj_flat("40", "0.95"))])
+chk("20 and 40 are not", any("objective" in p for p in d.problems), True)
+
+print("--- the objective in lines() ---")
+d = A.Detection()
+d.files = ["a.czi"]
+d.report = {"instrument": {"objective_magnification": {"value": "20", "top": "20", "distinct": 1},
+                           "objective_na": {"value": "0.8", "top": "0.8", "distinct": 1}}}
+chk("magnification with an x, and the NA",
+    d.lines()[-1], "Instrument: objective 20x (NA 0.8).")
+
+print("--- what differs: Information first, positions left out, the full count kept ---")
+def vary_flat(i):
+    flat = {"Experiment/Block/Setting%02d" % j: str(i) for j in range(60)}
+    flat["Scaling/Items/Distance[X]/Value"] = "6.5e-07" if i else "6.6e-07"
+    flat["Information/Application/Version"] = "3.%d" % i
+    flat["Experiment/Tile/StagePosition"] = str(i)
+    flat["HardwareSetting/Focus/Position/Z"] = str(i)
+    return flat
+d = A.Detection()
+d.files = ["a.czi", "b.czi"]
+A._report(d, [("a.czi", {}, [], vary_flat(0)), ("b.czi", {}, [], vary_flat(1))])
+keys = list(d.report["varying"])
+chk("Information first, then Scaling",
+    keys[:2], ["Information/Application/Version", "Scaling/Items/Distance[X]/Value"])
+chk("fifty kept", len(keys), 50)
+chk("the full count is recorded", d.report["varying_total"], 62)
+chk("stage and focus positions are not listed",
+    any("Position" in k for k in d.report["varying"]), False)
+
 print("--- 400 headers of 3000 fields are read in seconds ---")
 def big_flat(i):
     flat = {}
@@ -287,6 +375,21 @@ with tempfile.TemporaryDirectory() as out:
     big = dict(_Det.report, varying={"k": "v" * 70000})
     proj.note_slides(big)
     chk("an oversize summary drops varying", "varying" in proj.block["slides"], False)
+    chk("...and says so", proj.block["slides"].get("varying_dropped"), True)
+    chk("...keeping the uses when that is enough",
+        ("uses" in proj.block["slides"], "uses_dropped" in proj.block["slides"]), (False, False))
+    proj.note_slides(dict(big, uses=[{"field": "f", "value": "u" * 70000, "use": "x"}]))
+    chk("still oversize: the uses go too",
+        (sorted(k for k in proj.block["slides"] if k in ("varying", "uses")),
+         proj.block["slides"].get("varying_dropped"), proj.block["slides"].get("uses_dropped")),
+        ([], True, True))
+    proj.note_slides(_Det.report, source_dir="/data/slides")
+    chk("note_slides records the slides folder", proj.block["slides"]["source_dir"],
+        "/data/slides")
+    chk("...and nothing dropped when small",
+        ("varying_dropped" in proj.block["slides"], "uses_dropped" in proj.block["slides"]),
+        (False, False))
+    chk("a study with the folder recorded validates", proj.validate()[0], [])
     path = A.write_report(out, _Det)
     chk("write_report names the file", os.path.basename(path), "slide_metadata.json")
     chk("the file holds fields", json.load(open(path))["fields"], {"x": {"1": 2}})

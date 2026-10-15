@@ -66,12 +66,28 @@ class Detection:
             if key in self.why:
                 out.append(self.why[key])
         inst = self.report.get("instrument") or {}
-        obj, cam = inst.get("objective_name") or inst.get("objective_magnification"), inst.get("camera")
+        obj, cam = _objective_words(inst), inst.get("camera")
         if obj or cam:
             out.append("Instrument: " + ", ".join(
-                [x for x in (obj and "objective " + obj["value"],
+                [x for x in (obj and "objective " + obj,
                              cam and "camera " + cam["value"]) if x]) + ".")
         return out + self.problems
+
+
+def _objective_words(inst):
+    """"Plan-Apochromat 20x/0.8" from the name, else "20x (NA 0.8)", else None."""
+    if inst.get("objective_name"):
+        return inst["objective_name"]["value"]
+    mag, na = inst.get("objective_magnification"), inst.get("objective_na")
+    if not mag:
+        return None
+    n = _num(mag["top"])
+    words = ("%g" % n if n is not None else mag["top"]) + "x"
+    if mag.get("distinct", 1) > 1:
+        words += " (varies between files)"
+    elif na:
+        words += " (NA %s)" % na["top"]
+    return words
 
 
 def slide_files(source_dir):
@@ -254,15 +270,35 @@ def _colours(d, headers):
             colour = G.BAND_COLOUR.get(got.most_common(1)[0][0])
             if colour:
                 colours[m] = colour
-    if colours:
+    # Two markers in one colour cannot be told apart in a picture: leave the
+    # colours for a person to pick rather than fill in a clash.
+    shared = Counter(colours.values())
+    clashes = [c for c, n in shared.items() if n > 1]
+    for c in clashes:
+        names = [m for m, mc in colours.items() if mc == c]
+        d.notes.append("%s both emit %s; pick their colours in Set up so they can be "
+                       "told apart." % (_and(names), _colour_word(c)))
+    if colours and not clashes:
         d.values["display.colours"] = colours
         d.why["display.colours"] = "Marker colours from each channel's band: %s." % ", ".join(
             "%s %s" % (m, c) for m, c in colours.items())
+    # The counterstain is drawn blue, and only when its band says blue: a far-red
+    # nuclear stain (DRAQ5) leaves the colour for the study to choose.
     if nuc_bands:
         colour = G.BAND_COLOUR.get(nuc_bands.most_common(1)[0][0])
-        if colour:
+        if colour == "blue":
             d.values["display.nuclear_colour"] = colour
             d.why["display.nuclear_colour"] = "Counterstain drawn %s, from its band." % colour
+
+
+def _and(names):
+    names = list(names)
+    return names[0] if len(names) == 1 else "%s and %s" % (", ".join(names[:-1]), names[-1])
+
+
+def _colour_word(colour):
+    """The light a drawing colour stands for, in plain words."""
+    return {"magenta": "far red"}.get(colour, colour)
 
 
 # ---------------------------------------------------------------------------
@@ -300,12 +336,18 @@ def tag_index(flat, suffixes=None):
     return out
 
 
-def by_tag(index, *suffixes):
+def by_tag(index, *suffixes, under=None):
     """The first value whose bracket-free path ends with one of `suffixes`, tried in order.
 
-    `index` is a tag_index() (or a raw flat dict, indexed here)."""
+    `index` is a tag_index() (or a raw flat dict, indexed here). With `under`
+    (a path prefix such as "Information/Instrument/"), paths below it are tried
+    first for every suffix, and the rest only when nothing is found there."""
     if any("[" in p for p in index):
         index = tag_index(index, suffixes)
+    if under:
+        got = by_tag({p: v for p, v in index.items() if p.startswith(under)}, *suffixes)
+        if got is not None:
+            return got
     for suffix in suffixes:
         if suffix in index:
             return index[suffix]
@@ -373,6 +415,13 @@ _INSTRUMENT_USE = {
 }
 
 
+#: Fields read from Information/Instrument when it holds them; a HardwareSetting
+#: or Experiment copy (which may describe another objective slot) only stands in
+#: when it does not.
+_UNDER_INSTRUMENT = ("microscope", "objective_name", "objective_magnification",
+                     "objective_na", "objective_immersion")
+_INSTRUMENT_PREFIX = "Information/Instrument/"
+
 #: Every suffix _INSTRUMENT looks for, so each file is indexed once for all of them.
 _INSTRUMENT_SUFFIXES = tuple(x for _k, _s, xs in _INSTRUMENT for x in xs)
 
@@ -385,7 +434,8 @@ def _instrument(headers):
         for (_n, h, _c, _flat), index in zip(headers, indexes):
             v = h.get(skey) if skey else None
             if v in (None, ""):
-                v = by_tag(index, *suffixes)
+                v = by_tag(index, *suffixes, under=(
+                    _INSTRUMENT_PREFIX if key in _UNDER_INSTRUMENT else None))
             vals.append(v)
         got = _most(vals)
         if got:
@@ -481,8 +531,17 @@ def _report(d, headers):
         if got and got["distinct"] > 1:
             d.problems.append("The files differ in %s: %s." % (label, ", ".join(
                 "%s in %d" % (v, n) for v, n in got["values"])))
-    objs = [g for g in (inst.get(k) for k in ("objective_name", "objective_magnification",
-                                              "objective_na")) if g and g["distinct"] > 1]
+    objs = []
+    for k in ("objective_name", "objective_magnification", "objective_na"):
+        g = inst.get(k)
+        if not g or g["distinct"] < 2:
+            continue
+        if k != "objective_name":
+            # 20 and 20.0 are one magnification: compare the numbers.
+            nums = {_num(v) if _num(v) is not None else v for v, _n in g["values"]}
+            if len(nums) < 2:
+                continue
+        objs.append(g)
     if objs:
         d.problems.append("The files were not all scanned with the same objective: %s." % (
             "; ".join(", ".join("%s in %d" % (v, n) for v, n in g["values"]) for g in objs)))
@@ -538,7 +597,8 @@ def _report(d, headers):
     rep["optics"] = optics
     rep["uses"] = uses
     vary = czi_report.varying(combined)
-    rep["varying"] = {p: vary[p]["values"] for p in sorted(vary)[:50]}
+    rep["varying"] = {p: vary[p]["values"] for p in sorted(vary, key=czi_report.order)[:50]}
+    rep["varying_total"] = len(vary)
     rep["fields"] = combined
     d.report = rep
 
@@ -717,7 +777,8 @@ def new_project(source_dir, out_root, thickness_um, atlas="salmon", name=None,
     for key, value in detection.values.items():
         p.set(key, value, by="read from the slides")
     if detection.report:
-        p.note_slides(detection.report, detection.notes, detection.problems, REPORT_FILE)
+        p.note_slides(detection.report, detection.notes, detection.problems, REPORT_FILE,
+                      source_dir)
     layout = detection.values.get("acquisition.layout")
     # The template's example of the other layout's table is not this study's.
     if layout == CH.LAYOUT_PAIRED:

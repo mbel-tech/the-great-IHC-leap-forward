@@ -11,18 +11,40 @@ NATURALLY_DIFFERENT = (
     "AcquisitionDateAndTime", "CreationDate", "Guid", "@Id",
     "CenterPosition", "Scenes", "SizeS", "SizeX", "SizeY",
     "Title", "FileName", "Document/Name",
+    # Stage and focus positions and timings: every scan is somewhere else.
+    "StagePosition", "FocusPosition", "Position/X", "Position/Y", "Position/Z",
+    "PositionX", "PositionY", "PositionZ", "/Z@", "TimeStamp", "Duration",
 )
 
+#: Subtrees below Metadata walked first, so the field cap never starves them.
+FIRST = ("Information", "Scaling")
 
-def _key(el, siblings):
-    """Path segment for el: bare tag when sole, else tag plus Id/Name/Index/position."""
+
+def _key(el, count, position):
+    """Path segment for el: bare tag when sole, else tag plus Id/Name/Index/position.
+
+    `count` is how many siblings share el's tag; `position` is el's 1-based place
+    among them."""
     tag = el.tag
-    if len(siblings) < 2:
+    if count < 2:
         return tag
     for attr in ("Id", "Name", "Index"):
         if el.get(attr):
             return f"{tag}[{el.get(attr)}]"
-    return f"{tag}[{siblings.index(el) + 1}]"
+    return f"{tag}[{position}]"
+
+
+def _children(el, path):
+    """[(kid, kid path)] in document order; sibling tags counted once per parent."""
+    kids = list(el)
+    counts = Counter(k.tag for k in kids)
+    seen = Counter()
+    out = []
+    for kid in kids:
+        seen[kid.tag] += 1
+        seg = _key(kid, counts[kid.tag], seen[kid.tag])
+        out.append((kid, f"{path}/{seg}" if path else seg))
+    return out
 
 
 def flatten(root, max_fields=5000, max_text=200):
@@ -49,14 +71,29 @@ def flatten(root, max_fields=5000, max_text=200):
         text = (el.text or "").strip()
         if text and not put(path, text):
             return False
-        kids = list(el)
-        for kid in kids:
-            same = [k for k in kids if k.tag == kid.tag]
-            if not walk(kid, f"{path}/{_key(kid, same)}" if path else _key(kid, same)):
+        for kid, kid_path in _children(el, path):
+            if not walk(kid, kid_path):
                 return False
         return True
 
-    walk(start, "")
+    # Information and Scaling first (real ZEN headers put Experiment,
+    # HardwareSetting and the like before them), then everything else; the
+    # paths are the same as a walk in document order would give.
+    ok = True
+    for name, val in start.attrib.items():
+        if not put(f"@{name}", val):
+            ok = False
+            break
+    text = (start.text or "").strip()
+    if ok and text:
+        ok = put("", text)
+    if ok:
+        kids = _children(start, "")
+        first = [k for k in kids if k[0].tag in FIRST]
+        rest = [k for k in kids if k[0].tag not in FIRST]
+        for kid, kid_path in first + rest:
+            if not walk(kid, kid_path):
+                break
     if cap[0]:
         out["_truncated"] = "yes"
     return out
@@ -88,3 +125,11 @@ def varying(combined):
 def constant(combined):
     """Paths with one value across every file that has them."""
     return {p: v for p, v in combined.items() if v["distinct"] == 1}
+
+
+def order(path):
+    """Sort key: Information/* first, then Scaling/*, then the rest, each alphabetical."""
+    for i, top in enumerate(FIRST):
+        if path == top or path.startswith(top + "/") or path.startswith(top + "@"):
+            return (i, path)
+    return (len(FIRST), path)

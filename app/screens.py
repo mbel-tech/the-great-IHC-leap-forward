@@ -647,6 +647,14 @@ class HomeScreen(QWidget):
             self.recent.setText("<br>".join(lines))
 
 
+def _same_folder(a, b):
+    """True when two folder paths name the same folder (both must be given)."""
+    if not a or not b:
+        return False
+    norm = lambda p: os.path.normcase(os.path.realpath(os.path.abspath(p)))   # noqa: E731
+    return norm(a) == norm(b)
+
+
 class SetupScreen(QWidget):
     """Slides, then the study's settings as cards, each with Apply."""
 
@@ -798,8 +806,13 @@ class SetupScreen(QWidget):
         full = os.path.join(out_root, "slide_metadata.json") if out_root else None
         if full and not os.path.isfile(full):
             full = None
-        if block.get("slides"):
-            return block["slides"], full
+        kept = block.get("slides")
+        if kept:
+            if _same_folder(kept.get("source_dir"), project.get("source_dir")):
+                return kept, full
+            # Read from another slides folder (or before the folder was recorded):
+            # its full file describes that folder too.
+            full = None
         import autodetect as AD
         found = AD.cached(project.get("source_dir"))
         if found and found.report:
@@ -844,7 +857,8 @@ class SetupScreen(QWidget):
         finally:
             QApplication.restoreOverrideCursor()
         if found.report and project.get("out_root"):
-            project.note_slides(found.report, found.notes, found.problems, AD.REPORT_FILE)
+            project.note_slides(found.report, found.notes, found.problems, AD.REPORT_FILE,
+                                source)
             AD.write_report(project.get("out_root"), found)
             self.session.touch()
         self._sync_report_btn()

@@ -10,6 +10,7 @@ report has rather than a fixed list, so a newer report still shows in full.
 """
 
 import json
+import re
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -36,6 +37,34 @@ def _label(key):
     return str(key).replace("_", " ").capitalize()
 
 
+#: Report keys whose plain name says more than the key does.
+_NAMES = {"per_file": "Scenes per file (fewest / typical / most)",
+          "nyquist": "Fine enough to resolve it"}
+
+
+def _name(key):
+    return _NAMES.get(key) or _label(key)
+
+
+def _settings():
+    """{dotted key: its plain label} from ls_config, or {} when it cannot be read."""
+    try:
+        import ls_config as LC
+        return {path: k.label for path, k in LC.BY_PATH.items()}
+    except Exception:                                   # noqa: BLE001 - fall back to keys
+        return {}
+
+
+_SETTING = re.compile(r"[a-z]+(?:[_.][a-z]+)+")
+
+
+def _plain_settings(text, labels):
+    """Each setting key in `text` replaced by its label (pixel_size_um -> Pixel size)."""
+    if not labels:
+        return text
+    return _SETTING.sub(lambda m: labels.get(m.group(0), m.group(0)), text)
+
+
 def _fields(section):
     """Rows for a dict of field -> value, or field -> {value, ...}."""
     rows = []
@@ -44,12 +73,12 @@ def _fields(section):
             extra = ""
             if v.get("distinct", 1) and v.get("distinct", 1) > 1:
                 extra = "differs between files (%d values)" % v["distinct"]
-            rows.append((_label(key), _text(v["value"]), extra))
+            rows.append((_name(key), _text(v["value"]), extra))
         elif isinstance(v, list) and v and isinstance(v[0], dict):
             for i, item in enumerate(v):
-                rows.append((_label(key) + " %d" % (i + 1), _text(item), ""))
+                rows.append((_name(key) + " %d" % (i + 1), _text(item), ""))
         else:
-            rows.append((_label(key), _text(v), ""))
+            rows.append((_name(key), _text(v), ""))
     return rows
 
 
@@ -82,17 +111,22 @@ def optics_rows(report):
     for key, v in sec.items():
         if key == "channels":
             for c in v or []:
-                bits = ["%s: %s" % (_label(k), _text(x)) for k, x in c.items() if k != "name"]
+                bits = ["%s: %s" % (_name(k), _text(x)) for k, x in c.items() if k != "name"]
                 out.append((c.get("name", ""), "; ".join(bits), ""))
         else:
-            out.append((_label(key), _text(v), ""))
+            out.append((_name(key), _text(v), ""))
     return out
 
 
 def use_rows(report):
-    """[(field, value, used for)]"""
-    return [(u.get("field", ""), _text(u.get("value")), u.get("use", ""))
-            for u in (report or {}).get("uses") or []]
+    """[(field, value, used for)], each setting named by its plain label."""
+    labels = _settings()
+    out = []
+    for u in (report or {}).get("uses") or []:
+        field = str(u.get("field", ""))
+        out.append((labels.get(field, field), _text(u.get("value")),
+                    _plain_settings(str(u.get("use", "")), labels)))
+    return out
 
 
 def varying_rows(report):
@@ -104,6 +138,18 @@ def varying_rows(report):
         out.append((key.replace("Information/", "").replace("Image/Dimensions/", ""),
                     ", ".join(seen)))
     return out
+
+
+def varying_note(report):
+    """What to say above (or instead of) the list of fields that differ, or ""."""
+    report = report or {}
+    if report.get("varying_dropped"):
+        return ("The list of fields that differ between files was too long to keep in the "
+                "study file; it is in slide_metadata.json in the output folder.")
+    total, shown = report.get("varying_total"), len(report.get("varying") or {})
+    if isinstance(total, int) and total > shown:
+        return "Showing the first %d of %d fields that differ." % (shown, total)
+    return ""
 
 
 def look_at(report):
@@ -159,16 +205,24 @@ class SlideReportDialog(QDialog):
             lay.addWidget(self.look)
         h, rows = channel_rows(report)
         sections = (
-            ("Instrument", ["Field", "Value", ""], instrument_rows(report)),
+            ("Instrument", ["Field", "Value", "Note"], instrument_rows(report)),
             ("Channels", h, rows),
-            ("Scenes", ["Field", "Value", ""], scene_rows(report)),
-            ("Optics", ["Field", "Value", ""], optics_rows(report)),
+            ("Scenes", ["Field", "Value", "Note"], scene_rows(report)),
+            ("Optics", ["Field", "Value", "Note"], optics_rows(report)),
             ("What each value did", ["Field", "Value", "Used for"], use_rows(report)),
             ("Differs between files", ["Field", "Values (files)"], varying_rows(report)),
         )
+        self.varying_line = None
         for title, headers, data in sections:
             self._heading(lay, title)
+            if title == "Differs between files" and varying_note(report):
+                self.varying_line = QLabel(varying_note(report))
+                self.varying_line.setWordWrap(True)
+                self.varying_line.setStyleSheet(T.HINT)
+                lay.addWidget(self.varying_line)
             if not data:
+                if title == "Differs between files" and report.get("varying_dropped"):
+                    continue
                 none = QLabel("Nothing recorded." if title != "Differs between files"
                               else "Every file agrees.")
                 none.setStyleSheet(T.HINT)

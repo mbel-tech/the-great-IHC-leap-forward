@@ -8,9 +8,11 @@
 const { env, load, chk, note, done } = require('./harness');
 const { els, store, blobs, fire } = env;
 
-const X = load(`{KEY, DATA, MARKERS, st, rows, inScope, render, onMarker, select,
+const X = load(`{KEY, STUDY, DATA, MARKERS, st, rows, inScope, render, onMarker, select,
   exportCsv, toggleExcl, hasRgb, status, scopeLabel, counts, onSlideUser,
   set active(v){active=v}, get active(){return active}}`);
+// The page files its records per study inside the key (roi_curator_study.test.js).
+const disk = () => (JSON.parse(store[X.KEY] || "{}")._studies || {})[X.STUDY] || {};
 console.log("MARKERS:", JSON.stringify(X.MARKERS));
 console.log("marker options:", els["marker"].innerHTML.replace(/<[^>]*>/g,"|").replace(/\|+/g,"|"));
 note("");
@@ -50,7 +52,7 @@ chk("still in the strip", X.rows().some(d=>d.uid===victim), true);
 els["hideExcl"].checked=true; X.render(); X.counts();
 chk("hide excluded removes it from the strip", X.rows().some(d=>d.uid===victim), false);
 chk("...but the count still reports it", els["nexcl"].textContent, exclCount);
-chk("...and it keeps its flag", !!JSON.parse(store[X.KEY])[victim].excl, true);
+chk("...and it keeps its flag", !!disk()[victim].excl, true);
 els["hideExcl"].checked=false; X.render();
 chk("unticking brings it back", X.rows().some(d=>d.uid===victim), true);
 
@@ -75,7 +77,7 @@ chk("...and the info line says the filter is hiding it",
 els["slider"].value = 3;
 X.onSlideUser(3);
 chk("a plate assigned now lands on that same section",
-    JSON.parse(store[X.KEY])[victim].plate, 3);
+    disk()[victim].plate, 3);
 
 // A uid the page has never heard of changes nothing at all.
 const keepActive = X.active;

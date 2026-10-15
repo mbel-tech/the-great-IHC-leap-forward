@@ -78,8 +78,15 @@ import ls_paths as LP  # noqa: E402
 # them was fixed alone the other put every ROI at a third of its true
 # position for weeks.
 import ls_atlas as AT  # noqa: E402
+# The file mirrors the page's localStorage key, which is filed per study (one
+# origin is shared by every study's page). Same rule as 04l and the app's import.
+import ls_curation as CU  # noqa: E402
 
 OUT_ROOT = CONFIG["out_root"]
+STUDY_ID = CU.study_id(OUT_ROOT)
+# The study's own mark, which moves with out_root: what lets an entry filed under
+# the folder this study had before a move be recognised as its own.
+STUDY_TOKEN = CU.study_token(OUT_ROOT)
 REFORMAT_DIR = os.path.join(OUT_ROOT, "reformatted")
 
 # The one place the "sections/ or sections_<marker>/" rule lives. See
@@ -301,13 +308,29 @@ def build(plates, landmarks, regions, k_of):
     return state, skipped
 
 
-def compare(state, path):
-    """What adopting this would change about the file already on disk."""
+def read_stored(path):
+    """The file as stored - flat, or filed per study - or None."""
     try:
         with open(path, encoding="utf-8") as fh:
-            old = json.load(fh)
+            return json.load(fh)
     except (OSError, ValueError):
         return None
+
+
+def compare(state, path):
+    """What adopting this would change about THIS study's part of the file on disk.
+
+    Only this study's part is replaced, so only it is compared: another study's
+    entry, and anything still unclaimed from before the file was filed per study,
+    are carried through the write untouched (see ls_curation.file_under).
+    """
+    stored = read_stored(path)
+    if stored is None:
+        return None
+    old = CU.own(stored, STUDY_ID, STUDY_TOKEN) or {}
+    moved = CU.carried_from(stored, STUDY_ID, STUDY_TOKEN)
+    if moved:
+        print("Curation from %s was carried over (this study's folder moved)" % moved)
     return {
         "old": len(old),
         "added": sorted(set(state) - set(old)),
@@ -390,8 +413,11 @@ def main(argv=None):
         print("\nbacked up %s -> %s"
               % (os.path.basename(args.out), os.path.basename(bak)))
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
+    # Into this study's entry, every other one kept: a flat file is this study's
+    # and is replaced, as it always was.
+    stored = read_stored(args.out)
     with open(args.out, "w", encoding="utf-8") as fh:
-        json.dump(state, fh)
+        json.dump(CU.file_under(stored, STUDY_ID, state, STUDY_TOKEN), fh)
     print("wrote " + args.out)
     print("Regenerate the page to pick it up: python scripts/04l_roi_curator.py ...")
     return 0

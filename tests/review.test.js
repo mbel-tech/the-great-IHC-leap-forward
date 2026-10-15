@@ -17,7 +17,7 @@
 const { env, load, chk, note, done } = require("./harness");
 const { store } = env;
 
-const X = load(`{KEY, PROV, PROWS, P_BY, MARKERS, SECDIRS, FILTERS, st, save, revSrc,
+const X = load(`{KEY, STUDY, PROV, PROWS, P_BY, MARKERS, SECDIRS, FILTERS, st, save, revSrc,
   revAct, revPick, revImg, revLayer, revStep, revList, REV, exportReview, csvq,
   esc, get revSel(){return revSel}}`);
 
@@ -311,7 +311,8 @@ chk("...with the reason", X.st(target.scene_uid).rev.why,
 chk("...and the status it was taken against",
     X.st(target.scene_uid).rev.status, "excluded");
 
-const onDisk = JSON.parse(store[X.KEY] || "{}")[target.scene_uid];
+// Filed per study inside the key (roi_curator_study.test.js).
+const onDisk = ((JSON.parse(store[X.KEY] || "{}")._studies || {})[X.STUDY] || {})[target.scene_uid];
 chk("it is written through, not held in memory", onDisk.rev.act, "restore");
 
 // ---- export ---------------------------------------------------------------

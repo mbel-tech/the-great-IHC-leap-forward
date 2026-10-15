@@ -14,9 +14,9 @@ Produces a self-contained folder:
 
 installer.iss wraps that folder into The-Great-IHC-Leap-Forward-Setup.exe.
 
-Why not PyInstaller (app\lsapp.spec): the stages are loaded by file path at run
-time, so a freezer cannot see what they import, and the spec had to leave
-StarDist and TensorFlow out. An embedded interpreter with a real site-packages
+Why not PyInstaller (the old app\lsapp.spec, now deleted): the stages are
+loaded by file path at run time, so a freezer cannot see what they import, and
+the spec had to leave StarDist and TensorFlow out. An embedded interpreter with a real site-packages
 runs every stage exactly as it runs from source.
 
 Python 3.13 rather than 3.14: pylibCZIrw publishes no cp314 wheel.
@@ -109,11 +109,8 @@ foreach ($dll in "msvcp140.dll", "msvcp140_1.dll", "msvcp140_2.dll", "vcruntime1
 $Py = Join-Path $Runtime "python.exe"
 Invoke-Checked $Py @((Get-Cached "https://bootstrap.pypa.io/get-pip.py"), "--no-warn-script-location", "-q")
 
-# pyinstaller is in requirements.txt for build_app.bat only.
-$req = Join-Path $Cache "requirements-app.txt"
-Get-Content "$Repo\requirements.txt" | Where-Object { $_ -notmatch '^\s*pyinstaller' } | Set-Content $req
 $pipArgs = @("-m", "pip", "install", "--no-warn-script-location", "--prefer-binary",
-    "-r", $req, "-r", "$Repo\requirements-czi.txt", "-r", "$PSScriptRoot\requirements-bundle.txt")
+    "-r", "$Repo\requirements.txt", "-r", "$Repo\requirements-czi.txt", "-r", "$PSScriptRoot\requirements-bundle.txt")
 if ($Constraints) { $pipArgs += @("-c", $Constraints) }
 Invoke-Checked $Py $pipArgs
 # Nothing at run time uses these, and they are what makes the bundle large and

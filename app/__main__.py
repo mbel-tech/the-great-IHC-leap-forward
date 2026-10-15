@@ -84,7 +84,7 @@ def main():
             f"  running: {sys.executable}\n"
             f"  version: {sys.version.split()[0]}\n\n"
             f"work\\appenv is the interpreter that has it - the same 3.13 venv "
-            f"build_app.bat freezes the exe from. (It is 3.13 rather than 3.14 "
+            f"build_app.bat sets up. (It is 3.13 rather than 3.14 "
             f"because pylibCZIrw, which the overview stage needs, publishes no "
             f"cp314 wheel.)\n\n"
             f"Use it:\n"

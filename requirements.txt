@@ -23,6 +23,3 @@ opencv-python-headless
 # Desktop app (app/). QtWebEngine hosts the existing HTML curators unchanged,
 # so the curation tools are not reimplemented.
 PySide6>=6.9
-
-# Only needed to build the bundled .exe, not to run from source.
-pyinstaller>=6.10

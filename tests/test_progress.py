@@ -81,6 +81,48 @@ finally:
     if old is not None:
         os.environ["LS_PROGRESS"] = old
 
+# ---------------------------------------------------------------- time left, and the last run
+chk("hours and minutes, to the nearest 5 min", PR.left_words(2 * 3600 + 9 * 60), "about 2 h 10 min left")
+chk("whole hours", PR.left_words(3 * 3600 + 60), "about 3 h left")
+chk("minutes", PR.left_words(4 * 60 + 10), "about 4 min left")
+chk("under a minute", PR.left_words(40), "under a minute left")
+chk("no estimate, no words", PR.left_words(None), "")
+chk("a run's length in hours", PR.duration_words(3 * 3600 + 12 * 60 + 20), "3 h 12 min")
+chk("a run's length in minutes", PR.duration_words(65), "1 min")
+chk("a run's length under a minute", PR.duration_words(42), "42 s")
+
+t = PR.TimeLeft()
+chk("the first count gives no estimate", t.update(0, 100, 1000.0), None)
+chk("nor after 10 s, however far it got", t.update(5, 100, 1010.0), None)
+chk("nor after a minute at 1 percent", t.update(1, 100, 1060.0) is None, True)
+t = PR.TimeLeft()
+t.update(0, 100, 0.0)
+chk("10 percent in 60 s leaves about 9 min", t.update(10, 100, 60.0), 540.0)
+chk("a quick section after it does not halve the estimate",
+    round(t.update(12, 100, 62.0)), round(88 * 62 / 12))
+t = PR.TimeLeft()
+t.update(200, 300, 0.0)
+chk("a resumed stage counts its rate from where it resumed",
+    t.update(230, 300, 300.0), 700.0)
+chk("a new total (the next phase) starts the estimate again",
+    t.update(1, 5, 310.0), None)
+chk("done means nothing left", t.update(5, 5, 400.0) in (None, 0.0), True)
+
+runs = [{"stage": "detect", "ok": True, "started": "2026-01-02T03:00:00+00:00",
+         "ended": "2026-01-02T06:12:00+00:00"},
+        {"stage": "detect", "ok": False, "started": "2026-01-03T03:00:00+00:00",
+         "ended": "2026-01-03T03:00:09+00:00"},
+        {"stage": "other", "ok": True, "started": "2026-01-04T03:00:00+00:00",
+         "ended": "2026-01-04T03:00:40+00:00"},
+        {"stage": "broken", "ok": True, "started": None, "ended": "2026-01-04T03:01:00+00:00"}]
+chk("the last complete run, skipping a failed one", PR.last_took({"runs": runs}, "detect"),
+    3 * 3600 + 12 * 60)
+chk("a run without its start time is not a length", PR.last_took({"runs": runs}, "broken"), None)
+chk("a stage never run has no length", PR.last_took({"runs": runs}, "nope"), None)
+chk("no history has no length", PR.last_took(None, "detect"), None)
+chk("the row's words", PR.last_run_words({"runs": runs}, "detect"), "Last run took 3 h 12 min")
+chk("a run under a minute is not worth a line", PR.last_run_words({"runs": runs}, "other"), "")
+
 print()
 print(f"{len(failures)} failure(s)" if failures else "all passed")
 sys.exit(1 if failures else 0)

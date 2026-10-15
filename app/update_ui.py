@@ -7,8 +7,9 @@ git instead.
 """
 
 import os
+import threading
 
-from PySide6.QtCore import QObject, QThread, QUrl, Signal
+from PySide6.QtCore import QObject, Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication, QDialog, QDialogButtonBox, QFrame, QHBoxLayout, QLabel,
@@ -22,7 +23,14 @@ TITLE = "Updates"
 
 
 class _Job(QObject):
-    """Runs one function off the window's thread and reports back."""
+    """Runs one function on a plain daemon thread and reports back by signal.
+
+    Not a QThread: a QThread still running when its owner is destroyed aborts
+    the whole process, and a check can sit in a slow DNS lookup well past its
+    timeout when the person closes the app. A daemon thread just ends with it.
+    The signals are queued to the window's thread because the object lives
+    there.
+    """
 
     progress = Signal(str, int, int)
     done = Signal(object)
@@ -84,7 +92,7 @@ class Updater(QObject):
         self.window = window
         self.root = root
         self.decision = None
-        self._threads = []
+        self._jobs = []
         self._build_banner()
 
     # ---- what the window shows -------------------------------------------
@@ -132,18 +140,15 @@ class Updater(QObject):
     # ---- checking ---------------------------------------------------------
 
     def _run(self, fn, done, failed, progress=None):
-        thread, job = QThread(self), _Job(fn)
-        job.moveToThread(thread)
-        thread.started.connect(job.run)
+        job = _Job(fn)
         job.done.connect(done)
         job.failed.connect(failed)
         if progress:
             job.progress.connect(progress)
+        self._jobs.append(job)
         for sig in (job.done, job.failed):
-            sig.connect(thread.quit)
-        thread.finished.connect(lambda: self._threads.remove((thread, job)))
-        self._threads.append((thread, job))
-        thread.start()
+            sig.connect(lambda *_a, j=job: self._jobs.remove(j) if j in self._jobs else None)
+        threading.Thread(target=job.run, daemon=True).start()
 
     def check_in_background(self):
         """On start: one quiet request; offline or any error shows nothing."""
@@ -213,9 +218,13 @@ class Updater(QObject):
         dlg = QProgressDialog(f"Downloading version {decision.version}…", None, 0, 1000,
                               self.window)
         dlg.setWindowTitle(TITLE)
+        # Modal, so nothing can be edited or started while it downloads: the
+        # app closes when it is done.
+        dlg.setWindowModality(Qt.ApplicationModal)
         dlg.setMinimumDuration(0)
         dlg.setAutoClose(False)
         dlg.setValue(0)
+        self._progress = dlg
         got = {}
 
         def progress(name, done, _size):
@@ -225,13 +234,21 @@ class Updater(QObject):
 
         def done(new_dir):
             dlg.close()
-            self._hand_over(new_dir, "apply")
+            self._staged(new_dir)
 
         def failed(err):
             dlg.close()
             self._say(TITLE, f"The update could not be downloaded. Nothing was changed.\n\n{err}")
 
         self._run(lambda p: UP.stage(self.root, decision, p), done, failed, progress)
+
+    def _staged(self, new_dir):
+        """Downloaded. Ask again before closing: things may have changed meanwhile."""
+        if not self._ready_to_close("update"):
+            self._say(TITLE, "The update is downloaded. Choose Update now again when "
+                             "you are ready to close the app.")
+            return
+        self._hand_over(new_dir, "apply")
 
     def _hand_over(self, new_dir, mode):
         try:

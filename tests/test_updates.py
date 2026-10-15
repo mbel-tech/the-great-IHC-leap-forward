@@ -189,6 +189,29 @@ try:
     chk("offline fails fast", __import__("time").time() - t0 < 6, True)
     chk("fetch_manifest from the release", UP.fetch_manifest(release)["version"], "1.3")
 
+    # check(): a manifest that cannot be fetched, or an install folder that
+    # cannot be written, means the installer rather than a failed check.
+    inst0 = os.path.join(TMP, "check-inst")
+    os.makedirs(inst0)
+    with open(os.path.join(inst0, "VERSION.json"), "w") as fh:
+        json.dump(same, fh)
+    broken = dict(release, assets=[a if not a["name"].startswith("update-") else
+                                   dict(a, browser_download_url="http://127.0.0.1:9/m.json")
+                                   for a in release["assets"]])
+    rel_json = os.path.join(TMP, "release.json")
+    json.dump(broken, open(rel_json, "w"))
+    chk("manifest unreachable -> installer", UP.check(inst0, url=url(rel_json)).kind, "installer")
+    json.dump(release, open(rel_json, "w"))
+    chk("check() end to end -> code", UP.check(inst0, url=url(rel_json)).kind, "code")
+    real_writable = UP._writable
+    UP._writable = lambda root: False
+    try:
+        chk("install folder not writable -> installer",
+            UP.check(inst0, url=url(rel_json)).kind, "installer")
+    finally:
+        UP._writable = real_writable
+    chk("a writable folder is writable", UP._writable(inst0), True)
+
     # ------------------------------------------------------------ staging
     def fake_install(path, version="1.2"):
         fake_repo(path)
@@ -283,7 +306,7 @@ try:
     inst = fresh_install("apply-ok")
     before = snapshot(inst)
     ok = UA.apply(inst, make_update(inst), check=lambda r: True)
-    chk("apply: returns True", ok, True)
+    chk("apply: returns ok", ok, "ok")
     chk("apply: new app in place", marker(inst), "new app")
     chk("apply: version is 1.3", UP.installed_info(inst)["version"], "1.3")
     chk("apply: file the release dropped is gone",
@@ -295,7 +318,7 @@ try:
     chk("apply: nothing else touched", snapshot(inst) == before, True)
 
     ok = UA.undo(inst, check=lambda r: True)
-    chk("undo: returns True", ok, True)
+    chk("undo: returns ok", ok, "ok")
     chk("undo: old app back", marker(inst), "app")
     chk("undo: version is 1.2", UP.installed_info(inst)["version"], "1.2")
     chk("undo: dropped file back", os.path.exists(os.path.join(inst, "scripts", "old.py")), True)
@@ -304,7 +327,7 @@ try:
 
     inst = fresh_install("apply-check-fails")
     ok = UA.apply(inst, make_update(inst), check=lambda r: False)
-    chk("check fails: returns False", ok, False)
+    chk("check fails: returns undone", ok, "undone")
     chk("check fails: old app back", marker(inst), "app")
     chk("check fails: old scripts back", marker(inst, "scripts"), "scripts")
     chk("check fails: version is 1.2", UP.installed_info(inst)["version"], "1.2")
@@ -323,14 +346,73 @@ try:
         ok = UA.apply(inst, make_update(inst), check=lambda r: True)
     finally:
         UA._move, UA.RETRY_DELAY = real_move, 1.0
-    chk("move fails: returns False", ok, False)
+    chk("move fails: returns undone", ok, "undone")
     chk("move fails: app back", marker(inst), "app")
     chk("move fails: scripts back", marker(inst, "scripts"), "scripts")
     chk("move fails: analysis untouched", marker(inst, "analysis"), "analysis")
     chk("move fails: version is 1.2", UP.installed_info(inst)["version"], "1.2")
 
+    # A failed update keeps the undo of the update before it.
+    inst = fresh_install("apply-twice")
+    UA.apply(inst, make_update(inst), check=lambda r: True)
+    second = make_update(inst)
+    with open(os.path.join(second, "VERSION.json"), "w") as fh:
+        json.dump(dict(same, version="1.4"), fh)
+    chk("second update fails", UA.apply(inst, second, check=lambda r: False), "undone")
+    chk("second fails: still on 1.3", UP.installed_info(inst)["version"], "1.3")
+    chk("second fails: undo to 1.2 still there", UP.can_undo(inst), True)
+    chk("second fails: previous is 1.2",
+        UP.installed_info(os.path.join(inst, "updates", "previous"))["version"], "1.2")
+
+    # Rolling back can itself be blocked (antivirus scanning the new app/).
+    # Then the old parts must survive somewhere, and the result must say so.
+    inst = fresh_install("rollback-blocked")
+    new = make_update(inst)
+
+    def stuck(src, dst):
+        if os.path.relpath(src, inst) == "app" and "new-" in dst:
+            raise PermissionError("still being scanned")
+        return real_move(src, dst)
+
+    UA._move, UA.RETRY_DELAY = stuck, 0
+    try:
+        ok = UA.apply(inst, new, check=lambda r: False)
+    finally:
+        UA._move, UA.RETRY_DELAY = real_move, 1.0
+    chk("rollback blocked: returns stuck", ok, "stuck")
+    kept = [os.path.join(dp, "marker.txt") for dp, dn, fn in os.walk(os.path.join(inst, "updates"))
+            if "marker.txt" in fn and os.path.basename(dp) == "app"]
+    chk("rollback blocked: the old app is kept under updates/",
+        any(open(p).read() == "app" for p in kept), True)
+    chk("rollback blocked: the rest was put back", marker(inst, "scripts"), "scripts")
+    chk("rollback blocked: result names the folder",
+        "updates" in UA.result_text("apply", ok, "1.2", "1.3", inst), True)
+
     src_main = open(os.path.join(REPO, "app", "__main__.py")).read()
     chk("app/__main__.py handles --check-install", "--check-install" in src_main, True)
+
+    # --check-install must build the main window (an update whose window cannot
+    # be built would otherwise be kept, and then Help > Undo is unreachable),
+    # on a throwaway study: never the person's own.
+    try:
+        import PySide6                                      # noqa: F401
+    except ImportError:
+        pass
+    else:
+        import subprocess
+        home = os.path.join(TMP, "home")
+        os.makedirs(home)
+        cwd = os.path.join(TMP, "cwd")
+        os.makedirs(cwd)
+        env = dict(os.environ, LS_HOME=home, QT_QPA_PLATFORM="offscreen",
+                   PYTHONPATH=REPO, QTWEBENGINE_CHROMIUM_FLAGS="--no-sandbox")
+        env.pop("LS_CONFIG", None)
+        r = subprocess.run([sys.executable, "-m", "app", "--check-install"], cwd=cwd, env=env,
+                           capture_output=True, text=True, timeout=180)
+        chk("--check-install exits 0", r.returncode, 0)
+        chk("--check-install built the window", "window built" in r.stdout, True)
+        chk("--check-install left LS_HOME alone", os.listdir(home), [])
+        chk("--check-install wrote nothing in the working folder", os.listdir(cwd), [])
 
     # ------------------------------------------------------------ the window side
     try:
@@ -372,6 +454,50 @@ try:
             fh.write("Updated to 1.3.")
         u.report_last_result()
         chk("result of the last update shown once", said[-1], "Updated to 1.3.")
+
+        # Downloaded, but the person said no to closing this time: no hand-over.
+        launched = []
+        real_launch = UP.launch_apply
+        UP.launch_apply = lambda *a, **k: launched.append(a)
+        u._ready_to_close = lambda verb: False
+        try:
+            u._staged("somewhere")
+        finally:
+            UP.launch_apply = real_launch
+        chk("no hand-over when closing is declined", launched, [])
+
+        # The download window blocks the app while it runs.
+        import threading
+        from PySide6.QtCore import Qt
+        gate = threading.Event()
+        real_stage = UP.stage
+        UP.stage = lambda root, d, p=None: gate.wait(5) and None
+        try:
+            u._stage(UP.Decision("code", version="1.3"))
+            chk("download window is modal", u._progress.windowModality(), Qt.ApplicationModal)
+        finally:
+            gate.set()
+            UP.stage = real_stage
+
+        # Closing the app while a check is still running must not abort it.
+        import subprocess
+        prog = (
+            "import sys, time; sys.path.insert(0, %r)\n"
+            "from PySide6.QtCore import QTimer\n"
+            "from PySide6.QtWidgets import QApplication, QMainWindow\n"
+            "import update_ui as UI\n"
+            "app = QApplication([])\n"
+            "w = QMainWindow(); u = UI.Updater(w, None)\n"
+            "u._run(lambda p: time.sleep(3), lambda r: None, lambda e: None)\n"
+            "QTimer.singleShot(100, app.quit)\n"
+            "app.exec()\n"
+            "del u, w\n"
+            "print('exited cleanly')\n"
+        ) % os.path.join(REPO, "app")
+        r = subprocess.run([sys.executable, "-c", prog], capture_output=True, text=True,
+                           timeout=60, env=dict(os.environ, QT_QPA_PLATFORM="offscreen"))
+        chk("closing during a check does not abort", (r.returncode, "exited cleanly" in r.stdout),
+            (0, True))
 finally:
     shutil.rmtree(TMP, ignore_errors=True)
 

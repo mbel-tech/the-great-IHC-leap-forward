@@ -141,13 +141,34 @@ def decide(info, release, manifest):
     return d
 
 
-def check(root, timeout=5):
+def _writable(root):
+    """Can this account write the install folder? (Not under Program Files, say.)"""
+    probe = os.path.join(root, "updates", ".write-test")
+    try:
+        os.makedirs(os.path.dirname(probe), exist_ok=True)
+        with open(probe, "w") as fh:
+            fh.write("")
+        os.remove(probe)
+        return True
+    except OSError:
+        return False
+
+
+def check(root, timeout=5, url=API_URL):
     info = installed_info(root)
     if not info:
         raise UpdateError("This copy has no VERSION.json, so it cannot tell which version it is.")
-    release = fetch_latest(timeout)
-    manifest = fetch_manifest(release, timeout)
-    return decide(info, release, manifest)
+    release = fetch_latest(timeout, url)
+    try:
+        manifest = fetch_manifest(release, timeout)
+    except UpdateError:
+        manifest = None             # the installer still works; say that rather than fail
+    d = decide(info, release, manifest)
+    if d.kind == "code" and not _writable(root):
+        # Installed for all users: only the installer, run as administrator, can
+        # write there.
+        d.kind, d.downloads = "installer", []
+    return d
 
 
 # ---------------------------------------------------------------- downloading

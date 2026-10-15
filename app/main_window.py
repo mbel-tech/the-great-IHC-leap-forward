@@ -36,6 +36,14 @@ from screens import CurateScreen, HomeScreen, SetupScreen, StageListScreen
 from widgets import COLOUR, QUIET, StepList, UnblindDialog
 
 
+def _curation_outputs(stage):
+    """The curation keys a stage writes (`curation/<key>.json` in its outputs): 04q's import."""
+    # Some outputs are path objects (stages.Art) rather than strings; none of those is curation.
+    return [os.path.splitext(os.path.basename(o))[0] for o in (stage.outputs or [])
+            if isinstance(o, str) and o.replace("\\", "/").startswith("curation/")
+            and o.endswith(".json")]
+
+
 class _Job(QObject):
     """Runs one stage off the GUI thread."""
     line = Signal(str)
@@ -531,18 +539,25 @@ class MainWindow(QMainWindow):
             self.out_root, "JSON (*.json)")
         if not path:
             return
+        # One folder for what the import replaces and for anything the page that was open
+        # still tries to save over it.
+        aside = ST.backup_folder()
         try:
-            keys = ST.CurationStore(self.out_root, lambda: self.session.project).import_bundle(path)
+            keys = ST.CurationStore(self.out_root, lambda: self.session.project).import_bundle(
+                path, aside)
         except (OSError, ValueError) as e:
             QMessageBox.warning(self, "Could not import", str(e))
             return
-        self.curator.refresh_seed()
+        # Not just a new seed: the open curator still holds the old state and would save it
+        # straight back over the import on its next autosave. This reloads it with the import.
+        self.curator.curation_replaced(keys, aside)
         self._log(f"imported curation state: {', '.join(keys) or 'nothing'}")
         QMessageBox.information(
             self, "Curation state imported",
             f"{len(keys)} key(s) imported into\n"
             f"{os.path.join(self.out_root, 'curation')}\n\n"
-            "Reopen a curator to see it.")
+            "The curator has been reloaded with it. What it replaced is kept in\n"
+            f"{os.path.join(self.out_root, 'curation', aside)}")
 
     def _explain_state(self):
         page = os.path.join(self.out_root, "reformatted",
@@ -761,6 +776,10 @@ class MainWindow(QMainWindow):
         # its own, so Qt would call it on the worker thread, which then tries to
         # wait on itself and starts the next stage's thread from inside it.
         self._current = base
+        # A stage that writes curation (04q, from the curator's exports) is an import: the
+        # open curator must not save over its file while it runs, nor after.
+        if _curation_outputs(base):
+            self.curator.hold(_curation_outputs(base))
         self._job.finished.connect(self._job_finished)
         self._thread.start()
 
@@ -806,6 +825,17 @@ class MainWindow(QMainWindow):
                                           now_iso(), options=getattr(self, "_run_values", None))
         if problem:
             self._log(f"could not record the run in the project: {problem}")
+        if _curation_outputs(st):
+            if res.ok:
+                # The stage wrote the plain copy only; the project takes it over here (it
+                # changed nothing else meanwhile, so that is an adopt), then the curator is
+                # reloaded from it.
+                line = self.session.sync_curation(self)
+                if line:
+                    self._log(f"curation: {line}")
+                self.curator.curation_replaced(_curation_outputs(st))
+            else:
+                self.curator.release()
         self.drawer.state.setStyleSheet("")
         if res.ok:
             self._running.pop(st.sid, None)

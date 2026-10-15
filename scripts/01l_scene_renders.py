@@ -64,6 +64,21 @@ says so once, and the CSV's `marker_range_from` / `nuclear_range_from` say
 Nothing here is measured. 05c reads native pixels from the CZI, whatever these
 pictures look like.
 
+Zeiss's preview copy (`--source zeiss_preview`, off by default)
+----------------------------------------------------------------
+
+The CZI also holds smaller copies of every scan that the Zeiss software made
+at scan time, at 1/2, 1/4, 1/8... of the native size. `scene_render.source:
+zeiss_preview` reads the copy at the picture's resolution in one call, so 15 of
+every 16 native pixels at 2.6 um/px are never decoded. Same size of picture,
+but Zeiss did the averaging and compressed that copy on its own, so values
+differ slightly from the default and clipped areas are diluted as
+docs/czi-reading-audit.md finding 2 describes - a block is drawn at the clip
+ceiling only if the copy says so. Only these pictures change; every stage that
+measures reads native pixels. At 0.65 um/px there is no copy to read and the
+scan itself is used. The index's `source` column says which route drew each
+picture, and changing the setting redraws them.
+
 How it is made fast
 -------------------
 
@@ -130,6 +145,8 @@ INDEX_CSV = os.path.join(QC_DIR, "scene_renders.csv")
 
 DEFAULT_UM_PX = float(_SR.get("um_per_px", 2.6))
 DEFAULT_RANGE = _SR.get("range", "dataset")
+DEFAULT_SOURCE = _SR.get("source") or "scan"
+SOURCES = ("scan", "zeiss_preview")
 #: CZIs drawn at once. Each uses two threads (one per channel), so half the
 #: cores, and no more than four: past that the disk, not the CPU, is the limit.
 DEFAULT_WORKERS = max(1, min(4, (os.cpu_count() or 2) // 2))
@@ -164,7 +181,7 @@ INDEX_KEYS = ["scene_uid", "file", "animal", "slide", "variant",
               "nuclear_lo", "nuclear_hi", "nuclear_range_from",
               "marker_lo", "marker_hi", "marker_range_from",
               "clipped_fraction_marker", "tilefield_applied",
-              "stain_counterstain_png", "stain_only_png", "reader"]
+              "stain_counterstain_png", "stain_only_png", "reader", "source"]
 
 
 def _load(script, name):
@@ -250,6 +267,24 @@ def read_blocks(read, rect, b):
     if got is None:
         return None
     return np.asarray(got[0], dtype=np.float32)
+
+
+def read_preview(doc, rect, b, idx, scene):
+    """The scene at 1/b of native size from Zeiss's stored copy, as float32.
+
+    Shaped as `read_blocks` shapes the default route - whole b x b blocks from
+    the scene origin - so the tile field and the index read it the same way.
+    """
+    rx, ry, rw, rh = rect
+    w, h = rw // b, rh // b
+    if w < 1 or h < 1:
+        return None
+    got = CR.read_plane(doc, SR.GEO._Rect(rx, ry, rw, rh), idx, scene=scene,
+                        zoom=1.0 / b)
+    out = np.zeros((h, w), np.float32)
+    hh, ww = min(h, got.shape[0]), min(w, got.shape[1])
+    out[:hh, :ww] = got[:hh, :ww]
+    return out
 
 
 def section_range(values, tissue, clipped=None):
@@ -485,7 +520,7 @@ def fits(need):
     return free
 
 
-def same_drawing(row, um_px, range_mode, only_path):
+def same_drawing(row, um_px, range_mode, only_path, source="scan"):
     """True when the index says the picture on disk was drawn as asked now.
 
     Changing the resolution or brightness in Set up has to redraw the pictures
@@ -498,7 +533,9 @@ def same_drawing(row, um_px, range_mode, only_path):
         same_px = abs(float(row.get("um_per_px") or 0) - um_px) < 0.005
     except ValueError:
         same_px = False
-    return same_px and row.get("range") == range_mode and index_key(row) == index_key(only_path)
+    return (same_px and row.get("range") == range_mode
+            and (row.get("source") or "scan") == source
+            and index_key(row) == index_key(only_path))
 
 
 def save_png(img, path):
@@ -509,13 +546,17 @@ def save_png(img, path):
 
 def render_scene(read_nuc, read_mark, rect, b, fields_nm, ranges, range_mode,
                  marker, colour, ceiling=65535):
-    """(composite rgb, stain-only grey, row facts) for one scene, or None."""
+    """(composite rgb, stain-only grey, row facts) for one scene, or None.
+
+    `read_nuc` and `read_mark` take (rect, b) and return the plane in b x b
+    blocks as float32 - `read_blocks` over the scan, or `read_preview`.
+    """
     nf, mf = fields_nm
     # The marker is read on a second thread while the counterstain is read and
     # drawn here: libCZI decodes without holding the GIL, so the two run on two
     # cores. Its own handle and cache, so the two never share a reader.
     with ThreadPoolExecutor(1) as ex:
-        pending = ex.submit(read_blocks, read_mark, rect, b)
+        pending = ex.submit(read_mark, rect, b)
         try:
             return _render(read_nuc, pending, rect, b, nf, mf, ranges, range_mode,
                            marker, colour, ceiling)
@@ -525,7 +566,7 @@ def render_scene(read_nuc, read_mark, rect, b, fields_nm, ranges, range_mode,
 
 def _render(read_nuc, pending, rect, b, nf, mf, ranges, range_mode, marker,
             colour, ceiling):
-    nuc = read_blocks(read_nuc, rect, b)
+    nuc = read_nuc(rect, b)
     if nuc is None:
         return None
     # A block mean at the ceiling means every native pixel in it clipped.
@@ -587,6 +628,12 @@ def main():
     ap.add_argument("--out-dir", default=None, metavar="DIR",
                     help="where the pictures go (default from config "
                          f"scene_render.out_dir: {OUT_DIR})")
+    ap.add_argument("--source", choices=SOURCES, default=DEFAULT_SOURCE,
+                    help="scan: average the scan's own pixels (exact, the default). "
+                         "zeiss_preview: Zeiss's stored smaller copy, much faster, "
+                         "values differ slightly. Pictures only; nothing measured "
+                         f"reads them (default from config scene_render.source: "
+                         f"{DEFAULT_SOURCE})")
     ap.add_argument("--marker", choices=MARKERS or None, default=None,
                     help="only the scans of this marker (default: every marker)")
     ap.add_argument("--force", action="store_true",
@@ -603,7 +650,17 @@ def main():
             f"--um-px {args.um_px}: the scan's own pixels are {NATIVE_UM} um, "
             f"so that is the finest picture there is.")
     out_dir = args.out_dir or OUT_DIR
+    if args.source not in SOURCES:
+        raise SystemExit(f"scene_render.source {args.source!r}: choose one of "
+                         f"{', '.join(SOURCES)}")
     b = block_for(args.um_px)
+    # At native size there is no smaller copy: both routes are the scan itself.
+    source = args.source if b > 1 else "scan"
+    if source != args.source:
+        print("0.65 um/px is the scan's own pixels - drawing from the scan")
+    if source == "zeiss_preview":
+        print("drawing from Zeiss's stored preview copy (faster; pictures differ "
+              "slightly from the scan route; nothing measured reads them)")
     um_px = b * NATIVE_UM
     if abs(um_px - args.um_px) > 1e-6:
         print(f"{args.um_px} um/px rounded to {um_px:.2f} ({b}x{b} native pixels)")
@@ -667,7 +724,7 @@ def main():
                     os.path.join(mdir, ONLY_DIR, uid + ".png")]
             if (not args.force and all(os.path.exists(p) for p in both)
                     and same_drawing(index.get(index_key(both[1])), um_px, range_mode,
-                                     both[1])):
+                                     both[1], source)):
                 existing += 1
                 continue
             todo.append(r)
@@ -702,8 +759,11 @@ def main():
                         continue
 
                     def reader(doc, idx, si=si):
-                        return lambda x, y, w, h: CR.read_plane(
-                            doc, SR.GEO._Rect(x, y, w, h), idx, scene=si)
+                        if source == "zeiss_preview":
+                            return lambda rect, bb: read_preview(doc, rect, bb, idx, si)
+                        plane = (lambda x, y, w, h: CR.read_plane(
+                            doc, SR.GEO._Rect(x, y, w, h), idx, scene=si))
+                        return lambda rect, bb: read_blocks(plane, rect, bb)
 
                     need = memory_needed(rects[si], b)
                     room = gate.acquire(need)
@@ -737,7 +797,7 @@ def main():
                         "tilefield_applied": int(fields_nm[1] is not None),
                         "stain_counterstain_png": os.path.abspath(p_rgb),
                         "stain_only_png": os.path.abspath(p_only),
-                        "reader": "pylibCZIrw", **facts}
+                        "reader": "pylibCZIrw", "source": source, **facts}
                     drawn.add(uid)
         except Exception as exc:  # noqa: BLE001 - one bad file must not stop the rest
             bad += [(r["scene_uid"], f"{type(exc).__name__}: {exc}") for r in todo
@@ -777,7 +837,8 @@ def main():
                       f"{(time.time() - t0) / 60:.1f} min)", end="")
 
     print()
-    print(f"wrote {made} scenes at {um_px:.2f} um/px ({range_mode} range) to {out_dir}")
+    print(f"wrote {made} scenes at {um_px:.2f} um/px ({range_mode} range"
+          f"{', Zeiss preview' if source == 'zeiss_preview' else ''}) to {out_dir}")
     if existing:
         print(f"  {existing} already there, left alone (--force redraws them)")
     if failed:

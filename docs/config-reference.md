@@ -28,6 +28,7 @@ A key marked *required* has to be present before any stage will run.
 | `curation_render.um_per_px` | float | `2.6` | `04o` | Resolution of the curation composites rendered from the CZI. |
 | `scene_render.out_dir` | path_dir_opt |  | `01l` | Where the pictures of every scene go. Empty means <out_root>/scene_renders. |
 | `scene_render.um_per_px` | float | `2.6` | `01l` | Resolution of the scene pictures, in micrometres per pixel. |
+| `scene_render.source` | str | `"scan"` | `01l` | Where the scene pictures take their pixels from: `scan` is exact; `zeiss_preview` is about ten times faster and changes the pictures slightly, never what is measured. |
 | `scene_render.range` | str | `"dataset"` | `01l` | How the scene pictures are brightened. |
 | `acquisition.layout` | str | `"multiplex"` | `01_overviews`, `02_pair_passes`, `04a_reformat`, `05c`, `app` | How the markers were imaged: one multi-channel scan per section, or one scan per marker. |
 | `acquisition.channels` | raw | `[]` | `01_overviews`, `05c`, `app` | What each CZI channel is: its name, what it is for, and how it is found in a file. |

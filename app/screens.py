@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QCheckBox, QFrame, QGridLayout, QMessageBox, QHBoxLayout, QLabel, QProgressBar, QPushButton, QScrollArea,
     QTabBar, QTabWidget, QVBoxLayout, QWidget)
 
+import progress as PR
 import stages as S
 import theme as T
 import workflow as W
@@ -285,7 +286,7 @@ class StageListScreen(QWidget):
                         plain=W.plain(st, study), status=words, state=state,
                         info_html=stage_info(st, study, block, values), mark=marks(st),
                         can_run=can_run, option_values=values, changed_count=len(values),
-                        action=action, goto=goto,
+                        action=action, goto=goto, took=PR.last_run_words(block, sid),
                         # A folder to open once the stage has made something.
                         open_visible=((state == "done") if sid in W.FOLDERS else
                                       bool(W.report_file(sid, study)) if sid in W.REPORTS

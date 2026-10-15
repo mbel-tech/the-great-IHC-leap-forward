@@ -742,6 +742,25 @@ if MW:
         QCoreApplication.processEvents()
         _t.sleep(0.02)
     chk("the bar goes when the stage is done", w.drawer.bar.isVisibleTo(w.drawer), False)
+    import progress as PR
+    _clock = [0.0]
+    w.drawer.clock = lambda: _clock[0]
+    w.drawer.start_progress()
+    w.drawer.show_progress(PR.Progress(0, 100, "sections"))
+    _clock[0] = 600.0
+    w.drawer.show_progress(PR.Progress(10, 100, "sections"))
+    chk("a long stage says about how long it has left, next to its count",
+        w.drawer.count.text(), "10 of 100 sections (10%), about 1 h 30 min left")
+    w.drawer.stop_progress()
+    w.session.project.record_run("scene_renders", True, "2026-01-02T03:00:00+00:00",
+                                 "2026-01-02T06:12:00+00:00")
+    w.refresh()
+    _sr = w.lists["prepare"].rows["scene_renders"]
+    chk("its row says how long the last complete run took",
+        (_sr.took.text(), _sr.took.isVisibleTo(w.lists["prepare"])),
+        ("Last run took 3 h 12 min", True))
+    chk("a stage never run says nothing of it",
+        w.lists["measure"].rows["roi_geometry"].took.isVisibleTo(w.lists["measure"]), False)
 
     def _wait_idle():
         end = _t.time() + 10

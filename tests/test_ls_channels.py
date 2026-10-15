@@ -283,6 +283,15 @@ chk("under multiplex it is refused (the table already says it)",
          "marker_segmentation": {"pERK": {"segment": "own"}}},
         "multiplex")[0]), True)
 
+print("--- the counterstain is never a paired study's marker ---")
+dapi_first = CH.validate({"layout": "paired", "markers": ["DAPI", "pERK", "PCNA"]}, "paired")[0]
+chk("DAPI listed as a marker is refused, since it shifts every marker by one",
+    len(dapi_first) == 1 and "counterstain" in dapi_first[0], True)
+chk("...as is Hoechst", bool(CH.validate({"markers": ["Hoechst 33342", "AF568"]}, "paired")[0]),
+    True)
+chk("a marker whose name merely contains the letters is not",
+    CH.validate({"markers": ["DAPIx1", "AF488"]}, "paired")[0], [])
+
 print()
 print("ALL PASS" if not failures else f"{len(failures)} FAILED")
 sys.exit(1 if failures else 0)

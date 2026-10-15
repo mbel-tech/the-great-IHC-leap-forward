@@ -450,6 +450,10 @@ def resolve(channels, czi_channel_names):
     return out
 
 
+#: Names that are the nuclear counterstain, never a marker of a paired study.
+NUCLEAR_NAME_RE = re.compile(r"^\s*(dapi|hoechst(\s*\d+)?|draq\s*5)\s*$", re.I)
+
+
 def validate(block, layout):
     """(errors, warnings) for a study's `acquisition` block.
 
@@ -546,6 +550,15 @@ def validate(block, layout):
                 errors.append(
                     f"marker name {m!r} is not usable in a file path. "
                     f"Use letters, digits, spaces, and . _ + - only.")
+            elif NUCLEAR_NAME_RE.search(m):
+                # Every paired scan already carries the counterstain beside its
+                # marker. Listing it as a marker too shifts every marker step by
+                # one: marker 0 becomes DAPI, and pairing and the per-marker
+                # stages then look for scans that do not exist.
+                errors.append(
+                    f"{m!r} in `acquisition.markers` is the nuclear "
+                    f"counterstain, not a marker. Each paired scan carries it "
+                    f"beside its marker, so leave it out of this list.")
     elif declared:
         errors.append(
             "`acquisition.markers` applies to `paired` studies only. Under "

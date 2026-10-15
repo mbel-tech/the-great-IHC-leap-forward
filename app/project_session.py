@@ -14,7 +14,7 @@ import os
 from datetime import datetime, timezone
 
 from PySide6.QtCore import QObject, Signal
-from PySide6.QtWidgets import QFileDialog, QInputDialog, QMessageBox
+from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 import ls_bundle as LB
 import ls_config as LC
@@ -170,39 +170,21 @@ class ProjectSession(QObject):
     # ---- new / open -----------------------------------------------------------
 
     def new_project(self, repo_root, parent=None):
-        """Name it, choose where it lives, fill in its settings; nothing is written until they are valid."""
+        """Two folders, the section thickness and the atlas; the slides answer the rest.
+
+        The study file is written into the output folder (study.json), so the whole
+        study is that one folder. Choosing an output folder that already holds a
+        study opens it instead.
+        """
         if not self.confirm_discard(parent, "start a new project"):
             return False
-        name, ok = QInputDialog.getText(parent, "New project", "Name for this project:")
-        name = (name or "").strip()
-        if not ok or not name:
+        from new_study import NewStudyDialog
+        dlg = NewStudyDialog(parent)
+        if not dlg.exec() or not dlg.path:
             return False
-        try:
-            start = os.path.join(LC.studies_dir(), LC.slugify(name) + ".json")
-        except SystemExit as exc:
-            BTN.warning(parent, "Name", str(exc))
-            return False
-        path, _ = QFileDialog.getSaveFileName(parent, "Where should the project file live?",
-                                              start, "Project (*.json)")
-        if not path:
-            return False
-        if not path.lower().endswith(".json"):
-            path += ".json"
-        if os.path.exists(path):
-            BTN.warning(parent, "Already exists", "%s already exists. Open it instead, or choose "
-                        "another name." % path)
-            return False
-        from config_dialog import ConfigDialog
-        project = LP.Project.new(name)
-        dlg = ConfigDialog(repo_root, path=path, study_name=name, parent=parent, project=project)
-        if not dlg.exec():
-            return False
-        try:
-            project.save_as(path)
-        except LP.ProjectError as exc:
-            BTN.warning(parent, "Not saved", str(exc))
-            return False
-        self.set_project(project)
+        if dlg.opened:
+            return self.open_project(parent, dlg.path, confirmed=True, repo_root=repo_root)
+        self.set_project(dlg.project)
         return True
 
     def open_project(self, parent=None, path=None, confirmed=False, repo_root=None):

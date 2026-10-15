@@ -305,30 +305,70 @@ legacy = ConfigDialog(REPO, path=pj.path, parent=None)
 chk("without a project the dialog still writes the file itself (the old behaviour)", legacy.ok_button.text().replace("&", ""), "Save")
 
 print("--- New project ---")
-picked["name"] = "Fresh one"
-picked["save"] = os.path.join(TMP, "fresh", "fresh.json")
-valid = read(study("tmpl"))
+import struct                                                    # noqa: E402
+import czi_meta                                                  # noqa: E402
+import autodetect as AD                                          # noqa: E402
+from new_study import NewStudyDialog                             # noqa: E402
+
+SLIDES = os.path.join(TMP, "fresh_slides")
+os.makedirs(SLIDES, exist_ok=True)
+for fname, marker, em in (("AB1_1a.czi", "AF568", 603), ("AB1_1b.czi", "AF488", 520)):
+    body = ('<ImageDocument><Metadata><Information><Image><Dimensions><Channels>'
+            '<Channel Id="Channel:0" Name="DAPI"><EmissionWavelength>465</EmissionWavelength></Channel>'
+            f'<Channel Id="Channel:1" Name="{marker}"><EmissionWavelength>{em}</EmissionWavelength>'
+            '</Channel></Channels></Dimensions></Image></Information><Scaling><Items>'
+            '<Distance Id="X"><Value>6.5e-07</Value></Distance></Items></Scaling>'
+            '</Metadata></ImageDocument>').encode()
+    head = bytearray(czi_meta.HEADER_LEN)
+    head[:10] = b"ZISRAWFILE"
+    struct.pack_into("<QQ", head, 84, 0, czi_meta.HEADER_LEN)
+    seg = bytearray(czi_meta.SEGMENT_HEADER_LEN)
+    seg[:14] = b"ZISRAWMETADATA"
+    sizes = struct.pack("<ii", len(body), 0).ljust(czi_meta.METADATA_DATA_LEN, b"\0")
+    open(os.path.join(SLIDES, fname), "wb").write(bytes(head) + bytes(seg) + sizes + body)
+FRESH = os.path.join(TMP, "Fresh one")
+fill = {"thickness": 14.0, "out": FRESH}
 
 
-def fill_and_accept(self):
-    for k in ("source_dir", "out_root", "atlas_pdf", "export_dir"):
-        self.project.cfg[k] = valid[k]
-    return QDialog.Accepted
+def fill_and_create(self):
+    self.slides.edit.setText(SLIDES)
+    self._read_slides()
+    self.output.edit.setText(fill["out"])
+    self.thickness.setValue(fill["thickness"])
+    self._check()
+    if not self.ok.isEnabled():
+        return QDialog.Rejected
+    self._create()
+    return self.result()
 
 
-ConfigDialog.exec = fill_and_accept
+NewStudyDialog.exec = fill_and_create
 n_ses = session_on("g")
 answers["Unsaved changes"] = QMessageBox.Discard
 opened.clear()
 n_ses.opened.connect(opened.append)
-chk("new project: named, placed, filled in, saved", (n_ses.new_project(REPO, None), n_ses.project.name), (True, "Fresh one"))
-chk("...the file exists with a project block", ("project" in read(picked["save"]), n_ses.dirty), (True, False))
-chk("...and it is the open project", opened[-1], os.path.abspath(picked["save"]))
-ConfigDialog.exec = lambda self: QDialog.Rejected
-picked["save"] = os.path.join(TMP, "fresh", "never.json")
-chk("cancelling the settings creates nothing", (n_ses.new_project(REPO, None), os.path.exists(picked["save"])), (False, False))
-picked["save"] = os.path.join(TMP, "fresh", "fresh.json")
-chk("an existing file is refused, not overwritten", (n_ses.new_project(REPO, None), "warn:Already exists" in asked), (False, True))
+chk("new project: two folders and a thickness, named after the output folder",
+    (n_ses.new_project(REPO, None), n_ses.project.name), (True, "Fresh one"))
+made = os.path.join(FRESH, AD.STUDY_FILE)
+chk("...the study file lives in the output folder, with a project block",
+    ("project" in read(made), n_ses.dirty), (True, False))
+chk("...and it is the open project", opened[-1], os.path.abspath(made))
+cfg_new = read(made)
+chk("...the slides gave its pixel size, layout and markers",
+    (cfg_new["pixel_size_um"], cfg_new["acquisition"]["layout"], cfg_new["acquisition"]["markers"]),
+    (0.65, "paired", ["AF568", "AF488"]))
+chk("...exports and pictures default to inside the output folder",
+    [k for k in ("export_dir", "atlas_pdf") if cfg_new.get(k)], [])
+chk("...and it validates", LC.validate(cfg_new, made)[0], [])
+fill.update(thickness=0, out=os.path.join(TMP, "no thickness"))
+chk("without a thickness nothing is made",
+    (n_ses.new_project(REPO, None), os.path.exists(fill["out"])), (False, False))
+fill.update(thickness=14.0, out=FRESH)
+before = read(made)
+opened.clear()
+chk("an output folder that already holds a study opens it, not overwrites it",
+    (n_ses.new_project(REPO, None), read(made) == before, opened[-1:]),
+    (True, True, [os.path.abspath(made)]))
 
 print("--- the runner ignores the project block ---")
 import runner as RN                                             # noqa: E402

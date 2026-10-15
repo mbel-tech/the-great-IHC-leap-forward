@@ -44,6 +44,7 @@ A key marked *required* has to be present before any stage will run.
 | `detection.threshold.mad_k` | float | `3.0` | `05c` | How many robust standard deviations above the background median a pixel must be to count as signal, for the `threshold` backend. |
 | `detection.threshold.min_area_um2` | float | `5.0` | `05c` | The smallest object the `threshold` backend will report, in square micrometres. |
 | `atlas_source` | str | `"salmon"` | `04e`, `04k`, `04l`, `04w`, `04x` | Which atlas the run uses: salmon (the default), wullimann1996, or one you imported. |
+| `atlas_rebuild_plates` | bool | `false` | `app` | Build the built-in atlas's plates again from its source instead of using the plates that ship with the app. |
 | `atlas_polygon_mirror` | bool | `false` | `04l` | Mirror the plate outlines about the midline, for an atlas whose outlines cover one hemisphere (Wullimann). |
 | `atlases` | raw | `{}` | `04e`, `04k`, `04l` | Atlases this study registered itself, beside the built-in salmon and wullimann1996: {name: {set_dir, region_kind, ...}}. |
 | `atlas_plate_set.dir` | str | `"plates"` | `04e`, `04k`, `04l` | Which plate set the ROI curator and the registration use. |

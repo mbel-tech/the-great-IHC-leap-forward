@@ -11,7 +11,7 @@ import os
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
-    QFrame, QGridLayout, QHBoxLayout, QLabel, QProgressBar, QPushButton, QScrollArea,
+    QApplication, QCheckBox, QFrame, QGridLayout, QMessageBox, QHBoxLayout, QLabel, QProgressBar, QPushButton, QScrollArea,
     QTabBar, QTabWidget, QVBoxLayout, QWidget)
 
 import stages as S
@@ -662,6 +662,28 @@ class SetupScreen(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(*PAGE_MARGINS)
         lay.addWidget(ScreenHeader(W.SETUP))
+        adv = QHBoxLayout()
+        self.advanced_line = QLabel(
+            "Only what the slide files cannot tell the program is asked here. Pixel size, "
+            "file names and channels are read from the slides; folders sit inside the "
+            "output folder.")
+        self.advanced_line.setWordWrap(True)
+        self.advanced_line.setStyleSheet(QUIET)
+        adv.addWidget(self.advanced_line, 1)
+        self.advanced = QCheckBox("Show advanced settings")
+        self.advanced.setChecked(self._advanced_on())
+        self.advanced.toggled.connect(self._toggle_advanced)
+        adv.addWidget(self.advanced)
+        adv.addWidget(InfoButton(
+            "Advanced settings",
+            "<p>Settings with one right answer that the slide files give (pixel size, "
+            "how the files are named, which channel is the counterstain, how the markers "
+            "were scanned) are read from the files by <b>Read settings from the slides</b> "
+            "on the Slides tab, and the folders for exports and pictures default to "
+            "folders inside the output folder.</p><p>They are all still here: tick "
+            "<b>Show advanced settings</b> to see and change them. A required setting that "
+            "is still empty is always shown.</p>"))
+        lay.addLayout(adv)
         self.tabs = QTabWidget()
         lay.addWidget(self.tabs, 1)
         self._slides_tab = QWidget()
@@ -681,6 +703,17 @@ class SetupScreen(QWidget):
             "<p>A file name has to fit the pattern under <b>Slide file names</b>, or the "
             "file is invisible to every stage.</p>"))
         sl.addLayout(top)
+        read = QHBoxLayout()
+        self.detect_btn = QPushButton("Read settings from the slides")
+        self.detect_btn.setToolTip("Read pixel size, file names and channels from the slide "
+                                   "files' headers and fill in the settings not yet set")
+        self.detect_btn.clicked.connect(self.detect_from_slides)
+        read.addWidget(self.detect_btn)
+        self.detect_line = QLabel("")
+        self.detect_line.setWordWrap(True)
+        self.detect_line.setStyleSheet(QUIET)
+        read.addWidget(self.detect_line, 1)
+        sl.addLayout(read)
         self.current = QLabel("")
         self.current.setWordWrap(True)
         self.current.setTextFormat(Qt.RichText)
@@ -699,7 +732,11 @@ class SetupScreen(QWidget):
             w.deleteLater()
         self.forms = {}
         project = self.session.project
-        for sid, title, intro, keys in W.setting_sections(LC.dialog_fields()):
+        advanced = self.advanced.isChecked()
+        empty = {k.path for k in LC.SPEC
+                 if k.required and project.get(k.path) in (None, "")}
+        for sid, title, intro, keys in W.setting_sections(LC.dialog_fields(), advanced,
+                                                          empty):
             page = QWidget()
             pl = QVBoxLayout(page)
             head = QHBoxLayout()
@@ -710,7 +747,8 @@ class SetupScreen(QWidget):
             pl.addLayout(head)
             form = SettingsForm(self.repo_root, project=project,
                                 keys=[k.path for k in keys], parent=page,
-                                headings=W.SECTION_HEADINGS)
+                                headings=W.SECTION_HEADINGS,
+                                channel_tools=(sid == "imaging"))
             form.setEnabled(not project.read_only)
             pl.addWidget(_scroll(form), 1)
             if sid == "atlas":
@@ -730,6 +768,62 @@ class SetupScreen(QWidget):
             self.forms[sid] = (form, status, title)
             self.tabs.addTab(page, title)
         self.update_marks()
+
+    @staticmethod
+    def _advanced_on():
+        import ls_config as LC
+        return bool(LC.read_settings().get("setup_advanced"))
+
+    def _toggle_advanced(self, on):
+        import ls_config as LC
+        try:
+            LC.write_settings({"setup_advanced": bool(on)})
+        except OSError:
+            pass
+        current = self.tabs.currentIndex()
+        self.build()
+        self.tabs.setCurrentIndex(min(current, self.tabs.count() - 1))
+
+    def detect_from_slides(self, quiet=False):
+        """Read the slide headers and fill in every setting the study has not set.
+
+        Never overwrites: a value already set stays, and where the files say
+        something else the difference is shown for a person to judge.
+        """
+        import autodetect as AD
+        project = self.session.project
+        source = project.get("source_dir")
+        if not source or not os.path.isdir(source):
+            self.detect_line.setText("Choose the slides folder first.")
+            return None
+        if project.read_only:
+            return None
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            found = AD.detect(source)
+        finally:
+            QApplication.restoreOverrideCursor()
+        fills = AD.fill(project.cfg, found)
+        for key, value in fills.items():
+            project.set(key, value, by="read from the slides")
+        differ = AD.compare(project.cfg, found)
+        if fills:
+            self.session.touch()
+            self.build()
+            self.applied.emit()
+            self.logged.emit("settings read from the slides: " + ", ".join(sorted(fills)))
+        lines = found.lines()
+        if fills:
+            lines.append("Filled in: %s." % ", ".join(sorted(fills)))
+        else:
+            lines.append("Nothing new to fill in: every setting the files give is already set.")
+        for key, mine, theirs in differ:
+            lines.append("The study says %s = %s, the files say %s. Check it under "
+                         "Show advanced settings." % (key, mine, theirs))
+        self.detect_line.setText(lines[0] + (" " + lines[-1] if len(lines) > 1 else ""))
+        if not quiet:
+            QMessageBox.information(self, "Read from the slides", "\n\n".join(lines))
+        return found
 
     def _add_fiji_row(self, layout, project):
         """'Add atlas from Fiji…', when this copy of the pipeline has the importer."""

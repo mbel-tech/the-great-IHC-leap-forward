@@ -131,6 +131,31 @@ chk("scan_names reads the folder", scan_names(STUDY.source_dir), ["AB1_2c.czi"])
 chk("...and a folder that is not there is empty, not an error",
     scan_names(os.path.join(STUDY.root, "nope")), [])
 
+# --------------------------------------------------------------------------
+print()
+print("--- the guided dialog: an example in, the pattern out ---")
+from naming_guide import GuidedNamingDialog                     # noqa: E402
+
+LS = ["LS22_1a.czi", "LS22_1b.czi", "LS53_2b-_A568.czi", "LS85_7b-.czi", "notes.txt"]
+g = GuidedNamingDialog(LS)
+chk("only slide files are checked", len(g.filenames), 4)
+chk("it opens on the program's reading, already able to save",
+    ("animal LS22" in g.reading.text(),
+     g.buttons.button(QDialogButtonBox.Save).isEnabled()), (True, True))
+chk("...and says what it changed to make every file fit",
+    "allowed to differ" in g.status.text(), True)
+chk("the regex stays out of sight unless asked for", g.regex.isVisibleTo(g), False)
+g._pick_role(B.REPLICATE)
+g._not_there()
+chk("saying there is no replicate letter re-reads every file",
+    "replicate" in g.reading.text(), False)
+g._guess()
+g.example.setCurrentText("LS53_2b-_A568.czi")
+chk("a typed example is read too", "animal LS53" in g.reading.text(), True)
+g._save()
+chk("Save hands back the pattern, example and case rule",
+    sorted(g.result_block), ["case_insensitive", "example", "pattern"])
+
 print()
 print("ALL PASS" if not failures else f"{len(failures)} FAILED")
 sys.exit(1 if failures else 0)

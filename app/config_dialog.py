@@ -147,7 +147,9 @@ class _PatternRow(QWidget):
         super().__init__(parent)
         self.source_getter = source_getter
         self.edit = QLineEdit("" if value is None else str(value))
-        btn = QPushButton("Build…")
+        btn = QPushButton("Set up from an example…")
+        btn.setToolTip("Type one of your file names and say which part is which; "
+                       "the pattern is written for you and checked against every file")
         btn.clicked.connect(self._build)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -155,7 +157,8 @@ class _PatternRow(QWidget):
         lay.addWidget(btn)
 
     def _build(self):
-        from naming_dialog import NamingDialog, scan_names
+        from naming_dialog import scan_names
+        from naming_guide import GuidedNamingDialog
         names = scan_names(self.source_getter() or "")
         if not names:
             QMessageBox.warning(
@@ -163,7 +166,7 @@ class _PatternRow(QWidget):
                 "Set the slides folder first - the pattern is checked against "
                 "the filenames that are actually there.")
             return
-        dlg = NamingDialog(names, self.edit.text().strip(), self)
+        dlg = GuidedNamingDialog(names, self.edit.text().strip(), self)
         if dlg.exec() == QDialog.Accepted and dlg.result_block:
             self.edit.setText(dlg.result_block["pattern"])
             self.built = dlg.result_block
@@ -258,7 +261,7 @@ class SettingsForm(QWidget):
     """
 
     def __init__(self, repo_root, path=None, study_name=None, parent=None, project=None,
-                 keys=None, headings=None):
+                 keys=None, headings=None, channel_tools=False):
         super().__init__(parent)
         self.repo_root = repo_root
         # With a project, this edits the project IN MEMORY: Apply changes it and
@@ -330,18 +333,26 @@ class SettingsForm(QWidget):
             hint.setWordWrap(True)
             form.addRow("", hint)
             if key.path == "acquisition.layout":
-                cb = QPushButton("Channels and markers...")
-                cb.setToolTip("name each channel, say which are markers, and choose "
-                              "the colour each marker is drawn in")
-                cb.clicked.connect(self._edit_channels)
-                form.addRow("", cb)
-                self._add_segmentation_row(form, cfg)
+                self._add_channel_tools(form, cfg)
             if key.path == "atlas_source":
                 btn = QPushButton("Import atlas...")
                 btn.setToolTip("add an atlas you made elsewhere: a folder of plate "
                                "images with plates.csv and polygons.csv or seeds.csv")
                 btn.clicked.connect(self._import_atlas)
                 form.addRow("", btn)
+
+        # Set up's basic view hides the layout (the slides say what it is) but
+        # still offers the channel names and where each marker's nuclei are found.
+        if channel_tools and "acquisition.layout" not in self.rows:
+            self._add_channel_tools(form, cfg)
+
+    def _add_channel_tools(self, form, cfg):
+        cb = QPushButton("Channels and markers...")
+        cb.setToolTip("name each channel, say which are markers, and choose "
+                      "the colour each marker is drawn in")
+        cb.clicked.connect(self._edit_channels)
+        form.addRow("", cb)
+        self._add_segmentation_row(form, cfg)
 
     def _add_segmentation_row(self, form, cfg):
         """Where each marker's nuclei are found - shown for a paired study only."""

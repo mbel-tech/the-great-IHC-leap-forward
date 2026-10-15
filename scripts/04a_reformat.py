@@ -129,10 +129,10 @@ def tissue_mask(v, light_background):
     if light_background:
         mask = v < np.percentile(v, 90) * 0.92
     else:
-        positive = v[v > 0]
-        if positive.size < 200:
+        cut = _dark_cut(v)
+        if cut is None:
             return None
-        mask = v > float(np.expm1(otsu(np.log1p(positive))))
+        mask = v > cut
 
     mask = ndimage.binary_closing(mask, np.ones((7, 7)))
     mask = ndimage.binary_fill_holes(mask)
@@ -145,6 +145,79 @@ def tissue_mask(v, light_background):
     keep = np.where(sizes >= MIN_COMPONENT_FRACTION * sizes.max())[0] + 1
     mask = np.isin(labels, keep)
     return mask if mask.sum() >= 200 else None
+
+
+def _dark_cut(v):
+    """The dark-background branch's threshold: Otsu on log intensity."""
+    positive = v[v > 0]
+    if positive.size < 200:
+        return None
+    return float(np.expm1(otsu(np.log1p(positive))))
+
+
+def overview_silhouette(path):
+    """The section silhouette in the OVERVIEW frame, one value per overview px.
+
+    `tissue_mask` runs on the 400 x 400 working grid, and what is stored of it
+    is `<uid>_mask.npy` on the 256 grid after rotation, crop and pad: about
+    30 um a cell against a 7 um nucleus. That is enough to orient and match a
+    section, and it is what the curator shows, but 05c decides each nucleus's
+    `off_tissue` from it, and a nucleus near the edge was judged by the cell
+    its centroid landed in rather than by the tissue under it.
+
+    This is the same rule at the overview's own 5.2 um/px: the cut is taken
+    from the working grid exactly as `tissue_mask` takes it, so both masks
+    threshold at the same intensity, and the closing, hole fill, opening and
+    debris fraction are applied with structuring elements scaled to the same
+    PHYSICAL size (per axis, because the working grid is square and the scan
+    box is not). It is the same silhouette, not a new definition: a gap
+    narrower than the 7 working px closing is tissue in both, a fleck below
+    the debris fraction is dropped from both. What changes is where the edge
+    is placed - to the overview pixel instead of the working one, and without
+    the 256 resample.
+
+    Running `tissue_mask` itself on the full overview would not be that: its
+    7 x 7 closing would shrink to a fifth of its size in microns and open up
+    cracks the curator saw as tissue.
+
+    Dark-background (section) polarity only. None when no mask can be formed,
+    which is the same case `tissue_mask` returns None for.
+    """
+    try:
+        img = Image.open(path).convert("L")
+    except OSError:
+        return None
+    work = np.asarray(img.resize((WORK_SIZE, WORK_SIZE), Image.BILINEAR)).astype(np.float32)
+    if tissue_mask(work, False) is None:
+        return None
+    cut = _dark_cut(work)
+    src_w, src_h = img.size
+    ky, kx = src_h / WORK_SIZE, src_w / WORK_SIZE
+
+    def size(n):
+        # Odd, so the element is centred as the working one is.
+        return (max(1, int(round(n * ky))) | 1, max(1, int(round(n * kx))) | 1)
+
+    # Rectangular elements, so dilation and erosion are separable max/min
+    # filters - a 35 x 35 binary_closing on a full overview is minutes. The
+    # constant 0 border is binary_closing's and binary_opening's default.
+    def dilate(m, n):
+        return ndimage.maximum_filter(m, size=size(n), mode="constant", cval=0)
+
+    def erode(m, n):
+        return ndimage.minimum_filter(m, size=size(n), mode="constant", cval=0)
+
+    mask = np.asarray(img).astype(np.float32) > cut
+    mask = erode(dilate(mask, 7), 7)
+    mask = ndimage.binary_fill_holes(mask)
+    mask = dilate(erode(mask, 3), 3)
+
+    labels, n = ndimage.label(mask)
+    if n == 0:
+        return None
+    sizes = np.array(ndimage.sum(mask, labels, range(1, n + 1)))
+    keep = np.where(sizes >= MIN_COMPONENT_FRACTION * sizes.max())[0] + 1
+    return np.isin(labels, keep)
 
 
 def principal_angle(mask):
@@ -887,6 +960,17 @@ def main():
         img, mask, angle, amask, cmask = out
         Image.fromarray(img).save(os.path.join(sec_dir, r["scene_uid"] + ".png"))
         np.save(os.path.join(sec_dir, r["scene_uid"] + "_mask.npy"), mask)
+        # The same silhouette in the overview frame, for 05c's per-nucleus
+        # off_tissue test; `_mask.npy` above stays what the curator shows and
+        # 06g backfills from. Not touched by the curator's rotation or flip:
+        # it is in the scanned frame, which 05a maps CZI pixels into. A stale
+        # one is removed rather than left to be read against a new mask.
+        fine_p = os.path.join(sec_dir, r["scene_uid"] + "_tissue_overview.png")
+        fine = overview_silhouette(src)
+        if fine is not None:
+            Image.fromarray(fine.astype(np.uint8) * 255).save(fine_p)
+        elif os.path.exists(fine_p):
+            os.remove(fine_p)
         # No mask products for an excluded section: it is a picture to look at,
         # and 05c reads these .npy files as "this section is in the analysis".
         if use_art:

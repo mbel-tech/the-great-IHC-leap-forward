@@ -8,6 +8,11 @@ object, so both can be wrong in two directions; this pins those two cases and
 the two where every method agrees, against 06f's own sampling code run on a
 mask built from the same pixels.
 
+`artifact` gets the same treatment: decided on 04g's own 5.2 um/px mask at the
+centroid's native position, against the 256 copy 04a resampled from it twice.
+So does `off_tissue`, on the silhouette 04a now also writes in the overview
+frame.
+
 SYNTHETIC. The planes, the model and the clip mask are made up here; what this
 guarantees is the rule and the plumbing, not a count on a real section.
 
@@ -21,6 +26,7 @@ import types
 
 import numpy as np
 from PIL import Image
+from scipy import ndimage
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -265,6 +271,210 @@ with temp_study(acquisition=PAIRED) as study:
         "no artifact mask" in out, False)
     chk("...and the re-measured section leaves the record",
         recorded(), [("AB13_2a-s0", "AF488")])
+
+    # `artifact` is decided on 04g's own mask at 5.2 um/px, at the centroid's
+    # native position - not on the 256 copy, which 04a made by resizing that
+    # mask by nearest neighbour twice (overview -> 400 working grid -> 256).
+    # Here a grid cell is 40 native px = 26 um, as on a real section, and the
+    # .npy is built by exactly those two resizes at angle 0 with a full-frame
+    # silhouette, so its crop and pad are the identity.
+    print()
+    print("=== artifact: 04g's mask at the native position, not the 256 grid ===")
+    K = 40                       # native px per grid cell
+    SC = 8                       # native px per overview px (0.65 -> 5.2 um)
+    OV = 256 * K // SC           # overview side, px
+    AX0 = AY0 = 960              # box origin: grid 24, overview 120
+    geom = {"scene_uid": UID, "animal": "AB12", "marker": "AF568",
+            "czi_file": FILE, "scene_index": "0",
+            "scene_x": "0", "scene_y": "0", "scene_w": str(OV * SC),
+            "scene_h": str(OV * SC), "overview_um_px": "5.2",
+            "native_um_px": "0.65", "src_w": str(OV), "src_h": str(OV),
+            "m00": str(K), "m01": "0", "m02": "0",
+            "m10": "0", "m11": str(K), "m12": "0"}
+    box = {"scene_uid": UID, "animal": "AB12", "marker": "AF568",
+           "roi_kind": "roi", "region": "Dm", "seed_n": "1",
+           "czi_x0": str(AX0), "czi_y0": str(AY0), "czi_w": str(N),
+           "czi_h": str(N), "sec_x": "25", "sec_y": "25", "sec_r": "20",
+           "sec_poly": ""}
+    for path, row in ((D5.G5.GEOM_CSV, geom), (D5.G5.BOX_CSV, box)):
+        with open(path, "w", newline="\n", encoding="utf-8") as fh:
+            w = csv.DictWriter(fh, fieldnames=list(row))
+            w.writeheader()
+            w.writerow(row)
+    # The same four nuclei. Their centroids, in overview px and grid cells:
+    #   1 (120.9, 120.9) -> grid (24, 24), which samples overview (123, 123)
+    #   2 (124.9, 120.9) -> grid (25, 24), samples (126, 123)
+    #   3 (120.9, 124.9) -> grid (24, 25), samples (123, 126)
+    #   4 (124.9, 124.9) -> grid (25, 25), samples (126, 126)
+    ov = np.zeros((OV, OV), dtype=np.uint8)
+    ov[120:122, 120:122] = 1     # 10 um bubble under 1; its cell samples past it
+    ov[126:128, 126:128] = 2     # 10 um fleck 3 um off 4, on 4's cell's sample
+    ov[120:124, 124:127] = 1     # under 2 AND on its cell's sample: both agree
+    os.makedirs(os.path.join(study.out_root, "artifacts"), exist_ok=True)
+    png = os.path.join(study.out_root, "artifacts", f"{UID}_artifact.png")
+    Image.fromarray(ov).save(png)
+    grid = np.asarray(Image.fromarray(ov).resize((400, 400), Image.NEAREST)
+                      .resize((256, 256), Image.NEAREST)) > 0
+    np.save(os.path.join(D5.REFORMAT_DIR, "sections", f"{UID}_artifact.npy"),
+            grid)
+    plain = np.full((N, N), 800.0)
+    rows = run(D5, plain, labels)
+    art = {k: int(r["artifact"]) for k, r in rows.items()}
+    chk("the grid copy lost the bubble and kept the fleck",
+        (bool(grid[24, 24]), bool(grid[25, 25])), (False, True))
+    chk("all four nuclei were measured", sorted(art), [1, 2, 3, 4])
+    chk("10 um bubble under the centroid: flagged", art[1], 1)
+    chk("clean, but a fleck 3 um away fills its cell: not flagged", art[4], 0)
+    chk("inside an artifact both frames agree on: flagged", art[2], 1)
+    chk("clean and clear: not flagged", art[3], 0)
+
+    # The .npy still decides WHETHER a section is masked: 04a writes it only
+    # when the section's mask was not rejected on review. Without 04g's PNG
+    # (or a geometry row from before 05a recorded the scene rectangle) there
+    # is nothing finer to read, so the grid copy is used - and said.
+    os.remove(png)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rows = run(D5, plain, labels)
+    chk("no 04g mask: falls back to the grid copy",
+        [int(rows[k]["artifact"]) for k in (1, 2, 3, 4)], [0, 1, 0, 1])
+    chk("...and says how many sections did",
+        "1 sections had artifacts decided on the 256 grid" in buf.getvalue(),
+        True)
+
+    # `off_tissue` the same way: decided on 04a's silhouette in the OVERVIEW
+    # frame at the centroid's native position, not on the 256 copy. Same
+    # geometry as the artifact case - a grid cell is 40 native px, 26 um, and
+    # the .npy is the fine mask through 04a's two resizes at angle 0 with the
+    # crop and pad the identity. Nuclei 1 and 3 sit at overview x 120.9 and
+    # 2 and 4 at 124.9; their grid columns 24 and 25 sample overview columns
+    # 123 and 126.
+    print()
+    print("=== off_tissue: 04a's silhouette in the overview frame, not the 256 grid ===")
+    sec = os.path.join(D5.REFORMAT_DIR, "sections")
+    fine_png = os.path.join(sec, f"{UID}_tissue_overview.png")
+
+    def tissue_run(fine):
+        Image.fromarray((fine * 255).astype(np.uint8)).save(fine_png)
+        g = np.asarray(Image.fromarray(fine.astype(np.uint8) * 255)
+                       .resize((400, 400), Image.NEAREST)
+                       .resize((256, 256), Image.NEAREST)) > 127
+        np.save(os.path.join(sec, f"{UID}_mask.npy"), g)
+        rows = run(D5, plain, labels)
+        return g, [int(rows[k]["off_tissue"]) for k in (1, 2, 3, 4)]
+
+    # Tissue ends at overview column 121: nuclei 1 and 3 are 4 um inside its
+    # edge, and their grid cell samples column 123, past it.
+    edge = np.zeros((OV, OV), dtype=bool)
+    edge[:, :122] = True
+    g, flags = tissue_run(edge)
+    chk("the grid puts the last tissue column off the section",
+        (bool(g[24, 24]), bool(g[24, 25])), (False, False))
+    chk("just inside a tissue edge: on tissue; past it: off", flags, [0, 1, 0, 1])
+
+    # The mirror image: tissue starts at column 123. Nuclei 1 and 3 are on the
+    # glass 10 um short of it, and their cell samples column 123, inside it,
+    # so the grid called them on the section.
+    edge = np.zeros((OV, OV), dtype=bool)
+    edge[:, 123:] = True
+    g, flags = tissue_run(edge)
+    chk("the grid puts glass short of an edge on the section",
+        (bool(g[24, 24]), bool(g[24, 25])), (True, True))
+    chk("on the glass beside an edge: off tissue", flags, [1, 0, 1, 0])
+
+    # Without the overview-frame file - a study reformatted before 04a wrote
+    # it - the grid copy decides, and the run says so.
+    os.remove(fine_png)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rows = run(D5, plain, labels)
+    chk("no overview silhouette: falls back to the grid copy",
+        [int(rows[k]["off_tissue"]) for k in (1, 2, 3, 4)], [0, 0, 0, 0])
+    chk("...and says how many sections did",
+        "1 sections had off_tissue decided on the 256 grid" in buf.getvalue(),
+        True)
+
+    # A file of another size is not in this geometry's frame.
+    Image.fromarray(np.zeros((OV // 2, OV // 2), dtype=np.uint8)).save(fine_png)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rows = run(D5, plain, labels)
+    chk("a silhouette of the wrong size is not read",
+        [int(rows[k]["off_tissue"]) for k in (1, 2, 3, 4)], [0, 0, 0, 0])
+    os.remove(fine_png)
+
+    # 04a's side. The silhouette in the overview frame is tissue_mask()'s rule
+    # - the same Otsu cut, the same closing, hole fill, opening and debris
+    # fraction - applied to the overview's own pixels with the structuring
+    # elements scaled to the same physical size. So it is the curator's
+    # silhouette, placed to the overview pixel rather than the working one.
+    print()
+    print("=== 04a: the silhouette at overview resolution ===")
+    RF = load_stage("04a_reformat.py")
+    W, H = 1000, 700                        # not square, as a scan box is not
+    yy, xx = np.mgrid[0:H, 0:W]
+    truth = ((xx - 500.3) / 401.7) ** 2 + ((yy - 350.6) / 251.3) ** 2 <= 1.0
+    rng = np.random.default_rng(0)
+    pic = np.where(truth, 120.0, 4.0) + rng.normal(0, 3, (H, W))
+    # A crack 2 px (10 um) wide cut in from the edge: far narrower than the
+    # closing, so it is tissue in BOTH masks - the definition, not a loss.
+    crack = (np.abs(yy - 350) <= 1) & (xx > 800)
+    pic[crack & truth] = 4.0
+    pic[50:54, 50:54] = 120.0               # a fleck of debris, 4 px
+    ov_png = os.path.join(study.out_root, "fine_src_DAPI.png")
+    Image.fromarray(np.clip(pic, 0, 255).astype(np.uint8)).save(ov_png)
+
+    fine = RF.overview_silhouette(ov_png)
+    chk("made in the overview frame", fine.shape, (H, W))
+    band = (ndimage.binary_dilation(truth, iterations=1)
+            & ~ndimage.binary_erosion(truth, iterations=1))
+    wrong = fine != truth
+    chk("every disagreement with the true edge is within 1 px of it",
+        int((wrong & ~band & ~crack).sum()), 0)
+    # The working mask (400 x 400 over 1000 x 700), carried back to the
+    # overview frame with no other step, for comparison.
+    work = np.asarray(Image.open(ov_png).convert("L")
+                      .resize((400, 400), Image.BILINEAR)).astype(np.float32)
+    coarse = np.asarray(Image.fromarray(
+        RF.tissue_mask(work, False).astype(np.uint8) * 255)
+        .resize((W, H), Image.NEAREST)) > 127
+    chk("...where the working mask strays further",
+        int(((coarse != truth) & ~band & ~crack).sum()) > 0, True)
+    chk("a crack narrower than the closing is tissue in both",
+        (bool(fine[350, 900]), bool(coarse[350, 900])), (True, True))
+    chk("debris is dropped in both",
+        (bool(fine[51, 51]), bool(coarse[51, 51])), (False, False))
+
+    # main() writes it beside <uid>_mask.npy and leaves that file as it was.
+    FU = "AB12_9z-s0"
+    od = os.path.join(RF.OVERVIEW_DIR, "AB12", "AF568")
+    os.makedirs(od, exist_ok=True)
+    import shutil
+    shutil.copy(ov_png, os.path.join(od, f"{FU}_DAPI.png"))
+    os.makedirs(os.path.dirname(RF.QC_CSV), exist_ok=True)
+    with open(RF.QC_CSV, "w", newline="", encoding="utf-8") as fh:
+        fh.write("scene_uid,animal,marker_channel,section_order\n"
+                 f"{FU},AB12,AF568,1\n")
+    os.makedirs(RF.PLATE_DIR, exist_ok=True)
+    with open(os.path.join(RF.PLATE_DIR, "plates.csv"), "w", newline="",
+              encoding="utf-8") as fh:
+        fh.write("plate_id,image_file\n")
+    saved = sys.argv
+    sys.argv = ["04a_reformat.py", "--marker", "AF568", "--preview", "0"]
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            RF.main()
+    finally:
+        sys.argv = saved
+    sd = RF.marker_paths("AF568")["sections"]
+    fp = os.path.join(sd, f"{FU}_tissue_overview.png")
+    chk("main() wrote <uid>_tissue_overview.png", os.path.exists(fp), True)
+    if os.path.exists(fp):
+        chk("...and it is overview_silhouette()",
+            bool(np.array_equal(np.asarray(Image.open(fp)) > 0, fine)), True)
+    chk("<uid>_mask.npy is what reformat() always made",
+        bool(np.array_equal(np.load(os.path.join(sd, f"{FU}_mask.npy")),
+                            RF.reformat(ov_png, False)[1])), True)
 
 print()
 if failures:

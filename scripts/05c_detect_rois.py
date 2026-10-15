@@ -1028,6 +1028,74 @@ def has_mask(uid, kind):
                for d in section_dirs())
 
 
+def overview_artifact(uid, g):
+    """04g's artifact mask in its OWN frame, and the CZI -> mask-pixel map.
+
+    Returns (mask, scene_x, scene_y, native px per mask px), or None when
+    there is nothing finer than the 256 copy to read.
+
+    The 256 copy is 04g's 5.2 um/px mask resized by nearest neighbour TWICE -
+    to 04a's 400 working grid, then to the output grid - and sampled at the
+    centroid's rounded cell, about 26-31 um on a section. A bubble or fleck a
+    few overview pixels across can fall between the samples and vanish, or
+    be the one sample its cell takes and claim every nucleus in it. 04g's
+    mask in the scanned frame is one scale and one origin shift from CZI
+    pixels (05a's `scale` and scene rectangle, recorded in the geometry row),
+    so the centroid is looked up there with no resampling at all. That is as
+    fine as the mask is made: 04g detects at 5.2 um/px, by design.
+
+    Overview pixel p sits at CZI scene_x + p * scale - the same convention
+    05a's matrix composes - so a centroid maps to (x - scene_x) / scale.
+    """
+    return overview_mask(os.path.join(OUT_ROOT, "artifacts", f"{uid}_artifact.png"), g)
+
+
+def overview_tissue(uid, g):
+    """04a's silhouette in the OVERVIEW frame - `overview_artifact` for
+    `off_tissue`. Same return, same None.
+
+    `<uid>_mask.npy` is that silhouette made on 04a's 400 working grid and
+    carried through rotation, crop and pad onto the 256 grid, ~30 um a cell;
+    a nucleus near the edge was judged by the cell its centroid landed in.
+    04a also writes `<uid>_tissue_overview.png`: the same rule at the
+    overview's 5.2 um/px, unrotated (see 04a.overview_silhouette). It is read
+    from the directory the .npy was found in, so the two cannot come from
+    different reformats.
+    """
+    for d in section_dirs():
+        if os.path.exists(os.path.join(d, f"{uid}_mask.npy")):
+            return overview_mask(os.path.join(d, f"{uid}_tissue_overview.png"), g)
+    return None
+
+
+def overview_mask(p, g):
+    """A PNG mask in the overview frame, and the CZI -> mask-pixel map, or
+    None when it is missing or not in this geometry row's frame."""
+    try:
+        rx, ry = float(g["scene_x"]), float(g["scene_y"])
+        scale = float(g["overview_um_px"]) / float(g["native_um_px"])
+        shape = (int(g["src_h"]), int(g["src_w"]))
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not os.path.exists(p):
+        return None
+    from PIL import Image
+    a = np.asarray(Image.open(p)) > 0
+    # A mask of another size is not in this geometry's frame - 04g run against
+    # a different export than 05a - and reading it would offset every lookup.
+    if a.shape != shape:
+        return None
+    return a, rx, ry, scale
+
+
+def overview_hit(ov, x, y):
+    """Whether CZI pixel (x, y) is set in an `overview_mask` result. Off the
+    mask's frame is False, as `inb` is off the grid's."""
+    m, rx, ry, k = ov
+    ix, iy = int(round((x - rx) / k)), int(round((y - ry) / k))
+    return 0 <= iy < m.shape[0] and 0 <= ix < m.shape[1] and bool(m[iy, ix])
+
+
 def record_no_artifact(path, marker, redone, missing):
     """Rewrite NO_ARTIFACT_CSV: this run's `redone` sections of `marker` get
     the rows in `missing` and nothing else; every other row is left alone.
@@ -1396,6 +1464,8 @@ def main():
     total_rel = 0
     total_bg = 0
     no_tissue_mask = []
+    art_on_grid = []
+    tis_on_grid = []
     # Recorded before the loop rather than after it: a run that dies half way
     # has still written rows for the sections it reached, and those must not
     # go unlisted. A section listed but not reached has no rows yet and is
@@ -1406,7 +1476,13 @@ def main():
         M = np.array([[float(g["m00"]), float(g["m01"]), float(g["m02"])],
                       [float(g["m10"]), float(g["m11"]), float(g["m12"])]])
         Minv = G5.invert_affine(M)              # CZI px -> 256 grid
+        # The .npy says WHETHER this section is masked - 04a writes it only
+        # when --mask-artifacts was on and the mask was not rejected on review
+        # - and 04g's own mask says WHERE. The grid copy is the fallback only.
         art = mask_at(uid, "artifact")
+        art_ov = overview_artifact(uid, g) if art is not None else None
+        if art is not None and art_ov is None:
+            art_on_grid.append(uid)
         ceiling = ceilings.get(g["czi_file"], DEFAULT_CEILING)
         # The DAPI tissue silhouette 04a_reformat.py carried into this same 256
         # frame - the tissue definition every other stage and the curator use.
@@ -1418,6 +1494,11 @@ def main():
         if tis is None:
             no_tissue_mask.append(uid)
             continue
+        # The grid copy decides only when 04a's overview-frame silhouette is
+        # missing (a study reformatted before 04a wrote it) or not this frame.
+        tis_ov = overview_tissue(uid, g)
+        if tis_ov is None:
+            tis_on_grid.append(uid)
         path = os.path.join(CONFIG["source_dir"], g["czi_file"])
         rows = []
         coloc_rows = []
@@ -1544,7 +1625,15 @@ def main():
                     # out-of-bounds index, so both cases land here. Recorded
                     # rather than dropped, the way `artifact` is: 06a decides,
                     # and the QC overlay can still show what was found.
-                    off_tis = int(not inb(tis))
+                    #
+                    # Both tests read the overview-frame mask at the centroid's
+                    # native position when there is one, and the 256 copy only
+                    # when there is not: a per-nucleus flag is not decided on
+                    # a 30 um cell when a 5.2 um mask of the same thing exists.
+                    off_tis = int(not (overview_hit(tis_ov, x0 + cx, y0 + cy)
+                                       if tis_ov is not None else inb(tis)))
+                    is_art = (overview_hit(art_ov, x0 + cx, y0 + cy)
+                              if art_ov is not None else inb(art))
                     rows.append([
                         uid, b["animal"], b["marker"], b["roi_kind"], b["region"],
                         b["seed_n"], bi, p.label,
@@ -1557,7 +1646,7 @@ def main():
                         round(float(vals.mean()), 1),
                         round(float(np.median(vals)), 1),
                         round(float(np.percentile(vals, 90)), 1),
-                        int(clipped(vals, ceiling)), int(inb(art)), off_tis,
+                        int(clipped(vals, ceiling)), int(is_art), off_tis,
                         seg_on, seg_backend, seg_shaped])
 
                 # CO-LOCALISATION, while both label images exist for this ROI.
@@ -1676,6 +1765,17 @@ def main():
         print(f"!! {len(no_tissue_mask)} sections SKIPPED for want of a tissue "
               f"mask in reformatted/: {no_tissue_mask[:5]}")
         print("   Run 04a_reformat.py for them before trusting any count.")
+    if art_on_grid:
+        print(f"!! {len(art_on_grid)} sections had artifacts decided on the 256 "
+              f"grid (~30 um cells): no artifacts/<uid>_artifact.png from 04g "
+              f"matching the scene in 05a's geometry: {art_on_grid[:5]}")
+        print("   Rerun 04g_artifact_mask.py and 05a_roi_geometry.py, then this.")
+    if tis_on_grid:
+        print(f"!! {len(tis_on_grid)} sections had off_tissue decided on the 256 "
+              f"grid (~30 um cells): no <uid>_tissue_overview.png from 04a "
+              f"matching the scene in 05a's geometry: {tis_on_grid[:5]}")
+        print("   Rerun 04a_reformat.py (and 05a_roi_geometry.py if its rows "
+              "predate the scene rectangle), then this.")
     warn_no_artifact(no_artifact, "were measured")
     return 0
 

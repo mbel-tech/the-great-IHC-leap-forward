@@ -8,6 +8,7 @@ scan per section.
 Run:  python tests/test_autodetect.py
 """
 
+import json
 import os
 import struct
 import sys
@@ -34,12 +35,36 @@ def chk(label, got, want):
         failures.append(label)
 
 
-def xml(channels, px_m=0.65e-6):
-    chans = "".join(
-        f'<Channel Id="Channel:{i}" Name="{name}"><EmissionWavelength>{em}'
-        f'</EmissionWavelength></Channel>' for i, (name, em) in enumerate(channels))
+def xml(channels, px_m=0.65e-6, exposure_ms=None, objective=None, bits=None, camera=None):
+    """A header. `exposure_ms`: {channel name: ms}; `objective`: (magnification, NA,
+    immersion); `bits`: ComponentBitCount for the image and every channel."""
+    exposure_ms = exposure_ms or {}
+
+    def chan(i, name, em):
+        extra = ""
+        if name in exposure_ms:
+            extra += f"<ExposureTime>{exposure_ms[name] * 1e6:g}</ExposureTime>"
+        if bits:
+            extra += f"<ComponentBitCount>{bits}</ComponentBitCount>"
+        return (f'<Channel Id="Channel:{i}" Name="{name}"><EmissionWavelength>{em}'
+                f'</EmissionWavelength>{extra}</Channel>')
+    chans = "".join(chan(i, name, em) for i, (name, em) in enumerate(channels))
+    inst = ""
+    if objective or camera:
+        inst = "<Instrument>"
+        if objective:
+            mag, na, imm = objective
+            inst += (f'<Objectives><Objective Id="Objective:1" Name="Plan-Apochromat {mag}x/{na}">'
+                     f"<NominalMagnification>{mag}</NominalMagnification><LensNA>{na}</LensNA>"
+                     f"<Immersion>{imm}</Immersion></Objective></Objectives>")
+        if camera:
+            inst += (f'<Detectors><Detector Id="Detector:1"><Manufacturer><Model>{camera}'
+                     f"</Model></Manufacturer></Detector></Detectors>")
+        inst += "</Instrument>"
+    img_bits = f"<ComponentBitCount>{bits}</ComponentBitCount>" if bits else ""
     return (f"<ImageDocument><Metadata><Information><Image><SizeC>{len(channels)}</SizeC>"
-            f"<Dimensions><Channels>{chans}</Channels></Dimensions></Image></Information>"
+            f"{img_bits}"
+            f"<Dimensions><Channels>{chans}</Channels></Dimensions></Image>{inst}</Information>"
             f'<Scaling><Items><Distance Id="X"><Value>{px_m}</Value></Distance>'
             f'<Distance Id="Y"><Value>{px_m}</Value></Distance></Items></Scaling>'
             f"</Metadata></ImageDocument>")
@@ -111,6 +136,86 @@ with tempfile.TemporaryDirectory() as tmp:
         [("DAPI", "nuclear"), ("AF488", "marker"), ("AF568", "marker")])
     chk("its own pixel size", d.values["pixel_size_um"], 0.325)
     chk("names read", d.naming["result"]["failed"], 0)
+
+print("--- the render resolution is whole native pixels near 2.6 ---")
+for px, want in ((0.65, 2.6), (0.325, 1.3), (1.3, 2.6), (0.1625, 1.3), (5.2, 5.2)):
+    chk("render at %g µm pixels" % px, A.render_um_per_px(px), want)
+
+print("--- every header field, and what it did ---")
+with tempfile.TemporaryDirectory() as tmp:
+    for name, chans, exp in (("LS22_1a.czi", [DAPI, AF568], {"DAPI": 20, "AF568": 120}),
+                             ("LS22_1b.czi", [DAPI, AF488], {"DAPI": 20, "AF488": 80}),
+                             ("LS45_8a.czi", [DAPI, AF568], {"DAPI": 20, "AF568": 300}),
+                             ("LS45_8b.czi", [DAPI, AF488], {"DAPI": 20.1, "AF488": 80})):
+        write_czi(os.path.join(tmp, name),
+                  xml(chans, exposure_ms=exp, objective=(20, 0.8, "Air"), bits=14,
+                      camera="Axiocam 712 mono"))
+    d = A.detect(tmp)
+    rep = d.report
+    chk("the report is JSON", bool(json.dumps(rep)), True)
+    chk("its sections", sorted(rep), ["channels", "fields", "instrument", "optics", "read",
+                                      "scenes", "uses", "varying"])
+    chk("files read and found", (rep["read"]["files_read"], rep["read"]["files_found"]), (4, 4))
+    chk("the objective's NA", rep["instrument"]["objective_na"]["value"], "0.8")
+    chk("the immersion, from the flat fields", rep["instrument"]["objective_immersion"]["value"],
+        "Air")
+    chk("the objective's name", rep["instrument"]["objective_name"]["value"],
+        "Plan-Apochromat 20x/0.8")
+    chk("the camera", rep["instrument"]["camera"]["value"], "Axiocam 712 mono")
+    chk("the bit depth", rep["instrument"]["bit_depth"]["value"], "14")
+    chk("a row per plane and channel",
+        [(c["index"], c["name"], c["band"]) for c in rep["channels"]],
+        [(0, "DAPI", "blue"), (1, "AF488", "green"), (1, "AF568", "red")])
+    chk("AF568's exposure range", next(c for c in rep["channels"] if c["name"] == "AF568")
+        ["exposure_ms"], [120.0, 300.0])
+    chk("optical resolution: 0.61 × 603 nm / 0.8",
+        next(c for c in rep["optics"]["channels"] if c["name"] == "AF568")["resolution_um"],
+        round(0.61 * 603 / 1000 / 0.8, 3))
+    chk("every use names a field, a value and a use",
+        all(set(u) == {"field", "value", "use"} for u in rep["uses"]), True)
+    chk("each field appears once",
+        len({u["field"] for u in rep["uses"]}) == len(rep["uses"]), True)
+    chk("the exposure says what it checks",
+        next(u["use"] for u in rep["uses"] if u["field"] == "channels[1 AF568].exposure_ms"),
+        "checks: exposures must match across files")
+    chk("the full field table is kept",
+        "Information/Instrument/Objectives/Objective/LensNA" in rep["fields"], True)
+    chk("an exposure that differs is a problem",
+        [p for p in d.problems if "exposed" in p],
+        ["AF568 was exposed for 120–300 ms across files; signal is not directly "
+         "comparable between those files."])
+    chk("...but 0.5 % is not", any(p.startswith("DAPI was exposed") for p in d.problems), False)
+    chk("0.65 µm meets Nyquist at NA 0.8 for none of these, and says so",
+        sum("coarser than half" in p for p in d.problems), 3)
+    chk("render resolutions from 0.65",
+        (d.values["curation_render.um_per_px"], d.values["scene_render.um_per_px"]), (2.6, 2.6))
+    chk("colours from the bands", d.values["display.colours"], {"AF568": "red", "AF488": "green"})
+    chk("the counterstain is blue", d.values["display.nuclear_colour"], "blue")
+    chk("the instrument is one line", [x for x in d.lines() if x.startswith("Instrument")],
+        ["Instrument: objective Plan-Apochromat 20x/0.8, camera Axiocam 712 mono."])
+    own = {"acquisition": {"layout": "paired", "markers": ["AF568", "AF488"]},
+           "display": {"colours": {"AF568": "magenta"}}}
+    filled = A.fill(own, d)
+    chk("a study's own colours are never filled over, not even partly",
+        [k for k in filled if k.startswith("display")], [])
+    filled = A.fill({"acquisition": {"layout": "paired", "markers": ["AF568"]}}, d)
+    chk("detected colours keep only the study's markers", filled["display.colours"],
+        {"AF568": "red"})
+
+with tempfile.TemporaryDirectory() as tmp:
+    for i, bits in enumerate((14, 12)):
+        write_czi(os.path.join(tmp, f"Mouse{i + 1}_s1.czi"),
+                  xml([DAPI, AF488, AF568], px_m=0.325e-6, bits=bits,
+                      objective=((20, 0.8, "Air"), (40, 0.95, "Air"))[i]))
+    d = A.detect(tmp)
+    chk("multiplex colours from the channel table", d.values["display.colours"],
+        {"AF488": "green", "AF568": "red"})
+    chk("render resolutions from 0.325", d.values["curation_render.um_per_px"], 1.3)
+    chk("differing bit depth is a problem", any("bit depth" in p for p in d.problems), True)
+    chk("differing objective is a problem", any("objective" in p for p in d.problems), True)
+    chk("varying fields are listed",
+        "Information/Instrument/Objectives/Objective/LensNA" in d.report["varying"], True)
+    chk("the report is JSON", bool(json.dumps(d.report)), True)
 
 print("--- nothing there ---")
 with tempfile.TemporaryDirectory() as tmp:

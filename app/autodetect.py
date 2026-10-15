@@ -11,7 +11,7 @@ filled in, with the evidence beside them.
 No Qt and no pixels: only the CZI header (czi_meta reads the XML block without
 decoding an image), so a folder of hundreds of slides is read in seconds.
 
-    detect(source_dir)          -> Detection (values, why, problems)
+    detect(source_dir)          -> Detection (values, why, problems, report)
     fill(cfg, detection)        -> {key: value} for the keys the study has not set
     compare(cfg, detection)     -> [(key, study value, file value)] that disagree
 
@@ -19,10 +19,13 @@ A value the person already set is never overwritten: `fill` only proposes keys
 that are absent, and `compare` reports disagreements for a person to judge.
 """
 
+import copy
 import os
+import statistics
 from collections import Counter
 
 import czi_meta
+import czi_report
 import ls_channel_guess as G
 import ls_channels as CH
 import naming_build as B
@@ -45,6 +48,7 @@ class Detection:
         self.read = 0             # headers read
         self.unreadable = []      # (file, reason)
         self.naming = None        # naming_build.auto() result
+        self.report = {}          # every header field and what it did (JSON-safe)
 
     def __repr__(self):
         return "<Detection %d files, %s>" % (len(self.files), sorted(self.values))
@@ -58,6 +62,12 @@ class Detection:
         for key in ("pixel_size_um", "slide_naming.pattern", "acquisition.layout"):
             if key in self.why:
                 out.append(self.why[key])
+        inst = self.report.get("instrument") or {}
+        obj, cam = inst.get("objective_name") or inst.get("objective_magnification"), inst.get("camera")
+        if obj or cam:
+            out.append("Instrument: " + ", ".join(
+                [x for x in (obj and "objective " + obj["value"],
+                             cam and "camera " + cam["value"]) if x]) + ".")
         return out + self.problems
 
 
@@ -79,20 +89,24 @@ def _sample(items, n):
 
 
 def read_headers(source_dir, names, limit=MAX_HEADERS):
-    """[(name, summary, channel_info)] for up to `limit` files; unreadable ones skipped."""
+    """[(name, summary, channel_info, flat)] for up to `limit` files; unreadable ones skipped.
+
+    `flat` is czi_report.flatten() of the same parsed header: every field.
+    """
     out, bad = [], []
     for name in _sample(names, limit):
         try:
             with open(os.path.join(source_dir, name), "rb") as fh:
                 root = czi_meta.read_metadata(fh)
-            out.append((name, czi_meta.summarise(root), czi_meta.channel_info(root)))
+            out.append((name, czi_meta.summarise(root), czi_meta.channel_info(root),
+                        czi_report.flatten(root)))
         except Exception as exc:                            # noqa: BLE001 - say why, carry on
             bad.append((name, str(exc)[:120]))
     return out, bad
 
 
 def _pixel_size(d, headers):
-    sizes = [round(h["px_um_x"], 4) for _n, h, _c in headers if h.get("px_um_x")]
+    sizes = [round(h["px_um_x"], 4) for _n, h, _c, _f in headers if h.get("px_um_x")]
     if not sizes:
         d.problems.append("No file records its pixel size; set it under Advanced.")
         return
@@ -110,6 +124,23 @@ def _pixel_size(d, headers):
     # objective: 5.2 µm at 0.65.
     d.values["overview_target_um_per_px"] = round(value * 8, 4)
     d.why["overview_target_um_per_px"] = "8 native pixels per overview pixel."
+    render = render_um_per_px(value)
+    for key in ("curation_render.um_per_px", "scene_render.um_per_px"):
+        d.values[key] = render
+        d.why[key] = ("%g µm per picture pixel: whole native %g µm pixels, between 1.3 "
+                      "and 2.6 where the pixel size allows." % (render, value))
+
+
+def render_um_per_px(px):
+    """A whole number of native pixels near 2.6 µm: k starts at 4, halves while
+    the result is over 2.6 (down to 1), doubles while it is under 1.3."""
+    eps = 1e-9
+    k = 4
+    while px * k > 2.6 + eps and k > 1:
+        k /= 2.0
+    while px * k < 1.3 - eps:
+        k *= 2
+    return round(px * k, 4)
 
 
 def _naming(d):
@@ -133,7 +164,7 @@ def _channels(d, headers):
     if not headers:
         return
     per_file = []
-    for name, _h, infos in headers:
+    for name, _h, infos, _f in headers:
         rows = G.detect(infos)
         nuc = [r for r in rows if r["role"] == CH.NUCLEAR]
         mk = [r for r in rows if r["role"] == CH.MARKER]
@@ -189,6 +220,309 @@ def _channels(d, headers):
         d.problems.append("No marker channel was found besides the counterstain.")
 
 
+def _colours(d, headers):
+    """display.colours (marker -> its band's colour) and display.nuclear_colour."""
+    layout = d.values.get("acquisition.layout")
+    if not headers or not layout:
+        return
+    bands, nuc_bands = {}, Counter()
+    for _n, _h, infos, _f in headers:
+        for r in G.detect(infos):
+            if r["role"] == CH.NUCLEAR:
+                if r["band"]:
+                    nuc_bands[r["band"]] += 1
+                continue
+            for key in {r["czi_name"], r["name"], "Channel%d" % r["index"]}:
+                if key and r["band"]:
+                    bands.setdefault(key, Counter())[r["band"]] += 1
+    if layout == CH.LAYOUT_PAIRED:
+        markers = list(d.values.get("acquisition.markers") or [])
+        lookup = {m: bands.get(m) for m in markers}
+    else:
+        table = d.values.get("acquisition.channels") or []
+        markers = [t["name"] for t in table if t["role"] == CH.MARKER]
+        lookup = {t["name"]: bands.get(t["czi_name"]) or bands.get(t["name"])
+                  or bands.get("Channel%d" % t["index"])
+                  for t in table if t["role"] == CH.MARKER}
+    colours = {}
+    for m in markers:
+        got = lookup.get(m)
+        if got:
+            colour = G.BAND_COLOUR.get(got.most_common(1)[0][0])
+            if colour:
+                colours[m] = colour
+    if colours:
+        d.values["display.colours"] = colours
+        d.why["display.colours"] = "Marker colours from each channel's band: %s." % ", ".join(
+            "%s %s" % (m, c) for m, c in colours.items())
+    if nuc_bands:
+        colour = G.BAND_COLOUR.get(nuc_bands.most_common(1)[0][0])
+        if colour:
+            d.values["display.nuclear_colour"] = colour
+            d.why["display.nuclear_colour"] = "Counterstain drawn %s, from its band." % colour
+
+
+# ---------------------------------------------------------------------------
+# The report: every header field, and what each one did
+# ---------------------------------------------------------------------------
+
+def _plain(path):
+    """A flat path without its bracket keys: Objective[Objective:1]/LensNA -> Objective/LensNA."""
+    out, depth = [], 0
+    for ch in path:
+        if ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+        elif depth == 0:
+            out.append(ch)
+    return "".join(out)
+
+
+def by_tag(flat, *suffixes):
+    """The first value whose bracket-free path ends with one of `suffixes`, tried in order."""
+    plain = [(_plain(p), v) for p, v in flat.items()]
+    for suffix in suffixes:
+        for p, v in plain:
+            if p == suffix or p.endswith("/" + suffix):
+                return v
+    return None
+
+
+def _num(text):
+    try:
+        v = float(text)
+    except (TypeError, ValueError):
+        return None
+    return v if v == v else None
+
+
+def _fmt(v):
+    if isinstance(v, float):
+        return "%g" % v
+    return str(v)
+
+
+def _most(values):
+    """{"value": most common (with "(varies: ...)" when files differ), "files", "distinct"}."""
+    vals = [_fmt(v) for v in values if v not in (None, "")]
+    if not vals:
+        return None
+    counts = Counter(vals)
+    top = counts.most_common(1)[0][0]
+    out = {"value": top, "files": len(vals), "distinct": len(counts)}
+    if len(counts) > 1:
+        out["value"] = "%s (varies: %s)" % (top, ", ".join(
+            "%s in %d" % (v, n) for v, n in counts.most_common()))
+        out["values"] = [[v, n] for v, n in counts.most_common()]
+    return out
+
+
+#: Instrument fields: (key, summarise() key or None, flat tag suffixes).
+_INSTRUMENT = (
+    ("microscope", None, ("Microscopes/Microscope@Name", "Microscopes/Microscope/System",
+                          "Microscope@Name", "Microscope/System")),
+    ("objective_name", None, ("Instrument/Objectives/Objective@Name",
+                              "Objectives/Objective@Name", "Objective/Manufacturer/Model")),
+    ("objective_magnification", "objective_mag", ("Objective/NominalMagnification",)),
+    ("objective_na", "objective_na", ("Objective/LensNA",)),
+    ("objective_immersion", None, ("Objective/Immersion",)),
+    ("camera", "camera", ("Detector/Manufacturer/Model", "Detector@Name", "CameraName")),
+    ("application", None, ("Application/Name",)),
+    ("application_version", None, ("Application/Version",)),
+    ("pixel_type", "pixel_type", ("Image/PixelType",)),
+    ("bit_depth", "component_bit_count", ("Image/ComponentBitCount",)),
+    ("online_stitching", "online_stitching", ("IsOnlineStitchingEnabled",)),
+    ("shading_reference_mode", "shading_reference_mode", ("SelectedShadingReferenceMode",)),
+)
+
+#: What each instrument field does, in plain words.
+_INSTRUMENT_USE = {
+    "objective_name": "checks: objective must match across files",
+    "objective_magnification": "checks: objective must match across files",
+    "objective_na": "sets the optical resolution; checks: objective must match across files",
+    "pixel_type": "checks: pixel type must match across files",
+    "bit_depth": "checks: bit depth must match across files",
+}
+
+
+def _instrument(headers):
+    out = {}
+    for key, skey, suffixes in _INSTRUMENT:
+        vals = []
+        for _n, h, _c, flat in headers:
+            v = h.get(skey) if skey else None
+            if v in (None, ""):
+                v = by_tag(flat, *suffixes)
+            vals.append(v)
+        got = _most(vals)
+        if got:
+            out[key] = got
+    return out
+
+
+def _channel_rows(headers):
+    """One row per (plane index, channel name) across the files."""
+    rows = {}
+    for _n, h, infos, _f in headers:
+        summ = h.get("channels") or []
+        for i, info in enumerate(infos):
+            name = info.get("name") or "Channel%d" % i
+            r = rows.setdefault((i, name), {"index": i, "name": name, "dye": Counter(),
+                                            "ex": Counter(), "em": Counter(), "band": Counter(),
+                                            "exp": [], "bits": Counter(), "files": 0})
+            r["files"] += 1
+            dye = G.dye(info)
+            if dye:
+                r["dye"][dye] += 1
+            if info.get("excitation_nm"):
+                r["ex"][info["excitation_nm"]] += 1
+            if info.get("emission_nm"):
+                r["em"][info["emission_nm"]] += 1
+            b = G.band(info)
+            if b:
+                r["band"][b] += 1
+            s = summ[i] if i < len(summ) else {}
+            if s.get("exposure_ms"):
+                r["exp"].append(s["exposure_ms"])
+            bits = s.get("component_bit_count") or h.get("component_bit_count")
+            if bits:
+                r["bits"][bits] += 1
+    out = []
+    for (_i, _name), r in sorted(rows.items(), key=lambda kv: kv[0]):
+        top = lambda c: c.most_common(1)[0][0] if c else None   # noqa: E731
+        out.append({
+            "index": r["index"], "name": r["name"], "files": r["files"],
+            "dye": top(r["dye"]), "excitation_nm": top(r["ex"]), "emission_nm": top(r["em"]),
+            "band": top(r["band"]),
+            "exposure_ms": ([round(min(r["exp"]), 3), round(max(r["exp"]), 3)]
+                            if r["exp"] else None),
+            "bit_depth": top(r["bits"]),
+            "bit_depths": sorted(r["bits"]),
+        })
+    return out
+
+
+def _scenes(headers):
+    counts = [len(h.get("scenes") or []) for _n, h, _c, _f in headers]
+    ws = [s["width_um"] for _n, h, _c, _f in headers for s in (h.get("scenes") or [])
+          if s.get("width_um")]
+    hs = [s["height_um"] for _n, h, _c, _f in headers for s in (h.get("scenes") or [])
+          if s.get("height_um")]
+    rng = lambda xs: [round(min(xs), 1), round(max(xs), 1)] if xs else None   # noqa: E731
+    return {"per_file": ([min(counts), statistics.median(counts), max(counts)]
+                         if counts else None),
+            "width_um": rng(ws), "height_um": rng(hs)}
+
+
+def _report(d, headers):
+    """Detection.report: what the headers hold and what each field did. Also adds the
+    checks (exposure, bit depth, pixel type, objective, Nyquist) to d.problems."""
+    flats = {name: flat for name, _h, _c, flat in headers}
+    combined = czi_report.combine(flats)
+    dates = sorted(h["acquired"] for _n, h, _c, _f in headers if h.get("acquired"))
+    rep = {"read": {"files_read": len(headers), "files_found": len(d.files),
+                    "acquired": [dates[0], dates[-1]] if dates else None}}
+    inst = _instrument(headers)
+    rep["instrument"] = inst
+    chans = _channel_rows(headers)
+    rep["channels"] = chans
+    rep["scenes"] = _scenes(headers)
+    uses = []
+
+    def use(field, value, what):
+        uses.append({"field": field, "value": value if isinstance(value, (int, float, str))
+                     or value is None else json_safe(value), "use": what})
+
+    px = d.values.get("pixel_size_um")
+    use("pixel_size_um", px, "sets pixel_size_um, overview_target_um_per_px, "
+        "curation_render.um_per_px, scene_render.um_per_px" if px else "recorded only")
+    for key, _s, _x in _INSTRUMENT:
+        if key in inst:
+            use("instrument." + key, inst[key]["value"],
+                _INSTRUMENT_USE.get(key, "recorded only"))
+
+    # Checks that span files.
+    for key, label in (("bit_depth", "bit depth"), ("pixel_type", "pixel type")):
+        got = inst.get(key)
+        if got and got["distinct"] > 1:
+            d.problems.append("The files differ in %s: %s." % (label, ", ".join(
+                "%s in %d" % (v, n) for v, n in got["values"])))
+    objs = [g for g in (inst.get(k) for k in ("objective_name", "objective_magnification",
+                                              "objective_na")) if g and g["distinct"] > 1]
+    if objs:
+        d.problems.append("The files were not all scanned with the same objective: %s." % (
+            "; ".join(", ".join("%s in %d" % (v, n) for v, n in g["values"]) for g in objs)))
+    by_name = {}
+    for c in chans:
+        if c["exposure_ms"]:
+            lo, hi = by_name.get(c["name"], (c["exposure_ms"][0], c["exposure_ms"][1]))
+            by_name[c["name"]] = (min(lo, c["exposure_ms"][0]), max(hi, c["exposure_ms"][1]))
+    for name, (lo, hi) in by_name.items():
+        if hi > lo * 1.01:
+            d.problems.append("%s was exposed for %g–%g ms across files; signal is not "
+                              "directly comparable between those files." % (name, lo, hi))
+
+    nuc = set()
+    for _n, _h, infos, _f in headers:
+        for r in G.detect(infos):
+            if r["role"] == CH.NUCLEAR:
+                nuc.add(r["czi_name"] or r["name"])
+    for c in chans:
+        tag = "channels[%d %s]." % (c["index"], c["name"])
+        use(tag + "name", c["name"], "sets acquisition.layout, acquisition.markers or "
+            "acquisition.channels, channels.dapi_index, channels.marker_index")
+        use(tag + "dye", c["dye"], "recorded only; with the name, sets the band when no "
+            "wavelength is given")
+        use(tag + "excitation_nm", c["excitation_nm"], "sets the band when no emission is given")
+        use(tag + "emission_nm", c["emission_nm"], "sets the band; with the NA, the optical "
+            "resolution")
+        use(tag + "band", c["band"], "sets display.nuclear_colour" if c["name"] in nuc
+            else "sets display.colours")
+        use(tag + "exposure_ms", c["exposure_ms"], "checks: exposures must match across files")
+        use(tag + "bit_depth", c["bit_depth"], "checks: bit depth must match across files")
+    for key in ("per_file", "width_um", "height_um"):
+        use("scenes." + key, rep["scenes"][key], "recorded only")
+
+    na = None
+    if inst.get("objective_na"):
+        na = _num(inst["objective_na"]["value"].split(" ")[0])
+    optics = {"na": na, "pixel_size_um": px, "channels": []}
+    seen = set()
+    for c in chans:
+        if c["name"] in seen:
+            continue
+        seen.add(c["name"])
+        res = (round(0.61 * c["emission_nm"] / 1000.0 / na, 3)
+               if na and c["emission_nm"] else None)
+        ok = (px <= res / 2.0 + 1e-9) if (res and px) else None
+        optics["channels"].append({"name": c["name"], "resolution_um": res, "nyquist": ok})
+        use("optics[%s]" % c["name"], res, "checks: pixel size must be at most half the "
+            "optical resolution" if res else "recorded only: NA or emission unknown")
+        if ok is False:
+            d.problems.append("%s is sampled at %g µm, coarser than half its %.2f µm optical "
+                              "resolution." % (c["name"], px, res))
+    rep["optics"] = optics
+    rep["uses"] = uses
+    vary = czi_report.varying(combined)
+    rep["varying"] = {p: vary[p]["values"] for p in sorted(vary)[:50]}
+    rep["fields"] = combined
+    d.report = rep
+
+
+def json_safe(value):
+    """Lists and dicts of plain values, as json.dumps takes them."""
+    if isinstance(value, dict):
+        return {str(k): json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [json_safe(v) for v in value]
+    if isinstance(value, float) and value != value:
+        return None
+    if value is None or isinstance(value, (int, float, str, bool)):
+        return value
+    return str(value)
+
+
 def detect(source_dir, limit=MAX_HEADERS):
     """Everything the slide files say about the settings. Never raises on a bad file."""
     d = Detection()
@@ -203,6 +537,10 @@ def detect(source_dir, limit=MAX_HEADERS):
     _pixel_size(d, headers)
     _naming(d)
     _channels(d, headers)
+    _colours(d, headers)
+    if headers:
+        _report(d, headers)
+        d.report = json_safe(d.report)
     return d
 
 
@@ -221,6 +559,7 @@ GROUPS = (
     ("slide_naming.pattern", "slide_naming.example", "slide_naming.case_insensitive"),
     ("acquisition.layout", "acquisition.markers", "acquisition.channels",
      "channels.dapi_index", "channels.marker_index"),
+    ("display.colours", "display.nuclear_colour"),
 )
 
 
@@ -247,6 +586,24 @@ def fill(cfg, detection, keys=None):
         if found and current not in (None, "", [], {}):
             continue
         out[key] = value
+    # A colour may only name a marker the study measures: when the study chose its
+    # own markers, the detected colours keep just the ones it shares.
+    if isinstance(out.get("display.colours"), dict):
+        merged = copy.deepcopy(cfg) if isinstance(cfg, dict) else {}
+        for key, value in out.items():
+            node = merged
+            parts = key.split(".")
+            for part in parts[:-1]:
+                if not isinstance(node.get(part), dict):
+                    node[part] = {}
+                node = node[part]
+            node[parts[-1]] = value
+        names = set(CH.marker_names(merged))
+        kept = {m: c for m, c in out["display.colours"].items() if m in names}
+        if kept:
+            out["display.colours"] = kept
+        else:
+            del out["display.colours"]
     return out
 
 

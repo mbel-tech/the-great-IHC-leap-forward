@@ -149,11 +149,16 @@ def k_from_disk(reformat_dir=REFORMAT_DIR, rgb=True):
     cache = {}
 
     def k_of(uid, marker):
-        if uid in cache:
-            return cache[uid]
+        # Keyed on the marker too: under multiplex a scene's uid is the same
+        # for every marker, and each marker has its own composite.
+        if (uid, marker) in cache:
+            return cache[(uid, marker)]
         from PIL import Image
         base = marker_dir(marker)
-        subs = ((base + "_rgb",) if rgb else ()) + (base,)
+        # 04o's directory for THIS marker, from ls_paths - not `base + "_rgb"`,
+        # which under multiplex is one directory shared by every marker.
+        own = NAMES.including(marker).basename("sections_rgb", marker)
+        subs = ((own,) if rgb else ()) + (base,)
         k = 1.0
         for sub in subs:
             path = os.path.join(reformat_dir, sub, uid + ".png")
@@ -163,7 +168,7 @@ def k_from_disk(reformat_dir=REFORMAT_DIR, rgb=True):
                 except OSError:
                     k = 1.0
                 break
-        cache[uid] = k
+        cache[(uid, marker)] = k
         return k
 
     return k_of

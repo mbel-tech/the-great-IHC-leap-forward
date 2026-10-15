@@ -751,6 +751,23 @@ class CziSource:
             w.writerows(self.rows)
 
 
+def rgb_dir(marker):
+    """Where this marker's composites go; the thumbnails are `<this>_thumb`.
+
+    Not `<section directory>_rgb`, which is what this was. Under multiplex every
+    marker's section directory is `sections`, and a scene's uid is the same for
+    every marker, so the two `rgb_*` stages wrote the same `<uid>.png` - the
+    second skipped every section as already built and the curator showed the
+    first marker's picture under the second marker's name. ls_paths gives each
+    marker its own directory; paired keeps the names already on the drive.
+
+    LAYOUT re-read for the reason `RF._overrides_path` gives: a suite flips it.
+    """
+    names = (RF.NAMES if RF.LAYOUT == RF.NAMES.layout
+             else RF.LP.Names(OUT_ROOT, MARKERS, RF.LAYOUT))
+    return names.including(marker).path("sections_rgb", marker)
+
+
 def main():
     ap = argparse.ArgumentParser()
     _default = MARKERS[0] if MARKERS else None
@@ -800,7 +817,7 @@ def main():
 
     paths = RF.marker_paths(args.marker)
     src_dir = paths["sections"]
-    out_dir = src_dir + "_rgb"
+    out_dir = rgb_dir(args.marker)
     index_path = paths["index"]
 
     # Thumbnails are a resize of what is already on disk, so they need none of

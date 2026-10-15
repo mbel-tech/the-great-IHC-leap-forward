@@ -250,10 +250,6 @@ SHARED_OK = {
         "the reformat is decided once per scene and shared by every marker",
     ("multiplex", frozenset(("reformat_pcna_final", "reformat_perk_final"))):
         "the reformat is decided once per scene and shared by every marker",
-    ("multiplex", frozenset(("rgb_perk", "rgb_pcna"))):
-        "KNOWN, NOT BY DESIGN: both runs write <uid>.png into sections_rgb, so "
-        "under multiplex the second marker's composites replace the first's. "
-        "A separate fix; listed so this check guards everything else.",
 }
 
 

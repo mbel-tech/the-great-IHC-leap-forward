@@ -1101,6 +1101,79 @@ def shortfall(sid, output):
     return "%d %s%s %s" % (n, rule[1], "" if n == 1 else "s", rule[2])
 
 
+#: Stages whose real output is a report to read, and where it is in out_root.
+REPORTS = {
+    "tune_detection": ("Open report", os.path.join("qc", "detection_tuning.md")),
+}
+
+
+def report_file(sid, study):
+    """The report a stage in REPORTS wrote, or None while there is none."""
+    entry = REPORTS.get(sid)
+    if not entry or not study.out_root:
+        return None
+    path = os.path.join(study.out_root, entry[1])
+    return path if os.path.isfile(path) else None
+
+
+def _signal_checks(study):
+    """[(marker as a person knows it, verdict, reasons)] from 05b's detection.auto.
+
+    Only the study's own markers: a marker dropped from the study keeps its old
+    entry in the file, and it is no reason to hold anything.
+    """
+    det = study.cfg.get("detection") if isinstance(study.cfg, dict) else None
+    auto = det.get("auto") if isinstance(det, dict) else None
+    if not isinstance(auto, dict):
+        return []
+    ident = study.cfg.get("marker_identity") or {}
+    out = []
+    for m in study.markers or list(auto):
+        e = auto.get(m)
+        if not isinstance(e, dict) or not e.get("verdict"):
+            continue
+        name = ident.get(m) if isinstance(ident, dict) else None
+        out.append((name if isinstance(name, str) and name else m,
+                    e["verdict"], [str(r) for r in e.get("reasons") or ()]))
+    return out
+
+
+def signal_words(study):
+    """'AF568 signal poor, AF488 good' for the signal check's row, or None."""
+    checks = _signal_checks(study)
+    if not checks:
+        return None
+    return ", ".join(("%s signal %s" if i == 0 else "%s %s") % (name, verdict)
+                     for i, (name, verdict, _r) in enumerate(checks))
+
+
+def run_hold(done_sid, queue, study):
+    """(title, message) when Run all remaining should stop after `done_sid`, else None.
+
+    A "poor" signal check means dim nuclei will be missed whatever the settings,
+    and detection after it takes hours. So a run that would go straight on into
+    detection stops here for a person to read the report. The check itself has
+    finished and its settings are written: it is a pause, not a failure, and
+    pressing Run on detection carries on anyway.
+    """
+    if done_sid != "tune_detection" or "detect" not in queue:
+        return None
+    poor = [(name, reasons) for name, verdict, reasons in _signal_checks(study)
+            if verdict == "poor"]
+    if not poor:
+        return None
+    check = display_title(S.BY_ID["tune_detection"], study)
+    detect = display_title(S.BY_ID["detect"], study)
+    lines = "\n".join("  %s: %s" % (name, "; ".join(reasons) or "no reason given")
+                       for name, reasons in poor)
+    names = " and ".join(name for name, _r in poor)
+    return ("Stopped before detection: weak signal",
+            "The signal check found weak signal for %s:\n%s\n\n"
+            "Detection takes hours, so the run stopped before it. Read the report "
+            "(Open report on the \"%s\" row) and the QC pictures first. To carry on "
+            "anyway, press Run on \"%s\"." % (names, lines, check, detect))
+
+
 #: When the ROI fixes reached main (PRs #21 and #24, 2026-10-14 12:37 UTC): 05c
 #: decides `censored` on the native pixels, and 05a/05c move curated shapes half
 #: a grid pixel onto pixel centres. Nuclei measured before then keep the old

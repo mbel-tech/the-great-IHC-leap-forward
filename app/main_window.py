@@ -814,6 +814,24 @@ class MainWindow(QMainWindow):
             if short:
                 self._log(f"--- {st.title}: {short}; the reasons are listed above")
                 self._shortfalls.append(f"{W.display_title(st)}: {short}")
+            # A stop already asked for (or a close waiting on this stage) ends the
+            # run anyway, and a box here would only stand in the close's way.
+            hold = None if self._stop_requested else W.run_hold(st.sid, self._queue,
+                                                                self.study())
+            if hold:
+                # Not a failure: the stage finished and kept its outputs. The run
+                # stops for a person to look before what comes next.
+                for sid in self._queue:
+                    self._running.pop(sid, None)
+                self._queue = []
+                self.drawer.stop_btn.setVisible(False)
+                self.drawer.state.setText(hold[0])
+                self.drawer.state.setStyleSheet(f"color:{COLOUR['waiting']}")
+                self._set_run_state("Idle")
+                self._log(f"--- {hold[0]}\n{hold[1]}")
+                self.refresh()
+                QMessageBox.information(self, hold[0], hold[1])
+                return
             if st.curator and self.curate.current == st.sid:
                 self.curator.show_page(st.curator, W.display_title(st, self.study()))
             self._run_next()

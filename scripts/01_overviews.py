@@ -48,6 +48,7 @@ from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
 import czi_read as CR  # noqa: E402
 import ls_channels as CH  # noqa: E402
 import ls_io as IO  # noqa: E402
+import ls_jsonio as JS  # noqa: E402
 
 SOURCE_DIR = CONFIG["source_dir"]
 OUT_ROOT = CONFIG["out_root"]
@@ -354,9 +355,9 @@ def sample_display_ranges(scenes, fields, zoom, force):
         v = np.concatenate(chunks)
         ranges[name] = {"lo": int(np.percentile(v, LO_PCT)), "hi": int(np.percentile(v, HI_PCT))}
         print(f"  {name}: {ranges[name]['lo']} .. {ranges[name]['hi']}  (n={v.size})")
-    os.makedirs(QC_DIR, exist_ok=True)
-    with open(RANGES_PATH, "w", encoding="utf-8") as fh:
-        json.dump(ranges, fh, indent=2)
+    # Atomic: a truncated display_ranges.json still exists, so the next run
+    # skips sampling and dies parsing it instead of resampling.
+    JS.write_json_atomic(RANGES_PATH, ranges)
     return ranges
 
 

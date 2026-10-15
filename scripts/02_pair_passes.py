@@ -35,6 +35,7 @@ if _HERE not in sys.path:
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
 import ls_naming as NM  # noqa: E402
 import ls_channels as CH  # noqa: E402
+import ls_io as IO  # noqa: E402
 import ls_paths as LP  # noqa: E402
 
 OUT_ROOT = CONFIG["out_root"]
@@ -408,10 +409,9 @@ def _write(path, rows):
         print(f"  (nothing to write for {os.path.basename(path)})")
         return
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", newline="", encoding="utf-8") as fh:
-        writer = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
-        writer.writeheader()
-        writer.writerows(rows)
+    # Swapped in, not written in place: a crash part-way through pairs.csv
+    # left a truncated one that 03 onwards read as the complete pairing.
+    IO.atomic_write_csv(path, rows, list(rows[0].keys()))
     print(f"  wrote {os.path.basename(path)}  ({len(rows)} rows)")
 
 

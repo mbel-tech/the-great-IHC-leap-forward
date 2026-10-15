@@ -8,6 +8,9 @@ object, so both can be wrong in two directions; this pins those two cases and
 the two where every method agrees, against 06f's own sampling code run on a
 mask built from the same pixels.
 
+`artifact` gets the same treatment: decided on 04g's own 5.2 um/px mask at the
+centroid's native position, against the 256 copy 04a resampled from it twice.
+
 SYNTHETIC. The planes, the model and the clip mask are made up here; what this
 guarantees is the rule and the plumbing, not a count on a real section.
 
@@ -265,6 +268,76 @@ with temp_study(acquisition=PAIRED) as study:
         "no artifact mask" in out, False)
     chk("...and the re-measured section leaves the record",
         recorded(), [("AB13_2a-s0", "AF488")])
+
+    # `artifact` is decided on 04g's own mask at 5.2 um/px, at the centroid's
+    # native position - not on the 256 copy, which 04a made by resizing that
+    # mask by nearest neighbour twice (overview -> 400 working grid -> 256).
+    # Here a grid cell is 40 native px = 26 um, as on a real section, and the
+    # .npy is built by exactly those two resizes at angle 0 with a full-frame
+    # silhouette, so its crop and pad are the identity.
+    print()
+    print("=== artifact: 04g's mask at the native position, not the 256 grid ===")
+    K = 40                       # native px per grid cell
+    SC = 8                       # native px per overview px (0.65 -> 5.2 um)
+    OV = 256 * K // SC           # overview side, px
+    AX0 = AY0 = 960              # box origin: grid 24, overview 120
+    geom = {"scene_uid": UID, "animal": "AB12", "marker": "AF568",
+            "czi_file": FILE, "scene_index": "0",
+            "scene_x": "0", "scene_y": "0", "scene_w": str(OV * SC),
+            "scene_h": str(OV * SC), "overview_um_px": "5.2",
+            "native_um_px": "0.65", "src_w": str(OV), "src_h": str(OV),
+            "m00": str(K), "m01": "0", "m02": "0",
+            "m10": "0", "m11": str(K), "m12": "0"}
+    box = {"scene_uid": UID, "animal": "AB12", "marker": "AF568",
+           "roi_kind": "roi", "region": "Dm", "seed_n": "1",
+           "czi_x0": str(AX0), "czi_y0": str(AY0), "czi_w": str(N),
+           "czi_h": str(N), "sec_x": "25", "sec_y": "25", "sec_r": "20",
+           "sec_poly": ""}
+    for path, row in ((D5.G5.GEOM_CSV, geom), (D5.G5.BOX_CSV, box)):
+        with open(path, "w", newline="\n", encoding="utf-8") as fh:
+            w = csv.DictWriter(fh, fieldnames=list(row))
+            w.writeheader()
+            w.writerow(row)
+    # The same four nuclei. Their centroids, in overview px and grid cells:
+    #   1 (120.9, 120.9) -> grid (24, 24), which samples overview (123, 123)
+    #   2 (124.9, 120.9) -> grid (25, 24), samples (126, 123)
+    #   3 (120.9, 124.9) -> grid (24, 25), samples (123, 126)
+    #   4 (124.9, 124.9) -> grid (25, 25), samples (126, 126)
+    ov = np.zeros((OV, OV), dtype=np.uint8)
+    ov[120:122, 120:122] = 1     # 10 um bubble under 1; its cell samples past it
+    ov[126:128, 126:128] = 2     # 10 um fleck 3 um off 4, on 4's cell's sample
+    ov[120:124, 124:127] = 1     # under 2 AND on its cell's sample: both agree
+    os.makedirs(os.path.join(study.out_root, "artifacts"), exist_ok=True)
+    png = os.path.join(study.out_root, "artifacts", f"{UID}_artifact.png")
+    Image.fromarray(ov).save(png)
+    grid = np.asarray(Image.fromarray(ov).resize((400, 400), Image.NEAREST)
+                      .resize((256, 256), Image.NEAREST)) > 0
+    np.save(os.path.join(D5.REFORMAT_DIR, "sections", f"{UID}_artifact.npy"),
+            grid)
+    plain = np.full((N, N), 800.0)
+    rows = run(D5, plain, labels)
+    art = {k: int(r["artifact"]) for k, r in rows.items()}
+    chk("the grid copy lost the bubble and kept the fleck",
+        (bool(grid[24, 24]), bool(grid[25, 25])), (False, True))
+    chk("all four nuclei were measured", sorted(art), [1, 2, 3, 4])
+    chk("10 um bubble under the centroid: flagged", art[1], 1)
+    chk("clean, but a fleck 3 um away fills its cell: not flagged", art[4], 0)
+    chk("inside an artifact both frames agree on: flagged", art[2], 1)
+    chk("clean and clear: not flagged", art[3], 0)
+
+    # The .npy still decides WHETHER a section is masked: 04a writes it only
+    # when the section's mask was not rejected on review. Without 04g's PNG
+    # (or a geometry row from before 05a recorded the scene rectangle) there
+    # is nothing finer to read, so the grid copy is used - and said.
+    os.remove(png)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rows = run(D5, plain, labels)
+    chk("no 04g mask: falls back to the grid copy",
+        [int(rows[k]["artifact"]) for k in (1, 2, 3, 4)], [0, 1, 0, 1])
+    chk("...and says how many sections did",
+        "1 sections had artifacts decided on the 256 grid" in buf.getvalue(),
+        True)
 
 print()
 if failures:

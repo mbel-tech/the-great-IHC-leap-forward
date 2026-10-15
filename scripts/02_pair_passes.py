@@ -81,11 +81,24 @@ def nn_spacing(pts):
 
 def _fnum(v):
     """A float cell, or nan for a blank one - a scene with no recorded centre
-    must load, and be ignored by the distance maths, rather than kill the run."""
+    must load rather than kill the run. nan is NOT ignored by the distance
+    maths: one in the cost matrix makes linear_sum_assignment raise, so main()
+    takes these scenes out before matching (has_centre) and lists them."""
     try:
         return float(v)
     except (TypeError, ValueError):
         return float("nan")
+
+
+def has_centre(r):
+    """Whether a scene can be placed at all. A section cannot be paired by a
+    position it has not got."""
+    return bool(np.isfinite(r["center_x_um"]) and np.isfinite(r["center_y_um"]))
+
+
+def _um(v):
+    """A centre for pairs.csv: blank, not the string 'nan', when there is none."""
+    return round(v, 1) if np.isfinite(v) else ""
 
 
 def load_scenes():
@@ -275,29 +288,53 @@ def main():
     a_slug, b_slug = LP.slug(marker_a), LP.slug(marker_b)
 
     animals = sorted({r["animal"] for r in rows}, key=NM.natural_key)
-    pair_rows, offset_rows = [], []
+    pair_rows, offset_rows, no_centre = [], [], []
 
     for animal in animals:
         slides = sorted({k[1] for k in chosen if k[0] == animal})
         entries = []
 
         for slide in slides:
-            a_rows = chosen.get((animal, slide, marker_a), [])
-            b_rows = chosen.get((animal, slide, marker_b), [])
+            a_all = chosen.get((animal, slide, marker_a), [])
+            b_all = chosen.get((animal, slide, marker_b), [])
+
+            # A scene with no recorded centre cannot be matched by position,
+            # and its nan would poison the whole slide's cost matrix. It keeps
+            # its own row in pairs.csv, as no_centre_<marker>, so it is listed
+            # rather than dropped - the same rule as every other status here.
+            a_rows = [r for r in a_all if has_centre(r)]
+            b_rows = [r for r in b_all if has_centre(r)]
+            blank = ([(marker_a, r) for r in a_all if not has_centre(r)]
+                     + [(marker_b, r) for r in b_all if not has_centre(r)])
+            for marker, r in blank:
+                entries.append({"slide": slide, "serial": r["slide_serial"], "marker": marker,
+                                "a": r if marker == marker_a else None,
+                                "b": r if marker == marker_b else None,
+                                "dist": "", "status": f"no_centre_{marker}"})
+                no_centre.append(r["scene_uid"])
+            blank_note = (f"; {len(blank)} scene(s) with no centre left out of matching"
+                          if blank else "")
 
             if not a_rows or not b_rows:
                 only = marker_a if a_rows else marker_b
+                other = marker_b if a_rows else marker_a
+                # The other pass was scanned but none of its scenes can be
+                # placed: these are unmatched, not the only pass there is.
+                other_scanned = bool(b_all if a_rows else a_all)
                 for r in (a_rows or b_rows):
                     entries.append({"slide": slide, "serial": r["slide_serial"], "marker": only,
                                     "a": r if a_rows else None, "b": None if a_rows else r,
-                                    "dist": "", "status": f"only_{only}"})
+                                    "dist": "",
+                                    "status": (f"unmatched_{only}" if other_scanned
+                                               else f"only_{only}")})
                 offset_rows.append({"animal": animal, "slide": slide,
-                                    f"n_{a_slug}": len(a_rows),
-                                    f"n_{b_slug}": len(b_rows), "same_slide": "",
+                                    f"n_{a_slug}": len(a_all),
+                                    f"n_{b_slug}": len(b_all), "same_slide": "",
                                     "tight_fraction": "", "median_residual_um": "",
                                     "dx_um": "", "dy_um": "",
                                     "inlier_votes": "", "n_matched": 0,
-                                    "note": f"only {only} present"})
+                                    "note": (f"no {other} scene has a centre" if other_scanned
+                                             else f"only {only} present") + blank_note})
                 continue
 
             pairs, un_a, un_b, offset, diag = match_slide(a_rows, b_rows)
@@ -319,13 +356,14 @@ def main():
 
             offset_rows.append({
                 "animal": animal, "slide": slide,
-                f"n_{a_slug}": len(a_rows), f"n_{b_slug}": len(b_rows),
+                f"n_{a_slug}": len(a_all), f"n_{b_slug}": len(b_all),
                 "same_slide": int(same),
                 "tight_fraction": diag["tight_fraction"],
                 "median_residual_um": diag["median_residual_um"],
                 "dx_um": round(float(offset[0]), 1), "dy_um": round(float(offset[1]), 1),
                 "inlier_votes": diag["votes"], "n_matched": len(pairs),
-                "note": "" if same else "constellations disagree - treat as separate slides",
+                "note": ("" if same else "constellations disagree - treat as separate slides")
+                        + blank_note,
             })
 
         # Canonical rostro-caudal numbering across the whole animal.
@@ -345,9 +383,17 @@ def main():
                 f"{b_slug}_scene": b["scene_index"] if b else "",
                 f"{b_slug}_scene_uid": b["scene_uid"] if b else "",
                 "match_distance_um": e["dist"],
-                "center_x_um": round((a or b)["center_x_um"], 1),
-                "center_y_um": round((a or b)["center_y_um"], 1),
+                "center_x_um": _um((a or b)["center_x_um"]),
+                "center_y_um": _um((a or b)["center_y_um"]),
             })
+
+    # Named, not just counted: the fix is in the manifest (stage 00), and the
+    # operator needs to know which scenes to look at.
+    if no_centre:
+        print(f"  !! {len(no_centre)} scene(s) have no recorded centre and were "
+              f"left out of matching (status no_centre_<marker>):")
+        for uid in no_centre:
+            print(f"       {uid}")
 
     _write(os.path.join(OUT_ROOT, "pairs.csv"), pair_rows)
     _write(os.path.join(OUT_ROOT, "qc", "pairing_offsets.csv"), offset_rows)

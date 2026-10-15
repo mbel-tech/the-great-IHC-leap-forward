@@ -37,12 +37,13 @@ import re
 import socketserver
 import threading
 
-from PySide6.QtCore import QUrl, Signal
+from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineCore import (
     QWebEngineDownloadRequest, QWebEngineScript, QWebEngineProfile)
 from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QLabel, QMessageBox, QPushButton, QVBoxLayout, QHBoxLayout, QWidget)
 
 import state as ST
 import theme as T
@@ -155,6 +156,16 @@ class CuratorView(QWidget):
         self.done_btn.setVisible(False)
         self.done_btn.clicked.connect(self.done_requested.emit)
 
+        # A curation save that failed. It stays up until a save succeeds, in this widget so it
+        # goes with the page into its own window: the operator is looking at the page, not at
+        # the log drawer, and every decision made while it shows is in the page only.
+        self.save_warning = QLabel("", self)
+        self.save_warning.setWordWrap(True)
+        self.save_warning.setStyleSheet(
+            f"background:{T.DANGER};color:#ffffff;font-weight:600;padding:6px 8px")
+        self.save_warning.setVisible(False)
+        self._save_failing = False
+
         bar = QHBoxLayout()
         bar.addWidget(self.title, 1)
         bar.addWidget(self.done_btn)
@@ -165,6 +176,7 @@ class CuratorView(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addLayout(bar)
+        lay.addWidget(self.save_warning)
         lay.addWidget(self.view, 1)
 
         prof = self.view.page().profile()
@@ -240,9 +252,7 @@ class CuratorView(QWidget):
         shipped as a copy, so it cannot drift from the QWebChannel on this side.
         """
         page = self.view.page()
-        self.bridge = ST.Bridge(
-            self.store,
-            on_save=lambda k, n: self.logged.emit(f"saved   {k}  ({n/1024:.1f} KB)"))
+        self.bridge = ST.Bridge(self.store, on_save=self._saved, on_error=self._save_failed)
         self.channel = QWebChannel(page)
         self.channel.registerObject("lsbridge", self.bridge)
         page.setWebChannel(self.channel)
@@ -262,6 +272,35 @@ class CuratorView(QWidget):
         sc.setRunsOnSubFrames(False)
         sc.setSourceCode(src)
         page.scripts().insert(sc)
+
+    def _saved(self, key, n):
+        self.logged.emit(f"saved   {key}  ({n/1024:.1f} KB)")
+        if self._save_failing:
+            self._save_failing = False
+            self.save_warning.setVisible(False)
+            self.logged.emit("curation saves are reaching disk again")
+
+    def _save_failed(self, key, message):
+        """Show a failed save now, and keep showing it until one succeeds.
+
+        The strip and the log line repeat for every failure; the message box comes once per
+        run of failures, since the curators save on every click and a box per click would
+        stop the work the operator is trying to save.
+        """
+        self.logged.emit(f"NOT SAVED  {message}")
+        self.save_warning.setText(
+            "Curation is NOT being saved to disk - decisions made now are in this page only. "
+            + message)
+        self.save_warning.setVisible(True)
+        if not self._save_failing:
+            self._save_failing = True
+            box = QMessageBox(QMessageBox.Warning, "Curation not saved",
+                              message + "\n\nThe warning above the curator stays until a "
+                              "save succeeds. Fix the cause, then make any decision to "
+                              "save again.", QMessageBox.Ok, self)
+            box.setAttribute(Qt.WA_DeleteOnClose)
+            # Not exec(): a modal loop inside the page's save call would stall the page.
+            box.open()
 
     def refresh_seed(self):
         """Rebuild the injected script so a later import is picked up on reload."""

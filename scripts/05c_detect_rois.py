@@ -1282,6 +1282,11 @@ def main():
             print(f"  {len(torn)} {args.marker} section(s) were cut off mid-write "
                   f"({dropped} rows) - dropped, and measured again: "
                   + ", ".join(sorted(torn)[:5]) + (" ..." if len(torn) > 5 else ""))
+    if exists and logged:
+        # Logged with no rows: measured and found empty (see record_done's
+        # call below). Done like any other, and under the thresholds it was
+        # measured with, so it counts in the settings check too.
+        measured |= logged & set(by_sec)
     done = set()
     if exists and not args.force:
         done = set(measured)
@@ -1702,7 +1707,15 @@ def main():
         fh.flush()
         # On disk before the section is logged as whole - see DONE_LOG.
         os.fsync(fh.fileno())
-        if rows:
+        # A section with rows is done. So is one MEASURED and found empty -
+        # it writes no rows, and without the entry the resume took it for
+        # unmeasured and measured it again every run, and 06a, which reads
+        # the log to tell "looked, found nothing" from "never looked", left it
+        # out instead of reporting zeros. One skipped for want of a shared
+        # range was not measured and is not logged: it is redone, and 06a
+        # does not count it. (Its geometry row alone says nothing: one is
+        # written for a section cut off before this line, too.)
+        if rows or not any(u == uid for u, _, _ in no_norm):
             record_done(dfh, args.marker, uid)
         if norm_rows:
             if nfh is None:

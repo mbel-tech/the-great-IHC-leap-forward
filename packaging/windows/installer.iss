@@ -40,12 +40,16 @@ UninstallDisplayName=The Great IHC Leap Forward {#AppVersion}
 ; library version no longer ships would otherwise linger in site-packages and
 ; can shadow the new ones.
 Type: filesandordirs; Name: "{app}\runtime"
+Type: filesandordirs; Name: "{app}\updates"
 Type: filesandordirs; Name: "{app}\app"
 Type: filesandordirs; Name: "{app}\scripts"
 Type: filesandordirs; Name: "{app}\analysis"
 Type: filesandordirs; Name: "{app}\atlas"
 Type: filesandordirs; Name: "{app}\R"
 Type: filesandordirs; Name: "{app}\keras"
+; The in-app updater's downloads and its kept previous version, which belong
+; to the copy being replaced.
+Type: filesandordirs; Name: "{app}\updates"
 
 [Files]
 Source: "{#Bundle}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -67,3 +71,4 @@ Type: files; Name: "{app}\lsapp-crash.log"
 Type: files; Name: "{app}\lsapp-selftest.log"
 Type: filesandordirs; Name: "{app}\keras"
 Type: filesandordirs; Name: "{app}\runtime"
+Type: filesandordirs; Name: "{app}\updates"

@@ -1,7 +1,7 @@
 <#
 Build the installable Windows bundle.
 
-    pwsh packaging/windows/build.ps1 [-Out dist\LS-IHC] [-NoR] [-PythonVersion 3.13.x]
+    pwsh packaging/windows/build.ps1 [-Out dist\LS-IHC] [-Version 1.2.0] [-NoR] [-PythonVersion 3.13.x]
 
 Produces a self-contained folder:
 
@@ -10,6 +10,7 @@ Produces a self-contained folder:
     R\           R and the figure packages (left out with -NoR)
     keras\       StarDist's pretrained model, so Measure works offline
     The Great IHC Leap Forward.cmd           starts the app from the folder (portable use)
+    VERSION.json the version and the fingerprints the in-app updater compares
 
 installer.iss wraps that folder into The-Great-IHC-Leap-Forward-Setup.exe.
 
@@ -23,6 +24,7 @@ Python 3.13 rather than 3.14: pylibCZIrw publishes no cp314 wheel.
 [CmdletBinding()]
 param(
     [string]$Out = "dist\LS-IHC",
+    [string]$Version = "0.0.0-dev",  # the release tag without its v; the updater reads it
     [string]$PythonVersion = "",     # empty = newest 3.13.x on python.org
     [string]$RVersion = "",          # empty = current CRAN release
     [switch]$NoR
@@ -113,6 +115,8 @@ foreach ($d in "app", "scripts", "analysis", "atlas") {
 foreach ($f in "config.example.json", "README.md") { Copy-Item "$Repo\$f" $Out }
 Get-ChildItem $Out -Recurse -Directory -Filter "__pycache__" | Remove-Item -Recurse -Force
 Set-Content -Encoding ascii (Join-Path $Out "The Great IHC Leap Forward.cmd") '@start "" "%~dp0runtime\pythonw.exe" -m app %*'
+# What app/updates.py compares with each release's update-<v>.json.
+Invoke-Checked $Py @("$Repo\packaging\make_update.py", "--version", $Version, "--version-file-only", $Out)
 
 # --- StarDist model -------------------------------------------------------
 # Fetched once here so the first Measure run needs no network. stardist ends

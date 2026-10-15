@@ -87,6 +87,14 @@
       "mad_k": 3.0,
       "_min_area_um2_note": "Not tidying. At k=3 over a whole frame, thousands of single-pixel excursions clear the cut by chance and each one would be counted as an object. This is what makes the count mean `a stained region` rather than `a pixel that was noisy`. 5 um2 is well below a nucleus (a 7 um nucleus is ~38 um2) and well above sensor noise; a study counting something smaller must lower it deliberately.",
       "min_area_um2": 5.0
+    },
+    "stardist": {
+      "_prob_thresh_note": "Setting it here overrides the tuned value. Lower finds more, dimmer objects and more noise; higher finds fewer. Changing it after detection has started changes what a nucleus is, so 05c refuses to add sections measured with a different value to the ones already measured: re-run detection with Redo finished sections.",
+      "prob_thresh": null,
+      "_nms_thresh_note": "Not tuned by 05b: the model was trained with its own value, and nothing measured on the slides says it should move. Raise it only if touching nuclei are being merged in the QC pictures.",
+      "nms_thresh": null,
+      "_use_auto_note": "Off runs detection with the model's own thresholds (or the ones set above), which is what every count before 05b existed was made with. The measurements and the tuned values stay in detection.auto either way.",
+      "use_auto": true
     }
   },
   "_atlas_source_note": "salmon takes its plates from atlas_pdf and atlas_plate_set. wullimann1996 is the zebrafish cross-section atlas: 04w builds its plate set (plates_wullimann), 04x turns each plate's region outlines into numbered polygons, and atlas_plate_set is then ignored. Plate ids differ between the two (wplate_NNN), and the plate fingerprint the importers already check catches rows made against another plate set. An atlas made elsewhere is brought in with `python scripts/ls_atlas_import.py` or the Import atlas button, which registers it under `atlases` and is then a valid value here.",

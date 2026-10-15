@@ -1141,6 +1141,41 @@ list, are refused rather than guessed at.
 > s = np.linalg.svd(np.asarray(M, float)[:, :2], compute_uv=False)
 > ```
 
+## 05b  Check signal quality and tune detection {#stage-tune_detection}
+
+*`scripts/05b_tune_detection.py` → `qc/detection_tuning.md`, `qc/detection_tuning.csv`, `detection.auto` in the study file*
+
+Run just before detection. For each marker it reads a sample of regions — by default three from each
+of twelve sections, spread evenly over the animals — off the plane detection will segment: DAPI for a
+marker measured inside nuclei, the marker's own channel for one segmented on itself (PCNA in the LS
+study). Every crop is read at full resolution; a region bigger than the window is cut to its centre,
+never shrunk.
+
+It measures, per crop: the **background** and **foreground** levels (the medians either side of an
+Otsu cut), the **noise** (from neighbouring-pixel differences, so it does not depend on how crowded
+the field is), **signal-to-noise**, **contrast**, how much of the crop is signal, and how much is
+**saturated**. Each section gets one vote before the study-wide median is taken, and the spread of
+the signal between sections is reported too. From those it gives a verdict — good, marginal or poor —
+with the reasons in words.
+
+For a StarDist marker it then runs the model once per crop and counts nuclei at a range of
+probability cuts (0.30 to 0.80, plus the model's own 0.479). Too low a cut adds noise as nuclei and
+the count climbs steeply; too high drops real ones and it falls steeply. In between the count barely
+moves, and **the cut is put where it moves least**, so the count reflects the nuclei rather than where
+the cut happened to be. The model's own cut is kept unless another is clearly more stable.
+
+**One setting per marker, for the whole study, never one per section.** A cut tuned to each section
+would follow that section's brightness, and brightness follows treatment whenever the treatment
+changes expression — the tuning would become a treatment-correlated bias in every count. The sample
+never reads the group key. The overlap threshold and the normalisation are not tuned: the model was
+trained with them, and nothing measured on the slides says they should move.
+
+The chosen cut is used by 05c unless you set `detection.stardist.prob_thresh` yourself (Set up →
+Advanced → Nucleus detection) or turn off *Use auto-tuned detection settings*. **05c records the
+thresholds each marker was measured with and refuses to add sections measured with different ones**
+to those already in the results; changing the setting mid-study means re-measuring that marker with
+*Redo finished sections*.
+
 ## 05c  Detect and measure nuclei {#stage-detect}
 
 *`scripts/05c_detect_rois.py` → `results/roi_nuclei.csv`*

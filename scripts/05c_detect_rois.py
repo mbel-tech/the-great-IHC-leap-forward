@@ -80,6 +80,7 @@ Run:  python 05c_detect_rois.py
 
 import argparse
 import csv
+import json
 import importlib.util
 import os
 import sys
@@ -103,6 +104,7 @@ import czi_read as CR  # noqa: E402
 import ls_channels as CH  # noqa: E402
 import ls_segment as SG  # noqa: E402
 import ls_coloc as CO  # noqa: E402
+import ls_jsonio  # noqa: E402
 OUT_ROOT = G5.OUT_ROOT
 REFORMAT_DIR = G5.REFORMAT_DIR
 RESULTS = os.path.join(OUT_ROOT, "results")
@@ -180,6 +182,86 @@ NUCLEAR_C = int(_NUCLEAR.index) if (
 _THRESH = (CONFIG.get("detection") or {}).get("threshold") or {}
 MAD_K = float(_THRESH.get("mad_k", 3.0))
 MIN_AREA_UM2 = float(_THRESH.get("min_area_um2", 5.0))
+
+
+#: StarDist's two thresholds, as the study sets them, and what 05b tuned.
+_STARDIST = (CONFIG.get("detection") or {}).get("stardist") or {}
+_AUTO = (CONFIG.get("detection") or {}).get("auto") or {}
+
+#: The StarDist thresholds each marker's rows were measured with. One record
+#: per marker, rewritten when a run starts: a resume compares against it and
+#: refuses to add sections measured with different thresholds to the ones
+#: already in roi_nuclei.csv - two definitions of "a nucleus" in one dataset
+#: would be a difference between sections that no statistic downstream could
+#: tell from biology. A file of its own for the reason NORM_CSV is.
+SETTINGS_JSON = os.path.join(RESULTS, "detection_settings.json")
+
+
+def stardist_settings(marker):
+    """{prob_thresh, nms_thresh, source} for a marker StarDist segments.
+
+    In order: a value set in detection.stardist, then the one 05b tuned for
+    this marker (unless detection.stardist.use_auto is off), then None - the
+    model's own, which is what every count before 05b was made with. 05b
+    writes None for a cut it kept at the model's default, so tuning that
+    changed nothing does not count as a change.
+    """
+    out, source = {"prob_thresh": None, "nms_thresh": None}, []
+    tuned = {}
+    if _STARDIST.get("use_auto", True):
+        tuned = ((_AUTO.get(marker) or {}).get("chosen") or {})
+    for k in ("prob_thresh", "nms_thresh"):
+        if _STARDIST.get(k) is not None:
+            out[k] = float(_STARDIST[k])
+            source.append(f"{k} set in config")
+        elif tuned.get(k) is not None:
+            out[k] = float(tuned[k])
+            source.append(f"{k} tuned by 05b")
+    out["source"] = ", ".join(source) or "model defaults"
+    return out
+
+
+def _thresholds(marker):
+    """The keyword arguments SG.segment takes for this marker's thresholds."""
+    st = stardist_settings(marker) if backend_for(marker) == "stardist" else {}
+    return {"prob_thresh": st.get("prob_thresh"),
+            "nms_thresh": st.get("nms_thresh")}
+
+
+def same_settings(a, b):
+    return all((a.get(k) is None and b.get(k) is None)
+               or (a.get(k) is not None and b.get(k) is not None
+                   and abs(float(a[k]) - float(b[k])) < 1e-6)
+               for k in ("prob_thresh", "nms_thresh"))
+
+
+def recorded_settings(marker, measured):
+    """The thresholds this marker's existing rows were made with, or None.
+
+    No record but rows already measured means they predate the record, and
+    then they were made with the model's own thresholds.
+    """
+    try:
+        with open(SETTINGS_JSON, encoding="utf-8") as fh:
+            rec = (json.load(fh).get("markers") or {}).get(marker)
+    except (OSError, ValueError, AttributeError):
+        rec = None
+    if rec is None and measured:
+        rec = {"prob_thresh": None, "nms_thresh": None, "source": "model defaults"}
+    return rec
+
+
+def record_settings(marker, settings):
+    try:
+        with open(SETTINGS_JSON, encoding="utf-8") as fh:
+            rec = json.load(fh)
+        if not isinstance(rec, dict):
+            rec = {}
+    except (OSError, ValueError):
+        rec = {}
+    rec.setdefault("markers", {})[marker] = dict(settings)
+    os.makedirs(RESULTS, exist_ok=True)
+    ls_jsonio.write_json_atomic(SETTINGS_JSON, rec)
 
 
 def _segments_own(marker):
@@ -905,8 +987,8 @@ def main():
     coloc_present = os.path.exists(COLOC_CSV)
     if coloc_exists or (coloc_present and args.force):
         check_header(COLOC_CSV, COLOC_COLUMNS)
-    done = set()
-    if exists and not args.force:
+    measured = set()
+    if exists:
         # Streamed with csv.reader, not load_csv: this needs one column and
         # load_csv would build a dict per row - about five million of them once
         # PCNA is in the file, on the resume of the run this stage exists to
@@ -917,7 +999,10 @@ def main():
             next(rd, None)
             for row in rd:
                 if row and row[0] in by_sec:
-                    done.add(row[0])
+                    measured.add(row[0])
+    done = set()
+    if exists and not args.force:
+        done = set(measured)
         print(f"resuming: {len(done)} {args.marker} sections already measured")
     todo = [u for u in sorted(by_sec) if u not in done]
     if args.order == "balanced":
@@ -928,6 +1013,38 @@ def main():
         print("nothing to do")
         return 0
     print(f"{len(todo)} sections, {sum(len(by_sec[u]) for u in todo)} ROIs")
+
+    # THE SAME THRESHOLDS FOR EVERY SECTION OF A MARKER. Rows that will stay
+    # in the file - every measured section on a resume, the ones outside
+    # `todo` on a --force --limit - must have been made with the thresholds
+    # this run would use, or the run is refused before anything is touched.
+    settings = None
+    if backend_for(args.marker) == "stardist":
+        settings = stardist_settings(args.marker)
+        staying = measured - set(todo) if args.force else measured
+        before = recorded_settings(args.marker, measured)
+        if before is not None and staying and not same_settings(before, settings):
+            def show(st):
+                return ", ".join(f"{k} {st.get(k) if st.get(k) is not None else 'model default'}"
+                                 for k in ("prob_thresh", "nms_thresh"))
+            print(f"!! REFUSED: {len(staying)} {args.marker} sections were "
+                  f"measured with {show(before)} ({before.get('source', '?')}), "
+                  f"and this run would use {show(settings)} "
+                  f"({settings['source']}).")
+            print("   Mixing the two would make 'a nucleus' mean different "
+                  "things in different sections. Either re-measure every "
+                  "section with the new settings (--force, no --limit), or go "
+                  "back to the old ones (detection.stardist.use_auto off, or "
+                  "set the thresholds in config).")
+            return 1
+        print(f"StarDist thresholds: prob_thresh "
+              f"{settings['prob_thresh'] if settings['prob_thresh'] is not None else 'model default'}"
+              f", nms_thresh "
+              f"{settings['nms_thresh'] if settings['nms_thresh'] is not None else 'model default'}"
+              f"  ({settings['source']})")
+        if not _AUTO.get(args.marker):
+            print(f"  (signal quality was not checked for {args.marker}; "
+                  f"05b_tune_detection.py does that before detection)")
 
     # The model is loaded only if something in this run needs it. A study whose
     # markers are all `segment: own` with the threshold backend has no use for
@@ -966,6 +1083,8 @@ def main():
         dropped, kept = drop_rows(NUCLEI_CSV, args.marker, todo)
         print(f"  --force: dropped {dropped} {args.marker} rows over {len(todo)} "
               f"sections, kept {kept}")
+    if settings is not None:
+        record_settings(args.marker, settings)
     if coloc_present and args.force:
         # The relations of a section are derived from its measurements, so
         # they are dropped by the same rule and at the same moment. Leaving
@@ -1131,7 +1250,8 @@ def main():
                 labels = SG.segment(seg_img, seg_backend, model=model,
                                     k=MAD_K, min_area_px=min_area_px,
                                     report=report,
-                                    norm=section_norm.get(marker))
+                                    norm=section_norm.get(marker),
+                                    **_thresholds(marker))
                 # BEFORE the `continue`, which is the whole point of it being
                 # here: the frames this fires on are usually the ones that
                 # report no objects, an ROI with no objects writes no rows, and
@@ -1223,7 +1343,8 @@ def main():
                     o_report = {}
                     o_labels = SG.segment(o_img, o_backend, model=model,
                                           k=MAD_K, min_area_px=min_area_px,
-                                          report=o_report)
+                                          report=o_report,
+                                          **_thresholds(other))
                     # The partner's plane is segmented in this run, so its
                     # frames are this run's to report on too.
                     if o_report.get("failed"):

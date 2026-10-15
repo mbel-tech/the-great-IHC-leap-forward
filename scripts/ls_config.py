@@ -101,7 +101,8 @@ class Key:
     def __init__(self, path, type, doc, required=False, default=None,
                  note=None, consumers=(), status=LIVE, choices=None,
                  materialise=False, example=_UNSET, consumers_pending=False,
-                 ui=None, label=None, in_example=True, minimum=None):
+                 ui=None, label=None, in_example=True, minimum=None,
+                 maximum=None):
         # How the settings dialog offers this key. None infers it from `type`;
         # False keeps it out of the dialog entirely, for a key the app writes
         # itself or one whose value is a table rather than a setting.
@@ -129,6 +130,8 @@ class Key:
         # The smallest value a number may take, when the stage reading it refuses
         # anything below - checked here so Set up refuses it before a run does.
         self.minimum = minimum
+        # The largest, for the same reason.
+        self.maximum = maximum
         # A key the Fiji/Groovy stages read straight out of the JSON. They
         # cannot see a Python default, so it must be present as a literal in
         # every written config or they get null.
@@ -569,6 +572,49 @@ note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
              "must lower it deliberately.",
         consumers=["05c"]),
 
+    Key("detection.stardist.prob_thresh", "float",
+        "StarDist's object-probability cut. Empty uses the tuned value from "
+        "05b, or the model's own (0.479) when nothing was tuned.",
+        default=None, label="StarDist: probability threshold", maximum=1.0,
+        note="Setting it here overrides the tuned value. Lower finds more, "
+             "dimmer objects and more noise; higher finds fewer. Changing it "
+             "after detection has started changes what a nucleus is, so 05c "
+             "refuses to add sections measured with a different value to the "
+             "ones already measured: re-run detection with Redo finished "
+             "sections.",
+        consumers=["05c"]),
+
+    Key("detection.stardist.nms_thresh", "float",
+        "StarDist's overlap threshold: how much two candidate nuclei may "
+        "overlap before the weaker is dropped. Empty uses the model's own "
+        "(0.3).",
+        default=None, label="StarDist: overlap threshold", maximum=1.0,
+        note="Not tuned by 05b: the model was trained with its own value, and "
+             "nothing measured on the slides says it should move. Raise it "
+             "only if touching nuclei are being merged in the QC pictures.",
+        consumers=["05c"]),
+
+    Key("detection.stardist.use_auto", "bool",
+        "Use the detection settings 05b tuned from the slides' signal quality.",
+        default=True, label="Use auto-tuned detection settings",
+        note="Off runs detection with the model's own thresholds (or the ones "
+             "set above), which is what every count before 05b existed was "
+             "made with. The measurements and the tuned values stay in "
+             "detection.auto either way.",
+        consumers=["05c"]),
+
+    Key("detection.auto", "raw",
+        "What 05b measured about each marker's signal and the detection "
+        "settings it chose from that.",
+        default=None, ui=False, in_example=False,
+        note="Written by 05b_tune_detection.py, one entry per marker: the "
+             "signal quality of a sample of sections (background, "
+             "foreground, noise, signal-to-noise, contrast, saturation), a "
+             "verdict, the object count at each probability cut tried, and the "
+             "cut chosen. Edit the detection.stardist settings to override, "
+             "not this.",
+        consumers=["05c"]),
+
     # ---- atlas -----------------------------------------------------------
     Key("atlas_source", "str",
         "Which atlas the run uses: salmon (the default), wullimann1996, or one "
@@ -895,6 +941,8 @@ def _check(key, value):
             return f"must be greater than zero, got {value}"
         if key.minimum is not None and value < key.minimum - 1e-9:
             return f"must be at least {key.minimum}, got {value}"
+        if key.maximum is not None and value > key.maximum + 1e-9:
+            return f"must be at most {key.maximum}, got {value}"
     elif t == "bool":
         if not isinstance(value, bool):
             return f"expected true or false, got {type(value).__name__}"

@@ -397,6 +397,15 @@ with tempfile.TemporaryDirectory() as out:
         A.write_report(os.path.join(out, "nope"), _Det), None)
     chk("...and nothing was created", os.path.exists(os.path.join(out, "nope")), False)
 
+print("--- file names no rule can be worked out for ---")
+with tempfile.TemporaryDirectory() as tmp:
+    write_czi(os.path.join(tmp, "---.czi"), xml([DAPI, AF568]))
+    d = A.detect(tmp)
+    # The study would keep the template's rule, which fits none of them: New
+    # study's warning and Set up both need this said, not left out.
+    chk("no rule for the names is a problem to look at",
+        any("Slide file names" in p for p in d.problems), True)
+
 print()
 print("FAILED: " + ", ".join(failures) if failures else "ALL PASS")
 sys.exit(1 if failures else 0)

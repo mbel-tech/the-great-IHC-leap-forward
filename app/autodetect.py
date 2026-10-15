@@ -179,6 +179,10 @@ def render_um_per_px(px):
 def _naming(d):
     got = B.auto(d.files)
     if not got:
+        # Said rather than left out: with no rule worked out, the study keeps
+        # the template's, and that one fits none of these files.
+        d.problems.append("No rule for the file names could be worked out; set it in "
+                          "Set up > Slide file names.")
         return
     d.naming = got
     d.values["slide_naming.pattern"] = got["pattern"]

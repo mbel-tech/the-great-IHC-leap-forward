@@ -83,6 +83,9 @@ from PySide6.QtWidgets import QApplication, QMessageBox         # noqa: E402
 
 app = QApplication.instance() or QApplication([])
 QMessageBox.information = staticmethod(lambda *a, **k: QMessageBox.Ok)
+# New study's "create anyway?" question: what it said is kept, answers[0] given.
+asked, answers = [], [QMessageBox.No]
+QMessageBox.question = staticmethod(lambda p, t, x, *a, **k: (asked.append(x), answers[0])[1])
 
 ticks = []
 timer = QTimer()
@@ -201,6 +204,44 @@ chk("nothing is made before the slides are read", os.path.exists(AD.study_file(o
 settle(getattr(dlg2, "slide_read", None))
 chk("...and the study is made once they are", os.path.isfile(AD.study_file(out)), True)
 chk("...from the same read", summary(dlg2.detection) == WANT[PAIRED], True)
+chk("...with no question asked, since the slides read cleanly", asked, [])
+
+print("--- New study: what the read found wrong is shown before the study is made ---")
+# Unreadable files and names the rule misses used to be listed under the
+# folder and then Create went ahead without a word; now it asks.
+BAD = os.path.join(STUDY.root, "bad")
+os.makedirs(BAD)
+for n in range(1, 4):
+    write_czi(os.path.join(BAD, "LS30_%da.czi" % n), xml([DAPI, AF568]))
+    write_czi(os.path.join(BAD, "LS30_%db.czi" % n), xml([DAPI, AF488]))
+write_czi(os.path.join(BAD, "odd name.czi"), xml([DAPI, AF568]))
+open(os.path.join(BAD, "LS30_9a.czi"), "wb").write(b"not a czi")
+
+
+def make(out, answer):
+    asked.clear()
+    answers[0] = answer
+    d = NewStudyDialog()
+    d.slides.edit.setText(BAD)
+    d.output.edit.setText(out)
+    d.thickness.setValue(14.0)
+    d._create()
+    settle(getattr(d, "slide_read", None))
+    return d
+
+
+back = os.path.join(STUDY.root, "bad out back")
+d3 = make(back, QMessageBox.No)
+chk("Create asks before making a study from a troubled read", len(asked), 1)
+text = asked[0] if asked else ""
+chk("...naming the unreadable file", "could not be read" in text, True)
+chk("...and the file name that does not fit", "do not fit" in text or "does not fit" in text, True)
+chk("Go back makes nothing", os.path.exists(AD.study_file(back)), False)
+chk("...and leaves the dialog open to change things", d3.result(), 0)
+chk("...with Create still there to press", d3.ok.isEnabled(), True)
+anyway = os.path.join(STUDY.root, "bad out anyway")
+make(anyway, QMessageBox.Yes)
+chk("Create anyway makes the study", os.path.isfile(AD.study_file(anyway)), True)
 
 print("\n%s" % ("FAILED: %s" % failures if failures else "all passed"))
 sys.exit(1 if failures else 0)

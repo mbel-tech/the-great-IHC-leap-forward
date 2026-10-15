@@ -118,7 +118,7 @@ Set up is where you describe the study once: where the slides are, how their fil
 
 Every field has a short hint, an **(i)** with the full reasoning and which stages read it, and a **↺** button that puts it back to its default. Changes are kept when you press **Apply** on that card, and saved automatically before any stage runs.
 
-> **Starting a new study.** Use **File > New project** (or **New study…** in the study picker). It asks for two folders, the folder with the `.czi` files and an output folder, plus the section thickness and the atlas. The slides are read straight away and their pixel size, file names and channels are filled in. The study's file (`study.json`), the curation, the pictures and the results all go in the output folder, so a study is one folder you can move or back up whole. Choosing an output folder that already holds a study opens it. To continue an existing study, use **File > Open project** or **Tools > Switch study**; studies made before this keep working where they are. The app reopens the study you had open last.
+> **Starting a new study.** Use **File > New project** (or **New study…** in the study picker). It asks for two folders, the folder with the `.czi` files and an output folder, plus the section thickness and the atlas. The slides are read straight away and their pixel size, file names and channels are filled in. If the read finds something to look at (files that could not be read, no pixel size in any file, file names that do not fit the rule), **Create study** lists it and asks *Create the study anyway?*: **Yes** makes the study, and you fix those in Set up; **No** goes back to change the folders. The study's file (`study.json`), the curation, the pictures and the results all go in the output folder, so a study is one folder you can move or back up whole. Choosing an output folder that already holds a study opens it. To continue an existing study, use **File > Open project** or **Tools > Switch study**; studies made before this keep working where they are. The app reopens the study you had open last.
 
 ### Slides tab
 
@@ -132,7 +132,7 @@ Everything the headers say is kept, not only what was used. A summary goes into 
 
 ![The Slides tab: one file whose name does not fit the pattern is shown in red and would be ignored](img/user-guide/02-setup-slides.png)
 
-Once a folder is set, the top of the Slides tab says which folder the study reads and how many files the slide headers list, and the tab gets a ✓. For the LS study that is 444 files from `D:\SLIDES HE DEC 2025 LS`. Use the buttons only to change it.
+Once a folder is set, the top of the Slides tab says which folder the study reads and how many files the slide headers list. The tab gets a ✓, and counts as done on Home, only when the slides have been read, every file name fits the rule and every marker has a real name (not *Marker1* or *Channel2*). Until then it says what is left under *Still to do on this tab*, for example *2 file names don't fit the rule (Slide file names)* or *name the markers (Microscope and channels > Channels and markers...)*; the Next up card on Home says the same. For the LS study that is 444 files from `D:\SLIDES HE DEC 2025 LS`. Use the buttons only to change it.
 
 Choosing a folder only records where the slides are; nothing is moved. Picking separate files from one folder records a list, which costs no space. If the files are spread over several folders, the app offers to link or copy them and always shows the size first.
 
@@ -574,7 +574,7 @@ Every stage is a script in `scripts/` and can also be run from a terminal; the (
 | Red rows on the Slides tab | File names do not fit the naming pattern | Fix the pattern with **Set up from an example…** on *Slide file names*, or rename the files |
 | Fewer sections than expected | Unmatched file names, or an incomplete copy | Check the Slides tab and the 00b result |
 | Run all remaining stops at a stage | That stage failed, or it waits for a curator | Read the screen's note and **Show log**. A waiting stage names the curator to export. |
-| "Finish Set up" on the Next up card | A required setting is empty | The card names each Set up card and the settings it lacks; open Set up and fill those in |
+| "Finish Set up" on the Next up card | A required setting is empty, or the Slides tab is not done | The card names each Set up card and the settings it lacks, and what is left on the Slides tab (read the slides, file names that don't fit the rule, markers to name); open Set up and do those |
 | A curator's decisions are ignored | You did not press **Export** | Open the curator and press Export (in the ROI curator, Done: export and go to Measure does it for you) |
 | Curation made in a browser is missing | Browser work is stored in that browser only | **Tools > Migrate browser curation**, or **Bring in browser exports** |
 | Nucleus detection is greyed out | No StarDist in this Python | Use the installer, or start with `run_app.bat` (uses `work/appenv`) |

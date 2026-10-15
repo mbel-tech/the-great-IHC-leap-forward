@@ -1045,6 +1045,50 @@ def step_progress(screen_sid, study):
     return progress(screen_sid, study)
 
 
+#: Set up's first tab, which holds no settings of its own: what it still needs
+#: is said as whole phrases (slides_left), not as settings with no value.
+SLIDES_CARD = "Slides"
+
+#: The names a marker has before anyone has named it: the template's Marker1,
+#: the Channel2 a header read gives a channel with no name, marker_label's
+#: "marker 1". Any of these in a workbook or a folder name is a marker nobody
+#: will recognise later.
+_PLACEHOLDER_MARKER = re.compile(r"^(marker|channel)\s*\d*$", re.IGNORECASE)
+
+
+def slides_left(cfg, read, files):
+    """What the Slides card still needs, as plain phrases; [] when it is done.
+
+    A folder being set is not the card being done. A file whose name the rule
+    misses is invisible to every stage, and a marker still called Marker1 ends
+    up as Marker1 in every output, so Set up said Done over both. `read` is
+    whether this folder's headers were read (by New study, Read settings from
+    the slides, or Prepare's manifest); `files` the slide file names in it.
+    """
+    import ls_channels as CH
+    import naming_build as B
+    if not cfg.get("source_dir"):
+        return ["choose the slides folder"]
+    out = []
+    if not read:
+        out.append("read the slides (Read settings from the slides)")
+    naming = cfg.get("slide_naming") or {}
+    if naming.get("pattern") and files:
+        failed = B.preview(files, naming["pattern"],
+                           bool(naming.get("case_insensitive")))["failed"]
+        if failed:
+            out.append("%d file name%s fit the rule (Slide file names)"
+                       % (failed, "s don't" if failed != 1 else " doesn't"))
+    ident = cfg.get("marker_identity")
+    ident = ident if isinstance(ident, dict) else {}
+    markers = CH.marker_names(cfg)
+    labels = [ident.get(m) if isinstance(ident.get(m), str) and ident.get(m) else m
+              for m in markers]
+    if not labels or any(_PLACEHOLDER_MARKER.match(str(n).strip()) for n in labels):
+        out.append("name the markers (Microscope and channels > Channels and markers...)")
+    return out
+
+
 def progress_words(screen_sid, done, total):
     """'5 of 6 cards', '10 of 19 stages', '0 of 1 exported', or 'Done'."""
     if not total:
@@ -1417,12 +1461,14 @@ def next_up(study, setup_ok=True, setup_missing=()):
     """(screen id, what to say, stage id or None) - the single next thing to do.
 
     `setup_missing` is [(card title, [settings with no value])], so the words
-    can say which settings rather than only that some are missing.
+    can say which settings rather than only that some are missing. The Slides
+    card's entries are already whole phrases (slides_left), said as they are.
     """
     if not setup_ok:
         if not setup_missing:
             return "setup", "Finish Set up: some required settings are missing.", None
-        gaps = "; ".join("%s needs %s" % (title, ", ".join(keys))
+        gaps = "; ".join("; ".join(keys) if title == SLIDES_CARD
+                         else "%s needs %s" % (title, ", ".join(keys))
                          for title, keys in setup_missing)
         return "setup", "Finish Set up: %s." % gaps, None
     plan, held = run_plan("prepare", study)

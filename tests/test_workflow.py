@@ -576,6 +576,86 @@ try:
 finally:
     DET.cli_only = _cli
 
+print("--- curation coverage per animal and level, and the second marker's own pass ---")
+# A paired study: the second marker's sections are separate physical sections,
+# curated on their own in the same page (04l), so they are a pass of their own.
+CV_CFG = json.load(open(write_study(os.path.join(TMP, "cv"))))
+CV_CFG["acquisition"] = dict(CV_CFG.get("acquisition") or {}, layout="paired",
+                             markers=["AF568", "AF488"])
+cv = study(CV_CFG)
+CVR = os.path.join(CV_CFG["out_root"], "reformatted")
+chk("a multiplex study has no second pass: one scan, one curation", W.second_pass(dm), None)
+chk("a paired study curates its second marker on its own", W.second_pass(cv), 1)
+chk("...called by its own name", cv.marker_label(W.second_pass(cv)), "AF488")
+_csv(os.path.join(CVR, "roi_worklist.csv"), ["rank", "scene_uid", "animal"],
+     [("1", "u1", "A1"), ("2", "u4", "A2"), ("3", "u2", "A1"), ("4", "u3", "A1"),
+      ("5", "u5", "A2")])
+_csv(cv.names.path("index", "AF488"), ["id", "kind", "animal"],
+     [("p1", "section", "A1"), ("p2", "section", "A1"), ("p3", "section", "A2"),
+      ("p4", "section", "A2"), ("plate", "plate", "")])
+CVE = os.path.join(cv.export_root, "03.03.2026_10.00")
+_csv(os.path.join(CVE, "roi_regions_03.03.2026_10.00.csv"), ["scene_uid", "marker", "roi_kind"],
+     [("u1", "AF568", "roi"), ("u2", "AF568", "roi"), ("u4", "AF568", "roi")])
+_csv(os.path.join(CVE, "roi_plates_03.03.2026_10.00.csv"),
+     ["scene_uid", "animal", "marker", "plate_id", "excluded"],
+     [("u1", "A1", "AF568", "plate_010", "0"), ("u2", "A1", "AF568", "plate_020", "0"),
+      ("u4", "A2", "AF568", "plate_010", "0"), ("u3", "A1", "AF568", "plate_020", "1")])
+open(os.path.join(CVR, "roi_curator.html"), "w").write("<html></html>")
+os.makedirs(os.path.join(CV_CFG["out_root"], "atlas"), exist_ok=True)
+open(os.path.join(CV_CFG["out_root"], "atlas", "plate_reframe.html"), "w").write("<html></html>")
+open(os.path.join(CV_CFG["out_root"], "atlas", "plate_boxes.csv"), "w").write("x\n")
+chk("with no setting, the target is one section per animal and level",
+    W.coverage_target(cv), 1)
+chk("...and the setting is offered in Set up's advanced settings",
+    [sid for sid, _t, _i, keys in W.setting_sections(LC.dialog_fields(), advanced=True)
+     if "curation_coverage.sections_per_level" in [k.path for k in keys]], ["curation"])
+cov = W.coverage(cv, 0)
+chk("coverage lists every animal in the queue, curated or not", cov["animals"], ["A1", "A2"])
+chk("...and every level a curated section was placed on", cov["levels"],
+    ["plate_010", "plate_020"])
+chk("...counting curated sections, not the excluded one",
+    cov["counts"], {("A1", "plate_010"): 1, ("A1", "plate_020"): 1, ("A2", "plate_010"): 1})
+chk("...and the cells under target are named", cov["under"], [("A2", "plate_020")])
+_html = __import__("screens").coverage_html(cov, "AF568")
+chk("the coverage table marks the cell under target, and only that one",
+    _html.count("background:"), 1)
+chk("...and says how many are under", "1 animal and level under the target of 1" in _html, True)
+chk("the Curate screen lists both passes, each with its own count",
+    re.sub("<[^>]+>", "", __import__("screens").passes_html(cv)).split("\n")[0],
+    "AF568 curation ● 4 of 5 sections curatedAF488 curation ● 0 of 4 sections curated "
+    "Choose AF488 in the curator's Channel.")
+chk("a higher target leaves more under it",
+    W.coverage(study(dict(CV_CFG, curation_coverage={"sections_per_level": 2})), 0)["under"],
+    [("A1", "plate_010"), ("A1", "plate_020"), ("A2", "plate_010"), ("A2", "plate_020")])
+chk("the first marker's pass: excluded counts as decided",
+    W.curated_sections(cv, 0), (4, 5))
+chk("the second marker's pass counts its own sections, not the plates",
+    W.curated_sections(cv, 1), (0, 4))
+chk("Curate's progress counts both passes", W.step_progress("curate", cv), (4, 9))
+# The first marker finished; the second untouched.
+_csv(os.path.join(CVE, "roi_regions_03.03.2026_10.00.csv"), ["scene_uid", "marker", "roi_kind"],
+     [(u, "AF568", "roi") for u in ("u1", "u2", "u4", "u5")])
+chk("the first pass done is not the ROI curator finished while the second is not",
+    (W.curated_sections(cv, 0), W.curator_finished("roi_curator", cv)), ((5, 5), False))
+_plan, _ap = W.run_plan, W.applies
+W.run_plan = lambda sid, s, *a, **k: ([], {})
+W.applies = lambda st, s: (False, "") if st.unblinds else _ap(st, s)
+try:
+    chk("Next up points to the second marker's pass", W.next_up(cv),
+        ("curate", "AF568 curation is done. 0 of 4 AF488 sections curated: choose "
+                   "AF488 in the ROI curator's Channel and curate or exclude them.",
+         "roi_curator"))
+    _csv(os.path.join(CVE, "roi_plates_03.03.2026_10.00.csv"),
+         ["scene_uid", "animal", "marker", "plate_id", "excluded"],
+         [("u3", "A1", "AF568", "plate_020", "1")]
+         + [(p, "A1", "AF488", "plate_010", "1") for p in ("p1", "p2", "p3", "p4")])
+    chk("...and once it is decided too, everything is done", W.next_up(cv)[0], "home")
+    chk("...and the ROI curator is finished", W.curator_finished("roi_curator", cv), True)
+finally:
+    W.run_plan, W.applies = _plan, _ap
+chk("a multiplex study's curation is one pass: its progress is unchanged",
+    W.step_progress("curate", dm), W.curated_sections(dm))
+
 print("--- options live in the project file ---")
 pj = LP.Project.open(PATH)
 chk("untouched, a stage has no options", pj.stage_options("detect"), {})
@@ -682,6 +762,21 @@ if MW:
 
     w.goto("curate")
     w.curate.show_curator("roi_curator")
+    _was = w.curate._study
+    w.curate._study = cv
+    _csv(os.path.join(CVE, "roi_plates_03.03.2026_10.00.csv"),
+         ["scene_uid", "animal", "marker", "plate_id", "excluded"],
+         [("u1", "A1", "AF568", "plate_010", "0")])
+    w.curate._update_actions()
+    chk("a paired study's Curate screen shows both passes and the coverage table",
+        (w.curate.passes.isVisibleTo(w.curate), "AF488 curation" in w.curate.passes.text(),
+         w.curate.coverage_area.isVisibleTo(w.curate), "<table" in w.curate.coverage.text()),
+        (True, True, True, True))
+    w.curate._study = _was
+    w.curate._update_actions()
+    chk("...and a study with no worklist yet shows neither",
+        (w.curate.passes.isVisibleTo(w.curate), w.curate.coverage_area.isVisibleTo(w.curate)),
+        (False, False))
     chk("the ROI curator offers Done above its page",
         (w.curator.done_btn.text(), w.curator.done_btn.isVisibleTo(w.curator)),
         ("Done: export and go to Measure", True))

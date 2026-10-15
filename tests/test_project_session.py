@@ -442,7 +442,7 @@ if MW:
     w = MW.MainWindow(REPO, config_path=path)
     chk("the window title names the project", "win" in w.windowTitle() or os.path.basename(path) in w.windowTitle(), True)
     chk("a File menu with the project verbs",
-        sorted(w._file_actions), ["copy", "history", "new", "open", "revert", "save", "save_as"])
+        sorted(w._file_actions), ["copy", "export_settings", "history", "import_settings", "new", "open", "revert", "save", "save_as"])
     chk("Revert is disabled while clean", w._file_actions["revert"].isEnabled(), False)
     w.session.project.set("pixel_size_um", 0.31, by="t")
     w.session.touch()

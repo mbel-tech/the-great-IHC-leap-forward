@@ -62,6 +62,13 @@ QC_CSV = os.path.join(QC_DIR, "focus.csv")
 # same two raw planes at the same zoom, so it writes them from the array it
 # already holds; 01k is left as a backfill for sections exported before it did.
 SAT_RAW_CSV = os.path.join(QC_DIR, "saturation_raw.csv")
+# Every section this run could not export, and why. 04a's "unaccounted" check
+# is built from focus.csv, so a section that never reached focus.csv - its CZI
+# unplugged, still inside a zip, or unreadable - is invisible to it; this is
+# where it is named instead. Rewritten every run, header only when nothing
+# failed, so an old list cannot outlive the fix.
+FAILURES_CSV = os.path.join(QC_DIR, "overview_failures.csv")
+FAILURE_KEYS = ["scene_uid", "file", "animal", "marker_channel", "scene_index", "reason"]
 CENSOR_RAW_DIR = os.path.join(QC_DIR, "censor_raw")
 # Masks are written for every declared marker - see 01k on why AF488 too.
 MASK_MARKERS = tuple(CH.marker_names(CONFIG))
@@ -183,7 +190,11 @@ def read_scene(czidoc, rect, channel, zoom, *, scene):
 def load_manifest():
     with open(os.path.join(OUT_ROOT, "manifest", "manifest_scenes.csv"),
               newline="", encoding="utf-8") as fh:
-        return list(csv.DictReader(fh))
+        rows = list(csv.DictReader(fh))
+    # A marker list that names no scan writes no clipping masks here or in 01k,
+    # and nothing says so until the ROI worklist comes out empty.
+    CH.require_manifest_markers(CONFIG, rows, CONFIG_PATH)
+    return rows
 
 
 def load_tile_fields():
@@ -283,6 +294,15 @@ def load_sat_raw():
         return {r["scene_uid"]: r for r in csv.DictReader(fh)}
 
 
+def record_failures(failures, fname, rows, reason):
+    """Name the file and every section lost with it, on screen and in the CSV."""
+    print(f"\n  !! {fname}: {reason} - {len(rows)} section(s) not exported: "
+          + ", ".join(r["scene_uid"] for r in rows))
+    for r in rows:
+        failures.append({**{k: r.get(k, "") for k in FAILURE_KEYS},
+                         "file": fname, "reason": reason})
+
+
 def write_sat_raw(by_uid):
     if by_uid:
         IO.atomic_write_csv(SAT_RAW_CSV, list(by_uid.values()), SAT_RAW_KEYS)
@@ -369,6 +389,7 @@ def export(scenes, fields, ranges, ceilings, zoom, limit, force):
     sat_raw = load_sat_raw()
 
     exported = failed = 0
+    failures = []
     t0 = time.time()
     for fname, rows in by_file.items():
         if limit and exported >= limit:
@@ -376,6 +397,8 @@ def export(scenes, fields, ranges, ceilings, zoom, limit, force):
         path = os.path.join(SOURCE_DIR, fname)
         if not os.path.exists(path):
             failed += len(rows)
+            record_failures(failures, fname, rows,
+                            f"CZI missing from {SOURCE_DIR} (drive unplugged, or still zipped?)")
             continue
 
         marker = rows[0]["marker_channel"]
@@ -385,6 +408,7 @@ def export(scenes, fields, ranges, ceilings, zoom, limit, force):
         d_lo, d_hi = channel_range(ranges, "DAPI")
         m_lo, m_hi = channel_range(ranges, marker)
 
+        done_here = set()
         try:
             with pyczi.open_czi(path) as czidoc:
                 rects = czidoc.scenes_bounding_rectangle
@@ -394,6 +418,8 @@ def export(scenes, fields, ranges, ceilings, zoom, limit, force):
                     s = int(r["scene_index"])
                     if s not in rects:
                         failed += 1
+                        done_here.add(r["scene_uid"])
+                        record_failures(failures, fname, [r], f"scene {s} not in the CZI")
                         continue
 
                     dapi_raw = read_scene(czidoc, rects[s], 0, zoom, scene=s)
@@ -461,9 +487,13 @@ def export(scenes, fields, ranges, ceilings, zoom, limit, force):
                         "reader": "pylibCZIrw",
                     })
                     exported += 1
+                    done_here.add(uid)
         except Exception as exc:  # noqa: BLE001 - one bad file must not kill the run
-            print(f"\n  !! {fname}: {exc}")
-            failed += len(rows)
+            # Only the sections not already written or already recorded: a file
+            # that fails on its fifth scene still exported the first four.
+            lost = [r for r in rows if r["scene_uid"] not in done_here]
+            failed += len(lost)
+            record_failures(failures, fname, lost, f"{type(exc).__name__}: {exc}")
 
         # Checkpoint per file: this runs unattended against an external drive
         # that has already dropped writes once.
@@ -476,6 +506,8 @@ def export(scenes, fields, ranges, ceilings, zoom, limit, force):
     print()
     write_qc(qc_rows)
     write_sat_raw(sat_raw)
+    os.makedirs(QC_DIR, exist_ok=True)
+    IO.atomic_write_csv(FAILURES_CSV, failures, FAILURE_KEYS)
     return exported, failed, len(qc_rows)
 
 
@@ -500,7 +532,14 @@ def main():
     print("=" * 72)
     print(f"exported {exported}, failed {failed}, focus.csv now holds {total_rows} sections")
     print("=" * 72)
+    if failed:
+        # A message rather than a bare `return 1`: app/runner.py ignores what
+        # main() returns and reports a SystemExit message as the step failing.
+        # From the command line it is still exit status 1.
+        raise SystemExit(f"{failed} section(s) not exported - listed above "
+                         f"and in {FAILURES_CSV}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

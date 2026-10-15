@@ -146,6 +146,15 @@ def run(*argv):
     L.main()
 
 
+def run_failing(*argv):
+    """The SystemExit message of a run expected to end as a failure, else ''."""
+    try:
+        run(*argv)
+    except SystemExit as exc:
+        return str(exc.code)
+    return ""
+
+
 def pic(folder, uid, root=PICS):
     return os.path.join(root, "AF568", folder, uid + ".png")
 
@@ -303,7 +312,7 @@ print("--- a scene that does not fit in memory is skipped, not fatal ---")
 real = L.available_memory
 L.available_memory = lambda: int(L.MEMORY_HEADROOM) + 1000   # less than a scene
 before = os.path.getmtime(pic("stain_only", UIDS[0]))
-run("--um-px", "0.65", "--force")
+run_failing("--um-px", "0.65", "--force")
 chk("nothing drawn when it does not fit",
     os.path.getmtime(pic("stain_only", UIDS[0])) == before)
 # Two CZIs this time: the limit has to hold across files, not only within one.
@@ -313,9 +322,10 @@ with open(L.MANIFEST_CSV, "a", newline="", encoding="utf-8") as fh:
     csv.writer(fh).writerow(["LS1_1b_s00", "LS1_1b.czi", "LS1", "1", "b", "AF568", 0, 2])
 buf = io.StringIO()
 with contextlib.redirect_stdout(buf):
-    run("--um-px", "0.65", "--force", "--limit", "1")
+    ended = run_failing("--um-px", "0.65", "--force", "--limit", "1")
 chk("--limit counts skipped scenes too", "1 not drawn" in buf.getvalue(),
     buf.getvalue().strip().splitlines()[-3:])
+chk("...and a scene not drawn fails the stage", "1 scene(s) not drawn" in ended, ended)
 with open(L.MANIFEST_CSV, "w", newline="", encoding="utf-8") as fh:
     fh.write(kept)
 L.available_memory = lambda: None           # platform cannot say: draw anyway
@@ -324,6 +334,42 @@ L.available_memory = real
 chk("memory estimate scales with the area", L.memory_needed((0, 0, 20000, 20000), 1)
     > 5 * L.memory_needed((0, 0, 20000, 20000), 4))
 chk("this machine reports its free memory", isinstance(real(), int))
+
+print()
+print("--- one scene that cannot be written does not stop the slide ---")
+# A stand-in writer that refuses scene 0, as Windows does when its picture is
+# open in a viewer: scene 1 of the same CZI must still be drawn, scene 0 named,
+# and the stage end as a failure so the app does not show it Done.
+real_save = L.save_png
+
+
+def refusing_save(img, path):
+    if os.path.basename(path) == UIDS[0] + ".png":
+        raise PermissionError(13, "Permission denied", path)
+    real_save(img, path)
+
+
+L.save_png = refusing_save
+before = {uid: os.path.getmtime(pic("stain_only", uid)) for uid in UIDS}
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    ended = run_failing("--force")
+L.save_png = real_save
+chk("the other scene of the slide is still drawn",
+    os.path.getmtime(pic("stain_only", UIDS[1])) > before[UIDS[1]])
+chk("the failed scene is named on screen, with why",
+    UIDS[0] in buf.getvalue() and "Permission denied" in buf.getvalue(),
+    buf.getvalue().strip().splitlines()[-3:])
+chk("the stage ends as a failure, naming the count and the list",
+    "1 scene(s) not drawn" in ended and L.FAILURES_CSV in ended, ended)
+listed = list(csv.DictReader(open(L.FAILURES_CSV, encoding="utf-8")))
+chk("the failures list names that scene and why",
+    [r["scene_uid"] for r in listed] == [UIDS[0]]
+    and "PermissionError" in listed[0]["reason"] and listed[0]["file"] == "LS1_1a.czi",
+    listed)
+run()
+chk("...and a clean run empties the list",
+    list(csv.DictReader(open(L.FAILURES_CSV, encoding="utf-8"))) == [])
 
 print()
 print("ALL PASS" if not fails else f"{fails} FAILED")

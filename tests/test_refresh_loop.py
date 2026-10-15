@@ -87,5 +87,25 @@ with temp_study(acquisition=OUT_OF_ORDER):
     chk("the watched marker is re-plotted FIRST, whatever it sorts as",
         loop.marker_list(), ["Zeta", "Alpha"])
 
+
+# --- what counts as "done" -----------------------------------------------
+#
+# progress() used to compare COUNTS: every distinct uid in roi_nuclei.csv
+# against every planned box. Rows for a section that is no longer in the plan
+# (a box since deleted, a scene renamed, an orphan from an older run) still
+# counted, so two stale sections could stand in for two planned ones that had
+# never been measured - and the loop would announce the datasets final. Only
+# measured sections that are ALSO planned may count.
+with temp_study():
+    loop = load_stage("06e_refresh_loop.py")
+    nuc = loop.G6C.NUCLEI_CSV
+    os.makedirs(os.path.dirname(nuc), exist_ok=True)
+    with open(nuc, "w", encoding="utf-8", newline="") as fh:
+        fh.write("marker,scene_uid,area\n"
+                 "M,a,1\nM,a,2\nM,stale1,3\nM,stale2,4\n")
+    loop.G5.all_boxes = lambda: [{"scene_uid": u} for u in ("a", "b", "c")]
+    chk("stale uids outside the plan do not count as done",
+        loop.progress(), (1, 3))
+
 print("\n" + ("ALL PASS" if not fails else f"{fails} FAILED"))
 raise SystemExit(1 if fails else 0)

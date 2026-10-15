@@ -1669,6 +1669,12 @@ function resolvePlate(rec, plates){
         c[3] = c[3] * ky;
         return c;
       });
+      // The landmarks are in the NEW plate's pixels now, so the record says
+      // so. Left at the old size, the save that follows stored scaled pairs
+      // beside it and every reload scaled them again - drift by the ratio per
+      // load. plate_fp stays the old one, so the record stays "resized" and
+      // withheld from the fit until a person confirms it.
+      out.plate_px = p.w + "x" + p.h;
     }
   }
   return out;
@@ -4235,6 +4241,9 @@ function exportCsv(){
              // size makes the factor 1.0 and the rescale a no-op that looks
              // like it worked. This comment argued for the old size while the
              // code wrote the new one, which is how that hid.
+             // (Once resolvePlate has rescaled a resized record's landmarks,
+             // s.plate_px names the size they were scaled TO, so the pair
+             // stays consistent and a later 1.0 is correct, not a no-op.)
              //
              // Blank when there is no stored identity - a record from before
              // ids were kept. plate_verified already says why; synthesising one

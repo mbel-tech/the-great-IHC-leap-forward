@@ -222,6 +222,50 @@ with temp_study(acquisition=PAIRED) as study:
     chk("...which still catches a 16-bit clip",
         int(rows[1]["censored"]), 1)
 
+    # A section measured with no _artifact.npy gets artifact=0 on every
+    # nucleus - the same value a clean section gets. write_inputs() lays down
+    # a tissue mask and no artifact mask, so every run above was one of those.
+    print()
+    print("=== a missing artifact mask is reported, not silent ===")
+    import contextlib
+    import io
+
+    def run_quiet():
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            run(D5, mark, labels)
+        return buf.getvalue()
+
+    def recorded():
+        if not os.path.exists(D5.NO_ARTIFACT_CSV):
+            return None
+        with open(D5.NO_ARTIFACT_CSV, newline="", encoding="utf-8") as fh:
+            return sorted((r["scene_uid"], r["marker"]) for r in csv.DictReader(fh))
+
+    # Another marker's row is not this run's to drop.
+    os.makedirs(os.path.dirname(D5.NO_ARTIFACT_CSV), exist_ok=True)
+    with open(D5.NO_ARTIFACT_CSV, "w", newline="", encoding="utf-8") as fh:
+        fh.write("scene_uid,marker\nAB13_2a-s0,AF488\n")
+    write_inputs(D5, [[FILE, CEIL]])
+    out = run_quiet()
+    chk("warned before measuring",
+        out.find("no artifact mask") != -1
+        and out.find("no artifact mask") < out.find(" nuclei -> "), True)
+    chk("...and again at the end",
+        out.rfind("no artifact mask") > out.find(" nuclei -> "), True)
+    chk("the section is recorded, the other marker's row kept",
+        recorded(), [(UID, "AF568"), ("AB13_2a-s0", "AF488")])
+    chk("no .tmp left beside it",
+        os.path.exists(D5.NO_ARTIFACT_CSV + ".tmp"), False)
+
+    np.save(os.path.join(D5.REFORMAT_DIR, "sections", f"{UID}_artifact.npy"),
+            np.zeros((256, 256), dtype=bool))
+    out = run_quiet()
+    chk("with the mask in place: no warning",
+        "no artifact mask" in out, False)
+    chk("...and the re-measured section leaves the record",
+        recorded(), [("AB13_2a-s0", "AF488")])
+
 print()
 if failures:
     print(f"{len(failures)} FAILED")

@@ -292,6 +292,9 @@ NOT_LISTED = {
     "01j_build_curator.py": "builds the HTML page where those candidates are "
                             "adjudicated (reads back through 01i --fit). Run by "
                             "hand alongside 01i; not part of the app's run order.",
+    "04v_wullimann_extract.py": "one-time cut of the Wullimann 1996 plates out of the "
+                                "book's PDF; its output ships in atlas/wullimann1996, "
+                                "so a study never runs it.",
 }
 
 REF = "reformatted/"

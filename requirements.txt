@@ -6,6 +6,8 @@ pandas>=2.0
 pillow>=10.0
 matplotlib>=3.9
 tifffile>=2025.1.1
+scikit-image>=0.24    # 05c/ls_segment threshold backends and 04g
+openpyxl>=3.1         # 06c/06d write the results workbooks
 
 # CZI access for instrument characterisation only (raw tiles, tile geometry).
 # Third-party reimplementation of the ZISRAW spec - NOT used for pixel values

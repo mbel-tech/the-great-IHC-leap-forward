@@ -221,5 +221,71 @@ chk("three declared markers is refused", _refuses(["A", "B", "C"]), True)
 chk("one declared marker is refused", _refuses(["A"]), True)
 
 print()
+print("--- a scene with no recorded centre is reported, not fatal ---")
+
+# load_scenes() reads a blank centre cell as nan so the manifest loads. The
+# comment there said nan would "be ignored by the distance maths"; it was not.
+# It went straight into the cost matrix, linear_sum_assignment raised
+# "matrix contains invalid numeric entries", and one blank cell killed the
+# whole run. Such a scene cannot be placed, so it is left out of matching and
+# listed as no_centre_<marker> - present in pairs.csv, never silently gone.
+
+
+def _run_02_blank(tag, blank_uids):
+    with temp_study(acquisition={"layout": "paired",
+                                 "markers": ["Mk1", "Mk2"]}) as _st:
+        P2 = load_stage("02_pair_passes.py", name="lsstage_02_" + tag)
+        path = os.path.join(P2.MANIFEST_DIR, "manifest_scenes.csv")
+        _manifest(path, ["Mk1", "Mk2"])
+        with open(path, newline="", encoding="utf-8") as fh:
+            rows = list(csv.DictReader(fh))
+        for r in rows:
+            if r["scene_uid"] in blank_uids:
+                r["center_x_um"] = r["center_y_um"] = ""
+        with open(path, "w", newline="\n", encoding="utf-8") as fh:
+            w = csv.DictWriter(fh, fieldnames=SCENE_COLS)
+            w.writeheader()
+            w.writerows(rows)
+        import contextlib
+        import io
+        buf, err = io.StringIO(), None
+        try:
+            with contextlib.redirect_stdout(buf):
+                P2.main()
+        except Exception as exc:  # noqa: BLE001
+            err = repr(exc)
+        out = os.path.join(P2.OUT_ROOT, "pairs.csv")
+        got = []
+        if os.path.exists(out):
+            with open(out, newline="", encoding="utf-8") as fh:
+                got = list(csv.DictReader(fh))
+        return err, got, buf.getvalue()
+
+
+err, bl_rows, bl_out = _run_02_blank("blank", {"AB12_1a-s1"})
+chk("a blank centre does not crash 02", err, None)
+chk("...every scene still has a row in pairs.csv", len(bl_rows), 6)
+chk("...the blank one is listed as no_centre_Mk1",
+    [r["mk1_scene_uid"] for r in bl_rows if r["status"] == "no_centre_Mk1"],
+    ["AB12_1a-s1"])
+chk("...with a blank centre, not 'nan'",
+    [(r["center_x_um"], r["center_y_um"]) for r in bl_rows
+     if r["status"] == "no_centre_Mk1"], [("", "")])
+chk("...the rest still match",
+    sum(1 for r in bl_rows if r["status"] == "matched"), 2)
+chk("...and the run names the scene", "AB12_1a-s1" in bl_out, True)
+
+# Every scene of one pass blank: nothing to match against, and match_slide
+# must not be handed an empty constellation.
+err, all_rows, _ = _run_02_blank(
+    "allblank", {f"AB12_1a-s{i}" for i in range(len(YS_A))})
+chk("one pass with no centres at all does not crash 02", err, None)
+chk("...all four of its scenes are no_centre_Mk1",
+    sum(1 for r in all_rows if r["status"] == "no_centre_Mk1"), 4)
+chk("...and the other pass is unmatched, not only_Mk2",
+    sorted({r["status"] for r in all_rows}),
+    ["no_centre_Mk1", "unmatched_Mk2"])
+
+print()
 print("ALL PASS" if not failures else f"{len(failures)} FAILED")
 sys.exit(1 if failures else 0)

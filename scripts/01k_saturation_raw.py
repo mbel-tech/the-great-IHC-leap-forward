@@ -257,6 +257,14 @@ def main():
     ceilings = OV.load_ceilings()
     os.makedirs(MASK_DIR, exist_ok=True)
     print("manifest: %d sections at zoom %.4f (%s um/px)" % (len(scenes), zoom, OV.TARGET_UM))
+    # This stage exists to write the masks 04j censors with. If no scene is of
+    # a masked marker, it would finish "ok" having written none, and 04j would
+    # call every section unmeasured.
+    if scenes and not any(r.get("marker_channel") in MASK_MARKERS for r in scenes):
+        raise SystemExit(
+            "no scene in manifest_scenes.csv is of a declared marker %s, so no "
+            "clipping mask would be written. Check acquisition.markers in %s."
+            % (list(MASK_MARKERS), OV.CONFIG_PATH))
 
     rows, done = [], set()
     if os.path.exists(OUT_CSV) and not args.force:

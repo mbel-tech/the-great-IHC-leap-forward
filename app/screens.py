@@ -102,6 +102,9 @@ def stage_status(st, study, running, held=None):
         if "--force" in W.run_values(st.sid, {}, study):
             # Said here because for 05c it is hours: nothing is kept from before.
             words += ". Run redoes all of it"
+        elif st.sid == "detect":
+            # 05c's own resume: the rest of its sections are kept.
+            words += ". Run re-measures the sections whose boxes changed"
         return state, words
     return state, WORD.get(state, state)
 

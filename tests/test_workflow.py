@@ -216,8 +216,30 @@ chk("...and everything made from it, down to the results",
 chk("Run all remaining on Measure runs them again, in order",
     W.run_plan("measure", _s)[0], ["roi_geometry", "detect", "roi_dataset"])
 chk("...and they no longer count as done", W.progress("measure", _s)[0], 1)
-chk("detection is redone, not resumed, because its sections already have rows",
+chk("detection measured before 05c logged its sections is redone, not resumed",
     W.run_values("detect", {"--qc": True}, _s), {"--qc": True, "--force": True})
+# 05c logs each section with a fingerprint of the boxes it was measured on, and
+# its resume re-measures only the sections whose boxes changed. Redo there would
+# re-measure every section - hours - for the few discs a re-export moved.
+_m0 = _s.markers[0]
+_log = os.path.join(_res, "roi_nuclei_sections_done.csv")
+_geo = os.path.join(_res, "roi_measured_geometry.csv")
+_put(_log, "%s,*\n%s,A,0123456789abcdef\n" % (_m0, _m0), _T0 + 40)
+chk("a re-export resumes detection when 05c can tell which sections changed",
+    W.run_values("detect", {"--qc": True}, _s), {"--qc": True})
+try:
+    import screens as _SC
+except ImportError:                     # no Qt here: the words are not testable
+    _SC = None
+if _SC is not None:
+    chk("...and says that is what Run will do",
+        "boxes changed" in _SC.stage_status(S.BY_ID["detect"], _s, {})[1], True)
+_put(_log, "%s,*\n%s,A,0123456789abcdef\n%s,B\n" % (_m0, _m0, _m0), _T0 + 40)
+chk("a section logged with no fingerprint and no recorded shape: redone, as before",
+    W.run_values("detect", {}, _s), {"--force": True})
+_put(_geo, "scene_uid,marker,roi_index\nB,%s,1\n" % _m0, _T0 + 40)
+chk("...with its measured shape recorded, 05c checks it, so it resumes",
+    W.run_values("detect", {}, _s), {})
 chk("a stage with no Redo switch runs as it is", W.run_values("roi_geometry", {}, _s), {})
 chk("nothing is deleted: the outputs are all still there",
     all(os.path.exists(p) for x in _trk for p in _outputs_of(x, _s)), True)
@@ -257,6 +279,13 @@ chk("re-tuning that keeps the same cut does not redo detection",
     W.outdated(S.BY_ID["detect"], study(_cfg2)), None)
 _cfg2["detection"]["auto"]["AF568"]["chosen"] = {"prob_thresh": 0.6}
 chk("...a new cut does", bool(W.outdated(S.BY_ID["detect"], study(_cfg2))), True)
+chk("...and re-measures every section, though 05c could resume by section",
+    W.run_values("detect", {}, study(_cfg2)), {"--force": True})
+_put(_export, "uid,roi\nA,3\n", _T0 + 300)
+chk("a different export alone resumes detection, by section",
+    (bool(W.outdated(S.BY_ID["detect"], study(_cfg))), W.run_values("detect", {}, study(_cfg))),
+    (True, {}))
+_put(_export, "uid,roi\nA,1\n", _T0 + 300)
 chk("a trial run of a few sections records nothing to compare with",
     W.run_inputs("detect", {"--limit": 5}, study(_cfg)), None)
 chk("...a full run does", W.run_inputs("detect", {}, study(_cfg)),

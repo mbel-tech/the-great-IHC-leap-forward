@@ -81,6 +81,7 @@ Run:  python 05c_detect_rois.py
 import argparse
 import csv
 import json
+import hashlib
 import importlib.util
 import os
 import sys
@@ -162,9 +163,11 @@ NORM_COLUMNS = ["scene_uid", "marker", "segmented_on", "norm_lo", "norm_hi",
 #: copied from the roi_boxes row 05c read. 06a joins nuclei to the CURRENT
 #: roi_boxes file by position, and 05a rewrites that file from the newest
 #: curator export - so a disc dragged or resized, or a polygon redrawn, after
-#: detection keeps its index, kind and region, the resume below skips the
-#: section because it already has rows, and 06a divided the old count by the
-#: new area. This record is what lets 06a see that. Per section rather than as
+#: detection keeps its index, kind and region, the resume below skipped the
+#: section because it already had rows, and 06a divided the old count by the
+#: new area. This record is what lets 06a see that - and what the resume
+#: falls back on, for a section logged before DONE_LOG carried fingerprints,
+#: to tell a changed section from an unchanged one. Per section rather than as
 #: columns of roi_nuclei.csv for NORM_CSV's reason, and also because a disc
 #: with no nuclei has no row there to carry it.
 #:
@@ -755,6 +758,10 @@ def check_header(path, columns, legacy=None):
 #: then on; without it the marker's rows predate the log and are trusted. An
 #: absent marker must not read as "nothing logged", or the first resume of the
 #: second marker after the log appeared would drop its whole dataset as torn.
+#:
+#: A third column, when there is one, is the section's box_fingerprint: what it
+#: was measured on. A resume re-measures a section whose boxes no longer give
+#: that fingerprint, and keeps every other.
 DONE_LOG = os.path.join(RESULTS, "roi_nuclei_sections_done.csv")
 
 
@@ -808,9 +815,87 @@ def start_done_log(fh, marker, trusted=()):
     fh.flush()
 
 
-def record_done(fh, marker, uid):
-    csv.writer(fh).writerow([marker, uid])
+def record_done(fh, marker, uid, fp=""):
+    """Log `uid` as whole, with the box fingerprint it was measured on.
+
+    The fingerprint is a third column, so every reader of the log that takes
+    r[0] and r[1] (06a, the app) reads it as it always did."""
+    csv.writer(fh).writerow([marker, uid] + ([fp] if fp else []))
     fh.flush()
+
+
+#: The columns of a box that decide what a section's rows are: the rectangle
+#: read from the CZI, the shape nuclei are kept inside, the area 06a divides
+#: by, and the fields copied onto every row. NOT the whole row, so a column
+#: 05a adds or fills differently for every section (it has before) does not
+#: read as every section's boxes having changed.
+FINGERPRINT_BOX_FIELDS = ["animal", "marker", "roi_kind", "region", "seed_n",
+                          "czi_x0", "czi_y0", "czi_w", "czi_h"] + \
+    [f for f in GEOMETRY_FIELDS if f not in ("roi_kind", "region")]
+#: The section's geometry row as main() reads it: the CZI and scene, the
+#: affine that maps a nucleus back onto the grid, and the scene rectangle the
+#: overview-frame masks are placed by.
+FINGERPRINT_GEOM_FIELDS = ["czi_file", "scene_index", "scene_w", "m00", "m01",
+                           "m02", "m10", "m11", "m12", "scene_x", "scene_y",
+                           "overview_um_px", "native_um_px", "src_h", "src_w"]
+
+
+def box_fingerprint(boxes, g):
+    """A short hash of what one section of one marker is measured on.
+
+    In box order, because the ROI loop numbers ROIs by it and roi_index is in
+    every row: the same discs in a different order are different rows. Equal
+    fingerprints mean a re-measure would read the same pixels into the same
+    shapes, so the rows already in the file stand."""
+    key = [[(g or {}).get(f, "") for f in FINGERPRINT_GEOM_FIELDS]] + \
+        [[b.get(f, "") for f in FINGERPRINT_BOX_FIELDS] for b in boxes]
+    return hashlib.sha256(json.dumps(key).encode()).hexdigest()[:16]
+
+
+def read_done_prints(path, marker):
+    """{uid: fingerprint} for `marker`'s sections logged with one.
+
+    A section logged before fingerprints existed (two columns) is absent: what
+    it was measured on is unknown here, and changed_sections decides it from
+    the measured-geometry record or not at all. The last line wins, as a
+    section re-measured is logged again after forget_done dropped the old."""
+    out = {}
+    if not os.path.exists(path):
+        return out
+    with open(path, newline="", encoding="utf-8") as fh:
+        for r in csv.reader(fh):
+            if len(r) >= 3 and r[0] == marker and r[1] != "*" and r[2]:
+                out[r[1]] = r[2]
+    return out
+
+
+def changed_sections(measured, by_sec, geom, marker, prints, recorded):
+    """(changed, unknown): which measured sections no longer match their boxes.
+
+    A fingerprint decides when the log has one. A section measured before
+    fingerprints falls back on GEOMETRY_CSV (`recorded`, its rows for this
+    marker): a shape that differs from the one recorded is changed. With
+    neither record nothing says what the section was measured on, and it is
+    `unknown` - kept, as every resume before this kept it."""
+    rec = {}
+    for r in recorded:
+        rec.setdefault(r["scene_uid"], []).append(
+            [r.get(c, "") for c in GEOMETRY_COLUMNS])
+    changed, unknown = set(), set()
+    for u in measured:
+        if u not in by_sec:
+            continue
+        if u in prints:
+            if prints[u] != box_fingerprint(by_sec[u], geom.get(u)):
+                changed.add(u)
+        elif u in rec:
+            now = [[str(v) for v in r] for r in geometry_rows(u, by_sec[u])]
+            then = sorted(rec[u], key=lambda r: int(r[2] or 0))
+            if now != then:
+                changed.add(u)
+        else:
+            unknown.add(u)
+    return changed, unknown
 
 
 def torn_sections(measured, logged):
@@ -1257,6 +1342,9 @@ def main():
     if coloc_exists or (coloc_present and args.force):
         check_header(COLOC_CSV, COLOC_COLUMNS)
     measured = set()
+    # This marker's sections with rows that are no longer in its boxes: taken
+    # out of the curation since they were measured.
+    gone = set()
     if exists:
         # Streamed with csv.reader, not load_csv: this needs one column and
         # load_csv would build a dict per row - about five million of them once
@@ -1265,10 +1353,12 @@ def main():
         # reason.
         with open(NUCLEI_CSV, newline="", encoding="utf-8") as rf:
             rd = csv.reader(rf)
-            next(rd, None)
+            mi = (next(rd, None) or COLUMNS).index("marker")
             for row in rd:
                 if row and row[0] in by_sec:
                     measured.add(row[0])
+                elif len(row) > mi and row[mi] == args.marker:
+                    gone.add(row[0])
     if exists:
         logged = read_done_log(DONE_LOG, args.marker)
         if logged is None:
@@ -1287,16 +1377,62 @@ def main():
         # call below). Done like any other, and under the thresholds it was
         # measured with, so it counts in the settings check too.
         measured |= logged & set(by_sec)
+        gone |= logged - set(by_sec)
+    # A RESUME RE-MEASURES THE SECTIONS WHOSE BOXES CHANGED, AND ONLY THOSE.
+    # It used to skip every section with rows, so a disc moved after detection
+    # kept the count made inside its old shape (06a's check_geometry refuses
+    # that now) - and the app, to get the moved discs re-measured, ran this
+    # stage with --force on every re-export: hours of StarDist over every
+    # section to redo the handful a curator touched. Each section is logged
+    # with a fingerprint of what it was measured on (box_fingerprint), and
+    # one whose fingerprint differs now is measured again here.
+    changed, unknown = set(), set()
+    if exists and not args.force:
+        recorded = []
+        if os.path.exists(GEOMETRY_CSV):
+            recorded = [r for r in G5.load_csv(GEOMETRY_CSV)
+                        if r.get("marker") == args.marker]
+        changed, unknown = changed_sections(
+            measured, by_sec, geom, args.marker,
+            read_done_prints(DONE_LOG, args.marker), recorded)
+        if changed:
+            print(f"  {len(changed)} {args.marker} section(s) have boxes that "
+                  f"changed since they were measured - measured again: "
+                  + ", ".join(sorted(changed)[:5])
+                  + (" ..." if len(changed) > 5 else ""))
+        if unknown:
+            # Said, because a disc moved on one of these is not caught here;
+            # 06a reports the same sections as unverified.
+            print(f"  {len(unknown)} {args.marker} section(s) were measured "
+                  f"before this stage recorded what they were measured on, so "
+                  f"a box changed since cannot be seen - kept as they are. "
+                  f"--force re-measures them.")
+    # SECTIONS TAKEN OUT OF THE CURATION lose their rows, so the dataset is
+    # the sections the boxes name. Unless MOST of what was measured has gone:
+    # 05a --limit writes a box file of its first N sections, and dropping the
+    # rest would throw away hours of detection over a trial run. Those rows
+    # stay, 06a joins only the sections that still have boxes, and the
+    # sections are done again when a full box file comes back.
+    if gone and len(gone) > len(measured):
+        print(f"!! {len(gone)} {args.marker} measured sections are not in "
+              f"{os.path.basename(G5.BOX_CSV)}, more than are still in it - "
+              f"that looks like a partial 05a run (--limit), not a curation, "
+              f"so their rows are KEPT. Re-run 05a in full.")
+        gone = set()
+    elif gone:
+        print(f"  {len(gone)} {args.marker} section(s) are no longer in the "
+              f"boxes - their rows are dropped: "
+              + ", ".join(sorted(gone)[:5]) + (" ..." if len(gone) > 5 else ""))
     done = set()
     if exists and not args.force:
-        done = set(measured)
+        done = set(measured) - changed
         print(f"resuming: {len(done)} {args.marker} sections already measured")
     todo = [u for u in sorted(by_sec) if u not in done]
     if args.order == "balanced":
         todo = balanced_order(todo, done)
     if args.limit:
         todo = todo[: args.limit]
-    if not todo:
+    if not todo and not gone:
         print("nothing to do")
         return 0
     print(f"{len(todo)} sections, {sum(len(by_sec[u]) for u in todo)} ROIs")
@@ -1308,7 +1444,9 @@ def main():
     settings = None
     if backend_for(args.marker) == "stardist":
         settings = stardist_settings(args.marker)
-        staying = measured - set(todo) if args.force else measured
+        # On a resume `todo` holds the changed sections as well as the new
+        # ones, and their rows go before they are measured again.
+        staying = measured - set(todo)
         before = recorded_settings(args.marker, measured)
         if before is not None and staying and not same_settings(before, settings):
             def show(st):
@@ -1373,14 +1511,25 @@ def main():
     # `todo` - exactly the sections whose rows are about to be replaced - and
     # done after load_model(), so a model that fails to load leaves the file
     # as it was.
-    if exists and args.force:
-        dropped, kept = drop_rows(NUCLEI_CSV, args.marker, todo)
-        print(f"  --force: dropped {dropped} {args.marker} rows over {len(todo)} "
+    #
+    # A resume drops by the same rule for the sections whose boxes changed,
+    # and for those taken out of the curation (`gone`), which are not measured
+    # again. `redo` is every section whose rows are replaced or removed, and
+    # each record below drops by it. Not on a plain resume with neither: the
+    # rewrite is of the whole dataset, and there would be nothing to drop.
+    redo = set(todo) | gone
+    rewrite = args.force or bool(changed) or bool(gone)
+    why = "--force" if args.force else "boxes changed"
+    if exists and rewrite:
+        dropped, kept = drop_rows(NUCLEI_CSV, args.marker, redo)
+        print(f"  {why}: dropped {dropped} {args.marker} rows over {len(redo)} "
               f"sections, kept {kept}")
-        forget_done(DONE_LOG, args.marker, todo)
+        forget_done(DONE_LOG, args.marker, redo)
     if settings is not None:
         record_settings(args.marker, settings)
-    if coloc_present and args.force:
+    if coloc_present and rewrite:
+        if not args.force and not coloc_exists:
+            check_header(COLOC_CSV, COLOC_COLUMNS)
         # The relations of a section are derived from its measurements, so
         # they are dropped by the same rule and at the same moment. Leaving
         # them would pair the new objects of a re-measured section with the
@@ -1392,9 +1541,9 @@ def main():
         # recomputed here: they come back when that marker is re-run, and
         # until then the pair is absent rather than wrong. Multiplex-only, so
         # no study today has a row for this to reach.
-        dropped, kept = drop_rows(COLOC_CSV, args.marker, todo,
+        dropped, kept = drop_rows(COLOC_CSV, args.marker, redo,
                                   marker_col=("marker_a", "marker_b"))
-        print(f"  --force: dropped {dropped} co-localisation rows naming "
+        print(f"  {why}: dropped {dropped} co-localisation rows naming "
               f"{args.marker} on either side, kept {kept}")
     # The same rule again for the background-assumption record: it describes
     # the frames of the sections being redone, and those frames are about to be
@@ -1411,7 +1560,7 @@ def main():
     bg_exists = (os.path.exists(BACKGROUND_CSV)
                  and header_of(BACKGROUND_CSV) == BACKGROUND_COLUMNS)
     if bg_exists:
-        dropped, _ = drop_rows(BACKGROUND_CSV, args.marker, todo)
+        dropped, _ = drop_rows(BACKGROUND_CSV, args.marker, redo)
         if dropped and args.force:
             print(f"  --force: dropped {dropped} background-assumption rows")
 
@@ -1422,7 +1571,7 @@ def main():
     norm_exists = os.path.exists(NORM_CSV)
     if norm_exists:
         check_header(NORM_CSV, NORM_COLUMNS)
-        drop_rows(NORM_CSV, args.marker, todo)
+        drop_rows(NORM_CSV, args.marker, redo)
     nfh = nw = None
     no_norm = []
 
@@ -1431,7 +1580,7 @@ def main():
     geo_exists = os.path.exists(GEOMETRY_CSV)
     if geo_exists:
         check_header(GEOMETRY_CSV, GEOMETRY_COLUMNS)
-        drop_rows(GEOMETRY_CSV, args.marker, todo)
+        drop_rows(GEOMETRY_CSV, args.marker, redo)
     gfh = open(GEOMETRY_CSV, "a" if geo_exists else "w", newline="",
                encoding="utf-8")
     gw = csv.writer(gfh)
@@ -1475,7 +1624,7 @@ def main():
     # has still written rows for the sections it reached, and those must not
     # go unlisted. A section listed but not reached has no rows yet and is
     # redone - and re-recorded - by the resume.
-    record_no_artifact(NO_ARTIFACT_CSV, args.marker, todo, no_artifact)
+    record_no_artifact(NO_ARTIFACT_CSV, args.marker, redo, no_artifact)
     for n, uid in enumerate(todo, 1):
         g = geom[uid]
         M = np.array([[float(g["m00"]), float(g["m01"]), float(g["m02"])],
@@ -1716,7 +1865,7 @@ def main():
         # does not count it. (Its geometry row alone says nothing: one is
         # written for a section cut off before this line, too.)
         if rows or not any(u == uid for u, _, _ in no_norm):
-            record_done(dfh, args.marker, uid)
+            record_done(dfh, args.marker, uid, box_fingerprint(by_sec[uid], g))
         if norm_rows:
             if nfh is None:
                 os.makedirs(RESULTS, exist_ok=True)

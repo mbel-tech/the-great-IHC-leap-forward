@@ -1682,8 +1682,8 @@ def _changed_from(need, study):
     return "the output of %s" % display_title(n, study)
 
 
-def _own_reason(st, study):
-    """Why `st`'s own results no longer follow from what it reads, or None."""
+def _own_files(st, study):
+    """(why one is missing, or None; `st`'s outputs that exist, the first of each)."""
     mine = []
     for e in st.outputs:
         if isinstance(e, S.Art) and e.marker is None:
@@ -1696,15 +1696,48 @@ def _own_reason(st, study):
                           if os.path.exists(p)), None)
                 if p is None:
                     return ("your ROI export has %s regions that are not placed yet"
-                            % study.marker_label(i))
+                            % study.marker_label(i)), mine
                 mine.append(p)
             continue
         mine += [p for p in st._alternatives(e, study.out_root, study.names)[1][:1]
                  if os.path.exists(p)]
-    made = min((os.path.getmtime(p) for p in mine), default=None)
+    return None, mine
+
+
+def _made_at(st, study):
+    """When `st`'s oldest output was written, or None when it has none."""
+    return min((os.path.getmtime(p) for p in _own_files(st, study)[1]), default=None)
+
+
+def _fixed_reason(st, study):
+    """FIXED_AT's words when `st`'s results predate the fix that made them wrong."""
+    made = _made_at(st, study)
     fixed = FIXED_AT.get(st.sid)
     if fixed and made is not None and made < fixed[0]:
         return fixed[1]
+    return None
+
+
+def _settings_changed(st, study):
+    """The settings `st` reads that differ from its last recorded run's, in order."""
+    rec = _last_ok(study, st.sid)
+    then = rec.get("inputs") if rec else None
+    if not isinstance(then, dict):
+        return []
+    now = fingerprint(st.sid, study)
+    was = then.get("settings") or {}
+    return [k for k in now["settings"] if now["settings"][k] != was.get(k)]
+
+
+def _own_reason(st, study):
+    """Why `st`'s own results no longer follow from what it reads, or None."""
+    missing, _ = _own_files(st, study)
+    if missing:
+        return missing
+    made = _made_at(st, study)
+    fixed = _fixed_reason(st, study)
+    if fixed:
+        return fixed
     rec = _last_ok(study, st.sid)
     then = rec.get("inputs") if rec else None
     if isinstance(then, dict):
@@ -1714,8 +1747,7 @@ def _own_reason(st, study):
         if files:
             return "%s changed since it ran" % " and ".join(
                 _changed_from(k, study) for k in files)
-        was = then.get("settings") or {}
-        keys = [k for k in now["settings"] if now["settings"][k] != was.get(k)]
+        keys = _settings_changed(st, study)
         if keys:
             import ls_config as LC
             label = {k.path: k.label for k in LC.SPEC}
@@ -1763,15 +1795,60 @@ def outdated(stage, study, _seen=None):
 def run_values(sid, values, study):
     """The options a run of `sid` uses: the saved ones, plus Redo when it is out of date.
 
-    A stage that skips finished work (05c keeps every section that has rows) would
-    otherwise run, change nothing and record itself current. So an out-of-date run
-    redoes everything, which is what the old advice to switch Redo on said by hand.
-    The saved options are not changed.
+    A stage that skips finished work would otherwise run, change nothing and
+    record itself current. So an out-of-date run redoes everything, which is what
+    the old advice to switch Redo on said by hand. The saved options are not
+    changed.
+
+    EXCEPT 05c WHEN ONLY ITS BOXES CHANGED. It logs each section with what it was
+    measured on and its own resume re-measures exactly the sections whose boxes
+    changed, so Redo there turned a curator's few moved discs into hours of
+    StarDist over every section. It still gets Redo when the whole dataset is
+    wrong (detect_needs_redo): a setting it reads changed, a fix since, or
+    sections it cannot check.
     """
     values = dict(values or {})
-    if any(o.flag == "--force" for o in options_for(sid)) and outdated(S.BY_ID[sid], study):
+    st = S.BY_ID[sid]
+    if any(o.flag == "--force" for o in options_for(sid)) and outdated(st, study) and (
+            sid != "detect" or detect_needs_redo(study)):
         values["--force"] = True
     return values
+
+
+def detect_needs_redo(study):
+    """Why 05c must re-measure every section rather than resume, or None.
+
+    Its thresholds and the other settings it reads apply to every section at
+    once, and 05c refuses to add sections measured one way to rows measured
+    another; a fix (FIXED_AT) is the same. Otherwise its resume decides per
+    section - from the fingerprint in its done log, or for a section logged
+    before those from the shape recorded in roi_measured_geometry.csv - and a
+    section with neither cannot be checked, so while any exists the old rule
+    stands and everything is redone, as every re-export did before.
+    """
+    st = S.BY_ID["detect"]
+    fixed = _fixed_reason(st, study)
+    if fixed:
+        return fixed
+    keys = _settings_changed(st, study)
+    if keys:
+        return "a setting it reads changed"
+    if not study.markers or not study.out_root:
+        return "no marker to check"
+    res = os.path.join(study.out_root, "results")
+    log = _rows(os.path.join(res, "roi_nuclei_sections_done.csv"))
+    m0 = study.markers[0]
+    mine = [r for r in (log or []) if len(r) >= 2 and r[0] == m0]
+    if not any(r[1] == "*" for r in mine):
+        # No log, or rows that predate it: 05c trusts them and cannot check them.
+        return "sections measured before 05c logged them"
+    bare = {r[1] for r in mine if r[1] != "*" and not (len(r) >= 3 and r[2])}
+    if bare:
+        shaped = _column(os.path.join(res, "roi_measured_geometry.csv"), "scene_uid",
+                         where=lambda r: r.get("marker") == m0) or set()
+        if bare - shaped:
+            return "sections measured before 05c recorded what they were measured on"
+    return None
 
 
 def notices(screen_sid, study):

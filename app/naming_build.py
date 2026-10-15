@@ -464,6 +464,22 @@ def readout(example, spans):
                       for s in sorted(spans, key=lambda s: s.start))
 
 
+def reading(name, pattern, ignore_case=False):
+    """readout() for a saved pattern: how it reads `name`, or None when it does not.
+
+    Set up's basic view shows the rule this way, as an example, so a person who
+    never wrote a regex is not shown one.
+    """
+    try:
+        m = re.match(pattern, name, re.IGNORECASE if ignore_case else 0)
+    except (re.error, TypeError):
+        return None
+    if not m:
+        return None
+    spans = [Span(m.start(g), m.end(g), g) for g, v in m.groupdict().items() if v]
+    return readout(name, spans) or None
+
+
 def shape_of(name):
     stem, ext = split_ext(name)
     return re.sub(r"\d+", "9", re.sub(r"[A-Za-z]+", "a", stem)) + ext.lower()

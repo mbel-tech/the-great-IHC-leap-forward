@@ -309,10 +309,80 @@ print("--- names and words for this study ---")
 s0 = study()
 chk("titles lose their script number", W.display_title(S.BY_ID["manifest"]), "Read slide headers")
 chk("titles use the study's markers",
-    W.display_title(S.BY_ID["reformat_pcna"], s0), "Reformat %s sections" % s0.marker_label(1))
+    W.display_title(S.BY_ID["reformat_pcna"], s0),
+    "Standard image of every %s section" % s0.marker_label(1))
 named = dict(CFG, marker_identity={s0.markers[0]: "pERK"})
 chk("a confirmed antibody name is preferred", study(named).marker_label(0), "pERK")
 chk("plain words fill the markers in", "{m" in W.plain(S.BY_ID["pair"], s0), False)
+
+print("--- the words a person reads ---")
+
+
+def _next_up_with(plan, cur=(), decided_=True):
+    """next_up(s0) with the study's state stubbed: `plan` is {screen: stages to
+    run}, `cur` the curators whose pages are built, `decided_` their export."""
+    saved = (W.run_plan, W.curators, W.decided, W.applies)
+    built = {sid: S.BY_ID[sid].done for sid in cur}
+    W.run_plan = lambda scr, study, **_k: (list(plan.get(scr, [])), {})
+    W.curators = lambda study: list(cur)
+    W.decided = lambda sid, study: decided_
+    W.applies = lambda st, study: (False, "")       # nothing left to unblind
+    for sid in cur:
+        S.BY_ID[sid].done = lambda *a: True
+    try:
+        return W.next_up(s0)[1]
+    finally:
+        W.run_plan, W.curators, W.decided, W.applies = saved
+        for sid, fn in built.items():
+            S.BY_ID[sid].done = fn
+
+
+# 04a turns every section upright now; the ROI curator's Rotate is only for
+# the odd one it got wrong, so no step tells a person to do it.
+_upright = re.compile(r"turn\w*( the)? sections upright", re.I)
+chk("Next up does not ask you to turn the sections upright",
+    bool(_upright.search(_next_up_with({}, ["roi_curator"], decided_=False))), False)
+chk("...nor does Curate or Prepare",
+    [t for t in (W.SCREENS["curate"].role, W.SCREENS["curate"].subtitle,
+                 W.SCREENS["prepare"].info) if _upright.search(t) or "rotate" in t.lower()], [])
+# The R figures are switched off in 06e: Results promises them only when on.
+_fig = [W.SCREENS["results"].subtitle, W.SCREENS["results"].intro,
+        _next_up_with({"results": ["build_results"]}),
+        W.display_title(S.BY_ID["build_results"], s0),
+        W.display_title(S.BY_ID["refresh_loop"], s0)] + \
+    [p[0] for p in W.SCREENS["results"].parts] + [p[1] for p in W.SCREENS["results"].parts]
+chk("06e still draws no R figures (if it does, R_FIGURES goes back to True)",
+    "figures: off" in open(os.path.join(REPO, "scripts", "06e_refresh_loop.py"),
+                           encoding="utf-8").read(), not S.R_FIGURES)
+chk("with the R figures off, Results promises no figures",
+    [] if S.R_FIGURES else [t for t in _fig if "figure" in t.lower()], [])
+# The step screens are the basic view: a stage there is named in plain words,
+# with its script number and the pipeline's own name kept for All stages.
+_plain = {sid: W.display_title(S.BY_ID[sid], s0)
+          for sid in ("czi_selftest", "reformat_pcna", "reformat_pcna_final",
+                      "censor_pcna", "censor_perk", "reformat_perk_final")}
+chk("basic stage names carry no pipeline jargon",
+    {sid: t for sid, t in _plain.items()
+     if re.search(r"self-test|reformat|censor|\bCZI\b|^\d\d", t, re.I)}, {})
+chk("...and stay apart, one name per stage", len(set(_plain.values())), len(_plain))
+chk("the pipeline's own name stays for the advanced view",
+    W.display_title(S.BY_ID["czi_selftest"], s0, technical=True), "CZI self-test")
+chk("no setting is labelled in 'um'",
+    [k.label for k in LC.SPEC if re.search(r"\bum\b", k.label)], [])
+chk("section thickness is in µm", LC.BY_PATH["section_thickness_um"].label,
+    "Section thickness µm")
+import naming_build as NB                                       # noqa: E402
+chk("a file name rule reads in words",
+    NB.reading("LS53_2b.czi", r"(?P<subject>[A-Z]+\d+)_(?P<slide>\d+)(?P<replicate>[a-z])\.czi"),
+    "animal LS53 · slide 2 · replicate b")
+chk("...and None when the name does not fit", NB.reading("x.czi", r"(?P<subject>LS\d+)"), None)
+# Prepare's count and its "N stages left to run" are made over the same stages:
+# Run all remaining also builds the curator pages, so they are counted too.
+for _scr in ("prepare", "measure", "results"):
+    _d, _t = W.progress(_scr, s0)
+    _plan, _held = W.run_plan(_scr, s0)
+    chk(f"{_scr}: no more left to run than its count says is left",
+        len(_plan) + len(_held) <= _t - _d, True)
 
 print("--- Run all remaining ---")
 plan, held = W.run_plan("prepare", s0)
@@ -696,6 +766,23 @@ if MW:
     form.widgets["acquisition.layout"].setCurrentText("multiplex")
     chk("a multiplex study hides it and writes nothing",
         (form._segmentation_value(), form.seg_row.isVisibleTo(form)), (None, False))
+    _rx = r"(?P<subject>[A-Z]+\d+)_(?P<slide>\d+)\.czi"
+    _named = dict(CFG, slide_naming={"pattern": _rx, "example": "LS53_2.czi"})
+    json.dump(_named, open(_p, "w"))
+    form = CD.SettingsForm(REPO, path=_p, keys=["slide_naming.pattern"], advanced=False)
+    chk("basic Set up shows the file name rule as an example, not the regex",
+        (form.pattern_row.edit.isHidden(), _rx in form.pattern_row.words.text(),
+         "animal LS53" in form.pattern_row.words.text()), (True, False, True))
+    chk("...which still saves the pattern it holds", form.pattern_row.value(), _rx)
+    form = CD.SettingsForm(REPO, path=_p, keys=["slide_naming.pattern"])
+    chk("...and advanced shows the regex to edit",
+        (form.pattern_row.edit.isHidden(), form.pattern_row.edit.text()), (False, _rx))
+    chk("a step screen's row names the stage without its script number",
+        (w.lists["prepare"].rows["czi_selftest"].code.text(),
+         w.lists["prepare"].rows["czi_selftest"].name.text()),
+        ("", W.display_title(S.BY_ID["czi_selftest"], w.study())))
+    chk("...which All stages still shows",
+        w.lists["all"].rows["czi_selftest"].code.text(), "00d")
     chk("the scene pictures row keeps Open pictures until there are pictures",
         (w.lists["prepare"].rows["scene_renders"].open_btn.text(),
          w.lists["prepare"].rows["scene_renders"].open_btn.isVisibleTo(w.lists["prepare"])),

@@ -45,6 +45,7 @@ class Detection:
         self.values = {}          # dotted key -> value
         self.why = {}             # dotted key -> one line of evidence
         self.problems = []        # plain-words things a person should look at
+        self.notes = []           # plain-words information (sampling), not shown by lines()
         self.read = 0             # headers read
         self.unreadable = []      # (file, reason)
         self.naming = None        # naming_build.auto() result
@@ -417,7 +418,8 @@ def _scenes(headers):
 
 def _report(d, headers):
     """Detection.report: what the headers hold and what each field did. Also adds the
-    checks (exposure, bit depth, pixel type, objective, Nyquist) to d.problems."""
+    checks (exposure, bit depth, pixel type, objective) to d.problems and the
+    sampling (Nyquist) lines to d.notes."""
     flats = {name: flat for name, _h, _c, flat in headers}
     combined = czi_report.combine(flats)
     dates = sorted(h["acquired"] for _n, h, _c, _f in headers if h.get("acquired"))
@@ -500,7 +502,7 @@ def _report(d, headers):
         use("optics[%s]" % c["name"], res, "checks: pixel size must be at most half the "
             "optical resolution" if res else "recorded only: NA or emission unknown")
         if ok is False:
-            d.problems.append("%s is sampled at %g µm, coarser than half its %.2f µm optical "
+            d.notes.append("%s is sampled at %g µm, coarser than half its %.2f µm optical "
                               "resolution." % (c["name"], px, res))
     rep["optics"] = optics
     rep["uses"] = uses

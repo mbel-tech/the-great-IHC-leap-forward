@@ -185,8 +185,12 @@ with tempfile.TemporaryDirectory() as tmp:
         ["AF568 was exposed for 120–300 ms across files; signal is not directly "
          "comparable between those files."])
     chk("...but 0.5 % is not", any(p.startswith("DAPI was exposed") for p in d.problems), False)
-    chk("0.65 µm meets Nyquist at NA 0.8 for none of these, and says so",
-        sum("coarser than half" in p for p in d.problems), 3)
+    chk("0.65 µm meets Nyquist at NA 0.8 for none of these, and says so in the notes",
+        sum("coarser than half" in n for n in d.notes), 3)
+    chk("...not in the problems", any("coarser than half" in p for p in d.problems), False)
+    chk("...nor in lines()", any("coarser than half" in x for x in d.lines()), False)
+    chk("...and the optics section keeps them",
+        [c["nyquist"] for c in rep["optics"]["channels"]], [False, False, False])
     chk("render resolutions from 0.65",
         (d.values["curation_render.um_per_px"], d.values["scene_render.um_per_px"]), (2.6, 2.6))
     chk("colours from the bands", d.values["display.colours"], {"AF568": "red", "AF488": "green"})

@@ -818,6 +818,13 @@ class SetupScreen(QWidget):
         else:
             lines.append("Nothing new to fill in: every setting the files give is already set.")
         for key, mine, theirs in differ:
+            if key == "acquisition.markers":
+                lines.append("The markers are named %s, but the scans name their marker "
+                             "channel %s, so pairing cannot match them. In Microscope and "
+                             "channels > Channels and markers, use the scan names and write "
+                             "the antibody under 'What it stains'."
+                             % (", ".join(map(str, mine)), ", ".join(theirs)))
+                continue
             lines.append("The study says %s = %s, the files say %s. Check it under "
                          "Show advanced settings." % (key, mine, theirs))
         self.detect_line.setText(lines[0] + (" " + lines[-1] if len(lines) > 1 else ""))

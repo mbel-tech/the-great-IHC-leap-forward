@@ -95,6 +95,9 @@ with tempfile.TemporaryDirectory() as tmp:
     chk("agreeing values are not reported", A.compare(cfg, d), [])
     chk("a disagreement is", A.compare({"pixel_size_um": 0.325}, d),
         [("pixel_size_um", 0.325, 0.65)])
+    chk("paired markers named by protein are caught: no scan would pair with them",
+        A.compare({"acquisition": {"layout": "paired", "markers": ["pERK", "PCNA"]}}, d),
+        [("acquisition.markers", ["pERK", "PCNA"], ["AF568", "AF488"])])
 
 print("--- one multi-channel scan per section ---")
 with tempfile.TemporaryDirectory() as tmp:

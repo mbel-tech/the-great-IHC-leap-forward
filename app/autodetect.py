@@ -253,6 +253,14 @@ def fill(cfg, detection, keys=None):
 def compare(cfg, detection):
     """[(key, study's value, what the files say)] where the two disagree."""
     out = []
+    # A paired marker must be named as the scans name it, or no scan pairs with it.
+    if (_get(cfg, "acquisition.layout")[1] == CH.LAYOUT_PAIRED
+            and detection.values.get("acquisition.layout") == CH.LAYOUT_PAIRED):
+        declared = _get(cfg, "acquisition.markers")[1] or []
+        scans = detection.values.get("acquisition.markers") or []
+        stray = [m for m in declared if m not in scans]
+        if stray:
+            out.append(("acquisition.markers", declared, scans))
     for key in ("pixel_size_um", "acquisition.layout"):
         if key not in detection.values:
             continue
@@ -325,3 +333,30 @@ def new_project(source_dir, out_root, thickness_um, atlas="salmon", name=None,
     elif layout == CH.LAYOUT_MULTIPLEX:
         p.set("acquisition.markers", [], record=False)
     return p, detection
+
+
+_CACHE = {}
+
+
+def cached(source_dir):
+    """detect(source_dir), remembered while the folder's listing is unchanged."""
+    if not source_dir or not os.path.isdir(source_dir):
+        return None
+    try:
+        stamp = (tuple(slide_files(source_dir)), os.path.getmtime(source_dir))
+    except OSError:
+        return None
+    hit = _CACHE.get(source_dir)
+    if hit and hit[0] == stamp:
+        return hit[1]
+    found = detect(source_dir)
+    _CACHE[source_dir] = (stamp, found)
+    return found
+
+
+def scan_marker_names(source_dir):
+    """The marker channel names a paired study's scans carry (AF568, AF488), or []."""
+    found = cached(source_dir)
+    if not found or found.values.get("acquisition.layout") != CH.LAYOUT_PAIRED:
+        return []
+    return list(found.values.get("acquisition.markers") or [])

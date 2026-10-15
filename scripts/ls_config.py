@@ -501,7 +501,8 @@ note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
 
     Key("marker_identity", "raw",
         "Which fluorophore is which marker. Filled in by "
-        "00c_channel_identity.py, then confirmed by the operator.",
+        "00c_channel_identity.py or under 'What it stains' in the app's channel "
+        "editor, then confirmed by the operator.",
         default=None, status=DOCUMENTED, example={},
         note="Fluorophore -> marker name, e.g. {\"AF568\": \"pERK\"}. Written "
              "by 00c --accept and read by no stage. Until it is filled in, "

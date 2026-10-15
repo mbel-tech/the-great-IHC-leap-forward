@@ -169,6 +169,8 @@ In the LS study the pattern also accepts a suffix after a dash, so a name such a
 
 **Channels and markers…** opens a table of channels. **Detect from a CZI file…** reads each channel's dye and colour from a real slide and fills the table in. The file knows the dye, not the antibody, so you type or pick the marker name yourself. A marker's name becomes part of folder and file names, so the app asks before you rename one.
 
+In a paired study the table has one row per marker with two names. **Scan channel** is the name the scans give the marker's channel (AF568, AF488). Pairing matches each scan to its marker by this name, so it must be the scan's name, not the antibody; the app lists the names the slides carry and refuses any other. **What it stains** is the antibody (pERK, PCNA), which the screens show. DAPI is in every scan and is never a marker.
+
 **Find nuclei** (paired studies only) has one row per marker. Leave it on *On the counterstain (DAPI)* unless a marker's scan has no usable DAPI. For such a marker, choose *On this marker's own channel*. The LS study needs this for PCNA (AF488), because its DAPI plane is noise at full resolution. Use it only for a marker whose signal is in the nucleus, as PCNA's is. Its fraction positive and total cell density are then not reported; positive density is. Section 7 explains why.
 
 ![Microscope and channels, with Find nuclei set to the marker's own channel for AF488 (PCNA)](img/user-guide/03-setup-microscope.png)

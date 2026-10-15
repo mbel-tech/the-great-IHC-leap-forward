@@ -8,7 +8,7 @@ from collections import Counter
 
 # Fields that differ from file to file by nature; matched as substrings of the path.
 NATURALLY_DIFFERENT = (
-    "AcquisitionDateAndTime", "CreationDate", "Guid", "Id@",
+    "AcquisitionDateAndTime", "CreationDate", "Guid", "@Id",
     "CenterPosition", "Scenes", "SizeS", "SizeX", "SizeY",
     "Title", "FileName", "Document/Name",
 )

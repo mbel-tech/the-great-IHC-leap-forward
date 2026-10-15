@@ -82,6 +82,22 @@ chk("dl still quotes each field", blobs[0], 'h1,h2\n"x,y","q""r"');
   const here = X.PLATES[pi].id;
   chk("...and a record with no stored id still names the plate at its index",
       exportAll({verified: "by_index"}), [here, here, here, here].join(" / "));
+  // seed_region is the label of a numbered seed ON THE PLATE THE ROW NAMES.
+  // It was read off the plate at the stored index, so a gone record named its
+  // stored plate in plate_id and another plate's region beside it.
+  const seedOf = rec => {
+    X.S[uid] = Object.assign({plate: pi, assigned: true, noroi: false, fav: false,
+      rot: 0, excl: false, frame: 256, pairs: [[10, 10, 5, 5, 1, 4]], polys: []}, rec);
+    blobs.length = 0; X.exportCsv();
+    const lm = parse(blobs[1]), c = lm[0].indexOf("seed_region");
+    return lm.slice(1).filter(r => r[0] === uid).map(r => r[c]).join("|");
+  };
+  const sd = X.PLATES[pi].seeds[0];
+  chk("a gone record's landmarks carry no seed label from another plate",
+      seedOf({plate_id: "plate_gone_999", plate_fp: "old", plate_px: "10x10",
+              verified: "gone"}), "");
+  chk("...while a record on its own plate keeps the seed's region",
+      seedOf({verified: "by_index"}), (sd.amb || sd.region) + (sd.unk ? "?" : ""));
   delete X.S[uid];
 }
 

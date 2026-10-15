@@ -4313,11 +4313,16 @@ function exportCsv(){
     // transform happens to exist, and the residual columns go blank when it does
     // not, which is the honest way to say "not measurable" rather than "zero".
     let tot=0;
+    // The seed label is read off the plate the row NAMES, not the plate at the
+    // stored index: for a record resolved "gone" those differ, and the label
+    // would be another plate's region beside this plate's id. A plate that is
+    // not in this atlas has no seeds to name, so the label goes blank.
+    const named = PLATES[PLATE_BY_ID[plateIdOf(s)]];
     roiPairs(s).forEach((pr,i)=>{
       const [sx,sy,px,py,sn]=pr;
       let r=null;
       if(T){ const [X,Y]=apply(T,px,py); r=Math.hypot(X-sx,Y-sy); tot+=r; }
-      const sd = sn ? P.seeds[sn-1] : null;
+      const sd = sn && named ? named.seeds[sn-1] : null;
       lm.push([d.uid,d.animal,d.m,d.order,PLATE_SET,plateIdOf(s),i+1,
                (sx/K).toFixed(2),(sy/K).toFixed(2),(pairR(pr)/K).toFixed(2),
                px.toFixed(2),py.toFixed(2), r===null ? "" : (r/K).toFixed(2),

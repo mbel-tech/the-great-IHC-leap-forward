@@ -543,6 +543,67 @@ if MW:
             QCoreApplication.processEvents()
             _t.sleep(0.02)
 
+    # A poor signal check stops Run all remaining before hours of detection.
+    # The fake signal check writes detection.auto and the report, as 05b does,
+    # and still finishes cleanly: its outputs are kept and detection can be run
+    # on its own to carry on anyway.
+    _m0 = w.study().markers[0]
+    _report = os.path.join(w.study().out_root, "qc", "detection_tuning.md")
+
+    def _tuning_run(verdict):
+        ran = []
+
+        def run(stage, on_line=None, extra_argv=()):
+            ran.append(stage.sid)
+            if stage.sid == "tune_detection":
+                cfg = json.load(open(PATH))
+                cfg.setdefault("detection", {})["auto"] = {_m0: {
+                    "verdict": verdict, "reasons": ["signal-to-noise is 1.2, below 3"]}}
+                json.dump(cfg, open(PATH, "w"))
+                os.makedirs(os.path.dirname(_report), exist_ok=True)
+                open(_report, "w").write("# Detection tuning\n")
+            return RN.StageResult(stage.sid, True, 0.1, "")
+        return ran, run
+
+    def _run_and_wait(sids):
+        w.run_stages(sids)
+        _wait_idle()
+
+    _three = ["tune_detection", "detect", "roi_dataset"]
+    _ran, w.runner.run = _tuning_run("poor")
+    del asked[:]
+    _run_and_wait(_three)
+    chk("a poor signal check holds the run before detection", _ran, ["tune_detection"])
+    chk("...and says which marker and why, and how to carry on",
+        (len(asked), _m0 in w.drawer.log.toPlainText(),
+         "signal-to-noise is 1.2" in w.drawer.log.toPlainText(),
+         "carry on anyway" in w.drawer.log.toPlainText()),
+        (1, True, True, True))
+    chk("...without calling the signal check a failure",
+        (w._running.get("tune_detection"), w._queue), (None, []))
+    _tune = w.lists["measure"].rows["tune_detection"]
+    chk("the signal check row shows the verdict",
+        "poor" in _tune.status.text() and _m0 in _tune.status.text(), True)
+    chk("...and offers its report",
+        (_tune.open_btn.text(), _tune.open_btn.isVisibleTo(w.lists["measure"])),
+        ("Open report", True))
+    import screens as SC
+    _opened = []
+    _real_open = SC.QDesktopServices.openUrl
+    SC.QDesktopServices.openUrl = staticmethod(lambda url: _opened.append(url.toLocalFile()))
+    _tune.open_btn.click()
+    SC.QDesktopServices.openUrl = _real_open
+    chk("Open report opens the report file",
+        [os.path.normcase(os.path.abspath(p)) for p in _opened],
+        [os.path.normcase(os.path.abspath(_report))])
+    _ran, w.runner.run = _tuning_run("poor")
+    _run_and_wait(["detect"])
+    chk("detection run on its own still goes ahead", _ran, ["detect"])
+    _ran, w.runner.run = _tuning_run("good")
+    del asked[:]
+    _run_and_wait(_three)
+    chk("a good signal check runs straight on into detection", (_ran, asked), (_three, []))
+
     def _blocking_run(ok):
         def run(stage, on_line=None, extra_argv=()):
             _release.wait(10)

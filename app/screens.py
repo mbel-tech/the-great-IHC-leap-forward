@@ -9,7 +9,8 @@ nothing here starts a thread or writes a file.
 import csv
 import os
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QFrame, QGridLayout, QMessageBox, QHBoxLayout, QLabel, QProgressBar, QPushButton, QScrollArea,
     QTabBar, QTabWidget, QVBoxLayout, QWidget)
@@ -220,11 +221,11 @@ class StageListScreen(QWidget):
             cl.setSpacing(0)
             for sid in ids:
                 st = S.BY_ID[sid]
-                folder = W.FOLDERS.get(sid)
+                folder = W.FOLDERS.get(sid) or W.REPORTS.get(sid)
                 row = StageRow(st, W.options_for(sid),
                                open_label=folder[0] if folder else None)
                 row.run_clicked.connect(lambda s: self.run_requested.emit([s]))
-                row.open_clicked.connect(self.open_requested.emit)
+                row.open_clicked.connect(self._open)
                 row.goto_clicked.connect(self.goto.emit)
                 row.options_changed.connect(self.options_changed.emit)
                 self.rows[sid] = row
@@ -234,6 +235,16 @@ class StageListScreen(QWidget):
             body.addWidget(card)
         lay.addLayout(body)
         lay.addStretch(1)
+        self._study = None
+
+    def _open(self, sid):
+        """A report opens here, in the system's viewer; anything else is the window's."""
+        if sid in W.REPORTS:
+            path = W.report_file(sid, self._study) if self._study is not None else None
+            if path:
+                QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+            return
+        self.open_requested.emit(sid)
 
     def _run_all(self):
         if self._plan:
@@ -245,6 +256,7 @@ class StageListScreen(QWidget):
 
     def refresh(self, study, running, project, busy=False):
         block = project.block if project is not None else {}
+        self._study = study
         self._plan, held = W.run_plan(self.screen.sid, study)
         for sid, row in self.rows.items():
             st = S.BY_ID[sid]
@@ -254,6 +266,11 @@ class StageListScreen(QWidget):
             code, _name = W.split_title(st.title)
             if sid in W.HIDDEN:
                 words = "Superseded"
+            elif sid == "tune_detection" and state == "done":
+                # The verdict is the point of the signal check: say it on the row.
+                verdict = W.signal_words(study)
+                if verdict:
+                    words = f"{words}: {verdict}"
             action, goto = row_action(st, state, held)
             can_run = bool(st.script) and ok and not st.cli_reason() and not busy
             if state == "waiting" and goto is None:
@@ -264,7 +281,9 @@ class StageListScreen(QWidget):
                         can_run=can_run, option_values=values, changed_count=len(values),
                         action=action, goto=goto,
                         # A folder to open once the stage has made something.
-                        open_visible=(state == "done") if sid in W.FOLDERS else None)
+                        open_visible=((state == "done") if sid in W.FOLDERS else
+                                      bool(W.report_file(sid, study)) if sid in W.REPORTS
+                                      else None))
         self.run_all.setEnabled(bool(self._plan) and not busy)
         now = next((sid for sid, what in (running or {}).items()
                     if what == "running" and sid in self.rows), None)

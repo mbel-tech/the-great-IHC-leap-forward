@@ -228,6 +228,84 @@ with tempfile.TemporaryDirectory() as tmp:
     # how a stage reports done for a file belonging to a different one.
     chk("with no study named, it is not done", st.done(tmp), False)
 
+# --- one stage's work does not tick another --------------------------------
+print()
+print("--- no two stages are satisfied by the same file ---")
+
+# done() is existence-only, so an output two stages both declare - or a
+# directory one declares that another's file lands in - makes running either
+# tick both, and "Run all remaining" then skips the one never run. 01c before
+# and after correction both declared qc/tile_artifact, 01h declared the
+# qc/flatfield directory 01f builds into, and 06e declared 06c's and 06d's
+# workbooks. A pair that genuinely should tick together goes here, keyed by
+# layout, with why.
+#
+# Under multiplex every marker answers with the same unsuffixed names
+# (ls_paths.geometry_source), so the PCNA and pERK halves of a stage pair write
+# one file between them.
+SHARED_OK = {
+    ("multiplex", frozenset(("artifact_pcna", "artifact_perk"))):
+        "one scan per section: 04g masks the one DAPI it shares, once",
+    ("multiplex", frozenset(("reformat_pcna", "reformat_perk_final"))):
+        "the reformat is decided once per scene and shared by every marker",
+    ("multiplex", frozenset(("reformat_pcna_final", "reformat_perk_final"))):
+        "the reformat is decided once per scene and shared by every marker",
+    ("multiplex", frozenset(("rgb_perk", "rgb_pcna"))):
+        "KNOWN, NOT BY DESIGN: both runs write <uid>.png into sections_rgb, so "
+        "under multiplex the second marker's composites replace the first's. "
+        "A separate fix; listed so this check guards everything else.",
+}
+
+
+def _satisfiers(st, names):
+    """Every relative path that would satisfy one of this stage's outputs."""
+    return {os.path.relpath(p, names.out_root).replace(os.sep, "/").rstrip("/")
+            for e in st.outputs for p in st._alternatives(e, names.out_root, names)[1]}
+
+
+def _overlap(a, b):
+    return sorted(x for x in a for y in b
+                  if x == y or y.startswith(x + "/") or x.startswith(y + "/"))
+
+
+for layout in S.LY.CH.LAYOUTS:
+    names = S.LP.Names(os.path.join(tempfile.gettempdir(), "nostudy"),
+                       ["Mk1", "Mk2"], layout)
+    live = [st for st in S.STAGES if st.applies(layout)]
+    shared = []
+    for i, a in enumerate(live):
+        for b in live[i + 1:]:
+            hit = _overlap(_satisfiers(a, names), _satisfiers(b, names))
+            if hit and (layout, frozenset((a.sid, b.sid))) not in SHARED_OK:
+                shared.append(f"{a.sid}/{b.sid}: {hit}")
+    chk(f"{layout}: no output satisfies two stages", shared, [])
+chk("every allowed overlap carries a reason",
+    all(isinstance(v, str) and v.strip() for v in SHARED_OK.values()))
+chk("every allowed overlap names real stages and a layout",
+    sorted(f"{lay} {sorted(pair)}" for lay, pair in SHARED_OK
+           if lay not in S.LY.CH.LAYOUTS or not pair <= set(S.BY_ID)), [])
+
+
+# The same thing as the operator meets it: run one, look at the other. A fresh
+# tree per pair, so nothing ticks from an earlier pair's files.
+def _touch(st, tmp, names):
+    for e in st.outputs:
+        p = st._alternatives(e, tmp, names)[1][0]
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        open(p, "w").close()
+
+
+for ran, other in (("artifact_before", "artifact_after"),
+                   ("artifact_after", "artifact_before"),
+                   ("tilefield_build", "tilefield_raw"),
+                   ("excel_sample", "build_results"),
+                   ("build_results", "excel_slide")):
+    with tempfile.TemporaryDirectory() as tmp:
+        names = S.LP.Names(tmp, ["Mk1", "Mk2"], "paired")
+        _touch(S.BY_ID[ran], tmp, names)
+        chk(f"running {ran} leaves {other} not done",
+            S.BY_ID[other].done(tmp, names), False)
+
 print()
 print("ALL PASS" if not failures else f"{len(failures)} FAILED")
 sys.exit(1 if failures else 0)

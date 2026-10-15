@@ -11,9 +11,11 @@ bundle.
 
 **Saying so when it dies.** A windowed PyInstaller build has no console: an
 unhandled exception kills it with no message, no dialog, and no exit code worth
-reading. Anything that escapes is written to a crash log beside the executable
-and shown in a message box, because "it just closes" is not something anyone can
-act on.
+reading. Anything that escapes is written to a crash log and shown in a message
+box, because "it just closes" is not something anyone can act on. The log is
+per-user (%LOCALAPPDATA%\\The Great IHC Leap Forward\\logs on Windows) rather than
+beside the executable: an install under Program Files is read-only to the person
+running it, and a log that cannot be written is no log at all.
 """
 
 import os
@@ -38,17 +40,51 @@ if HERE not in sys.path:
 if SCRIPTS not in sys.path:
     sys.path.insert(0, SCRIPTS)
 
-CRASH_LOG = os.path.join(REPO, "lsapp-crash.log")
+APP_NAME = "The Great IHC Leap Forward"
+CRASH_LOG_NAME = "lsapp-crash.log"
 SELFTEST_LOG = os.path.join(REPO, "lsapp-selftest.log")
 
 
+def crash_log_path():
+    """A crash log file this user can write, creating its folder if needed.
+
+    %LOCALAPPDATA% on Windows (always set there); elsewhere XDG_STATE_HOME or
+    ~/.local/state, which is where logs belong on Linux and harmless on a Mac.
+    The folder is tried by actually opening the log for append, because
+    os.access says nothing useful about a Program Files folder on Windows. If
+    that fails too, the temp folder: a log somewhere beats none. Called only
+    when something has gone wrong, so it never raises.
+    """
+    base = (os.environ.get("LOCALAPPDATA") or os.environ.get("XDG_STATE_HOME")
+            or os.path.join(os.path.expanduser("~"), ".local", "state"))
+    import tempfile
+    for folder in (os.path.join(base, APP_NAME, "logs"), tempfile.gettempdir()):
+        path = os.path.join(folder, CRASH_LOG_NAME)
+        try:
+            os.makedirs(folder, exist_ok=True)
+            with open(path, "a", encoding="utf-8"):
+                pass
+            return path
+        except Exception:                                   # noqa: BLE001
+            continue
+    return None
+
+
 def _report(exc_type, exc, tb):
-    text = "".join(traceback.format_exception(exc_type, exc, tb))
+    # This is sys.excepthook: an exception raised in here replaces the one being
+    # reported, so every step is allowed to fail on its own.
     try:
-        with open(CRASH_LOG, "a", encoding="utf-8") as fh:
-            fh.write(text + "\n")
-    except OSError:
-        pass
+        text = "".join(traceback.format_exception(exc_type, exc, tb))
+    except Exception:                                       # noqa: BLE001
+        text = f"{getattr(exc_type, '__name__', exc_type)}: {exc}\n"
+    log = None
+    try:
+        log = crash_log_path()
+        if log is not None:
+            with open(log, "a", encoding="utf-8") as fh:
+                fh.write(text + "\n")
+    except Exception:                                       # noqa: BLE001
+        log = None
     try:
         if sys.stderr is not None:
             sys.stderr.write(text)
@@ -64,7 +100,8 @@ def _report(exc_type, exc, tb):
         if QApplication.instance():
             QMessageBox.critical(
                 None, "The Great IHC Leap Forward stopped",
-                f"{exc_type.__name__}: {exc}\n\nWritten to:\n{CRASH_LOG}")
+                f"{exc_type.__name__}: {exc}\n\n"
+                + (f"Written to:\n{log}" if log else "No crash log could be written."))
     except Exception:                                       # noqa: BLE001
         pass
 
@@ -84,7 +121,7 @@ def main():
             f"  running: {sys.executable}\n"
             f"  version: {sys.version.split()[0]}\n\n"
             f"work\\appenv is the interpreter that has it - the same 3.13 venv "
-            f"build_app.bat freezes the exe from. (It is 3.13 rather than 3.14 "
+            f"build_app.bat sets up. (It is 3.13 rather than 3.14 "
             f"because pylibCZIrw, which the overview stage needs, publishes no "
             f"cp314 wheel.)\n\n"
             f"Use it:\n"
@@ -100,7 +137,7 @@ def main():
         return _check_install()
 
     app = QApplication(sys.argv)
-    app.setApplicationName("The Great IHC Leap Forward")
+    app.setApplicationName(APP_NAME)
     # Before any window exists, so the study picker is drawn light too.
     import theme
     theme.apply(app)

@@ -259,6 +259,46 @@ def warp_plate_into_section(plate, A, shape):
     return ndimage.affine_transform(plate, mat, offset=off, output_shape=shape, order=1)
 
 
+def gate_on_plate_verified(by_sec, plate_rows):
+    """Split landmark sections into those whose plate verified and the rest.
+
+    `by_sec` is {scene_uid: [landmark rows]} from roi_landmarks.csv;
+    `plate_rows` are the rows of the roi_plates.csv exported beside it.
+    Returns `(kept, held)`: `kept` is the subset of `by_sec` to fit, `held` is
+    {scene_uid: reason} for every section left out.
+
+    The same rule `04l` applies to its own fit: landmarks are used only when the
+    plate they were clicked on is still, byte for byte, the plate on disk - a
+    verdict of exactly `ok`. Anything else (resized, changed, gone, unchecked,
+    by_index, or a verdict this code does not know) needs a person to confirm
+    first. roi_landmarks.csv carries no verdict of its own, which is how this
+    stage used to fit a "gone" section's landmarks against whatever plate the
+    row named. The verdict is read through `ls_atlas.restore_plate`, so a
+    file from before the column existed reads `unchecked` here exactly as it
+    does in the importers - not `ok`.
+
+    A section whose landmark rows name a different plate than its roi_plates
+    row is held too: the two files of one export disagreeing about the plate is
+    the shape the 04l export bug left in files already written, and neither
+    name can be trusted to be the one the operator clicked against.
+    """
+    verdict = {r.get("scene_uid", ""): r for r in plate_rows}
+    kept, held = {}, {}
+    for uid, rows in by_sec.items():
+        pr = verdict.get(uid)
+        if pr is None:
+            held[uid] = "not in roi_plates.csv"
+            continue
+        v = AT.restore_plate(pr, pr.get("plate_index"))
+        if v["verified"] != AT.OK:
+            held[uid] = v["verified"]
+        elif any((r.get("plate_id") or "").strip() != v["plate_id"] for r in rows):
+            held[uid] = "plate_id differs from roi_plates.csv"
+        else:
+            kept[uid] = rows
+    return kept, held
+
+
 def run_from_landmarks(itk, args):
     """Refine the curator's landmark alignment with an image-driven registration.
 
@@ -286,6 +326,23 @@ def run_from_landmarks(itk, args):
         by_sec = {}
         for r in csv.DictReader(fh):
             by_sec.setdefault(r["scene_uid"], []).append(r)
+
+    # The verdicts live in roi_plates.csv, written by the same export beside the
+    # landmarks. Without it no section can be shown to be on the plate it was
+    # clicked against, so refuse rather than fit everything unchecked.
+    pl_path = os.path.join(os.path.dirname(lm_path), "roi_plates.csv")
+    if not os.path.exists(pl_path):
+        raise SystemExit(f"{pl_path} not found - it carries each section's plate_verified, "
+                         "and is written by the same 04l export as roi_landmarks.csv")
+    with open(pl_path, newline="", encoding="utf-8") as fh:
+        by_sec, held = gate_on_plate_verified(by_sec, list(csv.DictReader(fh)))
+    if held:
+        why = {}
+        for reason in held.values():
+            why[reason] = why.get(reason, 0) + 1
+        print(f"  {len(held)} section(s) withheld - their plate is not verified ok, so their "
+              "landmarks may not belong to the plate on disk; confirm the plate in 04l and "
+              "export again: " + ", ".join(f"{k} {n}" for k, n in sorted(why.items())))
 
     with open(os.path.join(PLATE_DIR, "plates.csv"), newline="", encoding="utf-8") as fh:
         plates = {p["plate_id"]: p for p in csv.DictReader(fh)}
@@ -412,6 +469,7 @@ def run_from_landmarks(itk, args):
     print("=" * 74)
     print(f"{len(out_rows)} seed positions -> {out}")
     print(f"  sections skipped (fewer than 3 pairs, or missing files): {skipped}")
+    print(f"  sections withheld (plate not verified ok): {len(held)}")
     print(f"  failed: {failed}")
     print()
     print("Compare against roi_regions.csv from the curator: that is the landmark")

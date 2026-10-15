@@ -399,7 +399,9 @@ STAGES = [
     Stage("artifact_before", "01c  Measure the tile artifact before correction",
           "Instrument characterisation",
           script="01c_measure_tile_artifact.py",
-          outputs=["qc/tile_artifact"],
+          # Each run's own summary, named by the folder it measured: both runs
+          # plot into qc/tile_artifact, so the folder ticked both.
+          outputs=["qc/tile_artifact/test_sections_summary.json"],
           needs=["fiji_export"],
           blurb="Peak-to-trough of the folded tile profile as a percentage of "
                 "mean signal: how much more a detection near a tile centre sees."),
@@ -408,7 +410,7 @@ STAGES = [
           "Instrument characterisation",
           script="01c_measure_tile_artifact.py",
           argv=["{out_root}/qc/test_sections_corrected/*.tif"],
-          outputs=["qc/tile_artifact"],
+          outputs=["qc/tile_artifact/test_sections_corrected_summary.json"],
           needs=["tilefield_verify"],
           blurb="The same measurement on the corrected sample. Compare with "
                 "the run before correction."),
@@ -416,7 +418,9 @@ STAGES = [
     Stage("tilefield_raw", "01h  Illumination field from raw tiles",
           "Instrument characterisation",
           script="01h_tilefield_raw.py", reader="czifile",
-          outputs=["qc/flatfield"],
+          # A file only 01h writes. qc/flatfield is also where 01f builds, so
+          # the folder ticked this the moment 01f ran.
+          outputs=["qc/flatfield/tilefield_raw_DAPI.npy"],
           needs=["manifest"],
           blurb="Per-pixel median across thousands of raw, unstitched tiles, "
                 "mapped to the stitched domain. Instrument only - no value "
@@ -733,7 +737,9 @@ STAGES = [
     Stage("build_results", "06e  Build results: datasets, spreadsheets, figures",
           "Beyond blinding",
           script="06e_refresh_loop.py", argv=["--once"],
-          outputs=["results/roi_dataset.xlsx", "results/roi_dataset_by_slide.xlsx"],
+          # Not the two workbooks: those are 06c's and 06d's outputs too, so
+          # running either ticked this and "Run all remaining" skipped it.
+          outputs=["results/build_results_pass.json"],
           needs=["detect"],
           blurb="06a, 06c and 06d in one run, then the figures for every "
                 "measured marker - the same pass the hourly loop makes, made "

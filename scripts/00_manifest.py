@@ -46,6 +46,7 @@ if _HERE not in sys.path:
 # lines copy-pasted into every stage.
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
 import ls_channels as CH  # noqa: E402
+import ls_io as IO  # noqa: E402
 import ls_naming as NM  # noqa: E402
 import ls_progress as PG  # noqa: E402
 
@@ -725,10 +726,10 @@ def _write_csv(path, rows):
         for k in r:
             if k not in keys:
                 keys.append(k)
-    with open(path, "w", newline="", encoding="utf-8") as fh:
-        writer = csv.DictWriter(fh, fieldnames=keys)
-        writer.writeheader()
-        writer.writerows(rows)
+    # Swapped in, not written in place: every later stage reads the manifest
+    # as the truth about the study, and a crash part-way through left a
+    # truncated one that they read without complaint.
+    IO.atomic_write_csv(path, rows, keys)
     print(f"  wrote {path}  ({len(rows)} rows)")
 
 

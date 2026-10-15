@@ -3077,9 +3077,23 @@ function skipRoi(){ if(!guided || !active || !gTarget) return;
 //
 // Kept per plate set and plate in its own localStorage key, for the reason the
 // selection is: the section store must hold section records only.
+//
+// Filed per study like every other key (saveStudy): plate ids are the atlas's, so
+// two studies on one atlas share them, and a store shared by the origin put one
+// study's added region on the other's plates. ADD ROIs from before filing are read
+// by a study that has none of its own (ownOr) and stay in the store for the rest.
 const CUSTOM_KEY = "ls_roi_curator_v1_custom";   // {plate_set: {plate_id: [{region, roi}]}}
+// What the app has on file for this study, for a browser that holds nothing yet.
+const CUSTOM_SEED = __CUSTOM__;
+const parseCustom = raw => {
+  try {
+    const v = typeof raw === "string" ? JSON.parse(raw) : raw;
+    return (v && typeof v === "object" && !Array.isArray(v)) ? v : null;
+  } catch(e){ return null; }
+};
 let CUSTOM = {};
-try { CUSTOM = JSON.parse(localStorage.getItem(CUSTOM_KEY) || "{}") || {}; } catch(e){}
+try { const raw = ownOr(CUSTOM_KEY); if(raw !== undefined) CUSTOM = parseCustom(raw) || {}; } catch(e){}
+if(!Object.keys(CUSTOM).length) CUSTOM = parseCustom(CUSTOM_SEED) || {};
 const customHull = c => ({region: c.region, amb: "", unk: 0, hex: "#ff7b72", part: 1,
                           n_parts: 1, seeds: [], v: [], roi: c.roi, custom: 1});
 (function applyCustom(){
@@ -3101,9 +3115,15 @@ function addRoi(){
   if(!h){
     h = customHull({region: name, roi: H.reduce((m, x) => Math.max(m, x.roi || 0), 0) + 1});
     H.push(h);
+    // Read again rather than written from the copy taken at load: this study's page
+    // open in a second tab may have added one since, and writing back what this page
+    // saw would drop it. What it added is kept, this one appended.
+    try { const now = parseCustom(ownOr(CUSTOM_KEY)); if(now) CUSTOM = now; } catch(e){}
     const set = CUSTOM[PLATE_SET] || (CUSTOM[PLATE_SET] = {});
-    (set[P.id] || (set[P.id] = [])).push({region: h.region, roi: h.roi});
-    try { localStorage.setItem(CUSTOM_KEY, JSON.stringify(CUSTOM)); } catch(e){}
+    const list = set[P.id] || (set[P.id] = []);
+    if(!list.some(c => c.region === h.region && c.roi === h.roi))
+      list.push({region: h.region, roi: h.roi});
+    try { saveStudy(CUSTOM_KEY, CUSTOM); } catch(e){}
   }
   // A chosen subset would hide it, and the cursor only walks what is chosen.
   if(SEL !== null && !SEL.includes(name)){
@@ -6307,6 +6327,20 @@ def main():
         except (OSError, ValueError):
             roisel = None
 
+    # The ROIs the operator added (ADD ROI), the same way: this study's own, else
+    # what predates filing. Only fills a browser that holds none.
+    custom = None
+    if not args.no_seed:
+        try:
+            with open(os.path.join(OUT_ROOT, "curation", "ls_roi_curator_v1_custom.json"),
+                      encoding="utf-8") as fh:
+                stored = json.load(fh)
+            custom = CU.own(stored, STUDY_ID, token)
+            if custom is None:
+                custom = CU.legacy(stored)
+        except (OSError, ValueError):
+            custom = None
+
     # The study's atlas_scope, as the page wants it. Reported against what this
     # atlas really carries, so a typo or the wrong atlas shows at build time.
     scope_cfg = CONFIG.get("atlas_scope") or {}
@@ -6327,7 +6361,7 @@ def main():
 
     page = IO.fill(PAGE, {
         "__ATLASSCOPE__": scope,
-        "__SEED__": seed, "__ROISEL__": roisel, "__PROV__": load_provenance(), "__DATA__": data,
+        "__SEED__": seed, "__ROISEL__": roisel, "__CUSTOM__": custom, "__PROV__": load_provenance(), "__DATA__": data,
         "__PLATES__": pl, "__PLATESET__": PLATE_SET, "__MARKERS__": markers,
         "__STUDY__": STUDY_ID, "__TOKEN__": token,
         # The page compares aspect ratios exactly as `ls_atlas.plate_status`

@@ -105,6 +105,7 @@ import ls_channels as CH  # noqa: E402
 import ls_segment as SG  # noqa: E402
 import ls_coloc as CO  # noqa: E402
 import ls_jsonio  # noqa: E402
+import ls_io as IO  # noqa: E402
 OUT_ROOT = G5.OUT_ROOT
 REFORMAT_DIR = G5.REFORMAT_DIR
 RESULTS = os.path.join(OUT_ROOT, "results")
@@ -128,6 +129,22 @@ BACKGROUND_CSV = os.path.join(OUT_ROOT, "qc", "roi_background_assumption.csv")
 BACKGROUND_COLUMNS = ["scene_uid", "roi_index", "marker", "segmented_on",
                       "backend", "n_objects", "cut", "above_cut",
                       "below_background"]
+
+#: The sections measured with NO artifact mask, one row per (section, marker).
+#: Without `<uid>_artifact.npy` every nucleus of the section is written with
+#: artifact = 0 - the same value a clean section gets, so roi_nuclei.csv alone
+#: cannot tell "checked, nothing there" from "never checked". The usual cause
+#: is 04a_reformat.py run without --mask-artifacts. Unlike a missing tissue
+#: mask this is not a skip: the counts are still counts, they just have not
+#: had artifacts taken out.
+#:
+#: ALWAYS WRITTEN, header-only when nothing is missing: every run looks for the
+#: mask, so an empty file is a true "none missing". Rewritten atomically each
+#: run; the rows of the sections a run re-measures are replaced and every other
+#: row (other markers, sections not redone) is kept, so it stays in step with
+#: roi_nuclei.csv across resumes and --limit.
+NO_ARTIFACT_CSV = os.path.join(OUT_ROOT, "qc", "roi_no_artifact_mask.csv")
+NO_ARTIFACT_COLUMNS = ["scene_uid", "marker"]
 
 #: The intensity range a marker-segmented section's crops were scaled by, one
 #: row per (section, marker). Provenance for numbers that depend on it, kept in
@@ -884,6 +901,40 @@ def mask_at(uid, kind):
     return None
 
 
+def has_mask(uid, kind):
+    """Whether mask_at(uid, kind) would find a file, without loading it."""
+    return any(os.path.exists(os.path.join(d, f"{uid}_{kind}.npy"))
+               for d in section_dirs())
+
+
+def record_no_artifact(path, marker, redone, missing):
+    """Rewrite NO_ARTIFACT_CSV: this run's `redone` sections of `marker` get
+    the rows in `missing` and nothing else; every other row is left alone.
+    """
+    redone = set(redone)
+    rows = []
+    if os.path.exists(path):
+        with open(path, newline="", encoding="utf-8") as fh:
+            rows = [r for r in csv.DictReader(fh)
+                    if not (r.get("marker") == marker
+                            and r.get("scene_uid") in redone)]
+    rows += [{"scene_uid": u, "marker": marker} for u in missing]
+    rows.sort(key=lambda r: (r["marker"], r["scene_uid"]))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    IO.atomic_write_csv(path, rows, NO_ARTIFACT_COLUMNS)
+
+
+def warn_no_artifact(uids, when):
+    """The operator-facing line for sections measured without an artifact mask."""
+    if not uids:
+        return
+    print(f"!! {len(uids)} sections {when} with no artifact mask "
+          f"(<uid>_artifact.npy) - every nucleus in them reads artifact=0 "
+          f"unchecked: {uids[:5]}")
+    print(f"   04a_reformat.py --mask-artifacts makes them; the list -> "
+          f"{NO_ARTIFACT_CSV}")
+
+
 def write_overlay(uid, bi, b, image, labels, kept):
     """One PNG per ROI: the SEGMENTED crop with the segmentation drawn on it.
 
@@ -1068,6 +1119,13 @@ def main():
             print(f"  (signal quality was not checked for {args.marker}; "
                   f"05b_tune_detection.py does that before detection)")
 
+    # Said BEFORE anything is loaded or dropped, so an operator who meant to
+    # mask artifacts can stop here and lose nothing. Only sections that will
+    # actually be measured: one with no tissue mask is skipped below anyway.
+    no_artifact = [u for u in todo
+                   if has_mask(u, "mask") and not has_mask(u, "artifact")]
+    warn_no_artifact(no_artifact, "will be measured")
+
     # The model is loaded only if something in this run needs it. A study whose
     # markers are all `segment: own` with the threshold backend has no use for
     # StarDist, and load_model() DOWNLOADS weights on first use - so making it
@@ -1175,6 +1233,11 @@ def main():
     total_rel = 0
     total_bg = 0
     no_tissue_mask = []
+    # Recorded before the loop rather than after it: a run that dies half way
+    # has still written rows for the sections it reached, and those must not
+    # go unlisted. A section listed but not reached has no rows yet and is
+    # redone - and re-recorded - by the resume.
+    record_no_artifact(NO_ARTIFACT_CSV, args.marker, todo, no_artifact)
     for n, uid in enumerate(todo, 1):
         g = geom[uid]
         M = np.array([[float(g["m00"]), float(g["m01"]), float(g["m02"])],
@@ -1439,6 +1502,7 @@ def main():
         print(f"!! {len(no_tissue_mask)} sections SKIPPED for want of a tissue "
               f"mask in reformatted/: {no_tissue_mask[:5]}")
         print("   Run 04a_reformat.py for them before trusting any count.")
+    warn_no_artifact(no_artifact, "were measured")
     return 0
 
 

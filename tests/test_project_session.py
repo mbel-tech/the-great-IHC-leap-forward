@@ -333,6 +333,7 @@ fill = {"thickness": 14.0, "out": FRESH}
 def fill_and_create(self):
     self.slides.edit.setText(SLIDES)
     self._read_slides()
+    self.slide_read.wait()                  # the headers are read in the background
     self.output.edit.setText(fill["out"])
     self.thickness.setValue(fill["thickness"])
     self._check()

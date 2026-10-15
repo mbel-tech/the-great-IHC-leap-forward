@@ -133,6 +133,7 @@ if MW:
     chk("with no kept report it reads the folder", bool(got and got.get("instrument")), True)
     chk("...and no full file yet", path, None)
     s.detect_from_slides(quiet=True)
+    s.slide_read.wait()                     # the headers are read in the background
     got, path = s._slide_report()
     chk("after reading, the study keeps a summary", "full_report" in got, True)
     chk("...and the full file is named by its absolute path",
@@ -160,7 +161,7 @@ if MW:
     project.set("source_dir", junk, by="test")
     project.block.pop("slides", None)
     s.detect_line.setText("")
-    chk("nothing readable: no window", s.show_slide_report(), None)
+    chk("nothing readable: no window", (s.show_slide_report(), s.slide_read.wait()), (None, True))
     chk("...and the line says so", s.detect_line.text(),
         "No slide file in the slides folder could be read.")
 

@@ -17,7 +17,7 @@ The step list on the left shows six screens in the order you work, each with a o
 | 2 | **Prepare** | Press **Run all remaining**. It runs straight through to the ROI curator. | The step list shows Prepare done and Next up sends you to Curate. |
 | 3 | **Curate** | In the ROI curator, bring back any section that was set aside by mistake, match each section to its atlas plate and draw the brain regions. Then press **Done: export and go to Measure**. | The curator is exported. |
 | 4 | **Measure** | Press **Run all remaining**. It first checks signal quality and tunes detection (05b); nucleus detection then takes hours and can be stopped and resumed. | Every section is measured. |
-| 5 | **Results** | Press **Run** on *Join the experiment*, check the sampling workbook in the box that opens and press **Unblind and run**. Then press **Run all remaining** for the spreadsheets and figures. | `roi_dataset.xlsx` is in your results folder. |
+| 5 | **Results** | Press **Run** on *Join the experiment*, check the sampling workbook in the box that opens and press **Unblind and run**. Then press **Run all remaining** for the spreadsheets (the R figures are switched off for now). | `roi_dataset.xlsx` is in your results folder. |
 
 Three habits will save you trouble:
 
@@ -35,7 +35,7 @@ There are far too many sections to measure by hand, so the program does the repe
 2. **Standardise every section.** Each section is cleaned, turned upright, centred and resized to the same square, so a position means the same thing on every section.
 3. **Curate.** You bring back any section the program set aside by mistake, match each section to an atlas plate, and draw the brain regions to measure.
 4. **Measure.** Your regions are mapped back onto the original full-resolution scan. Every nucleus inside them is found (on DAPI, or for PCNA on its own channel) and the marker is measured in each.
-5. **Unblind and report.** Only now are the animals joined to their treatment groups, and the spreadsheets and figures are written.
+5. **Unblind and report.** Only now are the animals joined to their treatment groups, and the spreadsheets are written (the R figures are switched off for now).
 
 ```mermaid
 flowchart LR
@@ -43,7 +43,7 @@ flowchart LR
     B --> E{{ROI curator<br/>plate and regions}}
     E --> F[Measure<br/>find and count nuclei]
     F -. blinding ends here .-> G[Unblind<br/>join treatment groups]
-    G --> H[Results<br/>spreadsheets, figures]
+    G --> H[Results<br/>spreadsheets, figures off for now]
 ```
 
 The hexagon is the one place the run stops for you: the ROI curator. The atlas plate boxes (salmon atlas only) are a second, short stop during Prepare.
@@ -500,7 +500,7 @@ Three tools fix results files written by older versions of the pipeline. They ar
 
 ## 8. Results: unblinding, spreadsheets and figures
 
-Results joins the measurements to the experiment's treatment groups and writes the spreadsheets and figures. **The first stage unblinds the analysis.** When the measurements are in, Next up says *Measurements are in. Unblind and build the results.* **Run all remaining never unblinds**; it always waits for you.
+Results joins the measurements to the experiment's treatment groups and writes the spreadsheets. The R figures are switched off for now (see The figures, below). **The first stage unblinds the analysis.** When the measurements are in, Next up says *Measurements are in. Unblind and build the results.* **Run all remaining never unblinds**; it always waits for you.
 
 Pressing **Run** on *Join the experiment (06b, marked ⚠ unblinds; its button reads Run…)* opens a box titled **Unblind the analysis?** It explains that this stage reads the treatment groups for the first time, and that everything before it was keyed by animal only. The **Sampling workbook (.xlsx)** field shows which workbook will be read; leave it empty to use the one in the slide folder, or press **Choose…** to pick another. Do this once the regions and detection settings are final. Press **Unblind and run** to go ahead, or **Cancel**.
 
@@ -511,10 +511,10 @@ Pressing **Run** on *Join the experiment (06b, marked ⚠ unblinds; its button r
 | Stage | What it does | Makes |
 | --- | --- | --- |
 | 06b Join the experiment (unblind) | Reads the sampling workbook and joins each animal to its treatment group. It checks the cohort against the workbook's own record of which animals were sliced, and stops loudly if they disagree. | `results/roi_dataset.csv`, `results/animal_metadata.csv` |
-| 06e Build results | One pass that rebuilds both spreadsheets and redraws the figures | Everything below |
+| 06e Build results | One pass that rebuilds the per-region numbers and both spreadsheets. It does not draw the R figures for now. | Everything below |
 | 06c Spreadsheet per sample | One row per region per animal, plus per-disc, per-section and coverage sheets. **The figures and statistics read this one**, because the animal is the unit of comparison. | `results/roi_dataset.xlsx` |
 | 06d Spreadsheet per slide | The same, one level finer, to show spread within an animal. Slides are not independent replicates; do not test on this sheet. | `results/roi_dataset_by_slide.xlsx` |
-| 06e Refresh hourly | Rebuilds the spreadsheets and figures every hour while detection is still running, and stops when it finishes or stalls. Run it from `refresh_loop.bat`, not the app. | `results/ROI_plots/` |
+| 06e Refresh hourly | Rebuilds the spreadsheets every hour while detection is still running, and stops when it finishes or stalls. Run it from `refresh_loop.bat`, not the app. | `results/ROI_plots/` |
 
 ### Before you unblind
 
@@ -524,7 +524,7 @@ Pressing **Run** on *Join the experiment (06b, marked ⚠ unblinds; its button r
 
 ### The figures
 
-Figures are drawn by R scripts in the `analysis/` folder (`plot_roi_figures.R`, `plot_by_sample.R`, `plot_by_slide.R`) and land in `results/ROI_plots/`. Build results finds R on its own; if it cannot, it lists where it looked. Statistics live in `analysis/roi_stats.R`.
+**The R figures are switched off for now.** Build results and the hourly refresh rebuild the numbers and spreadsheets but no longer look for R or draw figures, so `results/ROI_plots/` is not updated. The R scripts are still in the `analysis/` folder (`plot_roi_figures.R`, `plot_by_sample.R`, `plot_by_slide.R`, statistics in `roi_stats.R`) and can be run by hand with `Rscript`, and the installer still includes R. Turning the figures back on is a code change in `scripts/06e_refresh_loop.py`, where the R step is commented out rather than deleted.
 
 **What not to claim.** There are no no-primary controls in the LS dataset, so absolute statements like "30% of cells are positive" are not supported. Comparisons between groups at matched brain levels are.
 
@@ -576,7 +576,7 @@ Every stage is a script in `scripts/` and can also be run from a terminal; the (
 | The overview stage fails on Python 3.14 | The CZI reader has no 3.14 version | Use Python 3.13 via `run_app.bat` |
 | A curator pane is blank in the .exe | The packaged files are incomplete | Start the app with `--self-test` and read `lsapp-selftest.log`; reinstall if it fails |
 | The app will not start | A missing library or a broken environment | Read `lsapp-crash.log`. To keep curating meanwhile, run `serve_curators.bat` and use a browser. |
-| Build results cannot find R | R is not on PATH and not in Program Files | Install R, or add `Rscript` to PATH |
+| No new figures in results/ROI\_plots | The R figure steps are switched off for now | Run the scripts in `analysis/` by hand with `Rscript` (section 8) |
 | 06b says the workbook header does not match | The sampling workbook's columns differ | Fix the workbook's column names to the ones it lists |
 
 ### Where to look for more detail

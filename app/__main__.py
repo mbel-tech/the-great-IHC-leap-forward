@@ -40,34 +40,11 @@ if HERE not in sys.path:
 if SCRIPTS not in sys.path:
     sys.path.insert(0, SCRIPTS)
 
-APP_NAME = "The Great IHC Leap Forward"
-CRASH_LOG_NAME = "lsapp-crash.log"
+# Where the crash log goes is its own module so the window's Help > Open the
+# log folder opens the very folder this writes to.
+from crash_log import APP_NAME, CRASH_LOG_NAME, crash_log_path   # noqa: E402,F401
+
 SELFTEST_LOG = os.path.join(REPO, "lsapp-selftest.log")
-
-
-def crash_log_path():
-    """A crash log file this user can write, creating its folder if needed.
-
-    %LOCALAPPDATA% on Windows (always set there); elsewhere XDG_STATE_HOME or
-    ~/.local/state, which is where logs belong on Linux and harmless on a Mac.
-    The folder is tried by actually opening the log for append, because
-    os.access says nothing useful about a Program Files folder on Windows. If
-    that fails too, the temp folder: a log somewhere beats none. Called only
-    when something has gone wrong, so it never raises.
-    """
-    base = (os.environ.get("LOCALAPPDATA") or os.environ.get("XDG_STATE_HOME")
-            or os.path.join(os.path.expanduser("~"), ".local", "state"))
-    import tempfile
-    for folder in (os.path.join(base, APP_NAME, "logs"), tempfile.gettempdir()):
-        path = os.path.join(folder, CRASH_LOG_NAME)
-        try:
-            os.makedirs(folder, exist_ok=True)
-            with open(path, "a", encoding="utf-8"):
-                pass
-            return path
-        except Exception:                                   # noqa: BLE001
-            continue
-    return None
 
 
 def _report(exc_type, exc, tb):

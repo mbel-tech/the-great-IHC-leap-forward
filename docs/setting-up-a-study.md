@@ -12,66 +12,100 @@ table that validates it.
 
 ## Where studies live
 
+A study made in the app lives in its own output folder, as `study.json`, next
+to everything the study produces: curation, pictures, results. The whole study
+is one folder you can move or back up.
+
 ```
+D:\LS-analysis\
+  study.json             the study (and project) file
+  curation\  qc\  results\  ...
+
 ~/.ls-pipeline/
-  settings.json          which study was open last
-  studies/
+  settings.json          the last study open, and File > Open Recent
+  studies/               studies made before they lived in their output folder
     ls-dec-2025.json
-    pilot-2027.json
 ```
 
-Set `LS_HOME` to put that somewhere else — a shared drive, or a USB stick for a
-portable install. The tests set it to a temp directory, which is how running
-them can never change which study you have open.
+The app reopens the study you had open last. **Tools ▸ Switch study…** lists
+both kinds: the named studies in `~/.ls-pipeline/studies/` and the recent ones
+kept in their own folders. Set `LS_HOME` to put `~/.ls-pipeline` somewhere else
+(a shared drive, or a USB stick for a portable install). The tests set it to a
+temp directory, which is how running them can never change which study you have
+open.
 
 ## Bringing an existing config in
 
 If you already have a `config.json` at the repo root, it keeps working exactly
-as before; nothing has to change. To give it a name and move it into the store:
+as before; nothing has to change. To give it a name, use **Import existing
+config…** in **Tools ▸ Switch study…** (enabled only when that file exists), or
+from a terminal:
 
 ```bash
 python scripts/ls_config.py --migrate "LS Dec 2025"
 ```
 
-That **copies**. The original is left where it was, so the move is reversible
-by deleting one file, and anything still resolving to it — a bare
-`python scripts/XX.py`, `run_all.sh`, a fresh clone — carries on working.
+That **copies** it into `~/.ls-pipeline/studies/`. The original is left where
+it was, so the move is reversible by deleting one file, and anything still
+resolving to it (a bare `python scripts/XX.py`, `run_all.sh`, a fresh clone)
+carries on working.
 
-`python scripts/ls_config.py --studies` lists what is there and which is active.
+`python scripts/ls_config.py --studies` lists the named studies and which is
+active.
 
 ## Making a new one
 
-In the app: **Pipeline ▸ Studies… ▸ New study…**. Name it, then fill in the
-settings dialog. Three are required and have no sensible default:
+In the app: **File ▸ New project…** (Ctrl+N), or **New study…** in **Tools ▸
+Switch study…**. The dialog asks only what the slide files cannot say:
 
-- **Slides folder** — where the `.czi` files are.
-- **Analysis output** — where everything is written. Overviews alone run to
-  several GB; put it on a drive with room.
-- **Atlas PDF** — the atlas plates and region seeds are extracted from.
+- **Slides folder**: where the `.czi` files are. It is read straight away,
+  headers only, so the pixel size, how the files are named and how the markers
+  were scanned are filled in from the files.
+- **Output folder**: where everything is written, `study.json` included.
+  Overviews alone run to several GB; put it on a drive with room, and not in
+  the slides folder. Choosing a folder that already holds a study opens that
+  study instead of making a new one.
+- **Section thickness**: how thick the sections were cut. A CZI is one plane of
+  a physical section and does not know.
+- **Atlas**: the salmon (Vindas) or zebrafish (Wullimann 1996) plates that ship
+  with the app, or your own, added afterwards in **Set up ▸ Atlas** (see
+  [`adding-your-own-atlas.md`](adding-your-own-atlas.md)).
+- **Name** (optional): defaults to the output folder's name.
 
-Everything else has a default that is stated in the reference rather than
-buried in the code.
+The study opens on **Set up**, where every setting has a default that is stated
+in the reference rather than buried in the code. Only the cards with something
+left to ask are shown; tick **Show advanced settings** to see the rest.
+**Tools ▸ All settings…** has every setting in one dialog.
 
 ## The filename pattern
 
 The pipeline reads the subject, the slide and the replicate out of each
 filename, and builds the `scene_uid` that every later table joins on. It has to
-be told how your names are shaped.
+be told how your names are shaped. Usually it already is: the pattern is worked
+out from the slides when the study is made, or by **Read settings from the
+slides** on the Set up ▸ Slides tab.
 
-**Pipeline ▸ Settings ▸ Filename pattern ▸ Build…** shows a real filename;
-select a run of characters and say what it is. Everything you do not mark is
-matched literally, so the pattern can never be looser than the example. The
-generated regex stays editable, because most naming schemes have an exception
-that no marking-up will cover.
+To set it yourself: **Set up ▸ Slide file names ▸ Set up from an example…**.
+Type or pick one of your file names. The app splits it into pieces and shows its
+reading, for example *animal LS53 · slide 2 · replicate b*; to change it, press
+**Animal ID**, **Slide number** or **Replicate letter** and click the piece
+(**Not in the name** if there is none). It writes the pattern and checks it
+against every file in the slides folder. Where files do not fit it tries the
+usual causes one at a time (case, a varying ending such as `-_A568`, a missing
+replicate letter, other separators) and says what it changed and how many files
+each change brought in. The pattern itself stays hidden unless you tick **Show
+the pattern**, where it can be edited by hand, because most naming schemes have
+an exception no example will cover.
 
-Underneath is the part that matters: every filename that was found, checked
-against the pattern, failures first. **A file the pattern misses never reaches
-any stage and nothing else will tell you** — so Save stays disabled until the
-misses are either fixed or ticked as deliberate exclusions.
+What matters is the check. **A file the pattern misses never reaches any stage
+and nothing else will tell you**, so the files that still do not fit are listed
+with the likely reason, and Save stays off until every file fits or you tick
+**Leave the files that do not fit out of this study**. The Slides tab shows the
+same files as red rows.
 
-One named group is required, `subject`. `slide` and `replicate` are optional;
-any other group you add rides along as an extra column. A subject cannot
-contain `_`, because the uid separates on it.
+One named group is required, `subject` (the animal). `slide` and `replicate`
+are optional; any other group you add by hand rides along as an extra column. A
+subject cannot contain `_`, because the uid separates on it.
 
 Studies whose filenames carry less degrade on their own:
 
@@ -123,16 +157,17 @@ The path settings (`source_dir`, `out_root`, `atlas_pdf`, `export_dir`) stay abs
 
 The **File** menu is the project's own:
 
-- **New project...** asks for a name and where the file should live, opens Settings, and writes nothing until the settings are valid.
+- **New project...** asks for the two folders, the section thickness and the atlas (see *Making a new one* above) and writes `study.json` into the output folder; nothing is written until those are valid.
 - **Open project...** and **Open Recent** open any project file, from any folder. One the pipeline would refuse opens with the reasons listed; one written by a newer app opens read-only.
 - **Save** (Ctrl+S), **Save As...**, **Revert**.
 - **Project history...** shows what the project remembers, newest first: every setting changed (was and now), every stage run (result, config hash, code version), the CZI files read and what they said, and a Notes box. The animal-to-treatment key appears only as "changed", never its values.
 
-Settings and the channel editor change the open project **in memory**: the title shows `name*` until you choose Save, and every change is added to the project's decision trail. Stages read the *saved* file, so running one asks to save first. Closing or switching with unsaved changes asks Save / Discard / Cancel. Each finished stage is added to the project's run history without saving your other unsaved edits. Detecting channels from a CZI keeps what the file said under `detected`, separate from what you decided.
+Set up, All settings and the channel editor change the open project **in memory**: the title shows `name*` until you choose Save, and every change is added to the project's decision trail. Stages read the *saved* file, so running one asks to save first. Closing or switching with unsaved changes asks Save / Discard / Cancel. Each finished stage is added to the project's run history without saving your other unsaved edits. Detecting channels from a CZI keeps what the file said under `detected`, separate from what you decided.
 
 ## Channels, markers and their colours
 
-In the app, **Settings → Channels and markers…** edits all of this as a table, so
+In the app, **Set up ▸ Microscope and channels ▸ Channels and markers…** (also in
+**Tools ▸ All settings…**) edits all of this as a table, so
 the config file does not have to be written by hand. Under `multiplex` each row is a
 channel: its name (what the outputs call it), its role (nuclear, marker,
 registration, ignore), the name the CZI file gives it, its plane as a fallback,
@@ -159,7 +194,8 @@ colour is the separate **Counterstain colour** setting.
 
 The table is judged by the same rules the pipeline applies when it loads the
 config, live, and OK stays disabled while it would be refused. Nothing is written
-until you press Save in Settings. A marker's name becomes folder and file names in
+until you press Apply on the Set up card (or OK in All settings). A marker's name
+becomes folder and file names in
 every output, so renaming asks you to confirm; colours and the composite follow a
 rename. The same keys (`acquisition.channels`, `acquisition.markers`,
 `display.colours`, `display.composite`) can still be edited by hand.

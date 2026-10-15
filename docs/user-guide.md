@@ -103,6 +103,12 @@ Nucleus detection needs StarDist. The installer and `work/appenv` both have it. 
 | Tools | All settings | Every setting in one dialog. |
 | Tools | Switch study | Move to another study's project. |
 | Tools | Migrate browser curation | Bring in curation done earlier in a web browser (section 6). |
+| Help | User guide | This guide. Running from the code it opens here in the app; an installed copy opens it on GitHub. |
+| Help | Wiki | The project wiki on GitHub: short pages, one question each. |
+| Help | Show the activity log | Opens the full log at the foot of the window (the same as **Show log**). |
+| Help | Open the log folder | The folder holding `lsapp-crash.log`, written if the app ever stops on an error (section 10). |
+| Help | Run the CZI self-test | Runs stage 00d, which checks the slide files for faults that would make every measurement wrong (section 5). |
+| Help | Check for updates, Undo last update, About | Install a newer version, go back to the one before, see which version this is. |
 
 ### Projects
 
@@ -580,14 +586,14 @@ Every stage is a script in `scripts/` and can also be run from a terminal; the (
 | Nucleus detection is greyed out | No StarDist in this Python | Use the installer, or start with `run_app.bat` (uses `work/appenv`) |
 | The overview stage fails on Python 3.14 | The CZI reader has no 3.14 version | Use Python 3.13 via `run_app.bat` |
 | A curator pane is blank in the .exe | The packaged files are incomplete | Start the app with `--self-test` and read `lsapp-selftest.log`; reinstall if it fails |
-| The app will not start | A missing library or a broken environment | Read `lsapp-crash.log`, in `%LOCALAPPDATA%\The Great IHC Leap Forward\logs` on Windows (`~/.local/state/The Great IHC Leap Forward/logs` elsewhere; the message box names it). To keep curating meanwhile, run `serve_curators.bat` and use a browser. |
+| The app will not start | A missing library or a broken environment | Read `lsapp-crash.log`, in `%LOCALAPPDATA%\The Great IHC Leap Forward\logs` on Windows (`~/.local/state/The Great IHC Leap Forward/logs` elsewhere; the message box names it). **Help > Open the log folder** opens that folder. To keep curating meanwhile, run `serve_curators.bat` and use a browser. |
 | No new figures in results/ROI\_plots | The R figure steps are switched off for now | Run the scripts in `analysis/` by hand with `Rscript` (section 8) |
 | 06b says the workbook header does not match | The sampling workbook's columns differ | Fix the workbook's column names to the ones it lists |
 
 ### Where to look for more detail
 
 - The **(i)** button on any stage or setting.
-- **The project wiki** on GitHub: short, question-led pages (Quick Start, Setting Up a Study, Prepare, Curate, Measure, Results, Atlases, Troubleshooting, Glossary). It is written from `docs/wiki/` in the repository and kept in step with this guide.
+- **The project wiki** on GitHub (**Help > Wiki**): short, question-led pages (Quick Start, Setting Up a Study, Prepare, Curate, Measure, Results, Atlases, Troubleshooting, Glossary). It is written from `docs/wiki/` in the repository and kept in step with this guide.
 - `docs/pipeline-guide.md`: every stage explained in depth, with the reasoning behind it.
 - `docs/setting-up-a-study.md`: settings, channels and the segmentation choices in detail.
 - `docs/adding-your-own-atlas.md`: drawing an atlas's regions in Fiji and adding it.

@@ -352,6 +352,12 @@ class StageRow(QFrame):
         self.status.setFont(T.font(13))
         self.status.setWordWrap(True)
         text.addWidget(self.status)
+        # How long the last complete run took, so a long stage is not started
+        # blind ("Last run took 3 h 12 min"); hidden when there is nothing to say.
+        self.took = QLabel("")
+        self.took.setStyleSheet(QUIET)
+        self.took.setVisible(False)
+        text.addWidget(self.took)
         top.addLayout(text, 1)
 
         # The right-hand group. Fixed, so a narrow window wraps the words on the
@@ -417,13 +423,14 @@ class StageRow(QFrame):
 
     def refresh(self, *, title, code, plain, status, state, info_html, mark="",
                 can_run=True, option_values=None, changed_count=0, action=None,
-                goto=None, open_visible=None, tip=""):
+                goto=None, open_visible=None, tip="", took=""):
         """Refresh everything the row shows. Called on every status refresh.
 
         `action` is the main button's label (default: Redo once done, else Run)
         and `goto` a screen id that button goes to instead of running. `tip` is
         the name's tooltip: the script number and the pipeline's own name, where
-        the row shows neither.
+        the row shows neither. `took` is the line about the last run's length
+        (progress.last_run_words).
         """
         colour = COLOUR.get(state, T.TEXT_MUTED)
         self.name.setText(title)
@@ -432,6 +439,8 @@ class StageRow(QFrame):
         self.plain.setText(plain)
         self.status.setText(status)
         self.status.setStyleSheet(f"color:{colour}")
+        self.took.setText(took)
+        self.took.setVisible(bool(took))
         self.dot.setStyleSheet(f"background:{colour};border-radius:5px")
         self.mark.setText(mark)
         self.mark.setStyleSheet(f"color:{T.DANGER};font-weight:600" if "unblind" in mark.lower()

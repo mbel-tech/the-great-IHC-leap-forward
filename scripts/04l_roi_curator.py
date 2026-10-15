@@ -236,6 +236,9 @@ import ls_channels as CH  # noqa: E402
 import ls_paths as LP  # noqa: E402
 import ls_atlas as AT  # noqa: E402
 import atlas_polygons as AP  # noqa: E402
+# Whose curation a stored value holds - shared with 04q and app/import_exports.py,
+# which read and write the same keys' files and must agree with the page.
+import ls_curation as CU  # noqa: E402
 
 # The markers this study measures, in declared order. ls_channels is the
 # single source of that list; naming a fluorophore here would pin the stage
@@ -287,6 +290,11 @@ NUCLEAR_NAME = (_NUCLEAR_CHANNEL.name if _NUCLEAR_CHANNEL
 
 OUT_ROOT = CONFIG["out_root"]
 REFORMAT_DIR = os.path.join(OUT_ROOT, "reformatted")
+# Whose curation this page holds. localStorage is per ORIGIN, and every page opened
+# from file:// in Chrome is one origin (so is everything serve_curators.py serves) -
+# so every study's roi_curator.html reads and writes the same keys, and scene uids
+# are built from subject names a pilot and a main study easily share.
+STUDY_ID = CU.study_id(OUT_ROOT)
 
 # The section-directory and index rule, borrowed rather than restated. ls_paths
 # rather than 04a: this stage builds an HTML page and importing 04a would pull
@@ -1380,7 +1388,8 @@ canvas{display:block;width:100%;height:100%;object-fit:contain;cursor:crosshair;
 
   <main id="centre">
     <div id="notices"><span class="row" id="seedOffer" style="display:none"></span><span
-      class="row" id="plateWarn" style="display:none;color:#9a5b00"></span></div>
+      class="row" id="plateWarn" style="display:none;color:#9a5b00"></span><span
+      class="row" id="studyNote" style="display:none;color:#9a5b00"></span></div>
     <!-- The coach line: which mode the mouse is in and what a click does there.
          Pure presentation of state the page already keeps (guided, bgMode,
          rotMode); coach() is called from status(), which every mode change
@@ -1563,6 +1572,98 @@ const DEFAULT_MARKER = __MARKER__;
 // The canonical reformatted grid (04a GRID). Display may be a multiple of it.
 const SEC_GRID = __SECGRID__;
 const KEY = "ls_roi_curator_v1";
+// The keys stay the same - the app mirrors them to the project by name (app/state.py
+// KEYS) - and the value is filed per study inside each one: {_studies: {STUDY: what
+// the key held before}, _legacy: a value from before}. Underscore-led because a
+// scene uid cannot start with one. The same rule, for the Python that reads these
+// files, is scripts/ls_curation.py.
+const STUDY = __STUDY__;
+// The study's own mark (out_root/curation/study_id.txt), which moves WITH the
+// folder when the data goes to another drive - STUDY does not. Every save records
+// it beside the entry, in _tokens, so the page rebuilt in the new place can tell
+// its own curation under the old folder from another study's under the same uids.
+// See scripts/ls_curation.py.
+const TOKEN = __TOKEN__;
+// A key read as {_studies, _legacy, _tokens}. A value that does not parse reads as
+// empty, as it always has for these keys (initState and the radius ignored garbage).
+function openStudy(key){
+  let v;
+  try { const raw = localStorage.getItem(key); v = raw === null ? undefined : JSON.parse(raw); }
+  catch(e){ v = undefined; }
+  return (v && typeof v === "object" && v._studies && typeof v._studies === "object")
+    ? {_studies: v._studies, _legacy: v._legacy,
+       _tokens: (v._tokens && typeof v._tokens === "object") ? v._tokens : {}}
+    : {_studies: {}, _legacy: v, _tokens: {}};
+}
+// When this study has no entry under its folder: the older folder whose entry is
+// its own (moved), or the folders that might be and cannot be told apart.
+// `fits(entry)` says an entry is about this page's sections at all.
+//   - one entry carrying this study's mark: carried over (`from`).
+//   - two or more carrying it, e.g. a copy of the folder that was also curated:
+//     not guessed between (`seen`).
+//   - entries with no mark (saved before marks were recorded) may be this study
+//     or another sharing its uids: reported (`seen`), never taken.
+// An entry marked as ANOTHER study's is that study's, and is not even mentioned:
+// that is two studies sharing an origin, the case filing per study exists for.
+function carriedFrom(s, fits){
+  if(STUDY in s._studies) return {from: null, seen: []};
+  const others = Object.keys(s._studies).filter(k => k !== STUDY && fits(s._studies[k]));
+  const marked = others.filter(k => s._tokens[k] === TOKEN);
+  if(marked.length === 1) return {from: marked[0], seen: []};
+  return {from: null, seen: marked.length ? marked : others.filter(k => !(k in s._tokens))};
+}
+// This study's value for a key; failing that, its own from an older folder;
+// failing that, the value from before filing, which cannot say whose it is and so
+// stays readable to every study that has none of its own yet - read, never
+// claimed, so no study loses it to another.
+function ownOr(key){
+  const s = openStudy(key);
+  if(STUDY in s._studies) return s._studies[STUDY];
+  const c = carriedFrom(s, () => true);
+  return c.from ? s._studies[c.from] : s._legacy;
+}
+// Write this study's entry and carry every other one through. The key is read
+// AGAIN here rather than from a copy taken at load: another study's page open in a
+// second tab saves into the same key, and writing back what this page saw when it
+// opened would undo that tab's work. `claimed`: section uids this study now holds,
+// which leave _legacy with this write (see openMine).
+function saveStudy(key, mine, claimed){
+  const cur = openStudy(key);
+  cur._studies[STUDY] = mine;
+  // Marks are carried through like entries: an older folder's entry stays marked,
+  // so it stays recognisable, and is never deleted.
+  const out = {_studies: cur._studies, _tokens: Object.assign({}, cur._tokens, {[STUDY]: TOKEN})};
+  let old = cur._legacy;
+  if(claimed && old && typeof old === "object" && !Array.isArray(old)){
+    old = Object.assign({}, old);
+    for(const u of claimed) delete old[u];
+    if(!Object.keys(old).length) old = undefined;
+  }
+  if(old !== undefined) out._legacy = old;
+  localStorage.setItem(key, JSON.stringify(out));
+}
+const MY_UIDS = new Set(DATA.map(d => d.uid));
+// A store written before curation was filed per study is a flat {uid: record}. This
+// page takes the records for ITS sections (its own entry wins where both have one)
+// and leaves the rest under _legacy, for the page whose sections they are: one
+// study's page must not show another's curation, and must not delete it either.
+// What the header says about curation under another folder, once el exists.
+let STUDY_NOTE = "";
+function openMine(){
+  const s = openStudy(KEY);
+  // A folder that moved: its curation under the old one is copied in here, and the
+  // old entry left where it is (saveStudy writes only this study's).
+  const c = carriedFrom(s, e => !!e && typeof e === "object"
+                               && Object.keys(e).some(u => MY_UIDS.has(u)));
+  if(c.from) STUDY_NOTE = `Curation from ${c.from} was carried over`;
+  else if(c.seen.length) STUDY_NOTE = `Curation from another folder exists (${c.seen.join(", ")})`
+    + " and was not carried over: it cannot be told whether it is this study's.";
+  const mine = Object.assign({}, s._studies[c.from || STUDY] || {});
+  const old = s._legacy;
+  if(old && typeof old === "object" && !Array.isArray(old))
+    for(const u of MY_UIDS) if(u in old && !(u in mine)) mine[u] = old[u];
+  return mine;
+}
 // Curation as it stood when this page was generated. localStorage is partitioned
 // per origin AND per browser profile, so a page opened from disk in one browser
 // cannot see what the app - or the same file in another browser - recorded. That
@@ -1722,11 +1823,15 @@ const hasDecision = r => hasRoiWork(r) || !!(r && (r.rot || r.rev));
 const decided = obj => Object.fromEntries(
   Object.entries(obj || {}).filter(([, v]) => hasDecision(v)));
 // Whatever this browser already holds wins - but only what it holds that is a
-// decision. A store of looked-at sections is an empty store.
+// decision. A store of looked-at sections is an empty store. `raw` is this study's
+// records (openMine), or their JSON text.
 function initState(raw, seed){
   let v = null;
   try {
-    if (raw) { const parsed = decided(JSON.parse(raw)); if (Object.keys(parsed).length) v = parsed; }
+    if (raw) {
+      const parsed = decided(typeof raw === "string" ? JSON.parse(raw) : raw);
+      if (Object.keys(parsed).length) v = parsed;
+    }
   } catch (e) {}
   if (!v) v = decided(seed);
   // EVERY stored record passes through here - the browser's store and the
@@ -1771,13 +1876,18 @@ function plateNotice(){
   }
   return n;
 }
-let S = initState(localStorage.getItem(KEY), SEED_STATE);
+let S = initState(openMine(), SEED_STATE);
 let active = null, pending = null;   // pending section point awaiting its plate partner
 const el = id => document.getElementById(id);
+if(STUDY_NOTE){
+  console.log(STUDY_NOTE);
+  const box = el("studyNote");
+  if(box){ box.textContent = STUDY_NOTE; box.style.display = ""; }
+}
 // Only decisions reach disk. The in-memory record for a section being looked
 // at stays (the plate it is on is needed while it is on screen); it is simply
 // not persisted until something is decided about it.
-const save = () => localStorage.setItem(KEY, JSON.stringify(decided(S)));
+const save = () => saveStudy(KEY, decided(S), MY_UIDS);
 // AUTOSAVE.
 //
 // save() already runs on every change - all twelve mutation sites call it - so
@@ -1793,9 +1903,11 @@ const BACKUP_KEY = KEY + "_backup";
 const AUTOSAVE_MS = 60000;
 function autosave(){
   save();
+  // Filed per study like the live store, so a restore brings back THIS study's
+  // snapshot. A snapshot from before filing is left where it is (not claimed):
+  // it is the one copy roiRestoreBackup can still fall back to.
   try {
-    localStorage.setItem(BACKUP_KEY, JSON.stringify(
-      {at: new Date().toISOString(), marker: el("marker").value, S}));
+    saveStudy(BACKUP_KEY, {at: new Date().toISOString(), marker: el("marker").value, S});
   } catch(e) {
     // Quota is the only realistic failure and it must not take the session with
     // it: the live save above has already happened, which is the copy that matters.
@@ -1809,9 +1921,18 @@ setInterval(autosave, AUTOSAVE_MS);
 // and should not sit one stray click away from a day's curation. Run
 // `roiRestoreBackup()` in the console.
 function roiRestoreBackup(){
-  const raw = localStorage.getItem(BACKUP_KEY);
-  if(!raw){ console.warn("no backup yet - one is written every minute"); return; }
-  const b = JSON.parse(raw);
+  const kept = openStudy(BACKUP_KEY);
+  // This study's snapshot, or - its folder having moved - the one it made under
+  // the old folder.
+  const moved = carriedFrom(kept, e => !!(e && e.S));
+  let b = kept._studies[moved.from || STUDY];
+  // A snapshot from before filing cannot say whose it is: only this page's
+  // sections of it, so restoring never brings another study's work onto this one.
+  const old = kept._legacy;
+  if(!b && old && typeof old === "object" && old.S && typeof old.S === "object")
+    b = Object.assign({}, old, {S: Object.fromEntries(
+      Object.entries(old.S).filter(([u]) => MY_UIDS.has(u)))});
+  if(!b){ console.warn("no backup yet - one is written every minute"); return; }
   const n = Object.keys(b.S || {}).length;
   if(!confirm(`Restore the snapshot from ${b.at} (${n} sections)?
 
@@ -2758,7 +2879,9 @@ function parseSel(raw){
 }
 let SEL = (() => {
   let v = null;
-  try { const raw = localStorage.getItem(SEL_KEY); if(raw) v = parseSel(raw); } catch(e){}
+  // Filed per study like the section store: a study that has not chosen yet reads
+  // a choice made before filing (ownOr), and never another study's.
+  try { const raw = ownOr(SEL_KEY); if(raw !== undefined) v = parseSel(raw); } catch(e){}
   return v || parseSel(SEL_SEED);
 })();
 const isSel     = h => SEL === null || SEL.includes(h.region);
@@ -2872,7 +2995,7 @@ function selAll(){
 }
 function selNone(){ if(selIsOpen()){ selDraft = []; selRender(); } }
 function selClose(){ selDraft = null; el("selDlg").style.display = "none"; }
-function selStore(v){ try { localStorage.setItem(SEL_KEY, JSON.stringify(v)); } catch(e){} }
+function selStore(v){ try { saveStudy(SEL_KEY, v); } catch(e){} }
 function selConfirm(){
   if(!selIsOpen() || !selDraft.length) return;
   SEL = selDraft.slice();
@@ -2884,13 +3007,13 @@ function selCancel(){
   // The first time it is asked, closing without choosing means "all of them" and
   // is remembered, so the question does not come back on every reload.
   let first = false;
-  try { first = localStorage.getItem(SEL_KEY) === null; } catch(e){}
+  try { first = ownOr(SEL_KEY) === undefined; } catch(e){}
   if(first && SEL === null) selStore([]);
   selClose();
 }
 function selAsk(){
   let none = false;
-  try { none = localStorage.getItem(SEL_KEY) === null; } catch(e){}
+  try { none = ownOr(SEL_KEY) === undefined; } catch(e){}
   if(none && SEL === null) selOpen();
 }
 
@@ -2985,7 +3108,7 @@ function addRoi(){
   // A chosen subset would hide it, and the cursor only walks what is chosen.
   if(SEL !== null && !SEL.includes(name)){
     SEL.push(name);
-    try { localStorage.setItem(SEL_KEY, JSON.stringify(SEL)); } catch(e){}
+    selStore(SEL);
   }
   guided = true; pending = null; draft = null; gTarget = h.roi;
   drawSec(); drawPl(); status();
@@ -3008,11 +3131,12 @@ function addRoi(){
 // store as everything else, so it survives a reload like every other decision.
 const PT_R_KEY = "ls_roi_curator_v1_size";
 let PT_R_CANON = 8;
-try { const v = parseFloat(localStorage.getItem(PT_R_KEY)); if(v > 0) PT_R_CANON = v; }
+// Per study like the rest of the store, falling back to a radius set before filing.
+try { const v = parseFloat(ownOr(PT_R_KEY)); if(v > 0) PT_R_CANON = v; }
 catch(e){}
 function onRoiSize(v){
   PT_R_CANON = Math.max(1, +v || 1);
-  try { localStorage.setItem(PT_R_KEY, String(PT_R_CANON)); } catch(e){}
+  try { saveStudy(PT_R_KEY, PT_R_CANON); } catch(e){}
   el("roiSizeVal").textContent = PT_R_CANON;
   drawSec();
 }
@@ -4536,7 +4660,8 @@ function dl(rowsArr,name){
 }
 // Write the seed through on first load, so this browser holds it like any other
 // decision rather than depending on the page it came from.
-try { if(!localStorage.getItem(KEY) && Object.keys(S).length) save(); } catch(e){}
+// "Holds" means holds for THIS study: another study's entry in the same key is not it.
+try { if(!(STUDY in openStudy(KEY)._studies) && Object.keys(S).length) save(); } catch(e){}
 
 // When this browser already holds something, it wins - but silence is wrong when
 // what it holds is one stale section and the page is carrying 257. Neither
@@ -6146,14 +6271,27 @@ def main():
     # The curation the app has on file, carried into the page so a browser copy
     # opens with the same work rather than empty. --no-seed leaves it out, which
     # is what you want when handing the file to someone who should start clean.
+    # The study's mark, made here once if it has none: see TOKEN in the page.
+    token = CU.study_token(OUT_ROOT, create=True)
+
     seed = {}
     if not args.no_seed:
         seed_path = os.path.join(OUT_ROOT, "curation", "ls_roi_curator_v1.json")
         try:
             with open(seed_path, encoding="utf-8") as fh:
-                seed = json.load(fh)
+                stored = json.load(fh)
         except (OSError, ValueError):
-            seed = {}
+            stored = {}
+        # The file mirrors the page's key, so it is filed per study too: this study's
+        # entry, with what is still unclaimed from before filing under it (this
+        # file has only ever been this study's). The seed only fills what the
+        # browser does not already hold, so nothing here overrides work.
+        mine, old = CU.own(stored, STUDY_ID, token), CU.legacy(stored)
+        moved = CU.carried_from(stored, STUDY_ID, token)
+        if moved:
+            print(f"  Curation from {moved} was carried over (this study's folder moved)")
+        seed = {**(old if isinstance(old, dict) else {}),
+                **(mine if isinstance(mine, dict) else {})}
 
     # The ROIs the operator chose to draw, if the app has one on file. Same rule
     # as the seed above: the browser's own copy wins, this only fills an empty one.
@@ -6162,7 +6300,10 @@ def main():
         try:
             with open(os.path.join(OUT_ROOT, "curation", "ls_roi_curator_v1_rois.json"),
                       encoding="utf-8") as fh:
-                roisel = json.load(fh)
+                stored = json.load(fh)
+            roisel = CU.own(stored, STUDY_ID, token)
+            if roisel is None:
+                roisel = CU.legacy(stored)
         except (OSError, ValueError):
             roisel = None
 
@@ -6188,6 +6329,7 @@ def main():
         "__ATLASSCOPE__": scope,
         "__SEED__": seed, "__ROISEL__": roisel, "__PROV__": load_provenance(), "__DATA__": data,
         "__PLATES__": pl, "__PLATESET__": PLATE_SET, "__MARKERS__": markers,
+        "__STUDY__": STUDY_ID, "__TOKEN__": token,
         # The page compares aspect ratios exactly as `ls_atlas.plate_status`
         # does, so it is handed THAT number rather than repeating it. A literal
         # 0.01 in the script is a section that verifies in the importer and not

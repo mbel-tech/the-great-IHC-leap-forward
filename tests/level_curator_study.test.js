@@ -49,7 +49,12 @@ function buildStudy(name) {
     fs.writeFileSync(path.join(pdir, id + ".png"), "");
   }
   fs.writeFileSync(path.join(pdir, "plates.csv"), csv);
-  const html = path.join(tmp, "level.html");
+  buildPage(cfgPath, name);
+  return tmp;
+}
+
+function buildPage(cfgPath, name) {
+  const html = path.join(path.dirname(cfgPath), "level.html");
   let ran = false;
   for (const exe of pys) {
     try {
@@ -67,13 +72,26 @@ function buildStudy(name) {
     scripts.reduce((a, b) => (b.length > a.length ? b : a), ""));
 }
 
-buildStudy("level_study_a");
+// The same study after its folder was moved to another drive: everything under it
+// moves and its config is pointed at the new place; the page rebuilt there names
+// itself by the NEW folder, while the browser holds its anchors under the old one.
+function moveStudy(tmp, name) {
+  const moved = tmp + "-moved";
+  fs.renameSync(tmp, moved);
+  tmps.push(moved);
+  const cfgPath = path.join(moved, "study.json");
+  fs.writeFileSync(cfgPath, fs.readFileSync(cfgPath, "utf8").split(tmp).join(moved));
+  buildPage(cfgPath, name);
+}
+
+const tmpA = buildStudy("level_study_a");
 buildStudy("level_study_b");
+moveStudy(tmpA, "level_study_a_moved");
 tmps.forEach(t => fs.rmSync(t, { recursive: true, force: true }));
 
 const { env, load, chk, note, done } = require("./harness");
 const { els, store } = env;
-const EXP = `{KEY, DATA, PLATES, anchors, droppedAnchors, rows, setAnchor,
+const EXP = `{KEY, STUDY, DATA, PLATES, anchors, droppedAnchors, rows, setAnchor,
   set active(v){active=v}}`;
 const anchorAt = (X, uid, slot) => {
   els["animal"].value = "A1"; X.active = uid; els["slider"].value = slot; X.setAnchor();
@@ -121,5 +139,39 @@ const L2 = load(EXP, "level_study_a");
 chk("...and keeps this study's migrated anchor", L2.anchors[uid] && L2.anchors[uid].id, "wplate_030");
 const LB = load(EXP, "level_study_b");
 chk("another study's page does not claim what study A already took", uid in LB.anchors, false);
+
+// ---- a study whose folder moved still opens with its anchors ----------------
+// The anchors filed under the old folder are carried over - copied, the old entry
+// left in place - because they carry this study's own mark (out_root/curation/
+// study_id.txt, which moved with the folder). Study B's entry, under the same
+// uids, does not, which is what keeps the collision checks above passing.
+note("");
+for (const k of Object.keys(store)) delete store[k];
+const MA = load(EXP, "level_study_a");
+anchorAt(MA, uid, 1);
+const MB = load(EXP, "level_study_b");
+anchorAt(MB, MB.DATA[1].uid, 3);
+const M = load(EXP, "level_study_a_moved");
+chk("the moved study names itself by its new folder", M.STUDY !== MA.STUDY, true);
+chk("...and still opens with its anchors", M.anchors[uid] && M.anchors[uid].id, "wplate_020");
+chk("...not the other study's, though it shares the uids", M.DATA[1].uid in M.anchors, false);
+chk("the operator is told where they came from", els["studyNote"].textContent.includes(MA.STUDY), true);
+anchorAt(M, M.DATA[2].uid, 2);
+const filed = JSON.parse(store[M.KEY])._studies;
+chk("the first save files them under the new folder", (filed[M.STUDY][uid] || {}).id, "wplate_020");
+chk("...and leaves the old folder's entry in place", (filed[MA.STUDY][uid] || {}).id, "wplate_020");
+
+// Two old folders carrying this study's mark: no guessing which is the real one.
+note("");
+const two = JSON.parse(store[M.KEY]);
+two._studies["/old/copy_one"] = two._studies[MA.STUDY];
+two._tokens = Object.assign({}, two._tokens, {"/old/copy_one": two._tokens[MA.STUDY]});
+delete two._studies[M.STUDY];
+store[M.KEY] = JSON.stringify(two);
+els["studyNote"].textContent = "";
+const M2 = load(EXP, "level_study_a_moved");
+chk("two candidate folders: nothing is carried over", uid in M2.anchors, false);
+chk("...and the operator is told anchors from another folder exist",
+    els["studyNote"].textContent.includes("another folder"), true);
 
 done();

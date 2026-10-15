@@ -49,7 +49,9 @@ reason the suffix exists:
                                    bounding box
     reformatted/roi_regions_used_<MARKER>.csv  the export these came from
 
-The marker is read from the export's own `marker` column, not passed in.
+The marker is read from the export's own `marker` column, not passed in. An
+export carrying both markers (the curator's normal output for a paired study)
+is placed one marker at a time, each into its own files.
 
 Run:  python 05a_roi_geometry.py
       python 05a_roi_geometry.py path/to/roi_regions.csv
@@ -496,8 +498,14 @@ def analysis_set(regions, plates):
     return keep, dropped, roi, bg
 
 
-def build(regions_csv, limit=None, plates_csv=None, require_background=True):
+def build(regions_csv, limit=None, plates_csv=None, require_background=True,
+          marker=None):
     regions = load_csv(regions_csv)
+    # One marker's rows of an export that carries several - see main(). The
+    # paired markers' uids are disjoint, so the plates' `excluded` flags need no
+    # such filter: another marker's uid never matches one of these.
+    if marker is not None:
+        regions = [r for r in regions if (r.get("marker") or "").strip() == marker]
     plates = load_csv(plates_csv) if (plates_csv and os.path.exists(plates_csv)) else []
 
     if require_background:
@@ -946,28 +954,42 @@ def main():
               "Export from the ROI curator, then pass the path:\n"
               "    python 05a_roi_geometry.py \"C:/Users/you/Downloads/roi_regions.csv\"")
         return 1
-    # THE MARKER COMES FROM THE EXPORT. The curator stamps it into every row
-    # (04l --marker), so asking the operator to repeat it here is one more thing
-    # to get wrong - and getting it wrong would write one marker's boxes to the
-    # other's file, which is the exact failure the per-marker paths exist to
-    # prevent. --marker is kept as an assertion, not as the source of truth.
-    seen_markers = sorted({(r.get("marker") or "").strip()
-                           for r in load_csv(regions)} - {""})
-    if len(seen_markers) > 1:
-        print(f"the export mixes markers {seen_markers} - it must carry exactly "
-              f"one, since the two are separate acquisitions with their own "
-              f"sections. Re-export from 04l with a single --marker.")
+    # THE MARKER COMES FROM THE EXPORT. The curator stamps it into every row,
+    # so asking the operator to repeat it here is one more thing to get wrong -
+    # and getting it wrong would write one marker's boxes to the other's file,
+    # which is the exact failure the per-marker paths exist to prevent.
+    # --marker is kept as an assertion, not as the source of truth.
+    #
+    # ONE EXPORT CAN CARRY BOTH MARKERS, and for a paired study that is the
+    # normal case: 04l loads every marker into one page and its export walks
+    # every section in it, while its --marker only picks the channel the page
+    # opens on. This used to refuse such an export and ask for a single-marker
+    # one that nothing can produce, so curating PCNA blocked 05a for the whole
+    # study. Each marker's rows are now placed on their own, into that marker's
+    # own files, exactly as a single-marker export would be.
+    all_rows = load_csv(regions)
+    seen_markers = sorted({(r.get("marker") or "").strip() for r in all_rows} - {""})
+    if args.marker and seen_markers and args.marker not in seen_markers:
+        print(f"--marker {args.marker} but the export says {seen_markers}. "
+              f"Refusing rather than writing one marker's boxes to the other's "
+              f"file.")
         return 1
-    marker = seen_markers[0] if seen_markers else (args.marker or MARKER)
-    if args.marker and args.marker != marker:
-        print(f"--marker {args.marker} but the export says {marker}. Refusing "
-              f"rather than writing one marker's boxes to the other's file.")
-        return 1
-    if marker not in MARKERS:
-        print(f"the export's marker is {marker!r}, not one of {MARKERS}")
-        return 1
-    use_marker(marker)
-    print(f"marker: {marker}")
+    todo = [args.marker] if args.marker else (seen_markers or [MARKER])
+    for marker in todo:
+        if marker not in MARKERS:
+            print(f"the export's marker is {marker!r}, not one of {MARKERS}")
+            return 1
+    # Filter by marker only when the export names more than one. A single-
+    # marker export is taken whole, exactly as before - including an old one
+    # whose rows carry no marker at all.
+    split = len(seen_markers) > 1
+    if split:
+        unstamped = sum(1 for r in all_rows if not (r.get("marker") or "").strip())
+        print(f"the export carries markers {seen_markers}; placing "
+              f"{', '.join(todo)} each into its own files")
+        if unstamped:
+            print(f"  {unstamped} row(s) name no marker, so belong to none of "
+                  f"them - not placed")
 
     plates = args.plates or regions.replace("roi_regions", "roi_plates")
     print(f"ROIs from {regions}")
@@ -977,10 +999,26 @@ def main():
         print(f"NO plates CSV beside it ({os.path.basename(plates)}) - the operator's "
               f"exclusions cannot be honoured; pass --plates")
 
+    # Every marker is attempted even when an earlier one fails, and a marker
+    # that places nothing is NOT written: its existing boxes are curation-
+    # derived work, and an empty file would silently replace them.
+    rc = 0
+    for marker in todo:
+        if _place_marker(marker, regions, plates, args,
+                         only=marker if split else None):
+            rc = 1
+    return rc
+
+
+def _place_marker(marker, regions, plates, args, only=None):
+    """Place one marker's ROIs and write that marker's files. 1 on failure."""
+    use_marker(marker)
+    print(f"marker: {marker}")
     geom, boxes, skipped = build(regions, limit=args.limit, plates_csv=plates,
-                                 require_background=not args.all_sections)
+                                 require_background=not args.all_sections,
+                                 marker=only)
     if not geom:
-        print("no section could be placed")
+        print(f"no {marker} section could be placed")
         if skipped:
             for uid, why in skipped[:10]:
                 print(f"    {uid}: {why}")

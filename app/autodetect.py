@@ -809,6 +809,61 @@ def new_project(source_dir, out_root, thickness_um, atlas="salmon", name=None,
     return p, detection
 
 
+def markers_found(detection):
+    """The markers the slide headers name (AF568, ...), in study order; [] when unread.
+
+    New study offers a name for each. Paired: the marker channel of each kind of
+    scan. Multiplex: the channel table's marker rows.
+    """
+    values = getattr(detection, "values", None) or {}
+    if values.get("acquisition.layout") == CH.LAYOUT_PAIRED:
+        return [m for m in values.get("acquisition.markers") or [] if isinstance(m, str)]
+    return [c.get("name") for c in values.get("acquisition.channels") or []
+            if isinstance(c, dict) and c.get("role") == CH.MARKER and c.get("name")]
+
+
+def name_markers(project, names):
+    """Give the markers of a new project the names a person typed; [] or the errors.
+
+    `names` is {marker as the headers name it: name typed}; a blank or unchanged
+    name leaves that marker alone. Written the way Set up's channel editor
+    writes it (ls_channel_edit), so New study and Set up cannot disagree about
+    where a marker's name lives: a multiplex channel is renamed and still found
+    by its CZI name, while a paired marker KEEPS the scan's name - that is what
+    pairing matches each scan by - and the name typed is recorded as what it
+    stains (marker_identity), which is what the screens call it. Nothing is
+    set when there are errors.
+    """
+    import ls_channel_edit as E
+    layout = E.layout_of(project.cfg)
+    rows = E.load_rows(project.cfg, layout)
+    changed = False
+    for r in rows:
+        typed = (names.get(r["orig"]) or "").strip() if r.get("orig") else ""
+        if not typed or typed == r["orig"]:
+            continue
+        changed = True
+        if layout == CH.LAYOUT_PAIRED:
+            r["stains"] = typed
+        else:
+            r["name"] = typed
+    if not changed:
+        return []
+    # The channel validator catches two channels of one name, but not two
+    # paired scans said to stain the same thing; either is a typing slip.
+    called = [(r.get("stains") or r["name"]).strip() for r in rows if r.get("role") == CH.MARKER]
+    twice = sorted({n for n in called if n and called.count(n) > 1})
+    if twice:
+        return ["Two markers are both called %s; give each its own name." % ", ".join(twice)]
+    edits = E.edits(project.cfg, layout, rows)
+    errors, _warnings = E.check(E.apply(project.cfg, edits, layout), layout)
+    if errors:
+        return errors
+    for key, value in edits.items():
+        project.set(key, value, by="new study")
+    return []
+
+
 REPORT_FILE = "slide_metadata.json"
 
 

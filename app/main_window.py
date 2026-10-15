@@ -11,6 +11,7 @@ figure - is still here as View > All stages.
 
 import json
 import os
+import time
 
 from PySide6.QtCore import QObject, Qt, QThread, QTimer, QUrl, Signal
 from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
@@ -97,6 +98,7 @@ class ActivityDrawer(QFrame):
         self.count.setStyleSheet(QUIET)
         self.count.setVisible(False)
         top.addWidget(self.count)
+        self.time_left = PR.TimeLeft()
         self.stop_btn = QPushButton("Stop after this stage")
         self.stop_btn.setVisible(False)
         top.addWidget(self.stop_btn)
@@ -118,17 +120,24 @@ class ActivityDrawer(QFrame):
         self.log.setVisible(on)
         self.toggle.setText("Hide log" if on else "Show log")
 
+    # Monotonic, so a clock change during an hours-long detection does not
+    # throw the estimate; a test swaps it for its own.
+    clock = staticmethod(time.monotonic)
+
     def start_progress(self):
         """A stage has started: a busy bar until it reports a count."""
         self.bar.setRange(0, 0)
         self.bar.setVisible(True)
         self.count.setText("")
         self.count.setVisible(False)
+        self.time_left = PR.TimeLeft()
 
     def show_progress(self, p):
+        """Fill the bar; the words say the count and, once it can be told, the time left."""
         self.bar.setRange(0, p.total)
         self.bar.setValue(p.done)
-        self.count.setText(PR.words(p))
+        left = PR.left_words(self.time_left.update(p.done, p.total, self.clock()))
+        self.count.setText(PR.words(p) + (f", {left}" if left else ""))
         self.count.setVisible(True)
 
     def stop_progress(self):
@@ -195,6 +204,7 @@ class MainWindow(QMainWindow):
         self.setup = SetupScreen(self.repo_root, self.importer, self.session)
         self.setup.applied.connect(self.refresh)
         self.setup.logged.connect(self._log)
+        self.setup.options_changed.connect(self._options_changed)
         self.curate = CurateScreen(self.curator)
         self.lists = {sid: StageListScreen(W.SCREENS[sid])
                       for sid in ("prepare", "measure", "results", "instrument", "all")}
@@ -758,7 +768,7 @@ class MainWindow(QMainWindow):
                 words, complete = "", False
             else:
                 done, total = (sd, st) if scr.sid == "setup" else W.step_progress(scr.sid, study)
-                words = W.progress_words(scr.sid, done, total)
+                words = W.progress_words(scr.sid, done, total, study)
                 complete = bool(total) and done >= total
             self.nav.set_step(i, title=scr.title, badge=str(i) if i else "⌂",
                               sub=scr.subtitle, progress=words, complete=complete)
@@ -915,7 +925,7 @@ class MainWindow(QMainWindow):
             else:
                 row.bar.setRange(0, p.total)
                 row.bar.setValue(p.done)
-                row.bar.setToolTip(PR.words(p))
+                row.bar.setToolTip(self.drawer.count.text() or PR.words(p))
 
     def _done(self, st, res):
         self._thread.quit()

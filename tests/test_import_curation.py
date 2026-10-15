@@ -314,12 +314,52 @@ def main():
         Q.main(argv + ["--write"])
         chk("--write writes the file", os.path.exists(out), True)
         with open(out, encoding="utf-8") as fh:
-            chk("...with every section in it", len(json.load(fh)), 4)
+            written = json.load(fh)
+        # Filed per study like the page's key (scripts/ls_curation.py).
+        chk("...filed under this study", list(written["_studies"]), [Q.STUDY_ID])
+        chk("...with every section in it", len(written["_studies"][Q.STUDY_ID]), 4)
 
         # A second --write must not lose the first: the backup is the only copy
         # of whatever it overwrites.
         Q.main(argv + ["--write"])
         chk("a rewrite leaves a backup", os.path.exists(out + ".backup"), True)
+
+        # ---- another study's curation in the same file is not this import's -----
+        # The page keeps its curation filed per study inside one localStorage key,
+        # because every study's page shares one origin; the app mirrors that value
+        # to this file. An import replaces THIS study's records and nothing else.
+        rec = {"plate": 0, "pairs": [], "assigned": False, "noroi": False,
+               "fav": True, "rot": 0, "excl": False}
+        uid0 = sorted(state)[0]
+        with open(out, "w", encoding="utf-8") as fh:
+            json.dump({"_studies": {Q.STUDY_ID: {"MINE_ONLY": rec},
+                                    "/elsewhere/other_study": {uid0: rec}},
+                       "_legacy": {uid0: rec, "UNCLAIMED": rec}}, fh)
+        d = Q.compare(state, out)
+        chk("compare reads this study's part of a filed file", d["only_on_disk"], ["MINE_ONLY"])
+        chk("...and not another study's, though it shares a uid", uid0 in d["changed"], False)
+        Q.main(argv + ["--write"])
+        with open(out, encoding="utf-8") as fh:
+            after = json.load(fh)
+        chk("--write keeps another study's records",
+            after["_studies"].get("/elsewhere/other_study"), {uid0: rec})
+        chk("...replaces this study's", sorted(after["_studies"][Q.STUDY_ID]), sorted(state))
+        chk("...and keeps what is still unclaimed from before filing, minus what it replaced",
+            after.get("_legacy"), {"UNCLAIMED": rec})
+
+        # ---- this study, after its folder moved to another drive -------------
+        # The file lives in out_root, so its one entry under another, unmarked folder
+        # is this study's: compared against, and left in place by the write.
+        with open(out, "w", encoding="utf-8") as fh:
+            json.dump({"_studies": {"/old/drive/out": {"MINE_ONLY": rec}}}, fh)
+        d = Q.compare(state, out)
+        chk("a moved study's old entry is what is compared", d["only_on_disk"], ["MINE_ONLY"])
+        Q.main(argv + ["--write"])
+        with open(out, encoding="utf-8") as fh:
+            after = json.load(fh)
+        chk("...the write files under the new folder", sorted(after["_studies"][Q.STUDY_ID]), sorted(state))
+        chk("...and leaves the old entry in place", after["_studies"].get("/old/drive/out"),
+            {"MINE_ONLY": rec})
     finally:
         import shutil
         shutil.rmtree(tmp, ignore_errors=True)

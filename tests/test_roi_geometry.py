@@ -613,6 +613,94 @@ with temp_study(acquisition={"layout": "paired",
         any(("Mk2" in s.replace(os.sep, "/").split("/")) for s in _rec.srcs),
         False)
 
+    # ---- main() on an export that carries BOTH markers --------------------
+    # 04l loads every marker of a paired study into one page and its export
+    # loops over all of them, so once both markers have curation the one
+    # roi_regions.csv carries rows for both. 04l's --marker only picks the
+    # channel the page opens on - there is no single-marker export to make -
+    # and the app runs 05a once with no --marker. main() refused such an export
+    # outright ("mixes markers ... Re-export from 04l with a single --marker"),
+    # so curating the second marker blocked 05a for the whole study.
+    print()
+    print("--- main(): an export carrying both markers is split, not refused ---")
+
+    both_csv = os.path.join(MK.root, "roi_regions_both.csv")
+    _RCOLS = ["scene_uid", "marker", "roi_kind", "region", "seed_n",
+              "sec_x", "sec_y", "sec_r", "sec_poly"]
+    _wcsv(both_csv,
+          [{"scene_uid": U1, "marker": "Mk1", "roi_kind": "roi",
+            "region": "R1", "seed_n": "1", "sec_x": "128", "sec_y": "128",
+            "sec_r": "10", "sec_poly": ""},
+           {"scene_uid": U2, "marker": "Mk2", "roi_kind": "roi",
+            "region": "R1", "seed_n": "1", "sec_x": "100", "sec_y": "100",
+            "sec_r": "10", "sec_poly": ""},
+           {"scene_uid": U2, "marker": "Mk2", "roi_kind": "roi",
+            "region": "R2", "seed_n": "2", "sec_x": "150", "sec_y": "150",
+            "sec_r": "10", "sec_poly": ""}], _RCOLS)
+    only1_csv = os.path.join(MK.root, "roi_regions_only1.csv")
+    _wcsv(only1_csv,
+          [{"scene_uid": U1, "marker": "Mk1", "roi_kind": "roi",
+            "region": "R1", "seed_n": "1", "sec_x": "128", "sec_y": "128",
+            "sec_r": "10", "sec_poly": ""}], _RCOLS)
+
+    def _main(*argv):
+        """main() with the reformat stubbed, its exit code and its output."""
+        saved = (P5.RF.reformat, P5.scene_rects, sys.argv)
+        buf = _io.StringIO()
+        try:
+            P5.RF.reformat = _Reformat()
+            P5.scene_rects = lambda path: {0: (100, 200, 1000, 1000)}
+            sys.argv = ["05a_roi_geometry.py", *argv, "--all-sections"]
+            with _ctx.redirect_stdout(buf):
+                rc = P5.main()
+        finally:
+            P5.RF.reformat, P5.scene_rects, sys.argv = saved
+        return rc, buf.getvalue()
+
+    def _uids(path):
+        if not os.path.exists(path):
+            return None
+        return sorted(r["scene_uid"] for r in P5.load_csv(path))
+
+    for _m in ("Mk1", "Mk2"):
+        for _p in (P5.box_csv(_m), P5.geom_csv(_m)):
+            if os.path.exists(_p):
+                os.remove(_p)
+
+    _rc, _said = _main(both_csv)
+    chk("a two-marker export is not refused as 'mixes markers'",
+        "mixes markers" in _said, False)
+    chk("...main() returns 0", _rc, 0)
+    chk("roi_boxes_Mk1.csv holds Mk1's box only", _uids(P5.box_csv("Mk1")), [U1])
+    chk("roi_boxes_Mk2.csv holds Mk2's two boxes only",
+        _uids(P5.box_csv("Mk2")), [U2, U2])
+    chk("roi_geometry_Mk1.csv holds Mk1's section only",
+        _uids(P5.geom_csv("Mk1")), [U1])
+    chk("roi_geometry_Mk2.csv holds Mk2's section only",
+        _uids(P5.geom_csv("Mk2")), [U2])
+
+    # --marker stays an assertion: with it, only that marker is touched. The
+    # other marker's boxes are curation-derived work and must survive as-is.
+    _sentinel = "scene_uid,roi_index\nKEEP-ME,0\n"
+    with open(P5.box_csv("Mk2"), "w", encoding="utf-8") as fh:
+        fh.write(_sentinel)
+    _rc, _said = _main(both_csv, "--marker", "Mk1")
+    chk("--marker Mk1 on a two-marker export returns 0", _rc, 0)
+    with open(P5.box_csv("Mk2"), encoding="utf-8") as fh:
+        chk("...and leaves Mk2's boxes untouched", fh.read() == _sentinel, True)
+
+    # A marker with no rows in the export is not written at all, so an export
+    # made before the second marker was curated cannot blank its boxes.
+    _rc, _said = _main(only1_csv)
+    chk("an Mk1-only export returns 0", _rc, 0)
+    with open(P5.box_csv("Mk2"), encoding="utf-8") as fh:
+        chk("...and leaves Mk2's boxes untouched", fh.read() == _sentinel, True)
+
+    _rc, _said = _main(only1_csv, "--marker", "Mk2")
+    chk("--marker absent from the export is still refused", _rc, 1)
+    with open(P5.box_csv("Mk2"), encoding="utf-8") as fh:
+        chk("...without touching Mk2's boxes", fh.read() == _sentinel, True)
+
 
 print("\n" + (f"{fails} FAILED" if fails else "ALL PASS"))
 sys.exit(1 if fails else 0)

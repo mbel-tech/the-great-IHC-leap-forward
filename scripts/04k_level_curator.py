@@ -64,6 +64,9 @@ if _HERE not in sys.path:
 # lines copy-pasted into every stage.
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
 import ls_atlas as AT  # noqa: E402
+# Whose curation a stored value holds, and the mark that follows a study when its
+# folder moves - the rule 04l and the importers share.
+import ls_curation as CU  # noqa: E402
 
 OUT_ROOT = CONFIG["out_root"]
 REFORMAT_DIR = os.path.join(OUT_ROOT, "reformatted")
@@ -84,7 +87,7 @@ CURATOR_HTML = os.path.join(REFORMAT_DIR, "level_curator.html")
 # a main study easily share. out_root is what makes a study a study here: it is
 # where its sections live. Normalised so the same folder spelled two ways on
 # Windows is still one study.
-STUDY_ID = os.path.normcase(os.path.abspath(OUT_ROOT))
+STUDY_ID = CU.study_id(OUT_ROOT)
 
 PAGE = """<!doctype html>
 <meta charset="utf-8"><title>Atlas level curator</title>
@@ -142,6 +145,7 @@ kbd{display:inline-block;padding:1px 6px;border:1px solid var(--line);border-rad
   <span class="row"><b id="ninterp"></b> interpolated</span>
   <span class="row" style="color:#d29922"><b id="nextrap"></b> extrapolated</span>
   <span class="row" id="dropRow" style="color:#d29922;display:none"><b id="ndropped"></b> anchor(s) dropped - plate no longer in this atlas</span>
+  <span class="row" id="studyNote" style="color:#d29922;display:none"></span>
   <span class="row" id="live"></span>
   <span class="grow"></span>
   <button onclick="clearAnimal()">Clear this animal</button>
@@ -193,6 +197,12 @@ const KEY = "ls_level_curator_v1";
 // _legacy: {...}}. Underscore-led because a scene uid cannot start with one, so the
 // two shapes cannot be mistaken for each other.
 const STUDY = __STUDY__;
+// The study's own mark (out_root/curation/study_id.txt), which moves WITH the
+// folder when the data goes to another drive - STUDY does not. Every save records
+// it in _tokens, so the page rebuilt in the new place can tell its own anchors
+// under the old folder from another study's under the same uids. See
+// scripts/ls_curation.py, and carriedFrom in 04l_roi_curator.py, the same rule.
+const TOKEN = __TOKEN__;
 
 // Never PLATES[i] bare. A migrated bare-integer anchor (see migrateAnchors
 // below) keeps whatever index it was stored with even when that index is
@@ -254,19 +264,38 @@ function migrateAnchors(raw, plates){
 // own bucket wins where both have one) and leaves the rest under _legacy, for the
 // page whose sections they are: one study's page must not show another's anchors,
 // and must not delete them either.
+//
+// A study whose folder moved has no entry under its new one. Its anchors under the
+// old folder are carried over - copied in, the old entry left in place - when that
+// entry carries this study's mark and is the only one that does. Two marked
+// entries are not guessed between, and an unmarked one (saved before marks were
+// recorded) may be another study sharing these uids: both are only reported. An
+// entry marked as another study's is that study's and is not mentioned at all.
 function openStore(raw, uids){
   // Not wrapped in try: a value that does not parse must stop the page, as it
   // always has, rather than read as empty and be saved over on the first click.
   const v = JSON.parse(raw || "{}") || {};
   const store = (v._studies && typeof v._studies === "object")
-    ? {_studies: v._studies, _legacy: v._legacy || {}}
-    : {_studies: {}, _legacy: v};
-  const mine = Object.assign({}, store._studies[STUDY] || {});
+    ? {_studies: v._studies, _legacy: v._legacy || {},
+       _tokens: (v._tokens && typeof v._tokens === "object") ? v._tokens : {}}
+    : {_studies: {}, _legacy: v, _tokens: {}};
+  let from = null, seen = [];
+  if(!(STUDY in store._studies)){
+    const others = Object.keys(store._studies).filter(k => k !== STUDY
+      && Object.keys(store._studies[k] || {}).some(u => uids.includes(u)));
+    const marked = others.filter(k => store._tokens[k] === TOKEN);
+    if(marked.length === 1) from = marked[0];
+    else seen = marked.length ? marked : others.filter(k => !(k in store._tokens));
+  }
+  const mine = Object.assign({}, store._studies[from || STUDY] || {});
   for(const u of uids) if(u in store._legacy){
     if(!(u in mine)) mine[u] = store._legacy[u];
     delete store._legacy[u];
   }
-  return {store, mine};
+  const note = from ? `Anchors from ${from} were carried over`
+    : seen.length ? `Anchors from another folder exist (${seen.join(", ")}) and were not`
+      + " carried over: it cannot be told whether they are this study's." : "";
+  return {store, mine, note};
 }
 const OPENED = openStore(localStorage.getItem(KEY), DATA.map(d => d.uid));
 const STORE = OPENED.store;
@@ -289,6 +318,11 @@ el("strip").addEventListener("click", e => {
   const c = e.target.closest && e.target.closest(".cell"); if(c) select(c.dataset.uid);
 });
 
+if(OPENED.note){
+  console.log(OPENED.note);
+  const box = el("studyNote");
+  if(box){ box.textContent = OPENED.note; box.style.display = ""; }
+}
 if(droppedAnchors.length){
   const box = el("dropRow"), n = el("ndropped");
   if(box) box.style.display = "";
@@ -297,12 +331,17 @@ if(droppedAnchors.length){
 const animals = [...new Set(DATA.map(d => d.animal))].sort((a,b)=>+a.slice(2)-+b.slice(2));
 el("animal").innerHTML = animals.map(a => `<option>${a}</option>`).join("");
 el("slider").max = PLATES.length - 1;
-// Writes this study's bucket and carries every other one, and whatever of the
-// legacy store is not this page's, through unchanged.
+// Writes this study's bucket and carries every other one, every mark, and whatever
+// of the legacy store is not this page's, through unchanged. The key is read AGAIN
+// here rather than taken from STORE: another study's page open in a second tab
+// saves into the same key, and writing back what this page saw when it opened
+// would undo that tab's work.
 const save = () => {
-  STORE._studies[STUDY] = anchors;
-  const out = {_studies: STORE._studies};
-  if(Object.keys(STORE._legacy).length) out._legacy = STORE._legacy;
+  const cur = openStore(localStorage.getItem(KEY), DATA.map(d => d.uid)).store;
+  cur._studies[STUDY] = anchors;
+  const out = {_studies: cur._studies,
+               _tokens: Object.assign({}, cur._tokens, {[STUDY]: TOKEN})};
+  if(Object.keys(cur._legacy).length) out._legacy = cur._legacy;
   localStorage.setItem(KEY, JSON.stringify(out));
 };
 const rows = () => DATA.filter(d => d.animal === el("animal").value)
@@ -507,7 +546,9 @@ def main():
           for p in AT.plate_order(plates)]
 
     page = IO.fill(PAGE, {"__DATA__": data, "__PLATES__": pl,
-                          "__PLATESET__": PLATE_SET, "__STUDY__": STUDY_ID})
+                          "__PLATESET__": PLATE_SET, "__STUDY__": STUDY_ID,
+                          # Made here once if the study has none: see TOKEN in the page.
+                          "__TOKEN__": CU.study_token(OUT_ROOT, create=True)})
     with open(args.out, "w", encoding="utf-8") as fh:
         fh.write(page)
 

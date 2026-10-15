@@ -967,6 +967,111 @@ def decision_file(sid, study):
     return max(found, key=os.path.getmtime) if found else None
 
 
+_ROWS = {}
+
+
+def _rows(path):
+    """The rows of a small CSV as lists, or None when there is no file.
+
+    Kept per (size, mtime), like _content's hashes: the status asks on every
+    refresh, and the files here (the worklist, an export, 05c's done log) are a
+    row per section, not per nucleus.
+    """
+    try:
+        info = os.stat(path)
+    except OSError:
+        return None
+    stamp = (info.st_size, info.st_mtime_ns)
+    hit = _ROWS.get(path)
+    if hit and hit[0] == stamp:
+        return hit[1]
+    import csv
+    try:
+        with open(path, newline="", encoding="utf-8") as fh:
+            rows = list(csv.reader(fh))
+    except (OSError, UnicodeDecodeError, csv.Error):
+        return None
+    _ROWS[path] = (stamp, rows)
+    return rows
+
+
+def _column(path, name, where=None):
+    """The set of `name` values in a CSV with a header (rows passing `where`), or None."""
+    rows = _rows(path)
+    if not rows or name not in rows[0]:
+        return None
+    head = rows[0]
+    i = head.index(name)
+    return {r[i] for r in rows[1:] if len(r) > i and r[i]
+            and (where is None or where(dict(zip(head, r))))}
+
+
+def _first(stage_id, artifact, study):
+    """The path of a stage's `artifact` output for marker 0 that exists, or None."""
+    for e in S.BY_ID[stage_id].outputs:
+        if isinstance(e, S.Art) and e.artifact == artifact:
+            return next((p for p in e.resolve(study.names)[1] if os.path.exists(p)), None)
+    return None
+
+
+def curated_sections(study):
+    """(sections decided, sections in the worklist) for the ROI curator, or None.
+
+    Decided is curated (a region in the newest export) or excluded in the
+    curator (roi_plates.csv beside it, excluded=1, as 05a reads it). None when
+    there is no worklist (04n) to count against: then the export alone is all
+    there is to go on.
+    """
+    queue = _column(os.path.join(study.out_root, "reformatted", "roi_worklist.csv"),
+                    "scene_uid")
+    if not queue:
+        return None
+    regions = decision_file("roi_curator", study)
+    decided_ = set()
+    if regions:
+        decided_ |= _column(regions, "scene_uid") or set()
+        plates = os.path.join(os.path.dirname(regions),
+                              os.path.basename(regions).replace("roi_regions", "roi_plates"))
+        decided_ |= _column(plates, "scene_uid",
+                            lambda r: r.get("excluded") == "1") or set()
+    return len(queue & decided_), len(queue)
+
+
+def curator_finished(sid, study):
+    """True when curator `sid` is exported and, for the ROI curator, every
+    worklist section in that export is curated or excluded."""
+    if not (decided(sid, study) and S.BY_ID[sid].done(study.out_root, study.names)):
+        return False
+    count = curated_sections(study) if sid == "roi_curator" else None
+    return count is None or count[0] >= count[1]
+
+
+def incomplete(stage, study):
+    """'640 of 1,980 sections' when a stage's outputs exist but cover only part
+    of what it measures, else None.
+
+    Only 05c today: roi_nuclei.csv exists after its first section, and it resumes
+    by section. Measured is what its done log (05c DONE_LOG) holds for marker 0,
+    the marker the app runs it for; the total is the sections of 05a's boxes,
+    the curated sections it will measure. A log with no `marker,*` line predates
+    the log, and 05c trusts such rows, so nothing is counted against them.
+    """
+    if stage.sid != "detect" or not study.markers or not stage.done(study.out_root,
+                                                                    study.names):
+        return None
+    boxes = _first("roi_geometry", "roi_boxes", study)
+    want = _column(boxes, "scene_uid") if boxes else None
+    log = _rows(os.path.join(study.out_root, "results", "roi_nuclei_sections_done.csv"))
+    if not want or log is None:
+        return None
+    mine = {r[1] for r in log if len(r) >= 2 and r[0] == study.markers[0]}
+    if "*" not in mine:
+        return None
+    done_ = len(want & mine)
+    return None if done_ >= len(want) else "%s of %s sections" % (
+        format(done_, ","), format(len(want), ","))
+
+
 def state(stage, study, running=None):
     """One word for a stage's status on screen.
 
@@ -975,6 +1080,7 @@ def state(stage, study, running=None):
     manual             the app cannot run it here (cli_only)
     done / todo        from the output folder
     outdated           done, but made from something that has changed since
+    todo               also when its outputs cover only part of the job (incomplete)
     """
     running = running or {}
     if running.get(stage.sid) in ("running", "failed", "queued"):
@@ -986,7 +1092,9 @@ def state(stage, study, running=None):
         return "manual"
     if not stage.done(study.out_root, study.names):
         return "todo"
-    return "outdated" if outdated(stage, study) else "done"
+    if outdated(stage, study):
+        return "outdated"
+    return "todo" if incomplete(stage, study) else "done"
 
 
 def screen_stages(screen_sid, include_curator_pages=True):
@@ -1021,7 +1129,8 @@ def run_plan(screen_sid, study, include_curator_pages=True):
         ok, _ = applies(st, study)
         if not ok or st.cli_reason():
             continue
-        if st.done(study.out_root, study.names) and not outdated(st, study):
+        if (st.done(study.out_root, study.names) and not outdated(st, study)
+                and not incomplete(st, study)):
             continue
         waits = None
         for need in st.needs:
@@ -1040,7 +1149,7 @@ def run_plan(screen_sid, study, include_curator_pages=True):
             # An out-of-date need this plan does not run (05c where StarDist is
             # missing) holds what is made from it, as a missing one does.
             if need not in planned and (not n.done(study.out_root, study.names)
-                                        or outdated(n, study)):
+                                        or outdated(n, study) or incomplete(n, study)):
                 waits = need
                 break
         if waits:
@@ -1068,17 +1177,30 @@ def progress(screen_sid, study):
         if st.operator and sid in own:
             done += decided(sid, study) and st.done(study.out_root, study.names)
         else:
-            done += st.done(study.out_root, study.names) and not outdated(st, study)
+            done += (st.done(study.out_root, study.names) and not outdated(st, study)
+                     and not incomplete(st, study))
     return done, total
+
+
+def _curate_by_section(study):
+    """True when Curate's progress is the ROI curator's sections: every other
+    curator is finished and there is a worklist to count against."""
+    sids = curators(study)
+    return ("roi_curator" in sids and curated_sections(study) is not None
+            and all(curator_finished(s, study) for s in sids if s != "roi_curator"))
 
 
 def step_progress(screen_sid, study):
     """(done, total) for a step, as the step list and Project show it.
 
     Curate counts curators exported rather than stages: building a curator's
-    page is Prepare's work, and what Curate asks of you is the export.
+    page is Prepare's work, and what Curate asks of you is the export. Once only
+    the ROI curator is left, it counts sections against the worklist instead:
+    an export of five sections is an export, and it is not the curation done.
     """
     if screen_sid == "curate":
+        if _curate_by_section(study):
+            return curated_sections(study)
         sids = curators(study)
         done = sum(1 for sid in sids
                    if decided(sid, study) and S.BY_ID[sid].done(study.out_root, study.names))
@@ -1130,12 +1252,18 @@ def slides_left(cfg, read, files):
     return out
 
 
-def progress_words(screen_sid, done, total):
-    """'5 of 6 cards', '10 of 19 stages', '0 of 1 exported', or 'Done'."""
+def progress_words(screen_sid, done, total, study=None):
+    """'5 of 6 cards', '10 of 19 stages', '0 of 1 exported', or 'Done'.
+
+    With `study`, Curate's count is said in sections when step_progress counted
+    sections: '640 of 1,980 sections curated'.
+    """
     if not total:
         return "Nothing to do"
     if done >= total:
         return "Done"
+    if screen_sid == "curate" and study is not None and _curate_by_section(study):
+        return f"{done:,} of {total:,} sections curated"
     unit = {"setup": "cards", "curate": "exported"}.get(screen_sid, "stages")
     return f"{done} of {total} {unit}"
 
@@ -1530,6 +1658,10 @@ def next_up(study, setup_ok=True, setup_missing=()):
         names = ", ".join(display_title(S.BY_ID[w], study) for w in waits if w in S.BY_ID)
         return "curate", "Prepare is waiting for: %s." % names, waits[0]
     m_plan, _ = run_plan("measure", study)
+    part = incomplete(S.BY_ID["detect"], study) if "detect" in m_plan else None
+    if part:
+        # Run all remaining resumes it: 05c skips every section in its done log.
+        return "measure", "Detection %s, resume." % part, None
     if m_plan:
         return "measure", "Run Measure: %d stage%s left." % (
             len(m_plan), "" if len(m_plan) == 1 else "s"), None
@@ -1545,6 +1677,14 @@ def next_up(study, setup_ok=True, setup_missing=()):
         return "results", "Build the spreadsheets on Results.", None
     if r_plan:
         return "results", "Build the spreadsheets and figures on Results.", None
+    # Measuring part of the worklist is allowed (04n orders it so any prefix is
+    # a dataset), so this holds nothing above; it only stops "everything done"
+    # being said over a curation that is not.
+    count = curated_sections(study) if "roi_curator" in curators(study) else None
+    if count and count[0] < count[1]:
+        n, m = count
+        return "curate", (f"{n:,} of {m:,} sections curated. Curate or exclude the rest "
+                          "in the ROI curator."), "roi_curator"
     return "home", "Everything the app can run is done.", None
 
 

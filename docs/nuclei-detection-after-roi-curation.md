@@ -1052,8 +1052,10 @@ python scripts/05a_roi_geometry.py "C:/Users/you/Downloads/roi_regions.csv"
 ```
 
 No `--marker` needed: 05a reads it from the export's own `marker` column and writes
-`roi_boxes_AF488.csv`. `--marker` exists as an assertion — pass it and a mismatch is refused
-rather than written to the wrong file. An export that mixes markers is refused outright.
+`roi_boxes_AF488.csv`. Once both markers have curation the export carries both, and 05a
+places each marker's rows into that marker's own files; a marker with no rows in the export
+keeps the boxes it has. `--marker` exists as an assertion — pass it and only that marker is
+placed, and one the export does not carry is refused rather than written to the wrong file.
 
 ```bash
 work/appenv/Scripts/python.exe scripts/05c_detect_rois.py --marker AF488 --limit 2 --qc

@@ -376,7 +376,20 @@ class MainWindow(QMainWindow):
         self._file_menu.addSeparator()
         add("history", "Project &history...", self._history)
         add("copy", "Export a &copy...", lambda: self.session.export_copy(self))
+        self._file_menu.addSeparator()
+        add("export_settings", "&Export settings...", self._export_settings)
+        add("import_settings", "&Import settings...", self._import_settings)
         self._fill_recent()
+
+    def _export_settings(self):
+        from settings_transfer import export_settings
+        export_settings(self.session, self)
+
+    def _import_settings(self):
+        from settings_transfer import import_settings
+        if self._idle_for("import settings") and import_settings(self.session, self):
+            self.setup.build()
+            self.refresh()
 
     def _revert(self):
         self.session.revert(self)
@@ -415,6 +428,7 @@ class MainWindow(QMainWindow):
         self._recent_menu.setEnabled(bool(paths))
         ro = self.session.project.read_only
         self._file_actions["save"].setEnabled(not ro)
+        self._file_actions["import_settings"].setEnabled(not ro)
         self._file_actions["revert"].setEnabled(self.session.dirty)
 
     def _update_title(self):

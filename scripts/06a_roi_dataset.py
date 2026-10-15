@@ -88,6 +88,26 @@ SPEC_CSV = os.path.join(RESULTS, "detector_specificity.csv")
 #: changed since. See check_geometry.
 GEOMETRY_CSV = os.path.join(RESULTS, "roi_measured_geometry.csv")
 GEOMETRY_CHANGED_CSV = os.path.join(RESULTS, "roi_geometry_changed.csv")
+#: 05c's log of the sections it finished (05c's DONE_LOG). A section measured
+#: and found empty has no nucleus rows, and this is the only place it shows.
+DONE_LOG = os.path.join(RESULTS, "roi_nuclei_sections_done.csv")
+
+
+def measured_empty(path, have):
+    """(scene_uid, marker) pairs 05c logged done that have no rows in `have`.
+
+    Those are sections 05c measured and found nothing in: it logs them, and
+    not one it skipped for want of a shared intensity range or one a crash cut
+    off - both of which leave a measured-geometry row too, so that record is
+    not proof of a measurement and this log is. `have` is the (uid, marker)
+    pairs with rows. No log, or none for a marker, is no such section.
+    """
+    if not os.path.exists(path):
+        return set()
+    with open(path, newline="", encoding="utf-8") as fh:
+        logged = {(r[1], r[0]) for r in csv.reader(fh)
+                  if len(r) >= 2 and r[1] != "*"}
+    return logged - set(have)
 
 T_UM = CONFIG["section_thickness_um"]
 AB = CONFIG["detection"].get("abercrombie", {})
@@ -535,9 +555,21 @@ def main(argv=None):
             elif not own:
                 diam_by[(mk, r["region"])].append(d)
 
-    print(f"{n_all} nuclei over {len(uids)} sections")
+    # Measured and found empty: discs with a count of 0, like the sections
+    # above whose every nucleus was dropped. Only where it still has boxes -
+    # the emit loop has nothing to write for one that has none - and checked
+    # against the geometry it was measured on like any other: 0 counted on
+    # the old shape of a moved disc is not 0 on the new one.
+    empty = {(u, m) for u, m in measured_empty(
+                 DONE_LOG, {(k[0], k[1]) for k in firsts})
+             if u in box_by}
+    uids |= {u for u, _ in empty}
+    print(f"{n_all} nuclei over {len(uids)} sections"
+          + (f" ({len(empty)} measured with none found)" if empty else ""))
     check_join(firsts.values(), box_by)
-    check_geometry(firsts.values(), box_by,
+    check_geometry(list(firsts.values())
+                   + [{"scene_uid": u, "marker": m} for u, m in sorted(empty)],
+                   box_by,
                    G5.load_csv(GEOMETRY_CSV) if os.path.exists(GEOMETRY_CSV)
                    else None,
                    GEOMETRY_CHANGED_CSV)

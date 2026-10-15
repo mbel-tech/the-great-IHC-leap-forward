@@ -582,6 +582,20 @@ def section_dirs():
     return {m: marker_paths(m)[1] for m in MARKERS}
 
 
+def rgb_dirs():
+    """{marker: {"rgb", "thumb"}}: 04o's directory NAMES for each marker.
+
+    Asked of ls_paths, not built as `section_dirs()[m] + "_rgb"` - which is
+    what both this page and its Python side did. Under multiplex every marker's
+    section directory is `sections`, so that gave every marker one composite
+    directory, and the page showed whichever marker 04o had written there
+    first under every marker's name.
+    """
+    return {m: {"rgb": NAMES.basename("sections_rgb", m),
+                "thumb": NAMES.basename("sections_rgb_thumb", m)}
+            for m in MARKERS}
+
+
 #: How far the Review pane lifts the counterstain. Not a contrast preference:
 #: in tissue the marker runs 4.0-4.6x brighter than DAPI across 24 sampled
 #: sections, so at native scale the counterstain is swamped by the thing
@@ -1541,6 +1555,10 @@ function mkOf(id){
 // unreachable - a broken <img>, which is to say nothing on screen and
 // nothing in the console.
 const SECDIRS = __SECDIRS__;
+// {marker: {rgb, thumb}} - 04o's colour directories, from rgb_dirs(). NOT
+// SECDIRS[m] + "_rgb": under multiplex every marker shares one section
+// directory but each has its own composites.
+const RGBDIRS = __RGBDIRS__;
 const DEFAULT_MARKER = __MARKER__;
 // The canonical reformatted grid (04a GRID). Display may be a multiple of it.
 const SEC_GRID = __SECGRID__;
@@ -5189,10 +5207,10 @@ function revSrc(p, what){
     // here infers one file from another - 1,066 sections have no composite and
     // a failed <img> is silent.
     if(!p.has_section) return "";
-    const dir = SECDIRS[p.marker];
-    const sub = p.has_section_thumb ? "_rgb_thumb"
-              : p.has_section_rgb   ? "_rgb" : "";
-    return `${dir}${sub}/${p.scene_uid}.png`;
+    const rgb = RGBDIRS[p.marker] || {};
+    const dir = p.has_section_thumb ? rgb.thumb
+              : p.has_section_rgb   ? rgb.rgb : SECDIRS[p.marker];
+    return `${dir}/${p.scene_uid}.png`;
   }
   if(what === "censor")   return p.has_censor
       ? `../censor/${p.scene_uid}_censor.png` : "";
@@ -5665,7 +5683,7 @@ function revImg(){
 // subset is written as "reinstated" so the export says where the row came from
 // rather than implying it was in the worklist all along.
 function reinstatedRow(p){
-  const dir = SECDIRS[p.marker] + (p.has_section_rgb ? "_rgb" : "");
+  const dir = p.has_section_rgb ? (RGBDIRS[p.marker] || {}).rgb : SECDIRS[p.marker];
   return {uid: p.scene_uid, animal: p.animal, m: p.marker, sub: "reinstated",
           order: +p.section_order || 0, rgb: !!p.has_section_rgb,
           img: dir + "/" + p.scene_uid + ".png", reinstated: true};
@@ -6031,7 +6049,7 @@ def main():
     # each channel is assembled on its own terms and tagged with its own subset.
     def build(marker):
         index_csv, img_dir = marker_paths(marker)
-        rgb_dir = img_dir + "_rgb"
+        rgb_dir = rgb_dirs()[marker]["rgb"]
         with open(index_csv, newline="", encoding="utf-8") as fh:
             rows = [r for r in csv.DictReader(fh) if r["kind"] == "section"]
         before, subset = len(rows), "all"
@@ -6163,6 +6181,7 @@ def main():
         # in the page the moment anyone tunes the tolerance.
         "__ASPECTTOL__": AT.ASPECT_TOLERANCE,
         "__MARKER__": args.marker, "__SECDIRS__": section_dirs(),
+        "__RGBDIRS__": rgb_dirs(),
         "__SECGRID__": SEC_GRID, "__GROUPS__": GROUPS,
         "__FILTERS__": review_filters(MARKERS, MARKER_COLOURS, NUCLEAR_COLOUR),
         "__EXPORTDIR__": args.export_dir},

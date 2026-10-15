@@ -130,11 +130,17 @@ def frame_from_disk(reformat_dir, rgb=True, names=None):
     cache = {}
 
     def frame_of(uid, marker):
-        if uid in cache:
-            return cache[uid]
+        # Keyed on the marker too: under multiplex a scene's uid is the same
+        # for every marker, and each marker has its own composite.
+        if (uid, marker) in cache:
+            return cache[(uid, marker)]
         from PIL import Image
         base = marker_dir(marker, names)
-        subs = ((base + "_rgb",) if rgb else ()) + (base,)
+        # 04o's directory for THIS marker, from ls_paths - not `base + "_rgb"`,
+        # which under multiplex is one directory shared by every marker.
+        n = names if names is not None else study_names()
+        own = n.including(marker).basename("sections_rgb", marker)
+        subs = ((own,) if rgb else ()) + (base,)
         frame = float(SEC_GRID)
         for sub in subs:
             path = os.path.join(reformat_dir, sub, uid + ".png")
@@ -144,7 +150,7 @@ def frame_from_disk(reformat_dir, rgb=True, names=None):
                 except OSError:
                     frame = float(SEC_GRID)
                 break
-        cache[uid] = frame
+        cache[(uid, marker)] = frame
         return frame
 
     return frame_of

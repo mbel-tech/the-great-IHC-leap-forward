@@ -103,21 +103,12 @@ class Art:
     study, which is not.
     """
 
-    def __init__(self, artifact, marker, tail=""):
+    def __init__(self, artifact, marker):
         self.artifact = artifact
         self.marker = marker
-        # `sections_AF568_rgb` and `sections_AF568_rgb_thumb` are 04o's
-        # derivatives of the section directory - the same name with something
-        # appended. They are not artifacts in their own right, but the SUFFIX
-        # RULE they carry is the section directory's, so they are built from it
-        # rather than spelled out. Spelled out they would read
-        # `sections_{marker0}_rgb`, which is right for this paired study only
-        # because marker0 is not the geometry source, and silently wrong under
-        # multiplex where every marker's directory is unsuffixed.
-        self.tail = tail
 
     def __repr__(self):
-        return f"<Art {self.artifact} marker{self.marker}{self.tail}>"
+        return f"<Art {self.artifact} marker{self.marker}>"
 
     def resolve(self, names):
         """`(what to show, [paths that satisfy it])` for one study.
@@ -129,7 +120,7 @@ class Art:
         """
         token = "{marker%d}" % self.marker
         if names is None or self.marker >= len(names.markers):
-            return f"{self.artifact}{self.tail} {token}", []
+            return f"{self.artifact} {token}", []
         marker = names.markers[self.marker]
         if self.artifact == "analysis_set":
             # 04j PINS the two pre-rename names rather than adopting them on
@@ -140,11 +131,6 @@ class Art:
             current = names.path(self.artifact, marker)
         legacy = names.legacy_path(self.artifact, marker)
         paths = [current] + ([legacy] if legacy and legacy != current else [])
-        if self.tail:
-            # A derivative has no legacy name of its own; it is only ever the
-            # current directory with something on the end.
-            current += self.tail
-            paths = [current]
         # Forward slashes: every other entry in this table is written
         # "reformatted/x.csv", and the panel lists them side by side.
         shown = os.path.relpath(current, names.out_root).replace(os.sep, "/")
@@ -618,7 +604,10 @@ STAGES = [
     Stage("rgb_perk", "04o  Colour composites - pERK", "Normalisation and curation",
           script="04o_section_rgb.py",
           argv=["--marker", "{marker0}", "--all", "--thumbs"],
-          outputs=[Art("sections", 0, "_rgb"), Art("sections", 0, "_rgb_thumb")],
+          # Per-marker directories in every layout - see "sections_rgb" in
+          # ls_paths. Built from the section directory with "_rgb" on the end,
+          # these were one directory for both markers under multiplex.
+          outputs=[Art("sections_rgb", 0), Art("sections_rgb_thumb", 0)],
           needs=["reformat_perk_final"],
           blurb="DAPI blue plus the marker, in the reformatted frame, so the "
                 "curator shows the channel being quantified, and the 256 px "
@@ -627,7 +616,7 @@ STAGES = [
     Stage("rgb_pcna", "04o  Colour composites - PCNA", "Normalisation and curation",
           script="04o_section_rgb.py",
           argv=["--marker", "{marker1}", "--all", "--thumbs"],
-          outputs=[Art("sections", 1, "_rgb"), Art("sections", 1, "_rgb_thumb")],
+          outputs=[Art("sections_rgb", 1), Art("sections_rgb_thumb", 1)],
           needs=["reformat_pcna_final"],
           blurb="The same for the PCNA channel."),
 

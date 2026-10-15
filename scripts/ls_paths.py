@@ -49,7 +49,13 @@ import ls_channels as CH
 #: NOT apply - the marker's name is in the filename for every marker, geometry
 #: source included.
 #:
+#: `OWN` means every marker gets a name of its own in every layout: the suffix
+#: rule under `paired`, `_<marker>` for every marker under `multiplex`, where
+#: the suffix rule would give them all one name. The stem carries `{suffix}`.
+#:
 #: An empty `ext` is a directory, not a file with no extension.
+OWN = "own"
+
 ARTIFACTS = {
     # key                subdir         stem                     ext     ruled
     "sections":         ("reformatted", "sections",              "",     True),
@@ -71,6 +77,18 @@ ARTIFACTS = {
     "analysis_set":     ("reformatted", "{marker}_analysis_set", ".csv", None),
     "roi_geometry":     ("reformatted", "roi_geometry_{marker}", ".csv", None),
     "roi_boxes":        ("reformatted", "roi_boxes_{marker}",    ".csv", None),
+    # OWN: 04o's colour composites and their thumbnails. A composite is ONE
+    # marker over the counterstain, so it is per marker in every layout - which
+    # the section directory it is cut from is not. Under `paired` the suffix
+    # rule already separates them (`sections_AF568_rgb`, `sections_rgb`) and
+    # those names are on the drive, so they are kept. Under `multiplex` every
+    # marker's section directory is `sections`, a scene's uid is the same for
+    # every marker, and `sections_rgb/<uid>.png` was one file both markers'
+    # runs wrote: the second run skipped every section as already built, and
+    # the curator showed the first marker's picture under the second's name.
+    # So there the marker's own name goes in, where paired puts it.
+    "sections_rgb":     ("reformatted", "sections{suffix}_rgb",  "",     OWN),
+    "sections_rgb_thumb": ("reformatted", "sections{suffix}_rgb_thumb", "", OWN),
 }
 
 #: Basenames that EXIST ON ONE OPERATOR'S DRIVE. Not a naming convention.
@@ -211,8 +229,14 @@ class Names:
         """
         self._check(marker)
         subdir, stem, ext, ruled = ARTIFACTS[artifact]
-        name = (stem.format(marker=marker) if ruled is None
-                else stem + self.suffix(marker))
+        if ruled is None:
+            name = stem.format(marker=marker)
+        elif ruled == OWN:
+            own = (self.suffix(marker) if self.geometry_source_marker is not None
+                   else f"_{marker}")
+            name = stem.format(suffix=own)
+        else:
+            name = stem + self.suffix(marker)
         return os.path.join(self.out_root, subdir, name + ext)
 
     def basename(self, artifact, marker):

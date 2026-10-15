@@ -261,6 +261,19 @@ def section_dir(marker):
     return NAMES.including(marker).basename("sections", marker)
 
 
+def rgb_dirs(marker):
+    """(composite, thumbnail) directory NAMES 04o wrote this marker into.
+
+    Not `section_dir(marker) + "_rgb"`: under multiplex every marker's section
+    directory is `sections`, so that pointed every marker's row at one shared
+    composite - whichever marker 04o had written first. ls_paths gives each
+    marker its own; under paired the names are the ones this always wrote.
+    """
+    names = NAMES.including(marker)
+    return (names.basename("sections_rgb", marker),
+            names.basename("sections_rgb_thumb", marker))
+
+
 def count_nuclei():
     """scene_uid -> nuclei measured. Streamed: the file is ~110 MB.
 
@@ -409,6 +422,7 @@ def main():
         # image; an excluded pERK section does not - see the module docstring.
         sec_dir = section_dir(mk)
         sec_rel = f"{sec_dir}/{uid}.png"
+        rgb_dir, thumb_dir = rgb_dirs(mk)
         ov_rel = f"../overviews/{m['animal']}/{mk}/{uid}_RGB.png"
         mask_rel = f"../artifacts/{uid}_artifact.png"
 
@@ -467,17 +481,15 @@ def main():
             # the 1,506 reformatted ones have a composite, so a viewer that
             # inferred one from the other would ask for 1,066 files that are not
             # there. 04o writes these; the marker decides the directory.
-            "section_rgb": sec_rel.replace(sec_dir, sec_dir + "_rgb", 1)
-            if os.path.exists(
-                os.path.join(REFORMAT_DIR, sec_dir + "_rgb", uid + ".png")) else "",
+            "section_rgb": f"{rgb_dir}/{uid}.png" if os.path.exists(
+                os.path.join(REFORMAT_DIR, rgb_dir, uid + ".png")) else "",
             # The 256px colour thumbnail 04o --thumbs writes. Asked separately
             # from the composite for the same reason the composite is asked
             # separately from the greyscale: whether a file is there is a fact
             # about the disk, and a set built without thumbnails must degrade to
             # the composite rather than request one that was never made.
-            "section_thumb": sec_rel.replace(sec_dir, sec_dir + "_rgb_thumb", 1)
-            if os.path.exists(
-                os.path.join(REFORMAT_DIR, sec_dir + "_rgb_thumb", uid + ".png")) else "",
+            "section_thumb": f"{thumb_dir}/{uid}.png" if os.path.exists(
+                os.path.join(REFORMAT_DIR, thumb_dir, uid + ".png")) else "",
             "mask_img": mask_rel if os.path.exists(
                 os.path.join(MASK_DIR, uid + "_artifact.png")) else "",
             "tissue_img": f"../tissue/{uid}_tissue.png" if os.path.exists(

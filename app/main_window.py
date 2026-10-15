@@ -748,7 +748,13 @@ class MainWindow(QMainWindow):
             return
         sid = self._queue.pop(0)
         base = S.BY_ID[sid]
-        values = self.session.project.stage_options(sid)
+        saved = self.session.project.stage_options(sid)
+        study = self.study()
+        # Out of date adds Redo for this run only: a stage that skips finished work
+        # would otherwise change nothing and be recorded as current.
+        values = W.run_values(sid, saved, study)
+        why = W.outdated(base, study) if values != saved else None
+        self._run_inputs = W.run_inputs(sid, values, study)
         st = W.with_options(base, values)
         n = self._queue_total - len(self._queue)
         self._run_started = now_iso()
@@ -764,6 +770,8 @@ class MainWindow(QMainWindow):
                             + (f"  ({n} of {self._queue_total})" if self._queue_total > 1 else ""),
                             "running")
         self._log(f"\n=== {base.title} ===")
+        if why:
+            self._log(f"out of date ({why}): redoing all of it")
         if values:
             self._log(f"options: {values}")
         self._job = _Job(self.runner, st)
@@ -822,7 +830,8 @@ class MainWindow(QMainWindow):
         self._thread = None
         self.drawer.stop_progress()
         problem = self.session.record_run(st.sid, res.ok, getattr(self, "_run_started", None),
-                                          now_iso(), options=getattr(self, "_run_values", None))
+                                          now_iso(), options=getattr(self, "_run_values", None),
+                                          inputs=getattr(self, "_run_inputs", None))
         if problem:
             self._log(f"could not record the run in the project: {problem}")
         if _curation_outputs(st):

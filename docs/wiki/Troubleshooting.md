@@ -3,8 +3,9 @@
 ## Re-running safely
 
 - **Stages skip finished work.** Pressing Run again only fills the gaps.
-- **After changing a setting**, re-run the stages that read it with **Redo … already done** switched on in Options. The setting's (i) says which stages read it. Then switch Redo off again.
-- **Changing a curator decision after Measure has run:** export again, then re-run Measure.
+- **Out of date.** From *Place the ROIs on the slide* on, a finished stage made from something that has changed since (your export, an earlier stage, a setting it reads) shows **Out of date** and why. **Run all remaining** runs it and what follows from it again; nothing is deleted first. See [Measure](Measure#out-of-date).
+- **After changing a setting** read by an earlier stage, re-run the stages that read it with **Redo … already done** switched on in Options. The setting's (i) says which stages read it. Then switch Redo off again.
+- **Changing a curator decision after Measure has run:** export again; Measure's stages show Out of date, then press Run all remaining there.
 - **Nothing is deleted.** Excluded sections can be reinstated in the ROI curator's Review. Repair tools back up a results file before changing it.
 - **Stop cleanly** with **Stop after this stage** on the status bar rather than closing the app mid-stage.
 
@@ -21,7 +22,7 @@
 | Curation made in a browser is missing | Browser work is stored in that browser only | **Tools > Migrate browser curation**, or **Bring in browser exports** |
 | Nucleus detection is greyed out | No StarDist in this Python | Use the installer, or `run_app.bat` (uses `work/appenv`) |
 | A section is left out of positivity | It has no background disc | Add one in the ROI curator and export |
-| Amber notice: results older than the ROI fixes | Nuclei were measured before 14 October 2026 | Re-run *Place the regions*, then *Detect and measure nuclei* with Redo, then Results. See [Measure](Measure). |
+| *Place the ROIs* and *Detect and measure nuclei* say Out of date | They ran before the region fixes of 14 October 2026, or the export changed since | Press Run all remaining on Measure, then rebuild Results. See [Measure](Measure#out-of-date). |
 | The overview stage fails on Python 3.14 | The CZI reader has no 3.14 version | Use Python 3.13 (`run_app.bat`) |
 | Scene pictures: "N scenes not drawn" | Not enough free memory at a fine resolution | Use 1.3 or 2.6 µm per pixel on Set up's Pictures card |
 | A curator pane is blank | The install is incomplete | Run the self-test (see [Install and first run](Install-and-First-Run)); reinstall if it fails |

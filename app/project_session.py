@@ -361,10 +361,10 @@ class ProjectSession(QObject):
 
     # ---- the run history ----------------------------------------------------------
 
-    def record_run(self, stage, ok, started, ended, options=None):
+    def record_run(self, stage, ok, started, ended, options=None, inputs=None):
         """Append to the run history. Returns an error message, or None."""
         try:
-            self.project.record_run(stage, ok, started, ended, options=options)
+            self.project.record_run(stage, ok, started, ended, options=options, inputs=inputs)
         except LP.ProjectError as exc:
             return str(exc)
         self.changed.emit()

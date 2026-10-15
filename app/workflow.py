@@ -17,6 +17,8 @@ judgement is tested without a window (`tests/test_workflow.py`).
 """
 
 import glob
+import hashlib
+import json
 import os
 import re
 
@@ -943,6 +945,7 @@ def state(stage, study, running=None):
     notused            this study does not use it
     manual             the app cannot run it here (cli_only)
     done / todo        from the output folder
+    outdated           done, but made from something that has changed since
     """
     running = running or {}
     if running.get(stage.sid) in ("running", "failed", "queued"):
@@ -952,15 +955,17 @@ def state(stage, study, running=None):
         return "notused"
     if stage.cli_reason():
         return "manual"
-    return "done" if stage.done(study.out_root, study.names) else "todo"
+    if not stage.done(study.out_root, study.names):
+        return "todo"
+    return "outdated" if outdated(stage, study) else "done"
 
 
 def run_plan(screen_sid, study, include_curator_pages=True):
     """(stages to run, in order; {stage id: what it waits for}) for Run all remaining.
 
     A stage is planned when it is used by this study, the app can run it, its
-    outputs are missing, and everything it needs is done or planned ahead of
-    it. A stage that needs a curator you have not exported yet is held, along
+    outputs are missing or out of date, and everything it needs is done (and
+    current) or planned ahead of it. A stage that needs a curator you have not exported yet is held, along
     with everything behind it, and named in the second value so the screen can
     say what it is waiting for. Prepare also builds the curator PAGES whose
     inputs are ready, because building a page is automatic - only using it is
@@ -981,7 +986,7 @@ def run_plan(screen_sid, study, include_curator_pages=True):
         ok, _ = applies(st, study)
         if not ok or st.cli_reason():
             continue
-        if st.done(study.out_root, study.names):
+        if st.done(study.out_root, study.names) and not outdated(st, study):
             continue
         waits = None
         for need in st.needs:
@@ -997,7 +1002,10 @@ def run_plan(screen_sid, study, include_curator_pages=True):
             if n.operator and not decided(need, study):
                 waits = need
                 break
-            if need not in planned and not n.done(study.out_root, study.names):
+            # An out-of-date need this plan does not run (05c where StarDist is
+            # missing) holds what is made from it, as a missing one does.
+            if need not in planned and (not n.done(study.out_root, study.names)
+                                        or outdated(n, study)):
                 waits = need
                 break
         if waits:
@@ -1019,7 +1027,7 @@ def progress(screen_sid, study):
         if st.operator:
             done += decided(sid, study) and st.done(study.out_root, study.names)
         else:
-            done += st.done(study.out_root, study.names)
+            done += st.done(study.out_root, study.names) and not outdated(st, study)
     return done, total
 
 
@@ -1180,37 +1188,229 @@ def run_hold(done_sid, queue, study):
 #: flag and the old boundary until ROI placement and detection run again.
 ROI_FIX_AT = 1791981478   # 2026-10-14T12:37:58Z
 
+#: Code changes that made a stage's earlier results wrong: {stage id: (when the
+#: fix reached main, what to say)}. Results older than the fix are out of date,
+#: like results older than what they read. Read off the outputs' age: nothing
+#: inside them says which version wrote them, and a file copied since then would
+#: hide an old run, so this is a reminder, not a guarantee.
+FIXED_AT = {
+    "roi_geometry": (ROI_FIX_AT, "placed before the 14 Oct fix that moves regions half "
+                                 "a pixel onto where you drew them"),
+    "detect": (ROI_FIX_AT, "measured before the 14 Oct fixes to region placement and to "
+                           "the saturated-nucleus flag (now read from the scan's own pixels)"),
+}
 
-def stale_results(study):
-    """Why this study's nuclei need measuring again, or None.
+#: Settings a tracked stage's script reads that do NOT put it out of date, and why.
+#: tests/test_workflow.py holds every other setting ls_config says a tracked stage
+#: reads to that stage's `settings`, so a new one cannot be missed by omission.
+NOT_TRACKED = {
+    "source_dir": "where the slides are, not what is measured from them; moving "
+                  "them to another drive changes no result",
+    "export_dir": "where the curator's exports are; the export itself is what is "
+                  "compared",
+    "groups.by_animal": "05c reads it only for the order it measures sections in, "
+                        "and the finished file is the same either way",
+}
 
-    Read off the file's age: nothing inside roi_nuclei.csv says which 05c wrote
-    it. A file copied since then would hide an old run, so this is a reminder,
-    not a guarantee.
+
+def script_codes(stage):
+    """The script numbers ls_config's `consumers` name a stage by: ("05c",)."""
+    if stage.sid == "build_results":
+        return ("06a", "06c", "06d", "06e")    # one pass of all three, then the figures
+    return (split_title(stage.title)[0],) if stage.script else ()
+
+
+_HASHES = {}
+
+
+def _content(path):
+    """A short hash of a file's bytes, or None when there is no file.
+
+    By content rather than date: saving the same export again, or 05a writing the
+    same boxes again, must not cost hours of detection. Kept per (size, mtime), so
+    a status refresh hashes only what has changed since the last one.
     """
-    if not study.out_root:
-        return None
-    path = os.path.join(study.out_root, "results", "roi_nuclei.csv")
     try:
-        when = os.path.getmtime(path)
+        info = os.stat(path)
     except OSError:
         return None
-    if when >= ROI_FIX_AT:
+    if os.path.isdir(path):
+        return "folder"
+    # ctime too: a file rewritten to the same size with its old date put back is
+    # still a different file.
+    stamp = (info.st_size, info.st_mtime_ns, info.st_ctime_ns, info.st_ino)
+    hit = _HASHES.get(path)
+    if hit and hit[0] == stamp:
+        return hit[1]
+    h = hashlib.sha256()
+    try:
+        with open(path, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                h.update(chunk)
+    except OSError:
         return None
-    return ("These nuclei were measured before the 14 Oct fixes to ROI placement (half a "
-            "pixel) and to the saturated-nucleus flag (now read from the scan's own "
-            "pixels). Run Place the ROIs on the slide again, then Detect and measure "
-            "nuclei with Options > Redo sections already done, then rebuild Results.")
+    _HASHES[path] = (stamp, h.hexdigest()[:16])
+    return _HASHES[path][1]
+
+
+def _input_paths(need, study):
+    """The files a stage reads from stage `need`: a curator's newest export, else its outputs."""
+    n = S.BY_ID[need]
+    if n.operator:
+        f = decision_file(need, study)
+        return [f] if f else []
+    out = []
+    for entry in n.outputs:
+        _shown, paths = n._alternatives(entry, study.out_root, study.names)
+        out += [p for p in paths if os.path.exists(p)][:1]
+    return out
+
+
+def _setting(cfg, key):
+    node = cfg
+    for part in key.split("."):
+        if not isinstance(node, dict) or part not in node:
+            return None
+        node = node[part]
+    if key == "detection.auto" and isinstance(node, dict):
+        # 05b writes its whole report here (the date, the count curve), but 05c
+        # takes only the chosen cut from it; a marker with none uses the model's own.
+        node = {m: e["chosen"] for m, e in node.items()
+                if isinstance(e, dict) and e.get("chosen")} or None
+    return node
+
+
+def _hash(obj):
+    return hashlib.sha256(json.dumps(obj, sort_keys=True, default=str).encode()).hexdigest()[:16]
+
+
+def fingerprint(sid, study):
+    """What stage `sid` reads, as it is now: {"files": {need: hash}, "settings": {key: hash}}.
+
+    None for a stage that is not tracked (its `made_from` is None).
+    """
+    st = S.BY_ID[sid]
+    if st.made_from is None:
+        return None
+    files = {need: _hash([_content(p) for p in _input_paths(need, study)])
+             for need in st.made_from if applies(S.BY_ID[need], study)[0]}
+    settings = {k: _hash(_setting(study.cfg, k)) for k in st.settings}
+    return {"files": files, "settings": settings}
+
+
+def run_inputs(sid, values, study):
+    """The fingerprint a run of `sid` with these options records, or None.
+
+    Taken when the run STARTS, because that is what it reads: an export made while
+    detection runs for hours is not in its results. A trial run of the first N
+    sections records nothing, so it cannot make the whole stage look current.
+    """
+    if (values or {}).get("--limit"):
+        return None
+    return fingerprint(sid, study)
+
+
+def _last_ok(study, sid):
+    for rec in reversed(((study.cfg or {}).get("project") or {}).get("runs") or []):
+        if rec.get("stage") == sid and rec.get("ok"):
+            return rec
+    return None
+
+
+def _changed_from(need, study):
+    n = S.BY_ID[need]
+    if need == "roi_curator":
+        return "your ROI export"
+    if n.operator:
+        return "your export from %s" % display_title(n, study)
+    return "the output of %s" % display_title(n, study)
+
+
+def _own_reason(st, study):
+    """Why `st`'s own results no longer follow from what it reads, or None."""
+    mine = [p for e in st.outputs
+            for p in st._alternatives(e, study.out_root, study.names)[1][:1]
+            if os.path.exists(p)]
+    made = min((os.path.getmtime(p) for p in mine), default=None)
+    fixed = FIXED_AT.get(st.sid)
+    if fixed and made is not None and made < fixed[0]:
+        return fixed[1]
+    rec = _last_ok(study, st.sid)
+    then = rec.get("inputs") if rec else None
+    if isinstance(then, dict):
+        now = fingerprint(st.sid, study)
+        was = then.get("files") or {}
+        files = [k for k in now["files"] if now["files"][k] != was.get(k)]
+        if files:
+            return "%s changed since it ran" % " and ".join(
+                _changed_from(k, study) for k in files)
+        was = then.get("settings") or {}
+        keys = [k for k in now["settings"] if now["settings"][k] != was.get(k)]
+        if keys:
+            import ls_config as LC
+            label = {k.path: k.label for k in LC.SPEC}
+            return "a setting it reads changed since it ran: %s" % ", ".join(
+                label.get(k, k) for k in keys)
+        return None
+    # Run before runs recorded what they read, or outside the app: fall back on
+    # file dates, which can say an input is newer but not what a setting was.
+    if made is None:
+        return None
+    for need in st.made_from:
+        if applies(S.BY_ID[need], study)[0] and any(
+                os.path.getmtime(p) > made for p in _input_paths(need, study)):
+            return "%s is newer than its results" % _changed_from(need, study)
+    return None
+
+
+def outdated(stage, study, _seen=None):
+    """Why a finished stage's results no longer match what they were made from, or None.
+
+    Its own inputs or settings changed since its last run, a fix since made its
+    results wrong (FIXED_AT), or a stage it is made from is out of date itself - so
+    a re-export marks 05a, 05c, 06a and the results at once, and Run all remaining
+    runs them again in order. Only the status and the plan change: nothing is
+    deleted, and the outputs stay where they are until the stage runs.
+    """
+    if stage.made_from is None or not study.out_root:
+        return None
+    seen = {} if _seen is None else _seen
+    if stage.sid in seen:
+        return seen[stage.sid]
+    seen[stage.sid] = None
+    why = None
+    if stage.done(study.out_root, study.names):
+        why = _own_reason(stage, study)
+        for need in stage.made_from if why is None else ():
+            n = S.BY_ID[need]
+            if applies(n, study)[0] and outdated(n, study, seen):
+                why = "%s is out of date" % display_title(n, study)
+                break
+    seen[stage.sid] = why
+    return why
+
+
+def run_values(sid, values, study):
+    """The options a run of `sid` uses: the saved ones, plus Redo when it is out of date.
+
+    A stage that skips finished work (05c keeps every section that has rows) would
+    otherwise run, change nothing and record itself current. So an out-of-date run
+    redoes everything, which is what the old advice to switch Redo on said by hand.
+    The saved options are not changed.
+    """
+    values = dict(values or {})
+    if any(o.flag == "--force" for o in options_for(sid)) and outdated(S.BY_ID[sid], study):
+        values["--force"] = True
+    return values
 
 
 def notices(screen_sid, study):
-    """Warnings a screen shows above its stages."""
-    out = []
-    if screen_sid in ("measure", "results"):
-        stale = stale_results(study)
-        if stale:
-            out.append(stale)
-    return out
+    """Warnings a screen shows above its stages.
+
+    None today: the one there was (results older than the 14 Oct fixes) is now the
+    stages' own Out of date status, through FIXED_AT.
+    """
+    return []
 
 
 def next_up(study, setup_ok=True, setup_missing=()):
@@ -1249,7 +1449,8 @@ def next_up(study, setup_ok=True, setup_missing=()):
     # Run all remaining leaves unblinding out, so it is named here on its own.
     for sid in SCREENS["results"].stage_ids():
         st = S.BY_ID[sid]
-        if st.unblinds and applies(st, study)[0] and not st.done(study.out_root, study.names):
+        if st.unblinds and applies(st, study)[0] and (
+                not st.done(study.out_root, study.names) or outdated(st, study)):
             return "results", "Measurements are in. Unblind and build the results.", sid
     r_plan, _ = run_plan("results", study)
     if r_plan:

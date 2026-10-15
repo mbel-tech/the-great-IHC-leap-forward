@@ -166,11 +166,19 @@ class Stage:
     either argv or outputs by `fill_markers`. `cli_only` is a reason string,
     None, or a callable returning either - detection depends on what the
     running interpreter can import.
+
+    `made_from` and `settings` are for a stage whose Done can go stale with
+    no output missing: the stage ids whose outputs (or, for a curator, whose
+    export) it reads, and the config keys it reads. A run records what they
+    held, and a change since shows the stage as out of date (workflow.outdated).
+    None - the default - leaves a stage on existence alone, which is right for
+    a stage that skips nothing or is cheap and run by hand anyway.
     """
 
     def __init__(self, sid, title, group, script=None, argv=(), outputs=(),
                  blurb="", cli_only=None, curator=None, needs=(),
-                 operator=False, reader="none", unblinds=False, layouts=None):
+                 operator=False, reader="none", unblinds=False, layouts=None,
+                 made_from=None, settings=()):
         self.sid = sid
         self.title = title
         self.group = group
@@ -188,6 +196,8 @@ class Stage:
         # the default has to be "applies", so a new stage cannot vanish from
         # every study by omission.
         self.layouts = tuple(layouts) if layouts else None
+        self.made_from = list(made_from) if made_from is not None else None
+        self.settings = tuple(settings)
 
     def applies(self, layout):
         """True when this stage should be offered for a study of this layout."""
@@ -687,6 +697,8 @@ STAGES = [
           script="05a_roi_geometry.py",
           outputs=[Art("roi_geometry", 0), Art("roi_boxes", 0)],
           needs=["roi_curator"],
+          made_from=["roi_curator"],
+          settings=["pixel_size_um", "acquisition.markers"],
           blurb="One affine per section and one CZI-pixel box per curated disc. "
                 "Reads the newest roi_regions.csv export. Per marker, so a PCNA "
                 "run cannot overwrite the pERK boxes."),
@@ -707,6 +719,16 @@ STAGES = [
           script="05c_detect_rois.py", reader="pylibCZIrw",
           outputs=["results/roi_nuclei.csv"],
           needs=["roi_geometry", "tune_detection"],
+          # Not 05b's report: what 05b decides for 05c is the chosen cut in
+          # detection.auto, and re-running the check with the same cut must
+          # not cost hours of detection.
+          made_from=["roi_geometry"],
+          settings=["pixel_size_um", "acquisition.layout", "acquisition.channels",
+                    "acquisition.marker_segmentation", "channels.dapi_index",
+                    "channels.marker_index", "detection.nucleus_diameter_um",
+                    "detection.threshold.mad_k", "detection.threshold.min_area_um2",
+                    "detection.stardist.prob_thresh", "detection.stardist.nms_thresh",
+                    "detection.stardist.use_auto", "detection.auto"],
           cli_only=detect_cli_reason,
           blurb="Reads each box at 0.65 um/px, segments nuclei on DAPI with "
                 "StarDist, measures the marker under each nuclear mask. One row "
@@ -716,6 +738,10 @@ STAGES = [
           script="06a_roi_dataset.py",
           outputs=["results/roi_measurements.csv", "results/detector_specificity.csv"],
           needs=["detect"],
+          # 05a's boxes too: 06a joins each nucleus to the CURRENT roi_boxes.
+          made_from=["roi_geometry", "detect"],
+          settings=["pixel_size_um", "section_thickness_um",
+                    "acquisition.marker_segmentation", "detection.abercrombie.enabled"],
           blurb="Positivity cut from each section's own background discs "
                 "(median + 3 x 1.4826 x MAD), the detector's false-positive "
                 "rate, two densities, Abercrombie. Still keyed by animal only."),
@@ -725,6 +751,7 @@ STAGES = [
           script="06b_join_sampling.py", unblinds=True,
           outputs=["results/roi_dataset.csv", "results/animal_metadata.csv"],
           needs=["roi_dataset"],
+          made_from=["roi_dataset"],
           blurb="THE UNBLINDING STEP - the first stage permitted to read a group "
                 "label. Joins LSnn to the sampling workbook and asserts the "
                 "cohort matches its own 'slicing IHC July 2025' column."),
@@ -752,6 +779,11 @@ STAGES = [
           # running either ticked this and "Run all remaining" skipped it.
           outputs=["results/build_results_pass.json"],
           needs=["detect"],
+          # It runs 06a, 06c and 06d, so it reads what they read.
+          made_from=["roi_geometry", "detect"],
+          settings=["pixel_size_um", "section_thickness_um",
+                    "acquisition.marker_segmentation", "detection.abercrombie.enabled",
+                    "groups.order", "groups.by_animal"],
           blurb="06a, 06c and 06d in one run, then the figures for every "
                 "measured marker - the same pass the hourly loop makes, made "
                 "once. 06b, the unblinding join, stays its own step. The R "

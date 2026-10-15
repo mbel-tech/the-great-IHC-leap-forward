@@ -172,18 +172,127 @@ chk("the scene pictures folder follows Set up",
 chk("...and defaults inside the study",
     W.output_folder("scene_renders", {"out_root": "/s"})[1], os.path.join("/s", "scene_renders"))
 
-print("--- older results are flagged for measuring again ---")
+print("--- a finished stage goes out of date when what it was made from changes ---")
 _res = os.path.join(CFG["out_root"], "results")
-os.makedirs(_res, exist_ok=True)
 _nuc = os.path.join(_res, "roi_nuclei.csv")
-open(_nuc, "w").write("uid\n")
-chk("fresh nuclei need nothing", W.stale_results(study()), None)
+_T0 = W.ROI_FIX_AT + 86400                      # after the 14 Oct fixes, unless a check says
+_stale_files = []
+
+
+def _put(path, text, when):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as fh:
+        fh.write(text)
+    os.utime(path, (when, when))
+    _stale_files.append(path)
+
+
+def _outputs_of(sid, s):
+    st = S.BY_ID[sid]
+    return [st._alternatives(e, s.out_root, s.names)[1][0] for e in st.outputs]
+
+
+_s = study()
+_export = os.path.join(_s.export_root, "roi_regions.csv")
+_put(_export, "uid,roi\nA,1\n", _T0)
+for _i, _sid in enumerate(("roi_curator", "tune_detection", "roi_geometry", "detect", "roi_dataset",
+                           "join_sampling", "build_results")):
+    for _p in _outputs_of(_sid, _s):
+        _put(_p, _sid + "\n", _T0 + 10 * (_i + 1))
+# 05c needs StarDist, which this interpreter may not have; the plan is what is tested.
+_det_cli = S.BY_ID["detect"].cli_only
+S.BY_ID["detect"].cli_only = None
+_trk = ["roi_geometry", "detect", "roi_dataset"]
+chk("outputs made after what they read are done",
+    [W.state(S.BY_ID[x], _s) for x in _trk], ["done"] * 3)
+chk("...and Measure has nothing left to run", W.run_plan("measure", _s)[0], [])
+os.utime(_export, (_T0 + 100, _T0 + 100))
+_s = study()
+chk("a re-export after 05a ran puts 05a out of date",
+    W.state(S.BY_ID["roi_geometry"], _s), "outdated")
+chk("...and says why", "ROI export" in (W.outdated(S.BY_ID["roi_geometry"], _s) or ""), True)
+chk("...and everything made from it, down to the results",
+    [W.state(S.BY_ID[x], _s) for x in _trk + ["build_results"]], ["outdated"] * 4)
+chk("Run all remaining on Measure runs them again, in order",
+    W.run_plan("measure", _s)[0], ["roi_geometry", "detect", "roi_dataset"])
+chk("...and they no longer count as done", W.progress("measure", _s)[0], 1)
+chk("detection is redone, not resumed, because its sections already have rows",
+    W.run_values("detect", {"--qc": True}, _s), {"--qc": True, "--force": True})
+chk("a stage with no Redo switch runs as it is", W.run_values("roi_geometry", {}, _s), {})
+chk("nothing is deleted: the outputs are all still there",
+    all(os.path.exists(p) for x in _trk for p in _outputs_of(x, _s)), True)
+
+# Once a run records what it read, the record decides, not the file times.
+_cfg = json.loads(json.dumps(CFG))
+
+
+def _record(cfg, *sids, **over):
+    s = study(cfg)
+    runs = cfg.setdefault("project", {}).setdefault("runs", [])
+    for sid in sids:
+        runs.append({"stage": sid, "ok": True, "inputs": W.fingerprint(sid, s), **over})
+
+
+_record(_cfg, *(_trk + ["join_sampling", "build_results"]))
+chk("a run records what it read", sorted(W.fingerprint("detect", study(_cfg))),
+    ["files", "settings"])
+chk("with that record, the same export read again is not a change",
+    [W.state(S.BY_ID[x], study(_cfg)) for x in _trk], ["done"] * 3)
+os.utime(_export, (_T0 + 200, _T0 + 200))
+chk("...nor is the same export saved again", W.outdated(S.BY_ID["roi_geometry"], study(_cfg)), None)
+_put(_export, "uid,roi\nA,2\n", _T0 + 300)
+chk("a different export is",
+    "ROI export" in (W.outdated(S.BY_ID["roi_geometry"], study(_cfg)) or ""), True)
+_put(_export, "uid,roi\nA,1\n", _T0 + 300)
+chk("...and putting it back clears it", W.outdated(S.BY_ID["roi_geometry"], study(_cfg)), None)
+_cfg2 = dict(_cfg, pixel_size_um=0.7)
+chk("a setting a stage reads puts it out of date, by name",
+    "Pixel size" in (W.outdated(S.BY_ID["roi_geometry"], study(_cfg2)) or ""), True)
+_cfg2 = dict(_cfg, section_thickness_um=99)
+chk("...only the stages that read it",
+    [W.state(S.BY_ID[x], study(_cfg2)) for x in _trk], ["done", "done", "outdated"])
+_cfg2 = json.loads(json.dumps(_cfg))
+_cfg2.setdefault("detection", {})["auto"] = {"AF568": {"tuned": "2026-10-20", "curve": [[0.5, 3]]}}
+chk("re-tuning that keeps the same cut does not redo detection",
+    W.outdated(S.BY_ID["detect"], study(_cfg2)), None)
+_cfg2["detection"]["auto"]["AF568"]["chosen"] = {"prob_thresh": 0.6}
+chk("...a new cut does", bool(W.outdated(S.BY_ID["detect"], study(_cfg2))), True)
+chk("a trial run of a few sections records nothing to compare with",
+    W.run_inputs("detect", {"--limit": 5}, study(_cfg)), None)
+chk("...a full run does", W.run_inputs("detect", {}, study(_cfg)),
+    W.fingerprint("detect", study(_cfg)))
+
+# What the 14 Oct notice said by hand is a stage status now.
 os.utime(_nuc, (W.ROI_FIX_AT - 3600, W.ROI_FIX_AT - 3600))
-chk("nuclei measured before the ROI fixes are flagged on Measure",
-    "Redo sections already done" in " ".join(W.notices("measure", study())), True)
-chk("...and on Results", bool(W.notices("results", study())), True)
-chk("...but not on Prepare", W.notices("prepare", study()), [])
-os.remove(_nuc)
+chk("nuclei measured before the 14 Oct ROI fixes are out of date",
+    "14 Oct" in (W.outdated(S.BY_ID["detect"], study(_cfg)) or ""), True)
+chk("...so Run all remaining measures them again, with Redo",
+    (W.run_plan("measure", study(_cfg))[0], W.run_values("detect", {}, study(_cfg))),
+    (["detect", "roi_dataset"], {"--force": True}))
+chk("no dated notice is left on the screens",
+    [W.notices(x, study(_cfg)) for x in ("prepare", "measure", "results")], [[], [], []])
+S.BY_ID["detect"].cli_only = _det_cli
+chk("a stage the app cannot run here holds what is made from it",
+    "roi_dataset" in W.run_plan("measure", study(_cfg))[0], W.state(S.BY_ID["detect"],
+                                                                    study(_cfg)) != "manual")
+for _p in _stale_files:
+    if os.path.exists(_p):
+        os.remove(_p)
+
+print("--- the settings a stage reads are the ones ls_config says it reads ---")
+_spec = {k.path: k for k in LC.SPEC}
+for st in S.STAGES:
+    if st.made_from is None:
+        continue
+    chk(f"{st.sid}: reads only real settings", [k for k in st.settings if k not in _spec], [])
+    codes = W.script_codes(st)
+    chk(f"{st.sid}: ...each one naming it as a reader",
+        [k for k in st.settings if k in _spec
+         and not any(c.split("_")[0] in codes for c in _spec[k].consumers)], [])
+    left = [k.path for k in LC.SPEC
+            if any(c.split("_")[0] in codes for c in k.consumers)
+            and k.path not in st.settings and k.path not in W.NOT_TRACKED]
+    chk(f"{st.sid}: every setting it reads is tracked, or says why not", left, [])
 
 print("--- outputs and inputs the screens offer ---")
 chk("overviews open their folder", W.output_folder("overviews", {"out_root": "/s"}),
@@ -455,20 +564,23 @@ if MW:
         ("Waiting for your ROI export", "Open curator", True))
     _geo.run_btn.click()
     chk("...which goes to Curate", w.stack.currentWidget() is w.curate, True)
-    open(_nuc, "w").write("uid\n")
-    os.utime(_nuc, (W.ROI_FIX_AT - 3600, W.ROI_FIX_AT - 3600))
+    _ws = w.study()
+    _put(os.path.join(_ws.export_root, "roi_regions.csv"), "uid,roi\nA,1\n", _T0 + 100)
+    for _p in _outputs_of("roi_geometry", _ws):
+        _put(_p, "g\n", _T0)
     w.refresh()
-    chk("Measure shows the redo notice for old nuclei",
-        (w.lists["measure"].notice.isVisibleTo(w.lists["measure"]),
-         "Place the ROIs" in w.lists["measure"].notice.text()), (True, True))
-    w.lists["measure"].dismiss_btn.click()
-    w.refresh()
-    chk("Dismiss puts the notice away", w.lists["measure"].notice.isVisibleTo(w.lists["measure"]),
-        False)
-    os.remove(_nuc)
-    w.refresh()
-    chk("...and drops it once they are measured again",
+    chk("a stage made before the latest export says it is out of date, and why",
+        (_geo.status.text().startswith("Out of date: your ROI export is newer"),
+         _geo.run_btn.text(), _geo.run_btn.isEnabled()), (True, "Run", True))
+    chk("...and there is no separate notice to read or dismiss",
         w.lists["measure"].notice.isVisibleTo(w.lists["measure"]), False)
+    _det = w.lists["measure"].rows["detect"]
+    chk("a stage made from it is not offered as Done",
+        _det.status.text() != "Done", True)
+    for _p in _stale_files:
+        if os.path.exists(_p):
+            os.remove(_p)
+    w.refresh()
     import config_dialog as CD
     _cfg = dict(CFG, acquisition={"layout": "paired", "markers": ["AF568", "AF488"]})
     _p = os.path.join(TMP, "paired.json")

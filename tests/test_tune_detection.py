@@ -278,5 +278,113 @@ with temp_study(acquisition=PAIRED) as study:
         {"AF568": {"verdict": "good"}})
 
 print()
+print("--- 05b tunes on the window of exactly what 05c feeds ---")
+# A box whose centre is dim and whose rim is bright, and a background disc far
+# brighter than either: the centre window's own percentiles, the whole box's,
+# the ROI-only shared range and the all-crops shared range are four different
+# stretches. Only the whole box under 05c's own range is what the model sees.
+PAIRED_OWN = dict(PAIRED, marker_segmentation={
+    "AF488": {"segment": "own", "backend": "stardist", "nucleus_shaped": True}})
+BOX, WIN = 200, 80
+
+
+class PlaneCzi:
+    """One large plane per channel; a read is the rectangle asked for."""
+
+    def __init__(self, planes):
+        self.planes = planes
+
+    def read(self, **kw):
+        x, y, w, h = kw["roi"]
+        return self.planes[int(kw["plane"]["C"])][y:y + h, x:x + w]
+
+
+class Recorder:
+    thresholds = Thresholds()
+
+    def __init__(self):
+        self.seen = []
+
+    def predict_instances(self, x, **kw):
+        self.seen.append(np.array(x, copy=True))
+        lab = np.zeros(x.shape, np.int32)
+        lab[2:6, 2:6] = 1
+        return lab, {}
+
+
+def plane(seed):
+    rng = np.random.default_rng(seed)
+    a = rng.normal(300, 30, (400, 400))
+    a[:BOX, :BOX] += 2000                       # the ROI box's bright rim
+    c0 = (BOX - WIN) // 2
+    a[c0:c0 + WIN, c0:c0 + WIN] -= 1800         # ... and its dim centre
+    a[220:320, 220:320] += 20000                # the background disc
+    return a
+
+
+def lay_out_two(D5, marker, uid):
+    D5.G5.use_marker(marker)
+    os.makedirs(os.path.dirname(D5.G5.GEOM_CSV), exist_ok=True)
+    with open(D5.G5.GEOM_CSV, "w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(["scene_uid", "animal", "marker", "czi_file", "scene_index",
+                    "m00", "m01", "m02", "m10", "m11", "m12"])
+        w.writerow([uid, uid.split("_")[0], marker, uid + ".czi", 0,
+                    1, 0, 0, 0, 1, 0])
+    with open(D5.G5.BOX_CSV, "w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(["scene_uid", "animal", "marker", "roi_kind", "region",
+                    "seed_n", "czi_x0", "czi_y0", "czi_w", "czi_h", "sec_x",
+                    "sec_y", "sec_r", "sec_poly"])
+        w.writerow([uid, uid.split("_")[0], marker, "roi", "Dm", 1, 0, 0,
+                    BOX, BOX, 100, 100, 200, ""])
+        w.writerow([uid, uid.split("_")[0], marker, "background", "bg", 1,
+                    220, 220, 100, 100, 270, 270, 5, ""])
+    mask_dir = os.path.join(D5.REFORMAT_DIR, "sections")
+    os.makedirs(mask_dir, exist_ok=True)
+    np.save(os.path.join(mask_dir, f"{uid}_mask.npy"), np.ones((256, 256), bool))
+
+
+def fed(mod, argv):
+    """Every array the model was shown during one run of `mod`."""
+    rec = Recorder()
+    saved = (pyczi.open_czi, sys.argv)
+    pyczi.open_czi = FakeOpen(PlaneCzi({c: plane(c + 1) for c in range(3)}))
+    loader = mod.D5 if hasattr(mod, "D5") else mod
+    saved_load = loader.load_model
+    loader.load_model = lambda: rec
+    sys.argv = argv
+    try:
+        rc = mod.main()
+    finally:
+        pyczi.open_czi, sys.argv = saved
+        loader.load_model = saved_load
+    return rc, rec.seen
+
+
+c0 = (BOX - WIN) // 2
+for marker, how in (("AF568", "its own percentiles (nuclear plane)"),
+                    ("AF488", "the section's shared range (own channel)")):
+    uid = "AB1_1a_s01"
+    with temp_study(acquisition=PAIRED_OWN):
+        B = load_stage("05b_tune_detection.py")
+        lay_out_two(B.D5, marker, uid)
+        rc_b, seen_b = fed(B, ["05b", "--marker", marker, "--dry-run",
+                               "--window", str(WIN)])
+    with temp_study(acquisition=PAIRED_OWN):
+        D5 = load_stage("05c_detect_rois.py")
+        lay_out_two(D5, marker, uid)
+        rc_c, seen_c = fed(D5, ["05c", "--marker", marker, "--order", "uid"])
+    chk(f"{marker}: 05b and 05c both run", (rc_b, rc_c), (0, 0))
+    chk(f"{marker}: 05b shows the model a {WIN} px window",
+        bool(seen_b) and seen_b[0].shape, (WIN, WIN))
+    chk(f"{marker}: 05c shows it the whole {BOX} px box first",
+        bool(seen_c) and seen_c[0].shape, (BOX, BOX))
+    want = seen_c[0][c0:c0 + WIN, c0:c0 + WIN] if seen_c else None
+    chk(f"{marker}: 05b's window is that box under {how}"[:62],
+        bool(seen_b) and want is not None and seen_b[0].shape == want.shape
+        and bool(np.allclose(seen_b[0], want, rtol=0, atol=1e-6)))
+
+print()
 print("ALL PASS" if not failures else f"{len(failures)} FAILED")
 sys.exit(1 if failures else 0)

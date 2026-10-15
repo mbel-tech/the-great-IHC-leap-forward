@@ -26,6 +26,12 @@ would be a treatment-correlated bias.
 NOTHING IS DOWNSAMPLED. A crop larger than --window is cut down to its central
 window, which loses area and keeps every pixel at full resolution.
 
+THE MODEL SEES WHAT 05c FEEDS IT. Each box is read whole and stretched to 0..1
+the way 05c stretches it - its own percentiles on the nuclear plane, the
+section's range over every crop (background discs included) on a marker's own
+channel - and only THEN cut to its window. Cutting first would stretch the
+window by its own content, which is not the input the chosen cut is used on.
+
     python scripts/05b_tune_detection.py                 # every marker
     python scripts/05b_tune_detection.py --marker AF488 --sections 20
     python scripts/05b_tune_detection.py --dry-run       # report only
@@ -107,11 +113,19 @@ def window(b, side):
     return D5._Rect(x0 + (w - cw) // 2, y0 + (h - ch) // 2, cw, ch)
 
 
-def read_crops(marker, uids, by_sec, geom, rois, side):
-    """[(uid, roi_index, box, crop)] off the plane 05c would segment."""
+def read_crops(marker, uids, by_sec, geom, rois, side, model_input=False):
+    """[(uid, roi_index, box, crop, x)] off the plane 05c would segment.
+
+    `crop` is the box's central window, raw. `x` is that same window of the
+    WHOLE box as 05c gives it to StarDist (ls_segment.stardist_input over the
+    box, under 05c's section range when the marker shares one), or None when
+    `model_input` is off or the section has no range to share - 05c skips such
+    a section, so it has no input to tune on either.
+    """
     from pylibCZIrw import czi as pyczi
     own = D5._segments_own(marker)
     plane = D5.plane_index_for(marker) if own else D5.NUCLEAR_C
+    shared = model_input and D5.needs_shared_norm(marker)
     out = []
     for uid in uids:
         g = geom.get(uid)
@@ -126,10 +140,25 @@ def read_crops(marker, uids, by_sec, geom, rois, side):
         path = os.path.join(CONFIG["source_dir"], g["czi_file"])
         with CR.open_czi(path, int(float(g.get("scene_w") or 0)) or None,
                          pyczi=pyczi) as doc:
+            norm, usable = None, model_input
+            if shared:
+                # 05c's own helper over the section's whole box list, so the
+                # range is the one 05c will stretch by, not one of the sample.
+                try:
+                    norm = D5.section_range(doc, by_sec[uid], marker,
+                                            int(g["scene_index"]))[:2]
+                except SG.SegmentError:
+                    usable = False
             for bi, b in spread(boxes, rois):
-                crop = CR.read_plane(doc, window(b, side), plane,
-                                     scene=int(g["scene_index"]))
-                out.append((uid, bi, b, crop.astype(np.float32)))
+                full = CR.read_plane(doc, D5._Rect(int(b["czi_x0"]), int(b["czi_y0"]),
+                                                   int(b["czi_w"]), int(b["czi_h"])),
+                                     plane, scene=int(g["scene_index"])
+                                     ).astype(np.float32)
+                r = window(b, side)
+                cut = (slice(r.y - int(b["czi_y0"]), r.y - int(b["czi_y0"]) + r.h),
+                       slice(r.x - int(b["czi_x0"]), r.x - int(b["czi_x0"]) + r.w))
+                x = SG.stardist_input(full, norm)[cut] if usable else None
+                out.append((uid, bi, b, full[cut], x))
     return out
 
 
@@ -149,16 +178,17 @@ def tune_marker(marker, args, model):
     print(f"{marker}: sampling {len(uids)} of {len(by_sec)} sections, up to "
           f"{args.rois} ROIs each, native pixels, windows of at most "
           f"{args.window} px")
-    crops = read_crops(marker, uids, by_sec, geom, args.rois, args.window)
+    backend = D5.backend_for(marker)
+    crops = read_crops(marker, uids, by_sec, geom, args.rois, args.window,
+                       model_input=backend == "stardist" and model is not None)
     if not crops:
         print(f"{marker}: nothing to measure")
         return None, []
 
     ceilings = D5.load_ceilings()
     seg_on = D5.segment_plane_for(marker)
-    backend = D5.backend_for(marker)
     rows, bg_failed = [], 0
-    for uid, bi, b, crop in crops:
+    for uid, bi, b, crop, _x in crops:
         q = TU.quality(crop, ceiling=ceilings.get(geom[uid]["czi_file"],
                                                   D5.DEFAULT_CEILING))
         q.update(scene_uid=uid)
@@ -183,15 +213,7 @@ def tune_marker(marker, args, model):
         default = round(float(getattr(getattr(model, "thresholds", None), "prob",
                                       FALLBACK_PROB) or FALLBACK_PROB), 6)
         grid = sorted(set(TU.PROB_GRID) | {default})
-        norms = {}
-        if D5.needs_shared_norm(marker):
-            for uid in {c[0] for c in crops}:
-                try:
-                    norms[uid] = SG.percentile_range([c[3] for c in crops if c[0] == uid])
-                except SG.SegmentError:
-                    pass
-        xs = [SG.stardist_input(c[3], norms.get(c[0])) for c in crops
-              if not D5.needs_shared_norm(marker) or c[0] in norms]
+        xs = [c[4] for c in crops if c[4] is not None]
         print(f"{marker}: counting nuclei at {len(grid)} probability cuts "
               f"over {len(xs)} crops...")
         nms = D5._STARDIST.get("nms_thresh")
@@ -213,7 +235,7 @@ def tune_marker(marker, args, model):
         entry["why"] = "StarDist is not available here, so only the signal was measured"
 
     out_rows = []
-    for (uid, bi, b, crop), q in zip(crops, rows):
+    for (uid, bi, b, crop, _x), q in zip(crops, rows):
         out_rows.append([marker, uid, NM.subject_of(uid), bi, seg_on,
                          crop.shape[1], crop.shape[0]]
                         + [round(q[k], 4) for k in COLUMNS[7:]])

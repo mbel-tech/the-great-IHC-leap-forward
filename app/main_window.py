@@ -165,7 +165,7 @@ class MainWindow(QMainWindow):
         self.curator = CuratorView(self.server, self.out_root,
                                    project_source=lambda: self.session.project)
         self.curator.logged.connect(self._log)
-        self.importer = ImportScreen(self.config_path, self.runner)
+        self.importer = ImportScreen(self.session, self.runner)
         self.importer.logged.connect(self._log)
         self.importer.imported.connect(self.refresh)
 
@@ -414,7 +414,6 @@ class MainWindow(QMainWindow):
             return
         self.config_path = os.path.abspath(path)
         self.runner.rebind(self.config_path)
-        self.importer.config_path = self.config_path
         self.setup.build()
         self._rebase()
         line = self.session.sync_curation(self)

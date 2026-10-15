@@ -8,9 +8,6 @@ downstream and nothing ever mentions it. Here it is a red row.
 Nothing is moved without the plan being shown first, in gigabytes.
 """
 
-import json
-import os
-
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFileDialog, QHBoxLayout, QHeaderView, QLabel, QMessageBox, QPushButton,
@@ -24,9 +21,12 @@ class ImportScreen(QWidget):
     imported = Signal()          # config changed; the window should re-read status
     logged = Signal(str)
 
-    def __init__(self, config_path, runner, parent=None):
+    def __init__(self, session, runner, parent=None):
         super().__init__(parent)
-        self.config_path = config_path
+        # The open project (app/project_session.py), not its file: the window holds
+        # the study in memory and saves it whole, so a value written to the file
+        # behind its back is put back by the next Save.
+        self.session = session
         self.runner = runner
         self.files = []
         self.chose_folder = None
@@ -75,8 +75,7 @@ class ImportScreen(QWidget):
     # ---- config -----------------------------------------------------------
 
     def _config(self):
-        with open(self.config_path, encoding="utf-8") as fh:
-            return json.load(fh)
+        return self.session.project.cfg
 
     # ---- picking ----------------------------------------------------------
 
@@ -135,6 +134,13 @@ class ImportScreen(QWidget):
         if not self.plan:
             return
         mode, target, note, names = self.plan
+        if self.session.project.read_only:
+            # Checked before anything is linked or copied, not when the setting fails.
+            QMessageBox.information(
+                self, "Read-only project",
+                "This project was written by a newer version of the app and cannot "
+                "be changed here.")
+            return
 
         if mode == SL.COPY:
             # The only path that writes bytes, so it is the only one that asks
@@ -153,22 +159,23 @@ class ImportScreen(QWidget):
                 self, "Some files could not be staged",
                 "\n".join(f"{n}: {e}" for n, e in errors[:10]))
 
-        cfg = self._config()
-        cfg["source_dir"] = target if mode in (SL.LINK, SL.COPY) else target
+        # Through the open project, then saved: the stages read the file, and
+        # 00_manifest must see this folder on the very next run.
+        project = self.session.project
+        project.set("source_dir", target, by="Add slides")
         if names:
-            cfg["source_files"] = names
+            project.set("source_files", names, by="Add slides")
         else:
-            cfg.pop("source_files", None)
-        tmp = self.config_path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(cfg, fh, indent=2)
-        os.replace(tmp, self.config_path)
+            project.unset("source_files", by="Add slides")
+        self.session.touch()
+        saved = self.session.save(self)
 
         which = f"{len(names)} selected files" if names else "the whole folder"
-        self.logged.emit(f"source_dir = {cfg['source_dir']}  ({which})"
-                         + (f", {staged} staged" if staged else ""))
+        self.logged.emit(f"source_dir = {target}  ({which})"
+                         + (f", {staged} staged" if staged else "")
+                         + ("" if saved else " - not saved yet (File > Save)"))
         self.imported.emit()
         QMessageBox.information(
             self, "Slides added",
-            f"source_dir is now:\n{cfg['source_dir']}\n\nProcessing {which}.\n\n"
+            f"source_dir is now:\n{target}\n\nProcessing {which}.\n\n"
             "Run 'Read slide headers' next.")

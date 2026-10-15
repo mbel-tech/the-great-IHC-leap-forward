@@ -107,13 +107,27 @@ def _sample(items, n):
     return [items[int(i * step)] for i in range(n)]
 
 
-def read_headers(source_dir, names, limit=MAX_HEADERS):
+class Cancelled(Exception):
+    """A read given up part-way because a newer one replaced it (see read_headers)."""
+
+
+def read_headers(source_dir, names, limit=MAX_HEADERS, progress=None, cancel=None):
     """[(name, summary, channel_info, flat)] for up to `limit` files; unreadable ones skipped.
 
     `flat` is czi_report.flatten() of the same parsed header: every field.
+    `progress(k, n)` is called before the k-th of n files is opened, and
+    `cancel` (a threading.Event) is looked at before each one: on a USB stick
+    or a cloud folder one header can take a second, so the window reads them
+    on a worker thread (slide_read.py) and has to be able to say how far it
+    got and to drop a read the person has already replaced.
     """
     out, bad = [], []
-    for name in _sample(names, limit):
+    chosen = _sample(names, limit)
+    for k, name in enumerate(chosen, 1):
+        if cancel is not None and cancel.is_set():
+            raise Cancelled(source_dir)
+        if progress is not None:
+            progress(k, len(chosen))
         try:
             with open(os.path.join(source_dir, name), "rb") as fh:
                 root = czi_meta.read_metadata(fh)
@@ -616,13 +630,16 @@ def json_safe(value):
     return str(value)
 
 
-def detect(source_dir, limit=MAX_HEADERS):
-    """Everything the slide files say about the settings. Never raises on a bad file."""
+def detect(source_dir, limit=MAX_HEADERS, progress=None, cancel=None):
+    """Everything the slide files say about the settings. Never raises on a bad file.
+
+    `progress` and `cancel` go to read_headers (Cancelled is the one exception).
+    """
     d = Detection()
     d.files = slide_files(source_dir)
     if not d.files:
         return d
-    headers, bad = read_headers(source_dir, d.files, limit)
+    headers, bad = read_headers(source_dir, d.files, limit, progress=progress, cancel=cancel)
     d.read, d.unreadable = len(headers), bad
     if bad:
         d.problems.append("%d file%s could not be read (e.g. %s: %s)."
@@ -813,20 +830,37 @@ def write_report(out_root, detection):
 _CACHE = {}
 
 
-def cached(source_dir):
-    """detect(source_dir), remembered while the folder's listing is unchanged."""
+def _stamp(source_dir):
     if not source_dir or not os.path.isdir(source_dir):
         return None
     try:
-        stamp = (tuple(slide_files(source_dir)), os.path.getmtime(source_dir))
+        return (tuple(slide_files(source_dir)), os.path.getmtime(source_dir))
     except OSError:
         return None
+
+
+def cached(source_dir, progress=None, cancel=None, fresh=False):
+    """detect(source_dir), remembered while the folder's listing is unchanged.
+
+    `fresh` reads the headers again even on a hit (and remembers that read):
+    "Read settings from the slides" always looks at the files as they are now.
+    """
+    stamp = _stamp(source_dir)
+    if stamp is None:
+        return None
     hit = _CACHE.get(source_dir)
-    if hit and hit[0] == stamp:
+    if hit and hit[0] == stamp and not fresh:
         return hit[1]
-    found = detect(source_dir)
+    found = detect(source_dir, progress=progress, cancel=cancel)
     _CACHE[source_dir] = (stamp, found)
     return found
+
+
+def is_cached(source_dir):
+    """True when cached(source_dir) would answer without reading a header."""
+    stamp = _stamp(source_dir)
+    hit = _CACHE.get(source_dir)
+    return stamp is None or bool(hit and hit[0] == stamp)
 
 
 def scan_marker_names(source_dir):

@@ -12,7 +12,7 @@ import os
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QFrame, QGridLayout, QMessageBox, QHBoxLayout, QLabel, QProgressBar, QPushButton, QScrollArea,
+    QCheckBox, QFrame, QGridLayout, QMessageBox, QHBoxLayout, QLabel, QProgressBar, QPushButton, QScrollArea,
     QTabBar, QTabWidget, QVBoxLayout, QWidget)
 
 import stages as S
@@ -686,6 +686,18 @@ class SetupScreen(QWidget):
         self.session = session
         self.importer = importer
         self.forms = {}
+        # Slide headers are read on a worker thread (slide_read.py): a slides
+        # folder on a USB stick or OneDrive can take minutes, and on this
+        # thread that greys the window out. What to do when the read lands is
+        # kept here: fill the settings (Read settings), show the report, or both.
+        import slide_read as SRD
+        self.slide_read = SRD.SlideRead(self)
+        self.slide_read.progress.connect(
+            lambda k, n: self.detect_line.setText(SRD.words(k, n)))
+        self.slide_read.finished.connect(self._slides_read)
+        self.slide_read.failed.connect(
+            lambda _src, why: self._read_failed("Could not read the slides: " + why))
+        self._when_read = None
         lay = QVBoxLayout(self)
         lay.setContentsMargins(*PAGE_MARGINS)
         lay.addWidget(ScreenHeader(W.SETUP))
@@ -847,6 +859,16 @@ class SetupScreen(QWidget):
                                         or (source and os.path.isdir(source))))
 
     def show_slide_report(self):
+        """The report window; when the folder has to be read first, once it is."""
+        import autodetect as AD
+        project = self.session.project
+        if not (project.get("project") or {}).get("slides") \
+                and not AD.is_cached(project.get("source_dir")):
+            self._read_slides(report=True)
+            return None
+        return self._open_report()
+
+    def _open_report(self):
         import slide_report as SR
         report, full = self._slide_report()
         if not report:
@@ -860,9 +882,10 @@ class SetupScreen(QWidget):
         """Read the slide headers and fill in every setting the study has not set.
 
         Never overwrites: a value already set stays, and where the files say
-        something else the difference is shown for a person to judge.
+        something else the difference is shown for a person to judge. The
+        headers are read in the background; the settings are filled in when
+        they land (_slides_read).
         """
-        import autodetect as AD
         project = self.session.project
         source = project.get("source_dir")
         if not source or not os.path.isdir(source):
@@ -870,11 +893,54 @@ class SetupScreen(QWidget):
             return None
         if project.read_only:
             return None
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-        try:
-            found = AD.detect(source)
-        finally:
-            QApplication.restoreOverrideCursor()
+        self._read_slides(fill=True, quiet=quiet)
+        return None
+
+    def _read_slides(self, fill=False, report=False, quiet=False):
+        """Start (or join) the background read of the study's slides folder.
+
+        A second click while the same folder is being read joins that read
+        rather than starting another; a read of a folder the study no longer
+        points at is dropped when it lands.
+        """
+        project = self.session.project
+        source = project.get("source_dir")
+        want = self._when_read if self.slide_read.busy else None
+        if want is None or want["project"] is not project or want["source"] != source:
+            want = {"project": project, "source": source,
+                    "fill": False, "report": False, "quiet": True}
+        want["fill"] |= fill
+        want["report"] |= report
+        want["quiet"] &= quiet or not fill
+        self._when_read = want
+        if self.slide_read.start(source, fresh=want["fill"]):
+            self.detect_line.setText("Reading the slides…")
+
+    def _read_failed(self, words):
+        self._when_read = None
+        self.detect_line.setText(words)
+
+    def _slides_read(self, source, found):
+        want, self._when_read = self._when_read, None
+        project = self.session.project
+        if (not want or want["project"] is not project
+                or not _same_folder(project.get("source_dir"), source)):
+            return                      # the study or its folder changed meanwhile
+        if found is None:
+            self.detect_line.setText("Choose the slides folder first.")
+            return
+        if want["fill"] and not project.read_only:
+            self._apply_detection(found, want["quiet"])
+        else:
+            self.detect_line.setText("")
+        if want["report"]:
+            self._open_report()
+
+    def _apply_detection(self, found, quiet):
+        """What detect_from_slides did with the headers once read (unchanged)."""
+        import autodetect as AD
+        project = self.session.project
+        source = project.get("source_dir")
         if found.report and project.get("out_root"):
             project.note_slides(found.report, found.notes, found.problems, AD.REPORT_FILE,
                                 source)

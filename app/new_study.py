@@ -12,15 +12,15 @@ the regions come from. The rest is under Set up > Show advanced settings.
 
 import os
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QApplication, QButtonGroup, QDialog, QDialogButtonBox, QDoubleSpinBox,
+    QButtonGroup, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
     QPushButton, QRadioButton, QVBoxLayout, QWidget)
 
 import atlas_registry as AR
 import autodetect as AD
 import ls_project as LP
+import slide_read as SRD
 import theme as T
 
 ATLASES = (
@@ -65,6 +65,14 @@ class NewStudyDialog(QDialog):
         self.opened = False
         self.detection = None
         self._read_for = None
+        # Read on a worker thread: a slides folder on a USB stick or OneDrive
+        # can take minutes, and the dialog must not freeze meanwhile. Create
+        # pressed before the read lands goes ahead once it does.
+        self.slide_read = SRD.SlideRead(self)
+        self.slide_read.progress.connect(lambda k, n: self.found.setText(SRD.words(k, n)))
+        self.slide_read.finished.connect(self._slides_read)
+        self.slide_read.failed.connect(self._read_failed)
+        self._create_when_read = False
 
         self.slides = _Folder("Folder with the slide files (.czi)")
         self.slides.edit.editingFinished.connect(self._read_slides)
@@ -144,16 +152,40 @@ class NewStudyDialog(QDialog):
         self._read_for = src
         self.detection = None
         if not src or not os.path.isdir(src):
+            self.slide_read.cancel()        # a read of the folder before is stale now
+            self._create_when_read = False
             self.found.setText("That folder does not exist." if src else "")
             self._check()
             return
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-        try:
-            self.detection = AD.detect(src)
-        finally:
-            QApplication.restoreOverrideCursor()
-        self.found.setText("<br>".join(self.detection.lines()))
+        # Replaces any read of an earlier folder still running; that one's
+        # result is dropped, so it cannot land on top of this one.
+        self.slide_read.start(src)
+        self.found.setText("Reading slides…")
         self._check()
+
+    def _slides_read(self, src, found):
+        if src != self._read_for:
+            return
+        self.detection = found
+        self.found.setText("<br>".join(found.lines()) if found is not None
+                           else "That folder does not exist.")
+        self._check()
+        if self._create_when_read:
+            self._create_when_read = False
+            if self.ok.isEnabled():         # what the files said may still need a look
+                self._create()
+
+    def _read_failed(self, src, why):
+        if src != self._read_for:
+            return
+        self._read_for = None               # so the next try reads it again
+        self._create_when_read = False
+        self.found.setText("Could not read the slides: " + why)
+        self._check()
+
+    def done(self, result):
+        self.slide_read.cancel()            # closed mid-read: stop reading
+        super().done(result)
 
     def _existing(self):
         out = self.output.value()
@@ -172,6 +204,8 @@ class NewStudyDialog(QDialog):
             why = "Choose the slides folder."
         elif not os.path.isdir(src):
             why = "The slides folder does not exist."
+        elif self.slide_read.busy:
+            why = "Reading the slides…"
         elif self.detection is not None and not self.detection.files:
             why = "There are no .czi files in the slides folder."
         elif not out:
@@ -192,6 +226,10 @@ class NewStudyDialog(QDialog):
             self.accept()
             return
         self._read_slides()
+        if self.slide_read.busy:
+            self._create_when_read = True   # _slides_read comes back here
+            self.ok.setEnabled(False)
+            return
         try:
             os.makedirs(out, exist_ok=True)
         except OSError as exc:

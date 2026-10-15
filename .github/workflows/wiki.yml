@@ -39,6 +39,8 @@ jobs:
           git clone --depth 1 "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git" wiki
           find wiki -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
           cp -r docs/wiki/. wiki/
+          mkdir -p wiki/images
+          cp docs/img/user-guide/*.png wiki/images/
           rm -f wiki/README.md
           cd wiki
           git config user.name "github-actions[bot]"

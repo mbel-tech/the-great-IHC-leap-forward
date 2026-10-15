@@ -4,6 +4,8 @@ Prepare reads the slides, checks them, builds the atlas, and turns every section
 
 **Goes in:** the slide files and your Set up settings. **Comes out:** one standard picture per section, the list of sections that can be measured, and the pages the curators show. Everything is written under your Analysis output folder.
 
+![The Prepare screen: Your part, Run all remaining, and the first stages](images/05-prepare.png)
+
 ## What happens, in order
 
 | Part | What it does | Stages |

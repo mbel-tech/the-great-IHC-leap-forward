@@ -9,6 +9,9 @@ import re
 import sys
 
 WIKI = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "docs", "wiki")
+# Pictures live in docs/img/user-guide/ and are copied to the wiki's images/ folder
+# when it is published, so a page's images/<name> resolves there (or in docs/wiki/images/).
+SHARED = os.path.join(WIKI, "..", "img", "user-guide")
 LINK = re.compile(r"(!?)\[[^\]]*\]\(([^)\s]+)\)")
 
 
@@ -33,7 +36,9 @@ def problems():
             if re.match(r"[a-z]+:", target) or target.startswith("#"):
                 continue
             if bang:
-                if not os.path.isfile(os.path.join(WIKI, target)):
+                name = os.path.basename(target)
+                if not (os.path.isfile(os.path.join(WIKI, target))
+                        or os.path.isfile(os.path.join(SHARED, name))):
                     found.append(f"{page}: missing picture {target}")
                 continue
             name, _, anchor = target.partition("#")

@@ -84,6 +84,33 @@ try:
         bool(np.allclose(whole[cm][::7], crop[cm][::7], atol=0.05)), True)
     chk("and the footprint is the right half of the plate", bool(cm.any()), True)
 
+    # --from-landmarks fits only sections whose plate VERIFIED. 04l withholds the
+    # landmarks of any other section from its own fit; 04e read roi_landmarks.csv
+    # alone and fitted all of them, so a "gone" plate's landmarks were fitted
+    # against whatever plate the CSV happened to name.
+    lmk = lambda uid, pid: [{"scene_uid": uid, "plate_id": pid}] * 3
+    by_sec = {"ok1": lmk("ok1", "plate_001"), "gone1": lmk("gone1", "plate_009"),
+              "unch": lmk("unch", "plate_002"), "old": lmk("old", "plate_003"),
+              "absent": lmk("absent", "plate_004"), "moved": lmk("moved", "plate_005"),
+              "rsz": lmk("rsz", "plate_006")}
+    prow = lambda uid, pid, v: {"scene_uid": uid, "plate_id": pid, "plate_index": "0",
+                                "plate_verified": v}
+    pl_rows = [prow("ok1", "plate_001", "ok"), prow("gone1", "plate_099", "gone"),
+               prow("unch", "plate_002", "unchecked"),
+               # an export from before the column existed: no verdict at all
+               {"scene_uid": "old", "plate_id": "plate_003", "plate_index": "2"},
+               # the plate row and the landmark rows name different plates - the
+               # export bug this gate exists to catch in files already written
+               prow("moved", "plate_007", "ok"),
+               prow("rsz", "plate_006", "resized")]
+    kept, held = R.gate_on_plate_verified(by_sec, pl_rows)
+    chk("only the verified section is fitted", sorted(kept), ["ok1"])
+    chk("...its landmark rows untouched", kept["ok1"], by_sec["ok1"])
+    chk("each withheld section says why", held,
+        {"gone1": "gone", "unch": "unchecked", "old": "unchecked",
+         "absent": "not in roi_plates.csv", "moved": "plate_id differs from roi_plates.csv",
+         "rsz": "resized"})
+
     # ---- end to end ------------------------------------------------------------
     if not HAVE_ITK:
         print("SKIP end-to-end: itk-elastix not installed")
@@ -131,6 +158,11 @@ try:
                 sx, sy = v[0] + rng.randn() * 1.5, v[1] + rng.randn() * 1.5
                 noisy.append((sx, sy, x, y))
                 fh.write("S1,A1,plates_wullimann,wplate_071,%.2f,%.2f,%d,%d\n" % (sx, sy, x, y))
+        # ...and the roi_plates.csv the same export writes beside it: 04e fits
+        # only sections whose plate verified, and reads that verdict from here.
+        with open(os.path.join(out_root, "reformatted", "roi_plates.csv"), "w", newline="") as fh:
+            fh.write("scene_uid,animal,plate_set,plate_id,plate_index,plate_verified\n"
+                     "S1,A1,plates_wullimann,wplate_071,0,ok\n")
         mir = np.array([W - 150.0, 200.0, 1.0])
         base = R.landmark_affine(noisy) @ mir
         base_err = float(np.hypot(*(base[:2] - (a_true @ mir)[:2])))

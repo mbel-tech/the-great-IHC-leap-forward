@@ -1586,6 +1586,14 @@ const plateIndex = plates => (!plates || plates === PLATES) ? PLATE_BY_ID
 // rather than another plate's pixels appearing under this plate's header.
 const plateAt = (s, plates) => (plates || PLATES)[s && s.plate] || BLANK_PLATE;
 
+// The plate a section's EXPORTED ROWS name: the stored id when there is one,
+// the plate at its index otherwise. One function for every row kind, because a
+// record resolved "gone" keeps its old index, and plateAt(s).id is then
+// whatever plate now sits there - roi_plates.csv named the stored plate while
+// the landmark and region rows of the same section named that other one, and
+// 04e fitted the landmarks against it.
+const plateIdOf = s => (s && s.plate_id) || plateAt(s).id;
+
 // `"1089x643"` -> [1089, 643]. The grammar is pinned to `ls_atlas._shape`:
 // integers only, lowercase x, nothing either side, and zero is not a size -
 // "0x0" is what a blank plate stamps, and dividing by it below would hand the
@@ -4219,7 +4227,7 @@ function exportCsv(){
     // today, qualified by by_index, whereas a synthesised fingerprint would be
     // a false claim about what the section was checked against. Every record
     // from before ids were kept exports what it exports today.
-    pl.push([d.uid,d.animal,d.m,d.sub,d.order,PLATE_SET, chosen?(s.plate_id||P.id):"", chosen?s.plate:"",
+    pl.push([d.uid,d.animal,d.m,d.sub,d.order,PLATE_SET, chosen?plateIdOf(s):"", chosen?s.plate:"",
              // THE IDENTITY THE ASSIGNMENT WAS MADE AGAINST - s.plate_fp and
              // s.plate_px, never the plate as it is NOW.
              //
@@ -4275,7 +4283,7 @@ function exportCsv(){
     // measurement - and that measurement is per section, so losing it would
     // leave the section's own ROIs with no reference level of their own.
     for(const pr of bgPairs(s)){
-      rg.push([d.uid,d.animal,d.m,PLATE_SET, chosen?P.id:"", "background","__background__",
+      rg.push([d.uid,d.animal,d.m,PLATE_SET, chosen?plateIdOf(s):"", "background","__background__",
                0,"",0,
                (pr[0]/K).toFixed(2),(pr[1]/K).toFixed(2),(pairR(pr)/K).toFixed(2),
                "", n, "", "", "disc","","","",""]);
@@ -4301,7 +4309,7 @@ function exportCsv(){
       let r=null;
       if(T){ const [X,Y]=apply(T,px,py); r=Math.hypot(X-sx,Y-sy); tot+=r; }
       const sd = sn ? P.seeds[sn-1] : null;
-      lm.push([d.uid,d.animal,d.m,d.order,PLATE_SET,P.id,i+1,
+      lm.push([d.uid,d.animal,d.m,d.order,PLATE_SET,plateIdOf(s),i+1,
                (sx/K).toFixed(2),(sy/K).toFixed(2),(pairR(pr)/K).toFixed(2),
                px.toFixed(2),py.toFixed(2), r===null ? "" : (r/K).toFixed(2),
                sn||"", sd ? ((sd.amb || sd.region) + (sd.unk ? "?" : "")) : ""]);
@@ -4325,7 +4333,7 @@ function exportCsv(){
         vs.push((pg.v[i]/K).toFixed(2) + " " + (pg.v[i+1]/K).toFixed(2));
       }
       const nv = pg.v.length/2;
-      rg.push([d.uid,d.animal,d.m,PLATE_SET,P.id,"roi",pg.region,
+      rg.push([d.uid,d.animal,d.m,PLATE_SET,plateIdOf(s),"roi",pg.region,
                h&&h.amb?1:0, (h&&h.amb)||"", h&&h.unk?1:0,
                (cx/nv/K).toFixed(2),(cy/nv/K).toFixed(2),"",
                "", n, T?T.kind:"", mr,

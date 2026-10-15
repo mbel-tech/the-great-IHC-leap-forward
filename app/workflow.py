@@ -354,9 +354,11 @@ PLAIN = {
     "excel_sample": "The spreadsheet with one row per region per animal. The figures read "
                     "this one.",
     "excel_slide": "The same spreadsheet one level finer, per slide.",
-    "build_results": "Rebuilds the per-region numbers, both spreadsheets and the figures in "
-                     "one go. Does not unblind; that stays its own step.",
-    "refresh_loop": "Rebuilds the spreadsheets and figures every hour while detection runs. "
+    "build_results": "Rebuilds the per-region numbers and both spreadsheets in one go. "
+                     "The R figures are switched off for now. Does not unblind; that "
+                     "stays its own step.",
+    "refresh_loop": "Rebuilds the spreadsheets every hour while detection runs (R figures "
+                    "switched off for now). "
                     "Run from refresh_loop.bat.",
 }
 

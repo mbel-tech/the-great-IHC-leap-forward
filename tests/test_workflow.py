@@ -424,6 +424,88 @@ chk("a run's duration in words",
     W.duration_words({"started": "2026-01-01T10:00:00+00:00", "ended": "2026-01-01T10:03:10+00:00"}),
     "took 3 min")
 
+print("--- Done means complete: detection and curation count sections ---")
+# 05c's roi_nuclei.csv exists after the first section, and Curate turned green
+# after any export at all, five sections of two thousand included. A study of
+# its own, so the files below cannot change what the checks above saw.
+DM_CFG = json.load(open(write_study(os.path.join(TMP, "dm"))))
+dm = study(DM_CFG)
+DM = DM_CFG["out_root"]
+M0 = dm.markers[0]
+
+
+def _csv(path, header, rows):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="") as fh:
+        fh.write(",".join(header) + "\n")
+        for r in rows:
+            fh.write(",".join(r) + "\n")
+
+
+UIDS = ["S%04d" % i for i in range(1980)]
+REF = os.path.join(DM, "reformatted")
+_csv(os.path.join(REF, "roi_worklist.csv"), ["rank", "tier", "scene_uid"],
+     [(str(i + 1), "core", u) for i, u in enumerate(UIDS)])
+EXP = os.path.join(dm.export_root, "02.02.2026_10.00")
+_csv(os.path.join(EXP, "roi_regions_02.02.2026_10.00.csv"), ["scene_uid", "roi_kind"],
+     [(u, "roi") for u in UIDS[:5]])
+open(os.path.join(REF, "roi_curator.html"), "w").write("<html></html>")
+# The plate boxes, where this study draws them, are exported once and whole.
+os.makedirs(os.path.join(DM, "atlas"), exist_ok=True)
+open(os.path.join(DM, "atlas", "plate_reframe.html"), "w").write("<html></html>")
+open(os.path.join(DM, "atlas", "plate_boxes.csv"), "w").write("x\n")
+chk("five sections exported of a 1,980-section worklist is not Curate done",
+    W.step_progress("curate", dm), (5, 1980))
+chk("...and says how far it has got",
+    W.progress_words("curate", *W.step_progress("curate", dm), study=dm),
+    "5 of 1,980 sections curated")
+# The rest curated, three of them excluded in the curator instead (roi_plates
+# beside the export, excluded=1): an excluded section is a decision made.
+_csv(os.path.join(EXP, "roi_regions_02.02.2026_10.00.csv"), ["scene_uid", "roi_kind"],
+     [(u, "roi") for u in UIDS[:-3]])
+_csv(os.path.join(EXP, "roi_plates_02.02.2026_10.00.csv"), ["scene_uid", "excluded"],
+     [(u, "1") for u in UIDS[-3:]])
+chk("every worklist section curated or excluded: Curate is done",
+    W.progress_words("curate", *W.step_progress("curate", dm), study=dm), "Done")
+
+# Detection: 640 of the 1,980 curated sections logged as measured.
+_csv(os.path.join(REF, "roi_boxes_%s.csv" % M0), ["scene_uid", "roi_index"],
+     [(u, "0") for u in UIDS])
+_csv(os.path.join(REF, "roi_geometry_%s.csv" % M0), ["scene_uid"], [(u,) for u in UIDS])
+os.makedirs(os.path.join(DM, "qc"), exist_ok=True)
+open(os.path.join(DM, "qc", "detection_tuning.md"), "w").write("x\n")
+_csv(os.path.join(DM, "results", "roi_nuclei.csv"), ["scene_uid"], [(u,) for u in UIDS[:640]])
+_csv(os.path.join(DM, "results", "roi_nuclei_sections_done.csv"), [M0, "*"],
+     [(M0, u) for u in UIDS[:640]])
+DET = S.BY_ID["detect"]
+_cli = DET.cli_only
+DET.cli_only = None                       # StarDist or not, the count is the point
+try:
+    chk("a part-measured detection says how far it has got",
+        W.incomplete(DET, dm), "640 of 1,980 sections")
+    chk("...is not Done on its row",
+        __import__("screens").stage_status(DET, dm, {}),
+        ("todo", "Detection 640 of 1,980 sections, resume"))
+    chk("...is planned again, to resume", "detect" in W.run_plan("measure", dm)[0], True)
+    chk("...and does not count as done in Measure's progress",
+        W.progress("measure", dm)[0] < W.progress("measure", dm)[1], True)
+    _plan = W.run_plan
+    W.run_plan = lambda sid, s, *a, **k: (["detect"], {}) if sid == "measure" else ([], {})
+    chk("Next up says so", W.next_up(dm)[:2],
+        ("measure", "Detection 640 of 1,980 sections, resume."))
+    W.run_plan = _plan
+    _csv(os.path.join(DM, "results", "roi_nuclei_sections_done.csv"), [M0, "*"],
+         [(M0, u) for u in UIDS])
+    chk("every section logged: detection is complete", W.incomplete(DET, dm), None)
+    chk("...and Done", W.state(DET, dm), "done")
+    # A log from before this marker was logged (no `marker,*` line) cannot count
+    # anything: the rows are trusted, as 05c trusts them.
+    _csv(os.path.join(DM, "results", "roi_nuclei_sections_done.csv"), ["other", "*"], [])
+    chk("...and a dataset older than the log is not called partial",
+        W.incomplete(DET, dm), None)
+finally:
+    DET.cli_only = _cli
+
 print("--- options live in the project file ---")
 pj = LP.Project.open(PATH)
 chk("untouched, a stage has no options", pj.stage_options("detect"), {})

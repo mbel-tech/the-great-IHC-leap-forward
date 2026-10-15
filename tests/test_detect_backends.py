@@ -516,6 +516,28 @@ else:
         chk("every line matches BACKGROUND_COLUMNS",
             set(widths(D5.BACKGROUND_CSV)), {len(D5.BACKGROUND_COLUMNS)})
 
+        print()
+        print("--- a plain resume measures that section again ---")
+        # An ROI with zero objects writes no rows to roi_nuclei.csv, so its
+        # section is never "done" and every resume segments it again - and the
+        # frames that fail the background check are exactly the ones that find
+        # nothing. Appending on each pass left one copy of its rows per resume.
+        # Another marker's row is put in the file first: the drop is exact,
+        # and must not take it.
+        with open(D5.BACKGROUND_CSV, "a", newline="", encoding="utf-8") as fh:
+            csv.writer(fh).writerow(
+                ["CD34_1a-s0", "1", "pERK", "DAPI", "threshold",
+                 "0", "1.0", "0", "0.9"])
+        fake, model, rows = drive(D5, "GFAP", "AB12_3a-s0", planes, star,
+                                  box=BIG)
+        flagged = read_rows(D5.BACKGROUND_CSV)
+        chk("the redone section still has one row, not two",
+            [(r["scene_uid"], r["marker"]) for r in flagged
+             if r["marker"] == "GFAP"], [("AB12_3a-s0", "GFAP")])
+        chk("...and the other marker's row was kept",
+            [r["scene_uid"] for r in flagged if r["marker"] == "pERK"],
+            ["CD34_1a-s0"])
+
 
 # --------------------------------------------------------------------------
 print()

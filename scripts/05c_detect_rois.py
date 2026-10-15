@@ -122,9 +122,10 @@ QC_DIR = os.path.join(OUT_ROOT, "qc", "roi_detections")
 #: nothing found", and it would sit beside every StarDist run - which checks
 #: nothing at all, because StarDist estimates no background. That is the same
 #: distinction `paired` writes no roi_colocalisation.csv for. It is appended to
-#: across resumes and dropped by --force with the measurements it describes, so
-#: it stays in step with roi_nuclei.csv rather than accumulating rows about
-#: objects that have since been re-segmented.
+#: across resumes, and the rows of the sections a run is about to measure are
+#: dropped first - on a resume as on --force - so it stays in step with
+#: roi_nuclei.csv rather than accumulating rows about objects that have since
+#: been re-segmented.
 BACKGROUND_CSV = os.path.join(OUT_ROOT, "qc", "roi_background_assumption.csv")
 BACKGROUND_COLUMNS = ["scene_uid", "roi_index", "marker", "segmented_on",
                       "backend", "n_objects", "cut", "above_cut",
@@ -1296,11 +1297,17 @@ def main():
     # rather than refused - it is a QC trace, and refusing to detect 130
     # sections over the state of one is the wrong trade. roi_nuclei.csv, which
     # is the dataset, keeps its refusal.
+    #
+    # ON A PLAIN RESUME TOO, as for the normalisation record below. The frames
+    # that fail this check are the ones that find nothing, a section that found
+    # nothing has no row in roi_nuclei.csv and is not "done", and so every
+    # resume segments it again - appending a second, third, ... copy of its
+    # rows when the drop waited for --force.
     bg_exists = (os.path.exists(BACKGROUND_CSV)
                  and header_of(BACKGROUND_CSV) == BACKGROUND_COLUMNS)
-    if bg_exists and args.force:
+    if bg_exists:
         dropped, _ = drop_rows(BACKGROUND_CSV, args.marker, todo)
-        if dropped:
+        if dropped and args.force:
             print(f"  --force: dropped {dropped} background-assumption rows")
 
     # The normalisation record describes the sections about to be measured, so

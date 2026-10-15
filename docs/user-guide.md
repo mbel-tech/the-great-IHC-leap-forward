@@ -1,8 +1,8 @@
-# LS IHC pipeline: user guide
+# The Great IHC Leap Forward: user guide
 
-14 October 2026. The editable version of this guide is the [Claude Doc](https://claude.ai/code/artifact/3935b5bd-45c5-4a2c-8b13-005fa0d0e0df); this file is a copy kept with the code.
+15 October 2026. The editable version of this guide is the [Claude Doc](https://claude.ai/code/artifact/3935b5bd-45c5-4a2c-8b13-005fa0d0e0df); this file is a copy kept with the code.
 
-This guide takes you from a folder of slide scans to a spreadsheet of per-region cell counts using the LS IHC desktop app. It is written for someone who has never used the app. Read sections 1 to 3 once, then use the rest as a reference while you work.
+This guide takes you from a folder of slide scans to a spreadsheet of per-region cell counts using The Great IHC Leap Forward, the lab's desktop app for the LS IHC pipeline. It is written for someone who has never used the app. Read sections 1 to 3 once, then use the rest as a reference while you work.
 
 > **Up to date with the redesigned app** (light theme, numbered steps, one curation stop). The pictures were taken on a made-up study, so the animal names and numbers in them are only examples.
 
@@ -70,7 +70,7 @@ There are three places where the pipeline waits for you. All three are on the **
 
 ### Starting the app
 
-- **Installing it (Windows):** download the newest `LS-IHC-Setup-<version>.exe` from the repository's Releases page and run it. It needs no administrator rights and brings everything with it, including Python, StarDist for Measure and R for the figures. Start **LS IHC pipeline** from the Start menu. Installing a newer version over it upgrades in place; your studies and settings live in `%USERPROFILE%\.ls-pipeline` and survive upgrades.
+- **Installing it (Windows):** download the newest `The-Great-IHC-Leap-Forward-Setup-<version>.exe` from the repository's Releases page and run it. It needs no administrator rights and brings everything with it, including Python, StarDist for Measure and R for the figures. Start **The Great IHC Leap Forward** from the Start menu. Installing a newer version over it upgrades in place; your studies and settings live in `%USERPROFILE%\.ls-pipeline` and survive upgrades.
 - **From the code:** double-click `run_app.bat`. The first time, run `build_app.bat` once; it sets up a Python 3.13 environment in `work/appenv`. Python 3.13 is needed because the library that reads Zeiss CZI files has no 3.14 version yet.
 - **Checking a copy on another computer:** start the app with `--self-test`. It reports PASS or FAIL for each check in `lsapp-selftest.log`.
 

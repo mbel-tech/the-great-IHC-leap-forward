@@ -1,0 +1,7 @@
+# What the macOS app carries on top of requirements.txt, requirements-czi.txt
+# and packaging/windows/requirements-bundle.txt.
+#
+# The bundled Python has its own OpenSSL, which does not read the macOS
+# keychain: certifi gives it the certificate list, so the update check and
+# StarDist's model download can talk HTTPS (sitecustomize.py points at it).
+certifi

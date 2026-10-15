@@ -1,0 +1,106 @@
+# Builds the macOS app (Apple Silicon), checks it, and publishes its disk image.
+#
+#   pull request touching packaging/   build + checks, disk image kept as an artifact
+#   Actions tab > Run workflow         same, on demand
+#   push a tag v1.2.3, or publish a    same, then the disk image is attached to that
+#   drafted release                    tag's release, beside the Windows installer
+name: Mac package
+
+on:
+  pull_request:
+    paths:
+      - "packaging/**"
+      - ".github/workflows/mac-package.yml"
+      - "requirements*.txt"
+      - "app/update*.py"
+      - "app/__main__.py"
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mac-package-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  APP_NAME: The Great IHC Leap Forward
+
+jobs:
+  build:
+    runs-on: macos-15          # Apple Silicon
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version
+        id: v
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then v="${GITHUB_REF_NAME#v}"; else v="0.0.0-dev.$GITHUB_RUN_NUMBER"; fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Build the app and the disk image
+        run: bash packaging/macos/build.sh --out dist/mac --version "${{ steps.v.outputs.version }}"
+
+      # Everything below runs on a copy taken out of the disk image, the way a
+      # person installs it, so the checks cover what is actually shipped.
+      - name: Install from the disk image
+        run: |
+          dmg="$(ls dist/mac/*-mac.dmg)"
+          mnt="$(mktemp -d)"
+          hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "$dmg"
+          mkdir -p "$RUNNER_TEMP/Applications"
+          ditto "$mnt/$APP_NAME.app" "$RUNNER_TEMP/Applications/$APP_NAME.app"
+          ls "$mnt"
+          hdiutil detach "$mnt"
+          codesign --verify --deep --verbose=1 "$RUNNER_TEMP/Applications/$APP_NAME.app"
+          echo "RES=$RUNNER_TEMP/Applications/$APP_NAME.app/Contents/Resources" >> "$GITHUB_ENV"
+
+      - name: Smoke test (libraries, offline StarDist)
+        run: |
+          "$RES/runtime/bin/python3" packaging/windows/smoke_test.py "$RES"
+
+      - name: Install check (what the in-app updater runs on new code)
+        timeout-minutes: 5
+        run: |
+          cd "$RES" && runtime/bin/python3 -m app --check-install
+
+      - name: App self-test through the app's own launcher (window, local server, curator)
+        timeout-minutes: 5
+        run: |
+          export LS_HOME="$RUNNER_TEMP/ls-home"
+          export LS_CONFIG="$PWD/config.example.json"
+          rc=0
+          "$RUNNER_TEMP/Applications/$APP_NAME.app/Contents/MacOS/$APP_NAME" --self-test || rc=$?
+          cat "$RES"/lsapp-selftest.log "$RES"/lsapp-crash.log 2>/dev/null || true
+          exit $rc
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: The-Great-IHC-Leap-Forward-${{ steps.v.outputs.version }}-mac
+          path: dist/mac/*-mac.dmg
+          retention-days: 14
+          compression-level: 0
+
+      - name: Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          dmg="$(ls dist/mac/*-mac.dmg)"
+          # The Windows job may be creating the same release at this moment:
+          # upload if it exists, create it if not, and try again if both raced.
+          for attempt in 1 2 3 4 5; do
+            if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+              gh release upload "$GITHUB_REF_NAME" "$dmg" --clobber && exit 0
+            else
+              gh release create "$GITHUB_REF_NAME" "$dmg" --title "The Great IHC Leap Forward $GITHUB_REF_NAME" --generate-notes && exit 0
+            fi
+            sleep $((attempt * 10))
+          done
+          echo "release upload failed" >&2
+          exit 1

@@ -30,7 +30,8 @@ REPO_SLUG = "mbel-tech/the-great-IHC-leap-forward"
 API_URL = f"https://api.github.com/repos/{REPO_SLUG}/releases/latest"
 RELEASES_PAGE = f"https://github.com/{REPO_SLUG}/releases/latest"
 USER_AGENT = "The-Great-IHC-Leap-Forward-updater"
-INSTALLER_PREFIX = "The-Great-IHC-Leap-Forward-Setup-"
+INSTALLER_PREFIX = "The-Great-IHC-Leap-Forward-Setup-"     # Windows: ...-Setup-<v>.exe
+MAC_INSTALLER_SUFFIX = "-mac.dmg"                         # macOS: ...-<v>-mac.dmg
 
 
 class UpdateError(Exception):
@@ -49,12 +50,30 @@ class Decision:
 
 # ---------------------------------------------------------------- what is installed
 
+def runtime_python(root, platform=None):
+    """The bundled interpreter: runtime\\python.exe on Windows, runtime/bin/python3 in the Mac app."""
+    if (platform or sys.platform) == "win32":
+        return os.path.join(root, "runtime", "python.exe")
+    return os.path.join(root, "runtime", "bin", "python3")
+
+
 def install_root():
-    """The install folder when this copy was installed, else None (running from source)."""
+    """The install folder when this copy was installed, else None (running from source).
+
+    In the Mac app that is Contents/Resources, which holds the same layout.
+    """
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    if installed_info(root) and os.path.exists(os.path.join(root, "runtime", "python.exe")):
+    if installed_info(root) and os.path.exists(runtime_python(root)):
         return root
     return None
+
+
+def is_installer(name, platform=None):
+    """Is this release asset the full installer for this platform?"""
+    name = str(name or "")
+    if (platform or sys.platform) == "darwin":
+        return name.startswith("The-Great-IHC-Leap-Forward-") and name.endswith(MAC_INSTALLER_SUFFIX)
+    return name.startswith(INSTALLER_PREFIX)
 
 
 def installed_info(root):
@@ -112,7 +131,7 @@ def fetch_manifest(release, timeout=10):
     return _get_json(url, timeout) if url else None
 
 
-def decide(info, release, manifest):
+def decide(info, release, manifest, platform=None):
     tag = release.get("tag_name", "")
     new, have = parse_version(tag), parse_version(info.get("version"))
     version = str(tag).lstrip("vV")
@@ -122,7 +141,7 @@ def decide(info, release, manifest):
     d = Decision("installer", version=version, notes=release.get("body") or "",
                  page_url=release.get("html_url") or RELEASES_PAGE)
     d.installer_url = next((a.get("browser_download_url") for a in release.get("assets") or []
-                            if str(a.get("name", "")).startswith(INSTALLER_PREFIX)), None)
+                            if is_installer(a.get("name"), platform)), None)
     if (not manifest or parse_version(manifest.get("version")) != new
             or manifest.get("runtime_fingerprint") != info.get("runtime_fingerprint")):
         return d
@@ -167,6 +186,11 @@ def check(root, timeout=5, url=API_URL):
     if d.kind == "code" and not _writable(root):
         # Installed for all users: only the installer, run as administrator, can
         # write there.
+        d.kind, d.downloads = "installer", []
+    if d.kind == "code" and sys.platform == "darwin":
+        # Swapping code inside a signed .app breaks its signature, and macOS
+        # may then refuse to open it. Until that is tried on a real Mac, Mac
+        # copies update by downloading the new disk image.
         d.kind, d.downloads = "installer", []
     return d
 
@@ -256,7 +280,7 @@ def launch_apply(root, new_dir=None, mode="apply"):
     helper = os.path.join(up, "update_apply.py")
     shutil.copyfile(os.path.join(os.path.dirname(os.path.abspath(__file__)), "update_apply.py"),
                     helper)
-    python = os.path.join(root, "runtime", "python.exe")
+    python = runtime_python(root)
     flags = 0
     if sys.platform == "win32":
         flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP

@@ -1,0 +1,5 @@
+# Held back so every library still loads on the macOS the app promises
+# (MIN_MACOS in build.sh; check_macos_min.py enforces it).
+#
+# itk-elastix 0.25.3 and later publish Apple Silicon wheels for macOS 15 only.
+itk-elastix<0.25.3

@@ -173,6 +173,18 @@ try:
     d = UP.decide(dict(same, runtime_fingerprint="old"), release, manifest)
     chk("runtime changed -> installer", d.kind, "installer")
     chk("installer url", d.installer_url, "https://example/setup.exe")
+    mac_release = dict(release, assets=release["assets"] + [
+        {"name": "The-Great-IHC-Leap-Forward-1.3-mac.dmg",
+         "browser_download_url": "https://example/app.dmg"}])
+    d = UP.decide(dict(same, runtime_fingerprint="mac"), mac_release, manifest, platform="darwin")
+    chk("mac: installer url is the disk image", d.installer_url, "https://example/app.dmg")
+    d = UP.decide(dict(same, runtime_fingerprint="mac"), mac_release, manifest, platform="win32")
+    chk("windows: installer url is still the Setup .exe", d.installer_url,
+        "https://example/setup.exe")
+    chk("mac interpreter path", UP.runtime_python("R", "darwin").replace(os.sep, "/"),
+        "R/runtime/bin/python3")
+    chk("windows interpreter path", UP.runtime_python("R", "win32").replace(os.sep, "/"),
+        "R/runtime/python.exe")
     d = UP.decide(same, release, None)
     chk("no manifest -> installer", d.kind, "installer")
     d = UP.decide(same, dict(release, tag_name="nightly"), manifest)

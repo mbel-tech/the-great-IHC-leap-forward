@@ -1,0 +1,52 @@
+# Publishes docs/wiki/ to the repository's GitHub wiki.
+#
+#   a change to docs/wiki/ reaches main   the wiki is replaced by docs/wiki/
+#   Actions tab > Run workflow            same, on demand
+#
+# The wiki must exist first: create any page once on GitHub (Wiki tab > Create
+# the first page); this workflow then overwrites it. Pages edited on the wiki
+# directly are overwritten too, so edit docs/wiki/ instead.
+name: Publish wiki
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/wiki/**"
+      - ".github/workflows/wiki.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-wiki
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check page links
+        run: python3 tests/test_wiki.py
+
+      - name: Copy docs/wiki to the wiki
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git clone --depth 1 "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git" wiki
+          find wiki -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -r docs/wiki/. wiki/
+          rm -f wiki/README.md
+          cd wiki
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Wiki already up to date."
+          else
+            git commit -m "Publish wiki from ${GITHUB_SHA::7}"
+            git push
+          fi

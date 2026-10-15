@@ -99,10 +99,23 @@ ed2._ok()
 chk("OK with no edit writes the same channels",
     CD.CE.apply(before, ed2.result_edits)["acquisition"]["channels"], CHANNELS)
 
-# ---- paired layout shows names and colours only ------------------------------
-pe = CEd.ChannelEditor({"acquisition": {"layout": "paired", "markers": ["AF568", "AF488"]}}, "paired")
-chk("paired has three columns", pe.table.columnCount(), 3)
+# ---- paired layout: scan channel, what it stains, colour ---------------------
+PCFG = {"acquisition": {"layout": "paired", "markers": ["AF568", "AF488"]},
+        "marker_identity": {"AF568": "pERK"}}
+pe = CEd.ChannelEditor(PCFG, "paired", scan_names=["AF568", "AF488"])
+chk("paired has four columns", pe.table.columnCount(), 4)
 chk("paired rows are the markers", [pe._w(i, "Name").text() for i in range(2)], ["AF568", "AF488"])
+chk("...with what each stains", [pe._w(i, "Stains").text() for i in range(2)], ["pERK", ""])
+pe._w(1, "Stains").setEditText("PCNA")
+pe._ok()
+chk("the antibody is kept beside the scan name, not in place of it",
+    (pe.result_edits["acquisition.markers"], pe.result_edits["marker_identity"]),
+    (["AF568", "AF488"], {"AF568": "pERK", "AF488": "PCNA"}))
+pe2 = CEd.ChannelEditor(PCFG, "paired", scan_names=["AF568", "AF488"])
+pe2._w(0, "Name").setEditText("pERK")
+chk("a marker named by its protein matches no scan, and OK says so",
+    (pe2.buttons.button(CEd.QDialogButtonBox.Ok).isEnabled(),
+     "What it stains" in pe2.status.text()), (False, True))
 
 # ---- through the settings dialog ---------------------------------------------
 dlg = CD.ConfigDialog(REPO, path=STUDY.path)

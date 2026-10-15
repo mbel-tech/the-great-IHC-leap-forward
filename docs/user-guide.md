@@ -128,6 +128,8 @@ Every field has a short hint, an **(i)** with the full reasoning and which stage
 4. Press **Use these slides**.
 5. Press **Read settings from the slides** to fill in what the slide headers say (pixel size, file-name rule, channels) for any setting not yet set. It never overwrites a setting you chose; where the files say something else, it tells you.
 
+Everything the headers say is kept, not only what was used. A summary goes into the study file and the complete list of header fields into `slide_metadata.json` in the output folder. Press **What the slides say…** next to the button to see it: the instrument, the channels, the scenes, the optical resolution, which values set what, and where files differ. What it sets is the pixel size, the picture resolutions, the colours, the file naming and the channels. What it only checks is the exposure, the bit depth, the objective and whether the pixels are small enough to show the detail the lens can resolve; anything odd is listed under *Things to look at*. If two markers would be drawn in the same colour, or the counterstain is not a blue stain, it leaves those colours for you to pick in Set up and says why.
+
 ![The Slides tab: one file whose name does not fit the pattern is shown in red and would be ignored](img/user-guide/02-setup-slides.png)
 
 Once a folder is set, the top of the Slides tab says which folder the study reads and how many files the slide headers list, and the tab gets a ✓. For the LS study that is 444 files from `D:\SLIDES HE DEC 2025 LS`. Use the buttons only to change it.
@@ -168,6 +170,8 @@ In the LS study the pattern also accepts a suffix after a dash, so a name such a
 | DAPI index, Marker index | Which channel in the CZI file is which | 0 and 1 |
 
 **Channels and markers…** opens a table of channels. **Detect from a CZI file…** reads each channel's dye and colour from a real slide and fills the table in. The file knows the dye, not the antibody, so you type or pick the marker name yourself. A marker's name becomes part of folder and file names, so the app asks before you rename one.
+
+In a paired study the table has one row per marker with two names. **Scan channel** is the name the scans give the marker's channel (AF568, AF488). Pairing matches each scan to its marker by this name, so it must be the scan's name, not the antibody; the app lists the names the slides carry and refuses any other. **What it stains** is the antibody (pERK, PCNA), which the screens show. DAPI is in every scan and is never a marker.
 
 **Find nuclei** (paired studies only) has one row per marker. Leave it on *On the counterstain (DAPI)* unless a marker's scan has no usable DAPI. For such a marker, choose *On this marker's own channel*. The LS study needs this for PCNA (AF488), because its DAPI plane is noise at full resolution. Use it only for a marker whose signal is in the nucleus, as PCNA's is. Its fraction positive and total cell density are then not reported; positive density is. Section 7 explains why.
 

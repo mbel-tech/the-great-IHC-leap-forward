@@ -476,6 +476,32 @@ class Project:
                              if d.get("file") != entry["file"]] + [entry]
         _cap(block)
 
+    def note_slides(self, report, notes=(), problems=(), full_report="slide_metadata.json",
+                    source_dir=None):
+        """Keep the summary of what the slide headers said. Evidence only.
+
+        The report minus its `fields` table (which lives in `full_report`, a file
+        name relative to the output folder), with the notes and problems found,
+        and the slides folder it was read from (`source_dir`), so a summary of
+        another folder is not shown as this one's. Over 64 KB, the list of fields
+        that differ is dropped (`varying_dropped`), then the list of uses
+        (`uses_dropped`); both stay in the full file.
+        """
+        self._check_writable()
+        entry = {k: copy.deepcopy(v) for k, v in dict(report).items() if k != "fields"}
+        entry["notes"] = [str(n) for n in notes]
+        entry["problems"] = [str(n) for n in problems]
+        entry["read_at"] = _now()
+        entry["full_report"] = full_report
+        if source_dir:
+            entry["source_dir"] = str(source_dir)
+        for key in ("varying", "uses"):
+            if len(json.dumps(entry, default=str)) <= 64 * 1024:
+                break
+            if entry.pop(key, None) is not None:
+                entry[key + "_dropped"] = True
+        self.block["slides"] = entry
+
     def set_notes(self, text):
         self._check_writable()
         self.block["notes"] = str(text)

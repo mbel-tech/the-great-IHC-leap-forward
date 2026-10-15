@@ -38,7 +38,7 @@ A key marked *required* has to be present before any stage will run.
 | `display.nuclear_colour` | str | `"blue"` | `04l_roi_curator`, `04o_section_rgb` | What colour the nuclear counterstain is drawn in. |
 | `channels.dapi_index` | int | `0` | `05c` | Which CZI channel plane is the nuclear counterstain. |
 | `channels.marker_index` | int | `1` | `05c` | Which CZI channel plane carries the marker. |
-| `marker_identity` | raw |  | recorded here, read by no stage | Which fluorophore is which marker. Filled in by 00c_channel_identity.py, then confirmed by the operator. |
+| `marker_identity` | raw |  | recorded here, read by no stage | Which fluorophore is which marker. Filled in by 00c_channel_identity.py or under 'What it stains' in the app's channel editor, then confirmed by the operator. |
 | `detection.nucleus_diameter_um` | float | `7.0` | `05c` | Expected nucleus diameter, the scale StarDist is run at. |
 | `detection.abercrombie.enabled` | bool | `true` | `06a` | Correct counted nuclear profiles to nuclei. |
 | `detection.threshold.mad_k` | float | `3.0` | `05c` | How many robust standard deviations above the background median a pixel must be to count as signal, for the `threshold` backend. |

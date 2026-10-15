@@ -69,9 +69,13 @@ def load_rows(cfg, layout=None):
     rows = []
     if layout == CH.LAYOUT_PAIRED:
         declared = _dig(cfg, "acquisition", "markers")
+        ident = _dig(cfg, "marker_identity")
+        ident = ident if isinstance(ident, dict) else {}
         for m in (declared if isinstance(declared, list) else []):
             if isinstance(m, str):
+                stains = ident.get(m)
                 rows.append({"orig": m, "name": m, "role": CH.MARKER,
+                             "stains": stains if isinstance(stains, str) else "",
                              "colour": colours.get(m), "show": shown(m), "extra": {}})
         return rows
 
@@ -98,7 +102,7 @@ def load_rows(cfg, layout=None):
 def new_row(layout, role=CH.MARKER):
     """A blank row, with the defaults a new channel would get."""
     if layout == CH.LAYOUT_PAIRED:
-        return {"orig": None, "name": "", "role": CH.MARKER, "colour": None,
+        return {"orig": None, "name": "", "role": CH.MARKER, "stains": "", "colour": None,
                 "show": True, "extra": {}}
     return {"orig": None, "name": "", "role": role, "czi_name": "", "index": None,
             "segment": CH.SEGMENT_NUCLEAR, "backend": None, "nucleus_shaped": True,
@@ -158,6 +162,20 @@ def edits(cfg, layout, rows):
     if layout == CH.LAYOUT_PAIRED:
         out["acquisition.markers"] = names
         out["acquisition.channels"] = []
+        # A paired marker is named as its scans name the channel (AF568): that is
+        # what pairing matches each scan by. What it stains (pERK) is recorded
+        # beside it, and is what the screens call it.
+        ident = _dig(cfg, "marker_identity")
+        ident = dict(ident) if isinstance(ident, dict) else {}
+        for r in markers:
+            for key in {r.get("orig"), r["name"].strip()} - {None, ""}:
+                ident.pop(key, None)
+        for r in markers:
+            stains = (r.get("stains") or "").strip()
+            if stains and r["name"].strip():
+                ident[r["name"].strip()] = stains
+        if ident or _dig(cfg, "marker_identity") is not None:
+            out["marker_identity"] = ident
     else:
         has_nuclear = any(r.get("role") == CH.NUCLEAR for r in rows)
         out["acquisition.channels"] = [_channel_entry(r, has_nuclear) for r in rows]

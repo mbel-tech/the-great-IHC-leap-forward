@@ -77,8 +77,11 @@ class ChannelEditor(QDialog):
     currently chosen in settings. `result_edits` is {dotted key: value} after OK.
     """
 
-    def __init__(self, cfg, layout, parent=None, on_detected=None):
+    def __init__(self, cfg, layout, parent=None, on_detected=None, scan_names=None):
         super().__init__(parent)
+        # Paired only: the marker channel names the slide files carry (AF568, ...),
+        # when they were read. A marker named anything else matches no scan.
+        self.scan_names = list(scan_names or [])
         self.on_detected = on_detected      # called (file, channels) after a CZI is read
         self.cfg = copy.deepcopy(cfg)
         self.layout = layout
@@ -87,11 +90,13 @@ class ChannelEditor(QDialog):
         self.setWindowTitle("Channels and markers")
         self.resize(1280 if not self.paired else 560, 520)
 
-        self.cols = (["Show", "Name", "Colour"] if self.paired else
+        self.cols = (["Show", "Name", "Stains", "Colour"] if self.paired else
                      ["Show", "Name", "Role", "CZI channel name", "Plane",
                       "Measured in", "Detector", "Nucleus-shaped", "Colour", "Detected"])
         self.table = QTableWidget(0, len(self.cols))
-        self.table.setHorizontalHeaderLabels(self.cols)
+        self.table.setHorizontalHeaderLabels(
+            [{"Name": "Scan channel (e.g. AF568)", "Stains": "What it stains (e.g. pERK)"}
+             .get(c, c) for c in self.cols] if self.paired else self.cols)
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setStretchLastSection(False)
         self.table.setColumnWidth(self.cols.index("Name"), 150)
@@ -102,8 +107,13 @@ class ChannelEditor(QDialog):
         intro = QLabel(
             "Each marker is a channel of the scan. The name becomes folder and file "
             "names and the marker column in every output, so rename with care." if not self.paired
-            else "A paired study has one scan per marker, so only the marker names are "
-                 "declared. The name becomes folder and file names in every output.")
+            else "A paired study has one scan per marker. Name each marker as its scans "
+                 "name the channel (AF568, AF488): that is how each scan is matched to its "
+                 "marker, and it becomes folder and file names. Write the antibody (pERK, "
+                 "PCNA) under 'What it stains'; the screens use that. The counterstain "
+                 "(DAPI) is in every scan and is not a marker."
+                 + (" The slides name: %s." % ", ".join(self.scan_names)
+                    if self.scan_names else ""))
         intro.setWordWrap(True)
         intro.setStyleSheet(T.HINT)
         self.status = QLabel("")
@@ -189,9 +199,23 @@ class ChannelEditor(QDialog):
         show = QCheckBox()
         show.setChecked(bool(r.get("show")))
         show.stateChanged.connect(lambda *_: self._refresh())
-        name = MarkerBox(r.get("name") or "", r.get("band"))
-        name.editTextChanged.connect(lambda *_: self._refresh())
+        if self.paired:
+            # The scan's channel name, picked from what the slides carry; the
+            # antibody list belongs to the next column.
+            name = QComboBox()
+            name.setEditable(True)
+            name.addItems(self.scan_names)
+            name.setEditText(r.get("name") or "")
+            name.text = name.currentText
+            name.editTextChanged.connect(lambda *_: self._refresh())
+            stains = MarkerBox(r.get("stains") or "", r.get("band"))
+            stains.editTextChanged.connect(lambda *_: self._refresh())
+        else:
+            name = MarkerBox(r.get("name") or "", r.get("band"))
+            name.editTextChanged.connect(lambda *_: self._refresh())
         cell = {"Show": show, "Name": name, "Colour": self._colour_combo(r.get("colour"))}
+        if self.paired:
+            cell["Stains"] = stains
         if not self.paired:
             role = self._combo(list(CH.ROLES), r.get("role"))
             czi = QLineEdit(r.get("czi_name") or "")
@@ -237,6 +261,8 @@ class ChannelEditor(QDialog):
                  "name": self._w(i, "Name").text(), "show": self._w(i, "Show").isChecked(),
                  "colour": None if colour in (DEFAULT_TEXT, CUSTOM_TEXT) else colour,
                  "role": CH.MARKER}
+            if self.paired:
+                r["stains"] = self._w(i, "Stains").text()
             if not self.paired:
                 plane = self._w(i, "Plane").value()
                 r.update({"role": self._w(i, "Role").currentText(),
@@ -275,6 +301,15 @@ class ChannelEditor(QDialog):
             errors, warnings = E.check(cfg, self.layout)
         except (ValueError, TypeError) as exc:
             errors, warnings = [str(exc)], []
+        if self.paired and self.scan_names:
+            for r in rows:
+                n = r["name"].strip()
+                if n and n not in self.scan_names:
+                    errors.append(
+                        "No scan names a channel %r (the slides name %s), so no scan would "
+                        "be matched to this marker. Use the scan's channel name here, and "
+                        "write %r under 'What it stains'."
+                        % (n, ", ".join(self.scan_names), n))
         if not rows:
             warnings = warnings or ["nothing declared yet"]
         lines = [f"<span style='color:{T.DANGER}'>%s</span>" % _esc(e) for e in errors[:5]]

@@ -501,7 +501,8 @@ note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
 
     Key("marker_identity", "raw",
         "Which fluorophore is which marker. Filled in by "
-        "00c_channel_identity.py, then confirmed by the operator.",
+        "00c_channel_identity.py or under 'What it stains' in the app's channel "
+        "editor, then confirmed by the operator.",
         default=None, status=DOCUMENTED, example={},
         note="Fluorophore -> marker name, e.g. {\"AF568\": \"pERK\"}. Written "
              "by 00c --accept and read by no stage. Until it is filled in, "
@@ -736,7 +737,9 @@ note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
         default=None, ui=False, in_example=False,
         note="Written and read by the app only; no stage reads it, so editing "
              "or deleting it never changes a result. `detected` holds what was "
-             "read from CZI files (evidence, not input), `decisions` the changes "
+             "read from CZI files (evidence, not input), `slides` the whole-study "
+             "summary of what the slide headers said (evidence, not input; the full table is in "
+             "slide_metadata.json beside the study file), `decisions` the changes "
              "made in the app (the animal-to-treatment key is recorded by name "
              "only, never by value), `runs` the stages that ran with a hash of "
              "the config and the code version. `portable` records each path setting that "
@@ -902,6 +905,9 @@ def _check_project(value):
     if synced is not None and (not isinstance(synced, dict)
                                or not all(isinstance(k, str) and isinstance(v, str) for k, v in synced.items())):
         out.append("`synced` must map curation names to hashes")
+    slides = value.get("slides")
+    if slides is not None and not isinstance(slides, dict):
+        out.append("`slides` must be a block")
     portable = value.get("portable")
     if portable is not None:
         if not isinstance(portable, dict) or not all(isinstance(k, str) and isinstance(v, str)

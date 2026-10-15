@@ -81,6 +81,7 @@ if _HERE not in sys.path:
 # the whole process. Imported, not re-implemented: this block used to be four
 # lines copy-pasted into every stage.
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
+import ls_progress as PG  # noqa: E402
 
 ATLAS_PDF = CONFIG["atlas_pdf"]
 OUT_DIR = os.path.join(CONFIG["out_root"], "atlas", "plates")
@@ -440,6 +441,7 @@ def main():
     raster_pages = {}
 
     for page_no in range(doc.page_count):
+        PG.report(page_no, doc.page_count, "atlas pages")
         page = doc[page_no]
         render = render_page(page)
         dots = page_dots(page, render)

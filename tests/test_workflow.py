@@ -477,6 +477,34 @@ if MW:
         _t.sleep(0.02)
     chk("a finished run that skipped scenes says so in the drawer",
         "2 scenes not drawn" in w.drawer.state.text(), True)
+
+    import threading as _th
+    _release = _th.Event()
+
+    def _counting_run(stage, on_line=None, extra_argv=()):
+        on_line("starting")
+        on_line("@@progress 5/10 sections")
+        _release.wait(10)
+        return RN.StageResult(stage.sid, True, 0.1, "")
+    w.runner.run = _counting_run
+    w.run_stages(["scene_renders"])
+    _end = _t.time() + 10
+    while w.drawer.bar.maximum() != 10 and _t.time() < _end:
+        QCoreApplication.processEvents()
+        _t.sleep(0.02)
+    _row = w.lists["prepare"].rows["scene_renders"].bar
+    chk("a running stage shows how far it has got",
+        (w.drawer.bar.isVisibleTo(w.drawer), w.drawer.bar.value(), w.drawer.count.text(),
+         _row.maximum(), _row.value()),
+        (True, 5, "5 of 10 sections (50%)", 10, 5))
+    chk("...and its count lines stay out of the log",
+        "@@progress" in w.drawer.log.toPlainText(), False)
+    _release.set()
+    _end = _t.time() + 10
+    while (w._thread is not None or w._queue) and _t.time() < _end:
+        QCoreApplication.processEvents()
+        _t.sleep(0.02)
+    chk("the bar goes when the stage is done", w.drawer.bar.isVisibleTo(w.drawer), False)
     w.server.stop()
 
 print()

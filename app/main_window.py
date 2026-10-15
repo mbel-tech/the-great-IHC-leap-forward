@@ -16,9 +16,11 @@ from PySide6.QtCore import QObject, Qt, QThread, Signal
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
     QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel, QListWidgetItem, QMainWindow,
-    QMessageBox, QPlainTextEdit, QPushButton, QStackedWidget, QVBoxLayout, QWidget)
+    QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QStackedWidget, QVBoxLayout,
+    QWidget)
 
 import ls_project as LP
+import progress as PR
 import stages as S
 import state as ST
 import theme as T
@@ -64,6 +66,18 @@ class ActivityDrawer(QFrame):
         self.last.setStyleSheet(QUIET)
         self.last.setMinimumWidth(100)
         top.addWidget(self.last, 1)
+        # How far the running stage has got. Busy (sliding) until the stage
+        # prints a count, then filled; see progress.py for what counts.
+        self.bar = QProgressBar()
+        self.bar.setObjectName("drawerProgress")
+        self.bar.setTextVisible(False)
+        self.bar.setFixedWidth(220)
+        self.bar.setVisible(False)
+        top.addWidget(self.bar)
+        self.count = QLabel("")
+        self.count.setStyleSheet(QUIET)
+        self.count.setVisible(False)
+        top.addWidget(self.count)
         self.stop_btn = QPushButton("Stop after this stage")
         self.stop_btn.setVisible(False)
         top.addWidget(self.stop_btn)
@@ -84,6 +98,23 @@ class ActivityDrawer(QFrame):
     def _toggle(self, on):
         self.log.setVisible(on)
         self.toggle.setText("Hide log" if on else "Show log")
+
+    def start_progress(self):
+        """A stage has started: a busy bar until it reports a count."""
+        self.bar.setRange(0, 0)
+        self.bar.setVisible(True)
+        self.count.setText("")
+        self.count.setVisible(False)
+
+    def show_progress(self, p):
+        self.bar.setRange(0, p.total)
+        self.bar.setValue(p.done)
+        self.count.setText(PR.words(p))
+        self.count.setVisible(True)
+
+    def stop_progress(self):
+        self.bar.setVisible(False)
+        self.count.setVisible(False)
 
     def append(self, text):
         self.log.appendPlainText(text)
@@ -689,7 +720,9 @@ class MainWindow(QMainWindow):
         self._job = _Job(self.runner, st)
         self._job.moveToThread(self._thread)
         self._thread.started.connect(self._job.run)
-        self._job.line.connect(self._log)
+        self._job.line.connect(self._stage_line)
+        self.drawer.start_progress()
+        self._row_progress(sid, None)
         # A bound method of the window, not a lambda: a lambda has no thread of
         # its own, so Qt would call it on the worker thread, which then tries to
         # wait on itself and starts the next stage's thread from inside it.
@@ -700,10 +733,37 @@ class MainWindow(QMainWindow):
     def _job_finished(self, res):
         self._done(self._current, res)
 
+    def _stage_line(self, line):
+        """A line from the running stage: to the log, and to the bars if it is a count."""
+        p = PR.parse(line)
+        if p is None or not p.hidden:
+            self._log(line)
+        current = getattr(self, "_current", None)
+        if p is not None and current is not None:
+            self.drawer.show_progress(p)
+            self._row_progress(current.sid, p)
+
+    def _row_progress(self, sid, p):
+        """The same count on the running stage's own row, wherever it is listed.
+
+        None puts the row's bar back to busy, for a stage that has just started.
+        """
+        for scr in [self.curate] + list(self.lists.values()):
+            row = getattr(scr, "rows", {}).get(sid)
+            if not isinstance(getattr(row, "bar", None), QProgressBar):
+                continue
+            if p is None:
+                row.bar.setRange(0, 0)
+            else:
+                row.bar.setRange(0, p.total)
+                row.bar.setValue(p.done)
+                row.bar.setToolTip(PR.words(p))
+
     def _done(self, st, res):
         self._thread.quit()
         self._thread.wait()
         self._thread = None
+        self.drawer.stop_progress()
         problem = self.session.record_run(st.sid, res.ok, getattr(self, "_run_started", None),
                                           now_iso(), options=getattr(self, "_run_values", None))
         if problem:

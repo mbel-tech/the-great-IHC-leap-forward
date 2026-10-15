@@ -124,6 +124,7 @@ if _HERE not in sys.path:
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
 import ls_channels as CH  # noqa: E402
 import czi_read as CR  # noqa: E402
+import ls_progress as PG  # noqa: E402
 
 # The markers this study measures, in declared order. ls_channels is the
 # single source of that list; naming a fluorophore here would pin the stage
@@ -853,7 +854,8 @@ def main():
         print(f"rendering from the CZI at {args.um_px} um/px "
               f"(native {GEO.BASE_PX_UM}); --source overview for the old route")
 
-    for uid in uids:
+    for n_done, uid in enumerate(uids):
+        PG.report(n_done, len(uids), "sections")
         out_path = os.path.join(out_dir, uid + ".png")
         if not args.verify and not args.force and os.path.exists(out_path):
             existing += 1

@@ -34,6 +34,7 @@ if _HERE not in sys.path:
 # lines copy-pasted into every stage.
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
 import ls_naming as NM  # noqa: E402
+import ls_progress as PG  # noqa: E402
 
 OUT_ROOT = CONFIG["out_root"]
 OVERVIEW_DIR = os.path.join(OUT_ROOT, "overviews")
@@ -306,7 +307,9 @@ def main():
         by_key[(r["animal"], r["marker_channel"])].append(r)
 
     sheets = []
-    for (animal, marker), group in sorted(by_key.items(), key=lambda kv: (NM.natural_key(kv[0][0]), kv[0][1])):
+    for n_done, ((animal, marker), group) in enumerate(
+            sorted(by_key.items(), key=lambda kv: (NM.natural_key(kv[0][0]), kv[0][1]))):
+        PG.report(n_done, len(by_key), "animals and markers")
         written = build_sheet(group, animal, marker, args.kind, args.cols, args.thumb, SHEET_DIR)
         sheets.extend(written)
         print(f"  {animal:<7} {marker:<6} {len(group):>4} sections -> {len(written)} page(s)")

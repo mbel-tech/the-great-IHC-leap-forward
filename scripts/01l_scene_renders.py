@@ -89,6 +89,7 @@ import ls_config as LC  # noqa: E402
 import ls_channels as CH  # noqa: E402
 import ls_io as IO  # noqa: E402
 import czi_read as CR  # noqa: E402
+import ls_progress as PG  # noqa: E402
 
 OUT_ROOT = CONFIG["out_root"]
 SOURCE_DIR = CONFIG["source_dir"]
@@ -517,7 +518,10 @@ def main():
     failed = []
     t0 = time.time()
     fields_cache = {}
+    n_scenes, n_seen = len(scenes), 0
     for fname in sorted(by_file):
+        PG.report(n_seen, n_scenes, "sections")
+        n_seen += len(by_file[fname])
         rows = sorted(by_file[fname], key=lambda r: int(r["scene_index"]))
         marker = rows[0]["marker_channel"]
         colour = MARKER_COLOURS.get(marker)

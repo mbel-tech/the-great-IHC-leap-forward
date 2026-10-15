@@ -1,0 +1,68 @@
+# Claude reviews every pull request against REVIEW.md and leaves comments.
+#
+# Needs ONE of these repository secrets (Settings > Secrets and variables >
+# Actions > New repository secret):
+#   CLAUDE_CODE_OAUTH_TOKEN  from `claude setup-token` (uses a Claude plan), or
+#   ANTHROPIC_API_KEY        from console.anthropic.com (billed per use).
+# Without either, this job is skipped rather than failing.
+#
+# The Claude GitHub App must be installed on the repository:
+#   https://github.com/apps/claude
+name: Claude review
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  id-token: write
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check a key is set
+        id: key
+        env:
+          OAUTH: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          API: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -n "$OAUTH$API" ]; then echo "ok=true" >> "$GITHUB_OUTPUT"
+          else echo "::notice::No CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY secret - skipping the review."
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.key.outputs.ok == 'true'
+        with:
+          fetch-depth: 1
+
+      - uses: anthropics/claude-code-action@v1
+        if: steps.key.outputs.ok == 'true'
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          track_progress: true
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            Review this pull request. Read REVIEW.md first and apply its rules.
+            Look for bugs that could change a measurement, lose curation work, or
+            make a failed step look done; then robustness; then test gaps. Trace
+            each finding through the code before reporting it, and drop anything
+            you cannot back up.
+
+            Post each finding as an inline comment on the line it is about, with
+            what goes wrong and a suggested fix. Then post one summary comment
+            with gh pr comment: the findings ranked by severity, or a single line
+            saying nothing blocking was found. Do not comment on style alone.
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"

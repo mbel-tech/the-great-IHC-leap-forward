@@ -78,6 +78,13 @@ PLATE_SET = AT.set_name(CONFIG)
 PLATE_DIR = AT.plate_dir(CONFIG)
 PLATES_CSV = os.path.join(PLATE_DIR, "plates.csv")
 CURATOR_HTML = os.path.join(REFORMAT_DIR, "level_curator.html")
+# Whose anchors this page holds. localStorage is per ORIGIN, and every page opened
+# from file:// in Chrome is one origin - so every study's level_curator.html reads
+# and writes the same key, and scene uids are built from subject names a pilot and
+# a main study easily share. out_root is what makes a study a study here: it is
+# where its sections live. Normalised so the same folder spelled two ways on
+# Windows is still one study.
+STUDY_ID = os.path.normcase(os.path.abspath(OUT_ROOT))
 
 PAGE = """<!doctype html>
 <meta charset="utf-8"><title>Atlas level curator</title>
@@ -181,6 +188,11 @@ kbd{display:inline-block;padding:1px 6px;border:1px solid var(--line);border-rad
 const DATA = __DATA__;      // [{uid, animal, order, img}]
 const PLATES = __PLATES__;  // [{id, img, regions, missing}]
 const KEY = "ls_level_curator_v1";
+// The key stays the same - the app mirrors it to the project by name (app/state.py
+// KEYS) - and the value is filed per study inside it: {_studies: {STUDY: anchors},
+// _legacy: {...}}. Underscore-led because a scene uid cannot start with one, so the
+// two shapes cannot be mistaken for each other.
+const STUDY = __STUDY__;
 
 // Never PLATES[i] bare. A migrated bare-integer anchor (see migrateAnchors
 // below) keeps whatever index it was stored with even when that index is
@@ -237,7 +249,28 @@ function migrateAnchors(raw, plates){
   return out;
 }
 
-const ANCHORS_RAW = JSON.parse(localStorage.getItem(KEY) || "{}");
+// A store written before anchors were filed per study is a flat {uid: anchor}
+// that cannot say whose it is. This page takes the anchors for ITS sections (its
+// own bucket wins where both have one) and leaves the rest under _legacy, for the
+// page whose sections they are: one study's page must not show another's anchors,
+// and must not delete them either.
+function openStore(raw, uids){
+  // Not wrapped in try: a value that does not parse must stop the page, as it
+  // always has, rather than read as empty and be saved over on the first click.
+  const v = JSON.parse(raw || "{}") || {};
+  const store = (v._studies && typeof v._studies === "object")
+    ? {_studies: v._studies, _legacy: v._legacy || {}}
+    : {_studies: {}, _legacy: v};
+  const mine = Object.assign({}, store._studies[STUDY] || {});
+  for(const u of uids) if(u in store._legacy){
+    if(!(u in mine)) mine[u] = store._legacy[u];
+    delete store._legacy[u];
+  }
+  return {store, mine};
+}
+const OPENED = openStore(localStorage.getItem(KEY), DATA.map(d => d.uid));
+const STORE = OPENED.store;
+const ANCHORS_RAW = OPENED.mine;
 let anchors = migrateAnchors(ANCHORS_RAW, PLATES);
 // Which uids migrateAnchors dropped, so the notice below can tell the
 // operator rather than let a needed re-confirmation look identical to a
@@ -264,7 +297,14 @@ if(droppedAnchors.length){
 const animals = [...new Set(DATA.map(d => d.animal))].sort((a,b)=>+a.slice(2)-+b.slice(2));
 el("animal").innerHTML = animals.map(a => `<option>${a}</option>`).join("");
 el("slider").max = PLATES.length - 1;
-const save = () => localStorage.setItem(KEY, JSON.stringify(anchors));
+// Writes this study's bucket and carries every other one, and whatever of the
+// legacy store is not this page's, through unchanged.
+const save = () => {
+  STORE._studies[STUDY] = anchors;
+  const out = {_studies: STORE._studies};
+  if(Object.keys(STORE._legacy).length) out._legacy = STORE._legacy;
+  localStorage.setItem(KEY, JSON.stringify(out));
+};
 const rows = () => DATA.filter(d => d.animal === el("animal").value)
                        .sort((a,b) => a.order - b.order);
 
@@ -467,7 +507,7 @@ def main():
           for p in AT.plate_order(plates)]
 
     page = IO.fill(PAGE, {"__DATA__": data, "__PLATES__": pl,
-                          "__PLATESET__": PLATE_SET})
+                          "__PLATESET__": PLATE_SET, "__STUDY__": STUDY_ID})
     with open(args.out, "w", encoding="utf-8") as fh:
         fh.write(page)
 

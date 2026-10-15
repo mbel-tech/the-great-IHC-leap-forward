@@ -1019,8 +1019,30 @@ def _first(stage_id, artifact, study):
     """The path of a stage's `artifact` output for marker 0 that exists, or None."""
     for e in S.BY_ID[stage_id].outputs:
         if isinstance(e, S.Art) and e.artifact == artifact:
-            return next((p for p in e.resolve(study.names)[1] if os.path.exists(p)), None)
+            # Marker 0's own, even from an output any marker satisfies.
+            mine = S.Art(artifact, 0).resolve(study.names)[1]
+            return next((p for p in mine if os.path.exists(p)), None)
     return None
+
+
+def export_markers(study):
+    """The indices of the markers the newest ROI export holds rows for.
+
+    What 05a places, read the way it reads it: each row's own `marker`, and an
+    export naming none (one from before the curator stamped it) is taken whole
+    as the first marker's. A marker the study does not declare is one 05a
+    refuses, so it is not asked after. No export: every marker with boxes,
+    since there is nothing to say which should have them.
+    """
+    regions = decision_file("roi_curator", study)
+    if not regions:
+        return [i for i, m in enumerate(study.markers)
+                if any(os.path.exists(p) for p in
+                       S.Art("roi_boxes", i).resolve(study.names)[1])]
+    named = {m.strip() for m in (_column(regions, "marker") or ())} - {""}
+    if not named:
+        return [0] if study.markers else []
+    return [i for i, m in enumerate(study.markers) if m in named]
 
 
 def second_pass(study):
@@ -1662,9 +1684,23 @@ def _changed_from(need, study):
 
 def _own_reason(st, study):
     """Why `st`'s own results no longer follow from what it reads, or None."""
-    mine = [p for e in st.outputs
-            for p in st._alternatives(e, study.out_root, study.names)[1][:1]
-            if os.path.exists(p)]
+    mine = []
+    for e in st.outputs:
+        if isinstance(e, S.Art) and e.marker is None:
+            # One file per marker the export holds (05a's pair per marker): each
+            # must be there, and the oldest decides, so re-placing one marker
+            # cannot vouch for another's. Asked before the run record, which
+            # holds the export but not which markers that run managed to place.
+            for i in export_markers(study):
+                p = next((p for p in S.Art(e.artifact, i).resolve(study.names)[1]
+                          if os.path.exists(p)), None)
+                if p is None:
+                    return ("your ROI export has %s regions that are not placed yet"
+                            % study.marker_label(i))
+                mine.append(p)
+            continue
+        mine += [p for p in st._alternatives(e, study.out_root, study.names)[1][:1]
+                 if os.path.exists(p)]
     made = min((os.path.getmtime(p) for p in mine), default=None)
     fixed = FIXED_AT.get(st.sid)
     if fixed and made is not None and made < fixed[0]:

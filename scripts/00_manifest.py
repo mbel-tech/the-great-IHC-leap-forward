@@ -427,6 +427,71 @@ def render_slidemap(path, member, scenes, rows, cols, serials):
     canvas.save(path)
 
 
+# ---------------------------------------------------------------- refusals
+
+# How far a file's header scale may sit from pixel_size_um. The header stores
+# the scale in metres to many digits, so honest files agree to far better than
+# this; another objective (0.325 at 20x against 0.65 at 10x) is off by 50%.
+PX_TOLERANCE = 0.005
+
+
+def pixel_size_mismatches(file_rows, expected):
+    """[(file, px_um)] for every file not at the configured scale.
+
+    Every stage after this one measures at CONFIG["pixel_size_um"] and never
+    reads the scale from the file again, and the app's autodetect samples only
+    some files, so this is the one place a slide scanned with another
+    objective can be caught. A file with no scale in its header is listed too:
+    it cannot be shown to agree, and would be measured as if it did.
+    """
+    return [(r["file"], r["px_um"]) for r in file_rows
+            if not r["is_redundant_copy"]
+            and (not r["px_um"]
+                 or abs(r["px_um"] - expected) > PX_TOLERANCE * expected)]
+
+
+def duplicate_uids(scene_rows):
+    """{scene_uid: [file, ...]} for every uid more than one file produced.
+
+    The uid leaves out the name suffix, so LS45_8b.czi and LS45_8b_A488.czi
+    both give LS45_s08b_scNN. Checked across ALL files, not per marker pass:
+    in the live paired LS study the two passes of a slide already differ by
+    replicate letter (LS53_2b-_A568 is AF568, LS53_2c is AF488), so a repeat
+    there is never legitimate - and 01k writes clip masks to one flat folder
+    keyed by uid alone (01/04j read them back the same way), and later tables
+    and the curation JSON key on the uid without the marker, so a repeat
+    across passes collides exactly as one within a pass does.
+    """
+    files = defaultdict(list)
+    for r in scene_rows:
+        if r["file"] not in files[r["scene_uid"]]:
+            files[r["scene_uid"]].append(r["file"])
+    return {uid: f for uid, f in files.items() if len(f) > 1}
+
+
+def refusals(file_rows, scene_rows, expected_px):
+    """Lines saying why the manifest must not be written; [] when it may."""
+    lines = []
+    bad_px = pixel_size_mismatches(file_rows, expected_px)
+    if bad_px:
+        lines.append(f"{len(bad_px)} file(s) are not at pixel_size_um = "
+                     f"{expected_px} (tolerance {PX_TOLERANCE:.1%}); every "
+                     f"later stage would measure them at the wrong scale:")
+        lines += [f"    {f}: px_um {px if px else 'missing from header'}"
+                  for f, px in bad_px]
+        lines.append("    -> remove them from source_files, or run them as "
+                     "their own study with their own pixel_size_um.")
+    dupes = duplicate_uids(scene_rows)
+    if dupes:
+        lines.append(f"{len(dupes)} scene uid(s) are produced by more than one "
+                     f"file; their outputs would overwrite each other:")
+        lines += [f"    {uid}: {' and '.join(f)}"
+                  for uid, f in sorted(dupes.items())]
+        lines.append("    -> the uid leaves out the name suffix; rename or "
+                     "drop one of each pair (slide_naming / source_files).")
+    return lines
+
+
 # ---------------------------------------------------------------- main
 
 
@@ -603,6 +668,16 @@ def main():
                 serials,
             )
 
+    # Before anything is written for downstream to read: a stale manifest from
+    # an earlier good run is safer than a fresh one that is wrong.
+    refused = refusals(file_rows, scene_rows, CONFIG["pixel_size_um"])
+    if refused:
+        print()
+        print("!! 00_manifest refuses this study; manifest not written.")
+        for line in refused:
+            print(line)
+        return 1
+
     if accepted:
         merged = dict(overrides)
         merged.update(accepted)
@@ -633,6 +708,7 @@ def main():
     _write_csv(os.path.join(QC_DIR, "slide_layout_summary.csv"), layout_rows)
 
     _report(file_rows, scene_rows, layout_rows, failures)
+    return 0
 
 
 def _write_csv(path, rows):
@@ -721,4 +797,4 @@ def _report(file_rows, scene_rows, layout_rows, failures):
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

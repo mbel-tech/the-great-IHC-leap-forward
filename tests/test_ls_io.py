@@ -85,6 +85,7 @@ try:
         IO.os.replace, IO.time.sleep = real_replace, real_sleep
     chk("exhausted attempts raise", raised, "gone")
     chk("...and the old file is untouched", read(p)[0]["a"], "keep")
+    chk("...and no .tmp is left beside it", os.path.exists(p + ".tmp"), False)
 
     # atomic_save: a context that hands out the temp path.
     q = os.path.join(tmp, "blob.bin")

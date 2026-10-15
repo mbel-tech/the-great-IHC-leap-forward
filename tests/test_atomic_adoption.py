@@ -41,6 +41,7 @@ SITES = {
     # The mask write moved to 01_overviews (checked below); 01k keeps its CSV.
     "01k_saturation_raw.py": (".save(mask_path)", "IO.atomic_write_csv(OUT_CSV, rows, KEYS)"),
     "00d_czi_selftest.py": ('with open(OUT_CSV, "w"', "IO.atomic_write_csv(OUT_CSV, rows, KEYS)"),
+    "04n_roi_worklist.py": ('with open(OUT_CSV, "w"', "IO.atomic_write_csv(OUT_CSV, rows, COLUMNS)"),
 }
 
 for name, (gone, present) in SITES.items():

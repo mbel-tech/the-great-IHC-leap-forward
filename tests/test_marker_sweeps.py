@@ -203,6 +203,61 @@ with temp_study(acquisition=LS):
         mod.declared_names(), {})
 
 print()
+print("--- 00c --accept: the study file is swapped in, never torn ---")
+#
+# `--accept` wrote the study file with open(path, "w"). That file is also the
+# project, curation and all: a crash between the truncate and the last byte
+# left hours of curation as a half-written JSON the app refuses to open. And
+# what it wrote was the DEFAULTED config this stage loaded at import, so a key
+# another writer added since then was dropped, and every default was written
+# in as if the person had chosen it.
+import json                                                     # noqa: E402
+
+with temp_study(acquisition=OTHER,
+                curation={"sections.csv": "hours of decisions"}) as study:
+    mod = load_stage("00c_channel_identity.py")
+    with open(study.path, encoding="utf-8") as fh:
+        disk = json.load(fh)
+    disk["detection"] = {"auto": {"Mk1": {"prob_thresh": 0.5}}}  # 05b, since
+    with open(study.path, "w", encoding="utf-8") as fh:
+        json.dump(disk, fh, indent=2)
+
+    mod.accept({"Mk1": "cFos", "Mk2": "Ki67"})
+    with open(study.path, encoding="utf-8") as fh:
+        after = json.load(fh)
+    chk("--accept records the names",
+        {k: v for k, v in after.get("marker_identity", {}).items()
+         if not k.startswith("_")}, {"Mk1": "cFos", "Mk2": "Ki67"})
+    chk("...keeps the curation", after.get("curation"),
+        {"sections.csv": "hours of decisions"})
+    chk("...keeps what another writer added since this stage loaded",
+        after.get("detection"), {"auto": {"Mk1": {"prob_thresh": 0.5}}})
+    chk("...and changes nothing else, no default written in",
+        {k: v for k, v in after.items() if k != "marker_identity"}
+        == {k: v for k, v in disk.items() if k != "marker_identity"}, True)
+
+    with open(study.path, "rb") as fh:
+        before = fh.read()
+    real_replace = os.replace
+
+    def crash(src, dst):
+        raise RuntimeError("killed mid-write")
+    os.replace = crash
+    raised = ""
+    try:
+        mod.accept({"Mk1": "Ki67", "Mk2": "cFos"})
+    except RuntimeError as exc:
+        raised = str(exc)
+    finally:
+        os.replace = real_replace
+    chk("a crash before the swap reaches the caller", raised, "killed mid-write")
+    with open(study.path, "rb") as fh:
+        chk("...and the study file is exactly as it was", fh.read() == before,
+            True)
+    chk("...with no temp file left beside it",
+        [f for f in os.listdir(study.root) if f.endswith(".tmp")], [])
+
+print()
 print("--- 04l_roi_curator: the counterstain's NAME, and the flag help ---")
 #
 # The Review pane's header already took the counterstain's colour and lift from

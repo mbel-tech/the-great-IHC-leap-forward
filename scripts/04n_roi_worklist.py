@@ -98,6 +98,10 @@ def index_csv():
 
 
 OUT_CSV = os.path.join(REFORMAT_DIR, "roi_worklist.csv")
+COLUMNS = ["rank", "tier", "tier_reason", "scene_uid", "partner_scene_uid",
+           "animal", "section_order", "rotation_unchecked", "pair_confidence",
+           "pair_align_iou", "partner_focus_score", "partner_n_pieces",
+           "partner_largest_piece_mm2"]
 
 # An animal with fewer than this many measurable sections cannot support a
 # per-animal estimate, so its sections are held out of the main job rather than
@@ -234,24 +238,20 @@ def main():
         v = r.get(k, "").strip()
         return v if v not in ("", "nan") else ""
 
-    with open(OUT_CSV, "w", newline="", encoding="utf-8") as fh:
-        w = csv.writer(fh, lineterminator="\n")
-        w.writerow(["rank", "tier", "tier_reason", "scene_uid",
-                    "partner_scene_uid", "animal", "section_order",
-                    "rotation_unchecked", "pair_confidence", "pair_align_iou",
-                    "partner_focus_score", "partner_n_pieces",
-                    "partner_largest_piece_mm2"])
-        n = 0
-        for tier, r in ordered:
-            if args.tier and tier != args.tier:
-                continue
-            n += 1
-            w.writerow([n, tier, reason[tier], r["scene_uid"], r[col_uid],
-                        r["animal"], r["section_order"],
-                        1 if r["paired"] == "0" else 0,
-                        r["pair_confidence"], num(r, "pair_align_iou"),
-                        num(r, col_focus), num(r, col_pieces),
-                        num(r, col_largest)])
+    # Built in full, then swapped in through ls_io: an in-place write truncated
+    # the previous worklist first, so a run killed partway left a half-ranked
+    # queue that still parsed, and 04l --worklist curated from it.
+    rows = []
+    for tier, r in ordered:
+        if args.tier and tier != args.tier:
+            continue
+        rows.append(dict(zip(COLUMNS, [
+            len(rows) + 1, tier, reason[tier], r["scene_uid"], r[col_uid],
+            r["animal"], r["section_order"],
+            1 if r["paired"] == "0" else 0,
+            r["pair_confidence"], num(r, "pair_align_iou"),
+            num(r, col_focus), num(r, col_pieces), num(r, col_largest)])))
+    IO.atomic_write_csv(OUT_CSV, rows, COLUMNS)
 
     counts = defaultdict(int)
     for tier, _ in ordered:

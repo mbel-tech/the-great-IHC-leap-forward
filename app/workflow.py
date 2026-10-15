@@ -943,30 +943,36 @@ def applies(stage, study):
     return True, ""
 
 
-def decided(sid, study):
-    """True when the curator `sid` has an export the next stages can read."""
-    pats = DECISION_FILES.get(sid)
-    if not pats:
-        return True
-    for pat in pats:
-        if pat.startswith("{export}"):
-            full = os.path.join(study.export_root, pat[len("{export}/"):])
-        else:
-            full = os.path.join(study.out_root, pat)
-        if glob.glob(full):
-            return True
-    return False
+#: 05a's copy of the export it read, `reformatted/roi_regions_used_<marker>.csv`
+#: (its record of where the boxes came from). The name matches roi_regions*.csv
+#: and the copy is written after the export, so it is always the newest match -
+#: and it is not an export: no roi_plates sits beside it, so taking it would
+#: lose every exclusion. Same name 05a's find_regions_csv skips.
+USED_COPY = re.compile(r"roi_regions_used_[^.]+\.csv\Z")
 
 
-def decision_file(sid, study):
-    """The newest export for curator `sid`, or None."""
+def _exports(sid, study):
+    """Every export of curator `sid` on disk, 05a's used copies left out."""
     found = []
     for pat in DECISION_FILES.get(sid, ()):
         if pat.startswith("{export}"):
             full = os.path.join(study.export_root, pat[len("{export}/"):])
         else:
             full = os.path.join(study.out_root, pat)
-        found += glob.glob(full)
+        found += [p for p in glob.glob(full) if not USED_COPY.match(os.path.basename(p))]
+    return found
+
+
+def decided(sid, study):
+    """True when the curator `sid` has an export the next stages can read."""
+    if not DECISION_FILES.get(sid):
+        return True
+    return bool(_exports(sid, study))
+
+
+def decision_file(sid, study):
+    """The newest export for curator `sid`, or None."""
+    found = _exports(sid, study)
     return max(found, key=os.path.getmtime) if found else None
 
 

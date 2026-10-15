@@ -537,6 +537,21 @@ _csv(os.path.join(EXP, "roi_plates_02.02.2026_10.00.csv"), ["scene_uid", "exclud
      [(u, "1") for u in UIDS[-3:]])
 chk("every worklist section curated or excluded: Curate is done",
     W.progress_words("curate", *W.step_progress("curate", dm), study=dm), "Done")
+# 05a copies the export it read to reformatted/roi_regions_used_<marker>.csv,
+# AFTER the export was written, so the copy is the newest roi_regions*.csv on
+# disk. It is 05a's record, not a curator export: with no roi_plates beside it,
+# taking it as the newest export would lose every exclusion and could count an
+# older curation than the operator's latest.
+_used = os.path.join(REF, "roi_regions_used_%s.csv" % M0)
+_csv(_used, ["scene_uid", "roi_kind"], [(u, "roi") for u in UIDS[:5]])
+_t = os.path.getmtime(os.path.join(EXP, "roi_regions_02.02.2026_10.00.csv")) + 60
+os.utime(_used, (_t, _t))
+chk("05a's used copy, newer than the export, is not the newest export",
+    os.path.basename(W.decision_file("roi_curator", dm)),
+    "roi_regions_02.02.2026_10.00.csv")
+chk("...so Curate is still done",
+    W.progress_words("curate", *W.step_progress("curate", dm), study=dm), "Done")
+os.remove(_used)
 
 # Detection: 640 of the 1,980 curated sections logged as measured.
 _csv(os.path.join(REF, "roi_boxes_%s.csv" % M0), ["scene_uid", "roi_index"],

@@ -101,3 +101,6 @@ reformatted/roi_curator.html
 # Re-include the shipped atlas images that the image rules above exclude.
 !/atlas/*/*.png
 !/atlas/*/*.jpeg
+
+# User guide screenshots are part of the docs
+!docs/img/user-guide/*.png

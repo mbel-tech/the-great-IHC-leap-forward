@@ -46,6 +46,7 @@ if _HERE not in sys.path:
 # lines copy-pasted into every stage.
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
 import ls_naming as NM  # noqa: E402
+import ls_progress as PG  # noqa: E402
 
 SOURCE_DIR = CONFIG["source_dir"]
 OUT_ROOT = CONFIG["out_root"]
@@ -463,7 +464,8 @@ def main():
         seen_names = {}
         failures = []
 
-        for source, member, container, opener in entries:
+        for n_done, (source, member, container, opener) in enumerate(entries):
+            PG.report(n_done, len(entries), "slide files")
             base = os.path.basename(member)
             parsed = parse_name(member)
             if parsed is None:

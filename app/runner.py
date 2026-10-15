@@ -95,6 +95,9 @@ class Runner:
         # and config.json is beside the executable, so without this every
         # stage fails at import with a missing file.
         os.environ["LS_CONFIG"] = self.config_path
+        # Lets scripts/ls_progress.py print the counts the progress bar reads.
+        # Unset on the command line, where those lines would only be noise.
+        os.environ["LS_PROGRESS"] = "1"
 
     # ---- argv -------------------------------------------------------------
 

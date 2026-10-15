@@ -61,6 +61,7 @@ if _HERE not in sys.path:
 # lines copy-pasted into every stage.
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
 import ls_channels as CH  # noqa: E402
+import ls_progress as PG  # noqa: E402
 
 MARKERS = list(CH.marker_names(CONFIG))
 
@@ -326,6 +327,7 @@ def main():
             if res:
                 results.append(res)
                 taken += 1
+                PG.report(len(results), SECTIONS_PER_MARKER * len(by_marker), "sections")
         print(f"  {marker}: analysed {taken} sections")
 
     if not results:

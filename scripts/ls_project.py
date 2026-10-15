@@ -51,6 +51,12 @@ COMPACT = ("curation",)
 #: is recorded as its size and a hash, so the trail stays readable and bounded.
 BRIEF_LIMIT = 1500
 
+#: Blocks a STAGE writes into the study file, as dotted paths. A run's history
+#: row is written from disk, and these are carried into memory with it: left
+#: behind, the next save of the person's working copy would put back the file
+#: as it was before the stage ran and quietly drop what the stage wrote.
+STAGE_WRITTEN = ("detection.auto",)
+
 #: Keys whose values are never written into the trail.
 REDACTED_PREFIXES = ("groups.",)
 
@@ -184,6 +190,31 @@ def _inside(path, folder):
         return os.path.commonpath([_norm(path), _norm(folder)]) == _norm(folder)
     except ValueError:
         return False
+
+
+def _carry(src, dst, parts):
+    """Copy the value at `parts` from `src` into `dst`, or drop it from `dst` when absent."""
+    node = src
+    for p in parts:
+        if not isinstance(node, dict) or p not in node:
+            node = _MISSING
+            break
+        node = node[p]
+    parent = dst
+    for p in parts[:-1]:
+        nxt = parent.get(p)
+        if not isinstance(nxt, dict):
+            if node is _MISSING:
+                return
+            nxt = parent[p] = {}
+        parent = nxt
+    if node is _MISSING:
+        parent.pop(parts[-1], None)
+    else:
+        parent[parts[-1]] = copy.deepcopy(node)
+
+
+_MISSING = object()
 
 
 def _stamp(path):
@@ -816,11 +847,14 @@ class Project:
         block.setdefault("runs", []).append(rec)
         _cap(block)
         ls_jsonio.write_json_atomic(self.path, disk, compact=COMPACT)
-        # Memory follows disk for runs only; everything else the person has not saved stays unsaved.
+        # Memory follows disk for runs, and for what a stage wrote; everything else the person
+        # has not saved stays unsaved.
         for target in (self.cfg, self._snapshot):
             if target is not None:
                 tb = target.setdefault("project", _new_block())
                 tb["runs"] = copy.deepcopy(block["runs"])
+                for dotted in STAGE_WRITTEN:
+                    _carry(disk, target, dotted.split("."))
         self._stamp = _stamp(self.path)
         LC.clear_cache()
         return rec

@@ -280,7 +280,37 @@ def percentile_range(images, lo=1, hi=99.8, max_samples=2_000_000):
     return low, high
 
 
-def stardist_labels(image, model, n_tiles=None, norm=None):
+def tiles_for(a):
+    """StarDist's tiling for a crop: tiles of roughly 300k px, never under 2x2."""
+    nt = max(2, int(np.ceil(np.sqrt(np.asarray(a).size / 300_000))))
+    return (nt, nt)
+
+
+def stardist_input(image, norm=None):
+    """The crop as StarDist is given it: stretched to 0..1.
+
+    `norm` None stretches THIS crop to its own 1st..99.8th percentile with
+    csbdeep's normalize(), the route every existing count came from. A
+    (low, high) range is applied as given - csbdeep's arithmetic with the
+    range supplied instead of measured (and, like it, no clipping). Shared by
+    `stardist_labels` and the tuning step, so the cut 05b chooses is chosen on
+    exactly what 05c will feed the network.
+    """
+    a = np.asarray(image)
+    if norm is None:
+        from csbdeep.utils import normalize
+        return normalize(a, 1, 99.8)
+    low, high = norm
+    if not (np.isfinite(low) and np.isfinite(high) and high > low):
+        raise SegmentError(
+            f"the intensity range ({low}, {high}) is not usable; it needs "
+            f"two finite numbers with the high above the low.")
+    return ((a.astype(np.float32) - np.float32(low))
+            / (np.float32(high) - np.float32(low) + np.float32(1e-20)))
+
+
+def stardist_labels(image, model, n_tiles=None, norm=None, prob_thresh=None,
+                    nms_thresh=None):
     """StarDist's instance segmentation, tiled.
 
     ALWAYS TILE. Untiled, StarDist takes 121 s on a 1.22 Mpx ROI; at
@@ -300,32 +330,28 @@ def stardist_labels(image, model, n_tiles=None, norm=None):
     done - stretch THIS crop to its own 1st..99.8th percentile, which is right
     for a counterstain and is the route every existing count came from. A range
     is given for a marker segmented on its own channel; see percentile_range
-    for why a per-crop stretch is wrong there. The arithmetic is csbdeep's
-    normalize() with the range supplied instead of measured (and, like it, no
-    clipping), so the two routes differ only in where the range comes from.
+    for why a per-crop stretch is wrong there. See `stardist_input`.
+
+    `prob_thresh` and `nms_thresh` None leave the model's own thresholds in
+    charge, which is what every count before 05b existed was made with. They
+    are passed to the model only when set.
     """
     a = np.asarray(image)
     if n_tiles is None:
-        nt = max(2, int(np.ceil(np.sqrt(a.size / 300_000))))
-        n_tiles = (nt, nt)
-    if norm is None:
-        from csbdeep.utils import normalize
-        x = normalize(a, 1, 99.8)
-    else:
-        low, high = norm
-        if not (np.isfinite(low) and np.isfinite(high) and high > low):
-            raise SegmentError(
-                f"the intensity range ({low}, {high}) is not usable; it needs "
-                f"two finite numbers with the high above the low.")
-        x = ((a.astype(np.float32) - np.float32(low))
-             / (np.float32(high) - np.float32(low) + np.float32(1e-20)))
+        n_tiles = tiles_for(a)
+    x = stardist_input(a, norm)
+    kw = {}
+    if prob_thresh is not None:
+        kw["prob_thresh"] = float(prob_thresh)
+    if nms_thresh is not None:
+        kw["nms_thresh"] = float(nms_thresh)
     labels, _ = model.predict_instances(
-        x, n_tiles=n_tiles, verbose=False, show_tile_progress=False)
+        x, n_tiles=n_tiles, verbose=False, show_tile_progress=False, **kw)
     return labels
 
 
 def segment(image, backend, model=None, k=3.0, min_area_px=10, report=None,
-            norm=None):
+            norm=None, prob_thresh=None, nms_thresh=None):
     """Dispatch to a backend by name.
 
     `report` is the threshold backend's diagnostic and is left untouched by
@@ -334,6 +360,7 @@ def segment(image, backend, model=None, k=3.0, min_area_px=10, report=None,
 
     `norm` is a shared intensity range and only StarDist reads it; the
     threshold backend measures its own background and has no use for one.
+    `prob_thresh` / `nms_thresh` are StarDist's, and None keeps the model's.
     """
     if backend == "threshold":
         return threshold_labels(image, k=k, min_area_px=min_area_px,
@@ -343,7 +370,8 @@ def segment(image, backend, model=None, k=3.0, min_area_px=10, report=None,
             raise SegmentError(
                 "the stardist backend needs a loaded model; 05c loads one per "
                 "process so the weights are read once.")
-        return stardist_labels(image, model, norm=norm)
+        return stardist_labels(image, model, norm=norm,
+                               prob_thresh=prob_thresh, nms_thresh=nms_thresh)
     raise SegmentError(
         f"unknown segmentation backend {backend!r}. Known backends are "
         f"{', '.join(BACKENDS)}.")

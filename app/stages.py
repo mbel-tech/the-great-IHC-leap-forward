@@ -683,10 +683,22 @@ STAGES = [
                 "Reads the newest roi_regions.csv export. Per marker, so a PCNA "
                 "run cannot overwrite the pERK boxes."),
 
+    Stage("tune_detection", "05b  Check signal quality and tune detection",
+          "Quantification",
+          script="05b_tune_detection.py", reader="pylibCZIrw",
+          outputs=["qc/detection_tuning.md"],
+          needs=["roi_geometry"],
+          blurb="Samples ROIs from sections spread over every animal, measures "
+                "background, signal, noise, signal-to-noise, contrast and "
+                "saturation on the plane detection uses, and picks StarDist's "
+                "probability cut where the nucleus count is most stable. One "
+                "setting per marker for the whole study, written to "
+                "detection.auto; detection.stardist overrides it."),
+
     Stage("detect", "05c  Detect and measure nuclei", "Quantification",
           script="05c_detect_rois.py", reader="pylibCZIrw",
           outputs=["results/roi_nuclei.csv"],
-          needs=["roi_geometry"],
+          needs=["roi_geometry", "tune_detection"],
           cli_only=detect_cli_reason,
           blurb="Reads each box at 0.65 um/px, segments nuclei on DAPI with "
                 "StarDist, measures the marker under each nuclear mask. One row "

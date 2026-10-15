@@ -168,7 +168,7 @@ MEASURE = Screen(
          ["roi_geometry_verify", "roi_geometry"]),
         ("Count and measure nuclei",
          "Finds nuclei, measures the marker in each, then builds the per-region table.",
-         ["detect", "roi_dataset"]),
+         ["tune_detection", "detect", "roi_dataset"]),
         ("Repairs for older results",
          "Only for a results file written by an older version of the pipeline. "
          "Each one backs the file up before changing it.",
@@ -339,6 +339,9 @@ PLAIN = {
     "roi_geometry_verify": "Checks that regions map back onto the slides accurately before "
                            "anything is measured.",
     "roi_geometry": "Maps every region you drew back onto the original slide.",
+    "tune_detection": "Measures how bright, clean and even the signal is on a sample of "
+    "sections, then picks the nucleus-detection setting that suits it. One setting for "
+    "the whole study; you can override it in Set up.",
     "detect": "Finds every nucleus inside your regions and measures the marker in each. "
               "Takes hours; can be stopped and resumed.",
     "recensor": "Recomputes the saturation flag on an older results file.",
@@ -622,6 +625,13 @@ OPTIONS = {
             "cannot use."),
         _limit(),
     ],
+    "tune_detection": [
+        Opt("--sections", "int", "Sections to sample",
+            "Per marker, spread evenly over the animals.", default=12, cli_default=12,
+            minimum=1),
+        Opt("--dry-run", "bool", "Report only",
+            "Writes the report but does not change the study's settings."),
+    ],
     "detect": [
         Opt("--order", "choice", "Order sections are measured in",
             "balanced alternates treatment and control so a partial run is already a "
@@ -745,6 +755,8 @@ SETTING_SECTIONS = [
     ("detection", "Nucleus detection",
      "How nuclei are found and counted inside your regions.",
      ["detection.nucleus_diameter_um", "detection.abercrombie.enabled",
+      "detection.stardist.use_auto", "detection.stardist.prob_thresh",
+      "detection.stardist.nms_thresh",
       "detection.threshold.mad_k", "detection.threshold.min_area_um2"]),
 ]
 

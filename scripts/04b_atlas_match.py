@@ -304,7 +304,7 @@ def main():
             cands = [{
                 "plate_id": plate_meta[j]["plate_id"],
                 "page": plate_meta[j]["page"],
-                "img": os.path.join("..", "..", "atlas", PLATE_SET,
+                "img": os.path.join("..", "..", "atlas", os.path.basename(PLATE_DIR),
                                     plate_meta[j]["image_file"]).replace("\\", "/"),
                 "score": round(float(sim[i, j]), 3),
                 "regions": plate_meta[j]["regions"],

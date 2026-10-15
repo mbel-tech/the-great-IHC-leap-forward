@@ -101,6 +101,20 @@ try:
                      "slide": "1", "section_order": "1"}, 5.2, fb)
     chk("01g analyse() on a missing section returns None", got, None)
     chk("...and records no fallback", fb, [])
+    # report() printed main()'s local `fallbacks` and raised NameError at the
+    # end of every 01g run; it now takes the list as an argument.
+    import contextlib
+    import io
+    buf = io.StringIO()
+    err = None
+    try:
+        with contextlib.redirect_stdout(buf):
+            G.report([{"scene_uid": "s1", "animal": "LSX", "verdict": "negligible",
+                       "contrast": 2.0}], "AF568", ["s1"])
+    except Exception as exc:  # noqa: BLE001
+        err = repr(exc)
+    chk("01g report() runs to the end", err, None)
+    chk("...and names the proxy fallbacks", "fell back to the 8-bit proxy" in buf.getvalue(), True)
 
     # 04l: --worklist that does not exist stops with a message, not a traceback
     r = subprocess.run([PY, os.path.join(SCRIPTS, "04l_roi_curator.py"),

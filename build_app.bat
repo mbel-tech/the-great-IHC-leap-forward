@@ -1,10 +1,10 @@
 @echo off
 REM Set up work\appenv, the Python 3.13 environment run_app.bat runs the app in.
 REM
-REM This used to go on to freeze the app with PyInstaller (app\lsapp.spec). That
-REM build left out StarDist, so it could not run Measure, and it could miss
-REM libraries the stages load at run time; it also closed its window on failure,
-REM so nobody saw why. The app now ships as an installer instead, built by
+REM This used to go on to freeze the app with PyInstaller (app\lsapp.spec, now
+REM deleted). That build left out StarDist, so it could not run Measure, and it
+REM could miss libraries the stages load at run time; it also closed its window
+REM on failure, so nobody saw why. The app now ships as an installer instead, built by
 REM packaging\windows\build.ps1 on GitHub Actions - see the README's Download.
 REM
 REM Python 3.13 rather than 3.14: pylibCZIrw publishes no cp314 wheel.

@@ -134,6 +134,59 @@ def marker_names(cfg):
     return [c.name for c in markers(parse(table))]
 
 
+def manifest_marker_problem(cfg, scene_rows):
+    """Why a paired study's markers do not name its scans, or None when they do.
+
+    A paired marker is matched to its scans by the scan's own channel name - the
+    manifest's `marker_channel`, e.g. AF568 - and by nothing else. A list that
+    names what the markers stain (pERK), or counts the counterstain as a marker
+    (DAPI), matches no scan at all, and nothing downstream says so: 01/01k write
+    no clipping masks, 04j finds every section unmeasured, and the ROI worklist
+    comes out empty several stages and hours later. So the stages that first
+    read the manifest stop on it instead.
+
+    Multiplex is not judged here: its channel table resolves against each CZI's
+    own channel names, which `resolve` already refuses when they disagree.
+    """
+    cfg = cfg if isinstance(cfg, dict) else {}
+    acq = cfg.get("acquisition")
+    if not isinstance(acq, dict) or acq.get("layout") != LAYOUT_PAIRED:
+        return None
+    seen = []
+    for r in scene_rows or ():
+        m = (r.get("marker_channel") or "").strip()
+        if m and m not in seen:
+            seen.append(m)
+    if not seen:
+        return None
+    declared = marker_names(cfg)
+    stray = [m for m in declared if m not in seen]
+    missing = [m for m in seen if m not in declared]
+    # A declared marker with no scans yet is a study part-way through
+    # acquisition and is left to 02 to judge. A scan whose channel is not
+    # declared is the failure: its scenes are silently skipped.
+    if not missing:
+        return None
+    parts = ["acquisition.markers is %s, but the scans' marker channels are %s."
+             % (declared, seen)]
+    if stray:
+        parts.append("No scan carries %s." % ", ".join(stray))
+    if missing:
+        parts.append("Scans of %s would be skipped." % ", ".join(missing))
+    parts.append("A paired study names each marker as its scans name the channel, "
+                 "and never lists the counterstain. Set acquisition.markers to %s "
+                 "and record what each stains in marker_identity, e.g. "
+                 "{\"%s\": \"pERK\"}." % (seen, seen[0]))
+    return " ".join(parts)
+
+
+def require_manifest_markers(cfg, scene_rows, where="the study config"):
+    """Stop the stage with `manifest_marker_problem`'s reason, if there is one."""
+    problem = manifest_marker_problem(cfg, scene_rows)
+    if problem:
+        raise SystemExit("%s: %s" % (where, problem))
+
+
 def paired_overrides(cfg):
     """Channels for the markers a `paired` study segments differently.
 

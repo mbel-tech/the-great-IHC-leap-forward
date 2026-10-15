@@ -45,6 +45,7 @@ if _HERE not in sys.path:
 # the whole process. Imported, not re-implemented: this block used to be four
 # lines copy-pasted into every stage.
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
+import ls_channels as CH  # noqa: E402
 import ls_naming as NM  # noqa: E402
 import ls_progress as PG  # noqa: E402
 
@@ -633,6 +634,10 @@ def main():
     _write_csv(os.path.join(QC_DIR, "slide_layout_summary.csv"), layout_rows)
 
     _report(file_rows, scene_rows, layout_rows, failures)
+
+    # Written first so the operator can read which channels the scans carry;
+    # then stopped, because every stage after this keys on those names.
+    CH.require_manifest_markers(CONFIG, scene_rows, CONFIG_PATH)
 
 
 def _write_csv(path, rows):

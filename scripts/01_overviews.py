@@ -183,7 +183,11 @@ def read_scene(czidoc, rect, channel, zoom, *, scene):
 def load_manifest():
     with open(os.path.join(OUT_ROOT, "manifest", "manifest_scenes.csv"),
               newline="", encoding="utf-8") as fh:
-        return list(csv.DictReader(fh))
+        rows = list(csv.DictReader(fh))
+    # A marker list that names no scan writes no clipping masks here or in 01k,
+    # and nothing says so until the ROI worklist comes out empty.
+    CH.require_manifest_markers(CONFIG, rows, CONFIG_PATH)
+    return rows
 
 
 def load_tile_fields():

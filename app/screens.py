@@ -130,6 +130,55 @@ def row_action(st, state, held):
     return None, None
 
 
+def passes_html(study):
+    """The ROI curator's passes, one line each with its own count, as HTML, or "".
+
+    Under `paired` the second marker is a pass of its own (W.second_pass): its
+    sections are curated in the same page, by choosing it in the Channel box.
+    """
+    lines = []
+    for m, (n, total) in W.curation_passes(study):
+        colour = COLOUR["done"] if n >= total else COLOUR["waiting"]
+        state = "Done" if n >= total else f"{n:,} of {total:,} sections curated"
+        how = ("" if m == 0 else
+               f" <span style='{QUIET}'>Choose {esc(study.marker_label(m))} in the "
+               "curator's Channel.</span>")
+        lines.append(f"<b>{esc(study.marker_label(m))} curation</b> "
+                     f"<span style='color:{colour}'>● {state}</span>{how}")
+    return "<br>".join(lines)
+
+
+def coverage_html(cov, label=""):
+    """A compact table of curated sections per animal (rows) and level (columns).
+
+    Cells under the target are amber, so the gaps a matched-level comparison
+    cannot afford are what the eye lands on.
+    """
+    if not cov or not cov["levels"]:
+        return ""
+    t = cov["target"]
+    under = set(cov["under"])
+    cell = "padding:1px 6px;text-align:center"
+    head = "".join(f"<th style='{cell}'>{esc(lv)}</th>" for lv in cov["levels"])
+    body = []
+    for a in cov["animals"]:
+        tds = []
+        for lv in cov["levels"]:
+            n = cov["counts"].get((a, lv), 0)
+            style = (f"{cell};background:{T.WARN_BG};color:{T.WARN}" if (a, lv) in under
+                     else cell)
+            tds.append(f"<td style='{style}'>{n}</td>")
+        body.append(f"<tr><th style='{cell};text-align:left'>{esc(a or '?')}</th>"
+                    + "".join(tds) + "</tr>")
+    gaps = len(under)
+    say = (f"{gaps} animal and level{'s' if gaps != 1 else ''} under the target of {t}"
+           if gaps else f"every animal at or over the target of {t} at every level")
+    return (f"<b>{esc(label)} coverage</b> <span style='{QUIET}'>curated sections per "
+            f"animal and atlas level; {say} (Set up &gt; Curation)</span>"
+            f"<table cellspacing='0' style='margin-top:2px'><tr><th></th>{head}</tr>"
+            + "".join(body) + "</table>")
+
+
 def marks(st):
     if st.unblinds:
         return "⚠ unblinds"
@@ -355,6 +404,19 @@ class CurateScreen(QWidget):
             self.rows[sid] = row
             self.row_holder.addWidget(row)
 
+        # The ROI curator's passes (the second marker's under `paired`) and how
+        # far each animal's curation reaches across the brain levels.
+        self.passes = QLabel("")
+        self.passes.setWordWrap(True)
+        self.passes.setVisible(False)
+        lay.addWidget(self.passes)
+        self.coverage = QLabel("")
+        self.coverage.setTextFormat(Qt.RichText)
+        self.coverage_area = _scroll(self.coverage)
+        self.coverage_area.setMaximumHeight(150)
+        self.coverage_area.setVisible(False)
+        lay.addWidget(self.coverage_area)
+
         actions = QHBoxLayout()
         self.decision = QLabel("")
         self.decision.setWordWrap(True)
@@ -470,6 +532,15 @@ class CurateScreen(QWidget):
                     "export.</span> Decide in the page, then press Export.")
         else:
             self.decision.setText(W.plain(S.BY_ID[sid], study))
+        roi = sid == "roi_curator"
+        passes = passes_html(study) if roi else ""
+        self.passes.setText(passes)
+        self.passes.setVisible(bool(passes))
+        tables = [coverage_html(W.coverage(study, m), study.marker_label(m))
+                  for m, _c in (W.curation_passes(study) if roi else [])]
+        tables = [t for t in tables if t]
+        self.coverage.setText("<br>".join(tables))
+        self.coverage_area.setVisible(bool(tables))
         self.continue_btn.setVisible(sid == "atlas_reframe")
         self.continue_btn.setEnabled(bool(latest))
         self.import_btn.setVisible(sid == "roi_curator")

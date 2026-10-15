@@ -124,7 +124,8 @@ def read_crops(marker, uids, by_sec, geom, rois, side):
         if not boxes:
             continue
         path = os.path.join(CONFIG["source_dir"], g["czi_file"])
-        with pyczi.open_czi(path) as doc:
+        with CR.open_czi(path, int(float(g.get("scene_w") or 0)) or None,
+                         pyczi=pyczi) as doc:
             for bi, b in spread(boxes, rois):
                 crop = CR.read_plane(doc, window(b, side), plane,
                                      scene=int(g["scene_index"]))

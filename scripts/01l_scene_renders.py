@@ -64,6 +64,24 @@ says so once, and the CSV's `marker_range_from` / `nuclear_range_from` say
 Nothing here is measured. 05c reads native pixels from the CZI, whatever these
 pictures look like.
 
+How it is made fast
+-------------------
+
+Decoding the scanner's JPEG-XR tiles is nearly all of the time. Three things
+cut it without changing a byte of any picture (tests/test_czi_speed.py):
+
+  * libCZI keeps the tiles it has decoded (`czi_read.open_czi`), so a tile
+    crossed by three bands is decoded once, not three times;
+  * the counterstain and the marker are read at the same time, one thread
+    each, from their own handle on the file;
+  * several CZIs are drawn at once (`--workers`, by default half the cores,
+    at most four) - but a second scene only starts while
+    the RAM itself, not the page file, has room for it. The first scene is
+    held to the rule below and nothing else, so a tight machine draws one at a
+    time, as before, instead of paging.
+
+Pictures and index rows come out in the same order whatever finishes first.
+
 Run:  python 01l_scene_renders.py
       python 01l_scene_renders.py --um-px 1.3 --marker AF488
       python 01l_scene_renders.py --um-px 0.65 --limit 5
@@ -76,7 +94,9 @@ import importlib.util
 import json
 import os
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 from PIL import Image
@@ -110,6 +130,9 @@ INDEX_CSV = os.path.join(QC_DIR, "scene_renders.csv")
 
 DEFAULT_UM_PX = float(_SR.get("um_per_px", 2.6))
 DEFAULT_RANGE = _SR.get("range", "dataset")
+#: CZIs drawn at once. Each uses two threads (one per channel), so half the
+#: cores, and no more than four: past that the disk, not the CPU, is the limit.
+DEFAULT_WORKERS = max(1, min(4, (os.cpu_count() or 2) // 2))
 #: The finest picture made: the native pixels themselves. Banded reading keeps
 #: the read small at any resolution, but the finished picture is held whole,
 #: and at 0.65 that is 4x the area of 1.3 - so each scene is checked against
@@ -219,7 +242,7 @@ def apply_field(plane, field, b, clipped=None):
     return out
 
 
-def read_scene(read, rect, b):
+def read_blocks(read, rect, b):
     """The whole scene rectangle, block-averaged b x b, as float32."""
     rx, ry, rw, rh = rect
     got = SR.read_region(read, (rx, ry, rx + rw - 1, ry + rh - 1), rect, b,
@@ -316,6 +339,48 @@ def index_key(row_or_path):
     return os.path.normcase(os.path.abspath(p)) if p else ""
 
 
+def available_ram():
+    """Bytes of RAM free now, page file NOT counted, or None when unknown.
+
+    The test for drawing a second scene alongside the first: a scene that
+    spills into the page file costs more than it gains running in parallel.
+    """
+    try:
+        import psutil
+        return int(psutil.virtual_memory().available)
+    except Exception:  # noqa: BLE001 - psutil is optional
+        pass
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            class _Status(ctypes.Structure):
+                _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                            ("ullTotalPhys", ctypes.c_ulonglong),
+                            ("ullAvailPhys", ctypes.c_ulonglong),
+                            ("ullTotalPageFile", ctypes.c_ulonglong),
+                            ("ullAvailPageFile", ctypes.c_ulonglong),
+                            ("ullTotalVirtual", ctypes.c_ulonglong),
+                            ("ullAvailVirtual", ctypes.c_ulonglong),
+                            ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+            st = _Status()
+            st.dwLength = ctypes.sizeof(_Status)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st)):
+                return int(st.ullAvailPhys)
+        except Exception:  # noqa: BLE001
+            return None
+        return None
+    try:
+        with open("/proc/meminfo", encoding="ascii") as fh:
+            for line in fh:
+                key, _, rest = line.partition(":")
+                if key == "MemAvailable":
+                    return int(rest.split()[0]) * 1024
+    except (OSError, ValueError):
+        pass
+    return None
+
+
 def available_memory():
     """Bytes a new allocation can get now, or None when the platform will not say.
 
@@ -367,8 +432,47 @@ def available_memory():
 
 
 def memory_needed(rect, b):
-    """Peak bytes to draw one scene at b x b native pixels per output pixel."""
-    return (rect[2] // b) * (rect[3] // b) * BYTES_PER_PX + 2 * BAND_ROWS * rect[2] * 2
+    """Peak bytes to draw one scene at b x b native pixels per output pixel:
+    the picture, a band in flight for each of the two channels, and each
+    channel's cache of decoded tiles."""
+    return ((rect[2] // b) * (rect[3] // b) * BYTES_PER_PX
+            + 2 * (2 * BAND_ROWS * rect[2] * 2)
+            + 2 * CR.tile_cache_bytes(rect[2]))
+
+
+class MemoryGate:
+    """Lets a scene start only while there is memory for it.
+
+    With nothing else drawing, the rule is `fits` - RAM and page file - as it
+    has always been, and a refusal is final for that scene. With other scenes
+    in flight, the scene waits until free RAM alone covers it on top of what
+    those scenes reserved (counted again even once allocated: cautious on
+    purpose), or until it is the only one left.
+    """
+
+    def __init__(self):
+        self.cond = threading.Condition()
+        self.inflight = 0
+
+    def acquire(self, need):
+        """None once `need` bytes are reserved, else the bytes free (refused)."""
+        with self.cond:
+            while True:
+                if self.inflight == 0:
+                    room = fits(need)
+                    if room is None:
+                        self.inflight += need
+                    return room
+                ram = available_ram()
+                if ram is not None and need + self.inflight + MEMORY_HEADROOM <= ram:
+                    self.inflight += need
+                    return None
+                self.cond.wait(timeout=2.0)
+
+    def release(self, need):
+        with self.cond:
+            self.inflight -= need
+            self.cond.notify_all()
 
 
 def fits(need):
@@ -407,7 +511,21 @@ def render_scene(read_nuc, read_mark, rect, b, fields_nm, ranges, range_mode,
                  marker, colour, ceiling=65535):
     """(composite rgb, stain-only grey, row facts) for one scene, or None."""
     nf, mf = fields_nm
-    nuc = read_scene(read_nuc, rect, b)
+    # The marker is read on a second thread while the counterstain is read and
+    # drawn here: libCZI decodes without holding the GIL, so the two run on two
+    # cores. Its own handle and cache, so the two never share a reader.
+    with ThreadPoolExecutor(1) as ex:
+        pending = ex.submit(read_blocks, read_mark, rect, b)
+        try:
+            return _render(read_nuc, pending, rect, b, nf, mf, ranges, range_mode,
+                           marker, colour, ceiling)
+        finally:
+            pending.cancel()
+
+
+def _render(read_nuc, pending, rect, b, nf, mf, ranges, range_mode, marker,
+            colour, ceiling):
+    nuc = read_blocks(read_nuc, rect, b)
     if nuc is None:
         return None
     # A block mean at the ceiling means every native pixel in it clipped.
@@ -432,7 +550,9 @@ def render_scene(read_nuc, read_mark, rect, b, fields_nm, ranges, range_mode,
     nuc8 = to_8bit(nuc, n_lo, n_hi)
     del nuc
 
-    mark = read_scene(read_mark, rect, b)
+    mark = pending.result()
+    if mark is None:
+        return None
     mclip = mark >= ceiling - 0.5
     mark = apply_field(mark, mf, b, mclip)
     if m_from == "dataset":
@@ -471,6 +591,9 @@ def main():
                     help="only the scans of this marker (default: every marker)")
     ap.add_argument("--force", action="store_true",
                     help="redraw pictures that already exist (default skips them)")
+    ap.add_argument("--workers", type=int, default=DEFAULT_WORKERS, metavar="N",
+                    help="CZIs drawn at once, while free RAM allows (default half "
+                         f"the cores, at most 4: {DEFAULT_WORKERS} here)")
     ap.add_argument("--limit", type=int, default=0, metavar="N",
                     help="stop after trying N scenes, drawn or not (0 = all)")
     args = ap.parse_args()
@@ -514,25 +637,27 @@ def main():
     for r in scenes:
         by_file.setdefault(r["file"], []).append(r)
 
-    made = existing = tried = 0
+    # Which scenes each file has to draw, decided up front and in file order,
+    # so --limit and the skips are what they were when this ran one file at a
+    # time.
+    existing = tried = 0
     failed = []
-    t0 = time.time()
+    jobs = []           # (fname, n scenes in it, rows to draw, marker info)
     fields_cache = {}
-    n_scenes, n_seen = len(scenes), 0
     for fname in sorted(by_file):
-        PG.report(n_seen, n_scenes, "sections")
-        n_seen += len(by_file[fname])
+        if args.limit and tried >= args.limit:
+            break
         rows = sorted(by_file[fname], key=lambda r: int(r["scene_index"]))
         marker = rows[0]["marker_channel"]
         colour = MARKER_COLOURS.get(marker)
         if colour is None:
             failed += [(r["scene_uid"], f"no display colour for {marker}") for r in rows]
+            jobs.append((fname, len(rows), [], None))
             continue
         n_idx, m_idx = SR.plane_indices(marker)
         if (n_idx, m_idx) not in fields_cache:
             f = load_fields((n_idx, m_idx))
             fields_cache[(n_idx, m_idx)] = (f.get(n_idx), f.get(m_idx))
-        fields_nm = fields_cache[(n_idx, m_idx)]
         mdir = os.path.join(out_dir, marker)
 
         todo = []
@@ -550,51 +675,60 @@ def main():
         # scene is skipped (too little memory) must still stop after N.
         if args.limit:
             todo = todo[:max(0, args.limit - tried)]
-        if not todo:
-            if args.limit and tried >= args.limit:
-                break
-            continue
         tried += len(todo)
+        jobs.append((fname, len(rows), todo,
+                     (marker, colour, n_idx, m_idx, fields_cache[(n_idx, m_idx)], mdir)))
 
+    gate = MemoryGate()
+
+    def draw_file(fname, todo, info):
+        """(index rows by key, failures, uids drawn) for one CZI's scenes."""
+        marker, colour, n_idx, m_idx, fields_nm, mdir = info
+        new_rows, bad, drawn = {}, [], set()
         path = os.path.join(SOURCE_DIR, fname)
         if not os.path.exists(path):
-            failed += [(r["scene_uid"], f"CZI not found: {path}") for r in todo]
-            continue
-        drawn = set()
+            return new_rows, [(r["scene_uid"], f"CZI not found: {path}") for r in todo], drawn
         try:
             with pyczi.open_czi(path) as doc:
-                rects = {int(k): (int(v.x), int(v.y), int(v.w), int(v.h))
-                         for k, v in doc.scenes_bounding_rectangle.items()}
+                rects = CR.scene_rects(doc)
+            widest = max([rects[int(r["scene_index"])][2] for r in todo
+                          if int(r["scene_index"]) in rects] or [1])
+            # One handle per channel, each with its own cache of decoded tiles.
+            with CR.open_czi(path, widest) as doc_n, CR.open_czi(path, widest) as doc_m:
                 for r in todo:
                     uid, si = r["scene_uid"], int(r["scene_index"])
                     if si not in rects:
-                        failed.append((uid, f"scene {si} absent from {fname}"))
+                        bad.append((uid, f"scene {si} absent from {fname}"))
                         continue
 
-                    def reader(idx, si=si):
+                    def reader(doc, idx, si=si):
                         return lambda x, y, w, h: CR.read_plane(
                             doc, SR.GEO._Rect(x, y, w, h), idx, scene=si)
 
                     need = memory_needed(rects[si], b)
-                    room = fits(need)
+                    room = gate.acquire(need)
                     if room is not None:
-                        failed.append((uid, f"needs about {need / 1e9:.1f} GB at "
-                                       f"{um_px:.2f} um/px and only {room / 1e9:.1f} GB "
-                                       "can be had (memory and page file) - close "
-                                       "other programs or choose a coarser resolution"))
+                        bad.append((uid, f"needs about {need / 1e9:.1f} GB at "
+                                    f"{um_px:.2f} um/px and only {room / 1e9:.1f} GB "
+                                    "can be had (memory and page file) - close "
+                                    "other programs or choose a coarser resolution"))
                         continue
-                    got = render_scene(reader(n_idx), reader(m_idx), rects[si], b,
-                                       fields_nm, ranges, range_mode, marker, colour,
-                                       ceilings.get(fname, 65535))
-                    if got is None:
-                        failed.append((uid, "empty scene rectangle"))
-                        continue
-                    rgb, only, facts = got
-                    p_rgb = os.path.join(mdir, nuc_dir, uid + ".png")
-                    p_only = os.path.join(mdir, ONLY_DIR, uid + ".png")
-                    save_png(rgb, p_rgb)
-                    save_png(only, p_only)
-                    index[index_key(p_only)] = {
+                    try:
+                        got = render_scene(reader(doc_n, n_idx), reader(doc_m, m_idx),
+                                           rects[si], b, fields_nm, ranges, range_mode,
+                                           marker, colour, ceilings.get(fname, 65535))
+                        if got is None:
+                            bad.append((uid, "empty scene rectangle"))
+                            continue
+                        rgb, only, facts = got
+                        p_rgb = os.path.join(mdir, nuc_dir, uid + ".png")
+                        p_only = os.path.join(mdir, ONLY_DIR, uid + ".png")
+                        save_png(rgb, p_rgb)
+                        save_png(only, p_only)
+                        del rgb, only, got
+                    finally:
+                        gate.release(need)
+                    new_rows[index_key(p_only)] = {
                         "scene_uid": uid, "file": fname, "animal": r.get("animal", ""),
                         "slide": r.get("slide", ""), "variant": r.get("variant", ""),
                         "marker_channel": marker, "scene_index": si,
@@ -605,24 +739,42 @@ def main():
                         "stain_only_png": os.path.abspath(p_only),
                         "reader": "pylibCZIrw", **facts}
                     drawn.add(uid)
-                    made += 1
         except Exception as exc:  # noqa: BLE001 - one bad file must not stop the rest
-            failed += [(r["scene_uid"], f"{type(exc).__name__}: {exc}") for r in todo
-                       if r["scene_uid"] not in drawn]
+            bad += [(r["scene_uid"], f"{type(exc).__name__}: {exc}") for r in todo
+                    if r["scene_uid"] not in drawn]
             print(f"\n  !! {fname}: {exc}")
+        return new_rows, bad, drawn
 
-        # Checkpoint per file, as 01 does: this runs for a long time against a
-        # drive that has dropped writes before.
-        if index:
-            IO.atomic_write_csv(INDEX_CSV, list(index.values()), INDEX_KEYS)
-        # Only when this file drew something: a run that skips every scene
-        # otherwise fills its log with one identical progress line per CZI.
-        if drawn:
-            rate = made / max(time.time() - t0, 1e-9)
-            print(f"\r  drew {made} scenes  ({rate:.2f}/s, "
-                  f"{(time.time() - t0) / 60:.1f} min)", end="")
-        if args.limit and tried >= args.limit:
-            break
+    workers = max(1, args.workers)
+    work = [j for j in jobs if j[2]]
+    if len(work) > 1 and workers > 1:
+        print(f"drawing up to {min(workers, len(work))} CZIs at once")
+    made = 0
+    t0 = time.time()
+    n_scenes, n_seen = len(scenes), 0
+    with ThreadPoolExecutor(workers) as ex:
+        futures = {j[0]: ex.submit(draw_file, j[0], j[2], j[3]) for j in work}
+        # Collected in file order, not as they finish, so the index rows and
+        # the failures list come out as a one-at-a-time run writes them.
+        for fname, n_rows, todo, _info in jobs:
+            PG.report(n_seen, n_scenes, "sections")
+            n_seen += n_rows
+            if fname not in futures:
+                continue
+            new_rows, bad, drawn = futures[fname].result()
+            index.update(new_rows)
+            failed += bad
+            made += len(drawn)
+            # Checkpoint per file, as 01 does: this runs for a long time against a
+            # drive that has dropped writes before.
+            if index:
+                IO.atomic_write_csv(INDEX_CSV, list(index.values()), INDEX_KEYS)
+            # Only when this file drew something: a run that skips every scene
+            # otherwise fills its log with one identical progress line per CZI.
+            if drawn:
+                rate = made / max(time.time() - t0, 1e-9)
+                print(f"\r  drew {made} scenes  ({rate:.2f}/s, "
+                      f"{(time.time() - t0) / 60:.1f} min)", end="")
 
     print()
     print(f"wrote {made} scenes at {um_px:.2f} um/px ({range_mode} range) to {out_dir}")

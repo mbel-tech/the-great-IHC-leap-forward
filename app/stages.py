@@ -344,7 +344,8 @@ STAGES = [
           outputs=["qc/scene_renders.csv"],
           needs=["manifest"],
           blurb="Every scene of every slide drawn from the CZI, read in bands "
-                "so memory stays small. Two folders per marker: the stain over "
+                "so memory stays small, several slides at once while free RAM "
+                "allows. Two folders per marker: the stain over "
                 "the counterstain, and the stain alone in grey. The folder, "
                 "resolution (2.6 um/px by default, 0.65 at the finest) and "
                 "brightness are study settings (scene_render). For looking at "

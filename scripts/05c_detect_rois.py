@@ -1176,7 +1176,10 @@ def main():
         bg_rows = []
         norm_rows = []
         section_norm = {}
-        with pyczi.open_czi(path) as doc:
+        # Keeping decoded tiles: neighbouring ROIs, the second read a shared
+        # range takes, and the background discs all land on the same few tiles.
+        with CR.open_czi(path, int(float(g.get("scene_w") or 0)) or None,
+                         pyczi=pyczi) as doc:
             # ONE INTENSITY RANGE PER SECTION for a marker segmented on its own
             # channel, taken from every crop of it - ROIs and background discs
             # alike - before any of them is segmented. That is a second read

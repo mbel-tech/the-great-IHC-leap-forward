@@ -106,9 +106,11 @@ Run:  python 04o_section_rgb.py
 
 import sys
 import argparse
+import contextlib
 import csv
 import importlib.util
 import os
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 from PIL import Image
@@ -505,9 +507,25 @@ def render_from_czi(read_dapi, read_mark, rep, scene_rect, overview_um_px,
         if art is not None:
             art[r0:r0 + STRIP_ROWS] = ar
 
+    # The marker's native pixels are read on a second thread while the
+    # counterstain's are read and sampled here - libCZI decodes without the
+    # GIL, so the two use two cores. Each plane is still read and sampled
+    # exactly as before; only when its read happens has changed.
+    with ThreadPoolExecutor(1) as ex:
+        pending = ex.submit(read_region, read_mark, bounds, scene_rect, b)
+        try:
+            return _sample_planes(read_dapi, pending, bounds, scene_rect, b, M, t,
+                                  side, tissue, art, dapi_field, mark_field)
+        finally:
+            pending.cancel()
+
+
+def _sample_planes(read_dapi, pending, bounds, scene_rect, b, M, t, side, tissue,
+                   art, dapi_field, mark_field):
     planes = []
-    for read, field in ((read_dapi, dapi_field), (read_mark, mark_field)):
-        region = read_region(read, bounds, scene_rect, b)
+    for which, field in (("dapi", dapi_field), ("mark", mark_field)):
+        region = (read_region(read_dapi, bounds, scene_rect, b) if which == "dapi"
+                  else pending.result())
         vals = np.zeros((side, side), np.float32)
         for r0 in range(0, side, STRIP_ROWS):
             U, V = np.meshgrid(t, t[r0:r0 + STRIP_ROWS])
@@ -659,11 +677,22 @@ class CziSource:
         self._rects = {int(k): (int(r.x), int(r.y), int(r.w), int(r.h))
                        for k, r in self._doc.scenes_bounding_rectangle.items()}
         self._path = fname
+        # One more handle per plane, each keeping the tiles it has decoded
+        # (czi_read.open_czi), so the bands of a section that cross one tile
+        # decode it once and the two planes can be read at the same time.
+        widest = max([r[2] for r in self._rects.values()] or [1])
+        self._stack = contextlib.ExitStack()
+        self._plane_docs = {
+            idx: self._stack.enter_context(
+                CR.open_czi(path, widest, pyczi=self._pyczi))
+            for idx in {self.n_idx, self.m_idx}}
 
     def _close_doc(self):
         if self._doc is not None:
+            self._stack.close()
             self._cm.__exit__(None, None, None)
         self._cm = self._doc = self._path = self._rects = None
+        self._stack = self._plane_docs = None
 
     def render(self, uid, focus_row, dapi_png, extra, flip, art, cen, art_native, um_px):
         m = self.man.get(uid)
@@ -693,10 +722,11 @@ class CziSource:
         if wmask is None:
             return None
 
-        doc = self._doc
+        docs = self._plane_docs
 
         def reader(idx):
-            return lambda x, y, w, h: CR.read_plane(doc, GEO._Rect(x, y, w, h), idx, scene=si)
+            return lambda x, y, w, h: CR.read_plane(docs[idx], GEO._Rect(x, y, w, h), idx,
+                                                    scene=si)
 
         return render_from_czi(reader(self.n_idx), reader(self.m_idx), rep, rect,
                                ov_um, self.native, um_px, wmask, art_native,

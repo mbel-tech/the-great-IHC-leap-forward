@@ -82,6 +82,13 @@ function buildStudy(name, seeded) {
     fs.writeFileSync(path.join(cur, "ls_roi_curator_v1_rois.json"), JSON.stringify({
       _studies: {"/elsewhere/other_study": ["Xx"], "/elsewhere/third_study": ["Yy"]},
       _tokens: {"/elsewhere/other_study": "another-study"}, _legacy: ["Dm"]}));
+    // The ROIs the operator added (ADD ROI), keyed plate set -> plate -> list. The
+    // plate set's name does not matter to the check, which reads the regions.
+    const added = region => ({anyset: {wplate_010: [{region, roi: 7}]}});
+    fs.writeFileSync(path.join(cur, "ls_roi_curator_v1_custom.json"), JSON.stringify({
+      _studies: {[id]: added("Mine"), "/elsewhere/other_study": added("Theirs"),
+                 "/elsewhere/third_study": added("Third")},
+      _tokens: {"/elsewhere/other_study": "another-study"}}));
   }
   buildPage(cfgPath, name, seeded);
   return tmp;
@@ -127,7 +134,7 @@ tmps.forEach(t => fs.rmSync(t, { recursive: true, force: true }));
 
 const { env, load, chk, note, done } = require("./harness");
 const { store } = env;
-const EXP = `{KEY, STUDY, BACKUP_KEY, SEL_KEY, PT_R_KEY, DATA, get S(){return S}, toggleExcl, toggleFav, save,
+const EXP = `{KEY, STUDY, BACKUP_KEY, SEL_KEY, PT_R_KEY, CUSTOM_KEY, PLATES, addRoi, st, DATA, get S(){return S}, toggleExcl, toggleFav, save,
   autosave, roiRestoreBackup, onRoiSize, selStore,
   get SEL(){return SEL}, get PT_R_CANON(){return PT_R_CANON},
   set active(v){active=v}}`;
@@ -135,6 +142,13 @@ const decide = (X, uid, how) => { X.active = uid; how === "fav" ? X.toggleFav() 
 const rec = (o) => Object.assign({plate: 0, pairs: [], assigned: false, noroi: false,
                                   fav: false, rot: 0, excl: false}, o);
 const clear = () => { for (const k of Object.keys(store)) delete store[k]; };
+// ADD ROI on the first plate, for section `uid`, naming the region `name`.
+const addRoi = (X, uid, name) => {
+  X.st(uid).plate = 0; X.active = uid;
+  global.prompt = () => name; X.addRoi(); delete global.prompt;
+};
+// The regions the operator added that a loaded page shows on its first plate.
+const added = X => (X.PLATES[0].hulls || []).filter(h => h.custom).map(h => h.region).join(",");
 
 // ---- study A curates, then study B's page opens in the same browser --------
 clear();
@@ -267,6 +281,56 @@ chk("an unmarked old entry is not carried over", uid in M3.S, false);
 chk("...but the operator is told it exists",
     env.els["studyNote"].textContent.includes("/old/unmarked"), true);
 
+// ---- a ROI the operator added (ADD ROI) belongs to the study it was added in ----
+// The same plate ids in both studies, so a plate-keyed store shared by the origin
+// would put study A's added region on study B's plate - and B's addition would
+// write over A's.
+note("");
+clear();
+const CA = load(EXP, "roi_study_a");
+addRoi(CA, uid, "Aonly");
+const CB = load(EXP, "roi_study_b");
+chk("study B's page does not show the ROI study A added", added(CB), "");
+addRoi(CB, uid, "Bonly");
+const CA2 = load(EXP, "roi_study_a");
+chk("study B adding one does not overwrite study A's", added(CA2), "Aonly");
+chk("...and study B keeps its own", added(load(EXP, "roi_study_b")), "Bonly");
+// Another tab of study A adds one after this page loaded: re-read before saving.
+const CT = load(EXP, "roi_study_a");
+const cv = JSON.parse(store[CT.CUSTOM_KEY]);
+const cset = Object.keys(cv._studies[CT.STUDY])[0];
+cv._studies[CT.STUDY][cset].wplate_010.push({region: "Atab", roi: 90});
+store[CT.CUSTOM_KEY] = JSON.stringify(cv);
+addRoi(CT, uid, "Alater");
+chk("adding one keeps what another tab of the study added meanwhile",
+    added(load(EXP, "roi_study_a")), "Aonly,Atab,Alater");
+
+// Added before the store was filed per study: a flat value no study can claim.
+// Read by a study that has none of its own, and never dropped.
+note("");
+clear();
+store[CA.CUSTOM_KEY] = JSON.stringify({[cset]: {wplate_010: [{region: "Old", roi: 50}]}});
+const CL = load(EXP, "roi_study_a");
+chk("a ROI added before filing still shows", added(CL), "Old");
+addRoi(CL, uid, "Anew");
+chk("adding one keeps it for this study", added(load(EXP, "roi_study_a")), "Old,Anew");
+chk("...and leaves the old value in the store for other studies",
+    JSON.stringify(JSON.parse(store[CA.CUSTOM_KEY])._legacy), JSON.stringify({[cset]: {wplate_010: [{region: "Old", roi: 50}]}}));
+chk("another study with none of its own still reads it", added(load(EXP, "roi_study_b")), "Old");
+
+// The study's folder moved: its added ROIs come with it, another study's do not.
+note("");
+clear();
+addRoi(load(EXP, "roi_study_a"), uid, "Aonly");
+addRoi(load(EXP, "roi_study_b"), uid, "Bonly");
+const CM = load(EXP, "roi_study_a_moved");
+chk("a moved study still shows the ROIs it added", added(CM), "Aonly");
+addRoi(CM, uid, "Amoved");
+const cmv = JSON.parse(store[CM.CUSTOM_KEY])._studies;
+chk("...files them under the new folder on its next addition",
+    JSON.stringify(cmv[CM.STUDY]).includes("Aonly") && JSON.stringify(cmv[CM.STUDY]).includes("Amoved"), true);
+chk("...and leaves the old folder's entry in place", JSON.stringify(cmv[CA.STUDY]).includes("Aonly"), true);
+
 // ---- the seed a page carries comes from its own study's part of the file -----
 // The app mirrors the page's key to out_root/curation/<key>.json, filed per study,
 // and 04l embeds that file in the page it builds. It must embed this study's part
@@ -274,12 +338,15 @@ chk("...but the operator is told it exists",
 // study's), never another study's entry the shared origin left in it.
 note("");
 clear();
-const SD = load(`{SEED_STATE, get SEL(){return SEL}}`, "roi_study_seeded");
+const SD = load(`{SEED_STATE, get SEL(){return SEL}, get CUSTOM(){return CUSTOM}}`, "roi_study_seeded");
 chk("the page is seeded with this study's records",
     !!(SD.SEED_STATE.A1_s01_sc01 && SD.SEED_STATE.A1_s01_sc01.excl), true);
 chk("...and what is unclaimed from before filing", !!(SD.SEED_STATE.A1_s01_sc03 || {}).noroi, true);
 chk("...not another study's", "A1_s01_sc02" in SD.SEED_STATE, false);
 chk("the ROI selection seed reads one from before filing, not another study's",
     JSON.stringify(SD.SEL), '["Dm"]');
+chk("the added-ROI seed is this study's", JSON.stringify(SD.CUSTOM).includes("Mine"), true);
+chk("...not another study's",
+    /Theirs|Third/.test(JSON.stringify(SD.CUSTOM)), false);
 
 done();

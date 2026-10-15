@@ -308,6 +308,45 @@ for _p in _stale_files:
     if os.path.exists(_p):
         os.remove(_p)
 
+# 05a writes one pair of files per marker the export holds rows for (PR #99), so
+# its status asks after each of those markers, not the first declared one: a
+# paired study can curate the second marker first, and a re-export that changes
+# only the second marker's regions must not pass on the first marker's files.
+print("--- 05a is placed for every marker the ROI export holds ---")
+_GEO = S.BY_ID["roi_geometry"]
+for _layout in ("paired", "multiplex"):
+    _c = json.loads(json.dumps(CFG))
+    _c.pop("project", None)
+    _c.setdefault("acquisition", {}).update(layout=_layout, markers=["AF568", "AF488"])
+    _s = study(_c)
+
+    def _place(marker, when):
+        for _a in ("roi_geometry", "roi_boxes"):
+            _put(_s.names.path(_a, marker), "g\n", when)
+
+    _put(_export, "scene_uid,marker\nB,AF488\n", _T0)
+    _place("AF488", _T0 + 10)
+    chk(f"{_layout}: only the second marker curated, and placed: 05a is done",
+        W.state(_GEO, _s), "done")
+    _put(_export, "scene_uid,marker\nA,AF568\nB,AF488\n", _T0 + 20)
+    chk(f"{_layout}: the export now holds a marker with no boxes: out of date, naming it",
+        (W.state(_GEO, _s), "AF568" in (W.outdated(_GEO, _s) or "")), ("outdated", True))
+    _runs = _c.setdefault("project", {}).setdefault("runs", [])
+    _runs.append({"stage": "roi_geometry", "ok": True,
+                  "inputs": W.fingerprint("roi_geometry", _s)})
+    chk(f"{_layout}: ...even with a run on record that read this export",
+        W.state(_GEO, study(_c)), "outdated")
+    _c["project"]["runs"] = []
+    _place("AF568", _T0 + 30)
+    chk(f"{_layout}: first marker placed again, second older than the export: out of date",
+        W.state(_GEO, study(_c)), "outdated")
+    _place("AF488", _T0 + 30)
+    chk(f"{_layout}: every marker in the export placed since it: done",
+        W.state(_GEO, study(_c)), "done")
+    for _p in _stale_files:
+        if os.path.exists(_p):
+            os.remove(_p)
+
 print("--- the settings a stage reads are the ones ls_config says it reads ---")
 _spec = {k.path: k for k in LC.SPEC}
 for st in S.STAGES:
@@ -566,6 +605,21 @@ _csv(os.path.join(EXP, "roi_plates_02.02.2026_10.00.csv"), ["scene_uid", "exclud
      [(u, "1") for u in UIDS[-3:]])
 chk("every worklist section curated or excluded: Curate is done",
     W.progress_words("curate", *W.step_progress("curate", dm), study=dm), "Done")
+# 05a copies the export it read to reformatted/roi_regions_used_<marker>.csv,
+# AFTER the export was written, so the copy is the newest roi_regions*.csv on
+# disk. It is 05a's record, not a curator export: with no roi_plates beside it,
+# taking it as the newest export would lose every exclusion and could count an
+# older curation than the operator's latest.
+_used = os.path.join(REF, "roi_regions_used_%s.csv" % M0)
+_csv(_used, ["scene_uid", "roi_kind"], [(u, "roi") for u in UIDS[:5]])
+_t = os.path.getmtime(os.path.join(EXP, "roi_regions_02.02.2026_10.00.csv")) + 60
+os.utime(_used, (_t, _t))
+chk("05a's used copy, newer than the export, is not the newest export",
+    os.path.basename(W.decision_file("roi_curator", dm)),
+    "roi_regions_02.02.2026_10.00.csv")
+chk("...so Curate is still done",
+    W.progress_words("curate", *W.step_progress("curate", dm), study=dm), "Done")
+os.remove(_used)
 
 # Detection: 640 of the 1,980 curated sections logged as measured.
 _csv(os.path.join(REF, "roi_boxes_%s.csv" % M0), ["scene_uid", "roi_index"],

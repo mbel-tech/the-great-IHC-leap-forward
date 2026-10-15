@@ -304,6 +304,10 @@ for name in ("information", "warning"):
     setattr(QMessageBox, name, staticmethod(lambda *a, **k: QMessageBox.Ok))
 
 SIZE = "ls_roi_curator_v1_size"
+# The ROIs the operator added with ADD ROI: study curation like the rest, so it has to
+# travel with its project and stay out of the next one.
+CUSTOM = "ls_roi_curator_v1_custom"
+A_CUSTOM = json.dumps({"_studies": {"A": {"set": {"plate_1": [{"region": "Aadd", "roi": 9}]}}}})
 
 
 def study_with(name, roi, extra=None):
@@ -329,13 +333,14 @@ def in_file(path, key=KEY):
 A_ROI = {"LS1_s1": {"plate": "A"}}
 B_ROI = {"LS9_s1": {"plate": "B"}}
 C_ROI = {"LS5_s1": {"plate": "C"}}
-pa = study_with("projA", A_ROI, {SIZE: "14"})
+pa = study_with("projA", A_ROI, {SIZE: "14", CUSTOM: A_CUSTOM})
 pb = study_with("projB", B_ROI)
 w = MW.MainWindow(REPO, config_path=pa)
 view = w.curator
 view.show_page("reformatted/roi.html")
 chk("project A's page shows A's curation", wait_loaded(A_ROI), True)
 chk("...and holds A's landmark radius", js(f"localStorage.getItem('{SIZE}')"), "14")
+chk("...and the ROIs added on A, restored from A's project", json.loads(js(f"localStorage.getItem('{CUSTOM}')") or "null"), json.loads(A_CUSTOM))
 
 # A decision on A's page that is still on its way to disk when B opens: the page
 # setItem()s at once, the bridge call arrives a moment later.
@@ -349,6 +354,7 @@ chk("after opening B, B's project file still holds B's curation", in_file(pb), B
 chk("...the page shows B's curation", page_state(), B_ROI)
 chk("...and A's landmark radius is not in it", js(f"localStorage.getItem('{SIZE}') === null"), True)
 chk("...nor in B's project file", in_file(pb, SIZE), None)
+chk("...nor the ROIs added on A", js(f"localStorage.getItem('{CUSTOM}') === null"), True)
 chk("A's decision in flight reached A's project file", in_file(pa), a_late)
 view.bridge.saveFrom(a_gen, KEY, json.dumps(dict(a_late, LS1_s3={"plate": "A unload"})))
 chk("a save from A's page arriving after the switch does not reach B", in_file(pb), B_ROI)
@@ -361,6 +367,7 @@ chk("...and not into A", in_file(pa).get("LS9_s2"), None)
 # localStorage - unless the port is one an earlier server had. Then the old keys are there,
 # and the seed has to empty those the new project does not have, not only fill the rest.
 js(f"localStorage['{SIZE}'] = '14'; true")             # as A's page left it: not mirrored
+js(f"localStorage['{CUSTOM}'] = {A_CUSTOM!r}; true")
 view.project_changed()
 view.refresh_seed()
 view.view.reload()
@@ -368,6 +375,10 @@ wait_loaded(b_new)
 chk("reloaded on the same origin, a key the project lacks is emptied",
     js(f"localStorage.getItem('{SIZE}') === null"), True)
 chk("...so it never reaches the project's file", in_file(pb, SIZE), None)
+chk("...and so are the ROIs added on A's page", js(f"localStorage.getItem('{CUSTOM}') === null"), True)
+js(f"localStorage.setItem('{CUSTOM}', '{{\"b\": 1}}'); true")
+chk("a ROI added on B's page is saved into B", settle(lambda: in_file(pb, CUSTOM) == {"b": 1}), True)
+chk("...and A's added ROIs are untouched", in_file(pa, CUSTOM), json.loads(A_CUSTOM))
 
 print("--- the same for New study ---")
 pc = study_with("projC", C_ROI)

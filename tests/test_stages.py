@@ -228,6 +228,20 @@ with tempfile.TemporaryDirectory() as tmp:
     # how a stage reports done for a file belonging to a different one.
     chk("with no study named, it is not done", st.done(tmp), False)
 
+# 05a writes a pair of files per marker its export holds, and a paired study can
+# curate the second marker before the first: that run is done too.
+with tempfile.TemporaryDirectory() as tmp:
+    names = S.LP.Names(tmp, ["AF568", "AF488"], "paired")
+    st = S.BY_ID["roi_geometry"]
+    for art in ("roi_geometry", "roi_boxes"):
+        p = names.path(art, "AF488")
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        open(p, "w").close()
+    chk("05a placed for the second marker only: done", st.done(tmp, names), True)
+    chk("...and shown under the first marker's names, as before",
+        st.output_names(tmp, names),
+        ["reformatted/roi_geometry_AF568.csv", "reformatted/roi_boxes_AF568.csv"])
+
 # --- one stage's work does not tick another --------------------------------
 print()
 print("--- no two stages are satisfied by the same file ---")

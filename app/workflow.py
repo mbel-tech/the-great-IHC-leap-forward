@@ -943,30 +943,36 @@ def applies(stage, study):
     return True, ""
 
 
-def decided(sid, study):
-    """True when the curator `sid` has an export the next stages can read."""
-    pats = DECISION_FILES.get(sid)
-    if not pats:
-        return True
-    for pat in pats:
-        if pat.startswith("{export}"):
-            full = os.path.join(study.export_root, pat[len("{export}/"):])
-        else:
-            full = os.path.join(study.out_root, pat)
-        if glob.glob(full):
-            return True
-    return False
+#: 05a's copy of the export it read, `reformatted/roi_regions_used_<marker>.csv`
+#: (its record of where the boxes came from). The name matches roi_regions*.csv
+#: and the copy is written after the export, so it is always the newest match -
+#: and it is not an export: no roi_plates sits beside it, so taking it would
+#: lose every exclusion. Same name 05a's find_regions_csv skips.
+USED_COPY = re.compile(r"roi_regions_used_[^.]+\.csv\Z")
 
 
-def decision_file(sid, study):
-    """The newest export for curator `sid`, or None."""
+def _exports(sid, study):
+    """Every export of curator `sid` on disk, 05a's used copies left out."""
     found = []
     for pat in DECISION_FILES.get(sid, ()):
         if pat.startswith("{export}"):
             full = os.path.join(study.export_root, pat[len("{export}/"):])
         else:
             full = os.path.join(study.out_root, pat)
-        found += glob.glob(full)
+        found += [p for p in glob.glob(full) if not USED_COPY.match(os.path.basename(p))]
+    return found
+
+
+def decided(sid, study):
+    """True when the curator `sid` has an export the next stages can read."""
+    if not DECISION_FILES.get(sid):
+        return True
+    return bool(_exports(sid, study))
+
+
+def decision_file(sid, study):
+    """The newest export for curator `sid`, or None."""
+    found = _exports(sid, study)
     return max(found, key=os.path.getmtime) if found else None
 
 
@@ -1013,8 +1019,30 @@ def _first(stage_id, artifact, study):
     """The path of a stage's `artifact` output for marker 0 that exists, or None."""
     for e in S.BY_ID[stage_id].outputs:
         if isinstance(e, S.Art) and e.artifact == artifact:
-            return next((p for p in e.resolve(study.names)[1] if os.path.exists(p)), None)
+            # Marker 0's own, even from an output any marker satisfies.
+            mine = S.Art(artifact, 0).resolve(study.names)[1]
+            return next((p for p in mine if os.path.exists(p)), None)
     return None
+
+
+def export_markers(study):
+    """The indices of the markers the newest ROI export holds rows for.
+
+    What 05a places, read the way it reads it: each row's own `marker`, and an
+    export naming none (one from before the curator stamped it) is taken whole
+    as the first marker's. A marker the study does not declare is one 05a
+    refuses, so it is not asked after. No export: every marker with boxes,
+    since there is nothing to say which should have them.
+    """
+    regions = decision_file("roi_curator", study)
+    if not regions:
+        return [i for i, m in enumerate(study.markers)
+                if any(os.path.exists(p) for p in
+                       S.Art("roi_boxes", i).resolve(study.names)[1])]
+    named = {m.strip() for m in (_column(regions, "marker") or ())} - {""}
+    if not named:
+        return [0] if study.markers else []
+    return [i for i, m in enumerate(study.markers) if m in named]
 
 
 def second_pass(study):
@@ -1654,12 +1682,31 @@ def _changed_from(need, study):
     return "the output of %s" % display_title(n, study)
 
 
+def _own_files(st, study):
+    """(why one is missing, or None; `st`'s outputs that exist, the first of each)."""
+    mine = []
+    for e in st.outputs:
+        if isinstance(e, S.Art) and e.marker is None:
+            # One file per marker the export holds (05a's pair per marker): each
+            # must be there, and the oldest decides, so re-placing one marker
+            # cannot vouch for another's. Asked before the run record, which
+            # holds the export but not which markers that run managed to place.
+            for i in export_markers(study):
+                p = next((p for p in S.Art(e.artifact, i).resolve(study.names)[1]
+                          if os.path.exists(p)), None)
+                if p is None:
+                    return ("your ROI export has %s regions that are not placed yet"
+                            % study.marker_label(i)), mine
+                mine.append(p)
+            continue
+        mine += [p for p in st._alternatives(e, study.out_root, study.names)[1][:1]
+                 if os.path.exists(p)]
+    return None, mine
+
+
 def _made_at(st, study):
     """When `st`'s oldest output was written, or None when it has none."""
-    mine = [p for e in st.outputs
-            for p in st._alternatives(e, study.out_root, study.names)[1][:1]
-            if os.path.exists(p)]
-    return min((os.path.getmtime(p) for p in mine), default=None)
+    return min((os.path.getmtime(p) for p in _own_files(st, study)[1]), default=None)
 
 
 def _fixed_reason(st, study):
@@ -1684,6 +1731,9 @@ def _settings_changed(st, study):
 
 def _own_reason(st, study):
     """Why `st`'s own results no longer follow from what it reads, or None."""
+    missing, _ = _own_files(st, study)
+    if missing:
+        return missing
     made = _made_at(st, study)
     fixed = _fixed_reason(st, study)
     if fixed:

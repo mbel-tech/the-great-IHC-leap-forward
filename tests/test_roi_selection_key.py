@@ -53,6 +53,14 @@ chk("04l fills that placeholder when it builds the page", len(re.findall(r'"__AT
 chk("the seed file is the key's own file under curation/", f'"{key}.json"' in page, True)
 chk("--no-seed leaves the seed out, like the curation seed", "if not args.no_seed:" in page.split("roisel = None")[1][:80], True)
 
+# The ROIs the operator adds (ADD ROI) are curation too: mirrored, and seeded the same way.
+m = re.search(r'const CUSTOM_KEY = "([^"]+)";', page)
+chk("the page declares its added-ROI key", bool(m), True)
+chk("the added-ROI key is mirrored to disk by the app", m.group(1) in keys, True)
+chk("04l fills its seed placeholder when it builds the page", len(re.findall(r'"__CUSTOM__": custom', page)), 1)
+chk("...from the key's own file under curation/", f'"{m.group(1)}.json"' in page, True)
+chk("--no-seed leaves it out too", "if not args.no_seed:" in page.split("custom = None")[1][:80], True)
+
 print()
 print("FAILED: " + ", ".join(failures) if failures else "ALL PASS")
 sys.exit(1 if failures else 0)

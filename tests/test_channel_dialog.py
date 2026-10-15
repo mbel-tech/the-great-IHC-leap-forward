@@ -117,6 +117,91 @@ chk("a marker named by its protein matches no scan, and OK says so",
     (pe2.buttons.button(CEd.QDialogButtonBox.Ok).isEnabled(),
      "What it stains" in pe2.status.text()), (False, True))
 
+# ---- the slides' channel names are read off the window's thread -------------
+# On a USB stick or OneDrive each CZI header can take a second; read on the
+# window's thread, Windows greyed the editor out as "Not responding" before it
+# even opened. The read is held on a gate here, so the editor must be up and
+# saying so while it is still running.
+import threading                                            # noqa: E402
+import time                                                 # noqa: E402
+import autodetect as AD                                     # noqa: E402
+from PySide6.QtCore import QCoreApplication                 # noqa: E402
+
+slides = os.path.join(STUDY.root, "paired_slides")
+os.makedirs(slides, exist_ok=True)
+open(os.path.join(slides, "a.czi"), "wb").close()
+gate, real_detect, threads = threading.Event(), AD.detect, []
+
+
+def gated_detect(source_dir, *a, **k):
+    threads.append(threading.current_thread())
+    gate.wait(10)
+    found = AD.Detection()
+    found.files = ["a.czi"]
+    found.values = {"acquisition.layout": "paired", "acquisition.markers": ["AF568", "AF488"]}
+    return found
+
+
+def pump(until, s=10):
+    end = time.monotonic() + s
+    while not until() and time.monotonic() < end:
+        QCoreApplication.processEvents()
+        time.sleep(0.01)
+
+
+AD.detect = gated_detect
+AD._CACHE.clear()
+started = time.monotonic()
+pr = CEd.ChannelEditor(PCFG, "paired", source_dir=slides)
+pr.show()
+QCoreApplication.processEvents()
+chk("the editor opens before the slides are read", time.monotonic() - started < 5, True)
+pump(lambda: threads)
+chk("...the read runs on another thread",
+    bool(threads) and threads[0] is not threading.main_thread(), True)
+chk("...the editor says it is reading", "Reading" in pr.status.text(), True)
+chk("...and OK waits for the names to check against",
+    pr.buttons.button(QDialogButtonBox.Ok).isEnabled(), False)
+chk("...while the table is there to edit already", pr.table.rowCount(), 2)
+gate.set()
+pump(lambda: pr.scan_names)
+chk("the names fill in when the read is done", pr.scan_names, ["AF568", "AF488"])
+chk("...the scan-channel boxes offer them",
+    [pr._w(0, "Name").itemText(i) for i in range(pr._w(0, "Name").count())], ["AF568", "AF488"])
+chk("...without changing what each row says",
+    [pr._w(i, "Name").text() for i in range(2)], ["AF568", "AF488"])
+chk("...the intro names them", "The slides name: AF568, AF488" in pr.intro.text(), True)
+chk("...and OK is back", pr.buttons.button(QDialogButtonBox.Ok).isEnabled(), True)
+pr.close()
+
+# Closed mid-read: the read is given up and its late answer lands nowhere.
+AD._CACHE.clear()
+gate.clear()
+threads.clear()
+pc = CEd.ChannelEditor(PCFG, "paired", source_dir=slides)
+pump(lambda: threads)
+pc.reject()
+gate.set()
+threads[0].join(10)
+pump(lambda: False, 0.3)
+chk("closing mid-read drops the late answer", (pc.scan_names, pc.result_edits), ([], None))
+del pc
+
+
+# A read that fails says so, and OK is not held for it.
+def broken_detect(source_dir, *a, **k):
+    raise OSError("the drive went away")
+
+
+AD.detect = broken_detect
+AD._CACHE.clear()
+pf = CEd.ChannelEditor(PCFG, "paired", source_dir=slides)
+pump(lambda: not pf._read.busy)
+chk("a failed read says why", "the drive went away" in pf.status.text(), True)
+chk("...and OK is not held for it", pf.buttons.button(QDialogButtonBox.Ok).isEnabled(), True)
+pf.close()
+AD.detect = real_detect
+
 # ---- through the settings dialog ---------------------------------------------
 dlg = CD.ConfigDialog(REPO, path=STUDY.path)
 btn = [b for b in dlg.findChildren(QPushButton) if b.text().startswith("Channels and markers")]
@@ -151,6 +236,17 @@ shown.clear()
 dlg2._save()
 chk("saving after a layout change is refused", "warn:Channels need another look" in shown, True)
 chk("...and writes nothing", read() == after, True)
+
+# ---- a paired study's editor is handed the folder, not names read here --------
+dlg3 = CD.ConfigDialog(REPO, path=STUDY.path)
+dlg3.rows["acquisition.layout"] = (dlg3.rows["acquisition.layout"][0], lambda: "paired")
+dlg3.form._source_dir = lambda: slides
+AD.scan_marker_names = lambda *_: (_ for _ in ()).throw(AssertionError("read on the window's thread"))
+opened = []
+CEd.ChannelEditor.exec = lambda self: (opened.append((self._read_for, self._read.busy)),
+                                       self._read.cancel(), QDialog.Rejected)[2]
+[b for b in dlg3.findChildren(QPushButton) if b.text().startswith("Channels and markers")][0].click()
+chk("the settings dialog leaves the slides to the editor's own read", opened, [(slides, True)])
 
 # ---- the marker list and detection from a CZI ----------------------------------
 import struct                                               # noqa: E402

@@ -37,6 +37,7 @@ KEYS = [
     "ls_roi_curator_v1_backup",    # the rolling snapshot, worth keeping too
     "ls_roi_curator_v1_size",      # the landmark radius; mirrored, so seed it back
     "ls_roi_curator_v1_rois",      # which ROIs the operator chose to draw (a JSON list)
+    "ls_roi_curator_v1_custom",    # the ROIs the operator added (ADD ROI), filed per study
     "ls_atlas_curator_v1",         # 04b's page, retired but a browser may hold it
 ]
 

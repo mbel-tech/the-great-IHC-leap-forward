@@ -12,7 +12,7 @@ figure - is still here as View > All stages.
 import json
 import os
 
-from PySide6.QtCore import QObject, Qt, QThread, Signal
+from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
     QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel, QListWidgetItem, QMainWindow,
@@ -158,6 +158,9 @@ class MainWindow(QMainWindow):
         self._queue_total = 0
         self._shortfalls = []
         self._stop_requested = False
+        # Set when the window was asked to close mid-run: it closes once the
+        # running stage has finished, never while its thread is still writing.
+        self._close_when_idle = False
 
         self.resize(1400, 900)
 
@@ -352,8 +355,10 @@ class MainWindow(QMainWindow):
             self._file_actions[key] = act
             return act
 
-        add("new", "&New project...", lambda: self.session.new_project(self.repo_root, self), "Ctrl+N")
-        add("open", "&Open project...", lambda: self.session.open_project(self, repo_root=self.repo_root), "Ctrl+O")
+        add("new", "&New project...", lambda: self._idle_for("start a new project")
+            and self.session.new_project(self.repo_root, self), "Ctrl+N")
+        add("open", "&Open project...", lambda: self._idle_for("open another project")
+            and self.session.open_project(self, repo_root=self.repo_root), "Ctrl+O")
         self._recent_menu = self._file_menu.addMenu("Open &Recent")
         self._file_menu.aboutToShow.connect(self._fill_recent)
         self._file_menu.addSeparator()
@@ -375,6 +380,8 @@ class MainWindow(QMainWindow):
         ProjectHistory(self.session, self).exec()
 
     def _home_action(self, key):
+        if key in ("switch", "open", "new") and not self._idle_for("open another project"):
+            return
         if key == "switch":
             self._studies()
         elif key == "open":
@@ -394,7 +401,8 @@ class MainWindow(QMainWindow):
         for path in paths:
             act = self._recent_menu.addAction(os.path.basename(path))
             act.setToolTip(path)
-            act.triggered.connect(lambda _=False, p=path: self.session.open_project(self, p))
+            act.triggered.connect(lambda _=False, p=path: self._idle_for("open another project")
+                                  and self.session.open_project(self, p))
             self._recent_actions.append(act)
         self._recent_menu.setEnabled(bool(paths))
         ro = self.session.project.read_only
@@ -435,9 +443,26 @@ class MainWindow(QMainWindow):
         else:
             self.refresh()
 
+    def _idle_for(self, action):
+        """True if no stage is running; otherwise say why `action` has to wait.
+
+        Opening another project rebinds the runner, the server and the
+        curation store while the running stage is still writing into the old
+        study's out_root. Refused here, before the session opens anything: by
+        the time _project_opened hears of it, the project has already changed.
+        """
+        if self._thread is None:
+            return True
+        QMessageBox.information(self, "A step is running",
+                                "A step is still running. Wait for it to finish, or press "
+                                f"Stop after this stage, before you {action}.")
+        return False
+
     def _studies(self):
         """Switch to another study, or make one."""
         from study_picker import StudyPicker
+        if not self._idle_for("switch study"):
+            return
         if not self.session.confirm_discard(self, "switch study"):
             return
         dlg = StudyPicker(self.repo_root, self)
@@ -660,6 +685,10 @@ class MainWindow(QMainWindow):
         for sid in self._queue:
             self._running[sid] = "queued"
         self.drawer.stop_btn.setVisible(len(self._queue) > 1)
+        # Stop disables itself when pressed, and a run that then fails ends in
+        # _done's failure branch, which only hides it; without this the next
+        # queue's Stop stays greyed out.
+        self.drawer.stop_btn.setEnabled(True)
         self._run_next()
         return True
 
@@ -737,6 +766,10 @@ class MainWindow(QMainWindow):
 
     def _job_finished(self, res):
         self._done(self._current, res)
+        if self._close_when_idle and self._thread is None:
+            # Queued, not called: close() from inside the finished signal would
+            # tear the window down while this slot is still on the stack.
+            QTimer.singleShot(0, self.close)
 
     def _stage_line(self, line):
         """A line from the running stage: to the log, and to the bars if it is a count."""
@@ -808,6 +841,24 @@ class MainWindow(QMainWindow):
                             + "\n\nThe full message is in the log (Show log, bottom right).")
 
     def closeEvent(self, e):
+        if self._thread is not None:
+            # Closing now would destroy the QThread while the stage is still
+            # writing, and Qt aborts the whole app ("QThread: Destroyed while
+            # thread is still running"), leaving half-written outputs.
+            e.ignore()
+            box = QMessageBox(QMessageBox.Question, "A step is running",
+                              "A step is still running. Stop after it finishes, or keep running?",
+                              parent=self)
+            stop = box.addButton("Stop after it finishes", QMessageBox.AcceptRole)
+            keep = box.addButton("Keep running", QMessageBox.RejectRole)
+            box.setDefaultButton(keep)
+            box.exec()
+            if box.clickedButton() is stop:
+                self._close_when_idle = True
+                if not self._stop_requested:
+                    self._request_stop()
+            return
+        self._close_when_idle = False
         if not self.session.confirm_discard(self, "close"):
             e.ignore()
             return

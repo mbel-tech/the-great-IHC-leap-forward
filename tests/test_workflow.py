@@ -536,6 +536,79 @@ if MW:
         QCoreApplication.processEvents()
         _t.sleep(0.02)
     chk("the bar goes when the stage is done", w.drawer.bar.isVisibleTo(w.drawer), False)
+
+    def _wait_idle():
+        end = _t.time() + 10
+        while (w._thread is not None or w._queue) and _t.time() < end:
+            QCoreApplication.processEvents()
+            _t.sleep(0.02)
+
+    def _blocking_run(ok):
+        def run(stage, on_line=None, extra_argv=()):
+            _release.wait(10)
+            return RN.StageResult(stage.sid, ok, 0.1, "", None if ok else "it broke")
+        return run
+
+    # Stop, then the stage fails: the next queue must still be stoppable.
+    _release.clear()
+    w.runner.run = _blocking_run(False)
+    w.run_stages(["scene_renders", "pair"])
+    w.drawer.stop_btn.click()
+    _release.set()
+    _wait_idle()
+    _release.clear()
+    w.runner.run = _blocking_run(True)
+    w.run_stages(["scene_renders", "pair"])
+    chk("after a stopped run failed, the next queue's Stop works again",
+        (w.drawer.stop_btn.isVisibleTo(w.drawer), w.drawer.stop_btn.isEnabled()), (True, True))
+
+    # Switching study while a stage runs would rebind the runner under it.
+    _opened = []
+    _real_open, _real_new = w.session.open_project, w.session.new_project
+    w.session.open_project = lambda *a, **k: _opened.append("open")
+    w.session.new_project = lambda *a, **k: _opened.append("new")
+    import study_picker as SP
+    _real_pick = SP.StudyPicker.exec
+    SP.StudyPicker.exec = lambda dlg: (_opened.append("picker"), 0)[1]
+    del asked[:]
+    w._file_actions["open"].trigger()
+    w._file_actions["new"].trigger()
+    w._studies()
+    w._home_action("open")
+    chk("while a stage runs, opening or switching a project is refused",
+        (_opened, asked.count("A step is running")), ([], 4))
+    w.session.open_project, w.session.new_project = _real_open, _real_new
+    SP.StudyPicker.exec = _real_pick
+
+    # Closing mid-run: the box answers with the button whose text is queued.
+    close_answer = []
+
+    def _close_exec(box):
+        asked.append(box.text())
+        want = close_answer.pop(0)
+        next(b for b in box.buttons() if b.text() == want).click()
+        return 0
+    _real_exec = MW.QMessageBox.exec
+    MW.QMessageBox.exec = _close_exec
+    w.show()
+    close_answer.append("Keep running")
+    del asked[:]
+    chk("closing mid-run asks, and Keep running leaves the window open",
+        (w.close(), w.isVisible(), w._thread is not None,
+         asked == ["A step is still running. Stop after it finishes, or keep running?"]),
+        (False, True, True, True))
+    close_answer.append("Stop after it finishes")
+    chk("...Stop after it finishes keeps it open while the stage runs",
+        (w.close(), w.isVisible(), w._stop_requested), (False, True, True))
+    _release.set()
+    _wait_idle()
+    end = _t.time() + 5
+    while w.isVisible() and _t.time() < end:
+        QCoreApplication.processEvents()
+        _t.sleep(0.02)
+    chk("...and closes once it has finished, without running the rest",
+        (w.isVisible(), w._thread, w._running.get("pair")), (False, None, None))
+    MW.QMessageBox.exec = _real_exec
     w.server.stop()
 
 print()

@@ -166,7 +166,7 @@ def progress():
 
 
 def refresh(rscript, quiet=True):
-    """One pass: 06a, both datasets, then the figures.
+    """One pass: 06a, both datasets, then the figures (figures currently off).
 
     06a runs FIRST and every cycle. It owns the per-ROI numbers - the positivity
     cut, the Abercrombie factor, the disc areas - and 06c/06d only group and
@@ -189,46 +189,50 @@ def refresh(rscript, quiet=True):
         if rc:
             print(f"  {label} FAILED (exit {rc})")
             return False
-    # ONE R RUN PER MARKER PRESENT.
-    #
-    # The figures draw one marker at a time - LS_MARKER selects it, defaulting
-    # to the FIRST DECLARED marker - so a bare Rscript call rebuilds the first
-    # marker's figures and nothing else. That is wrong in exactly the situation this loop exists for: the
-    # long run it is meant to babysit is the PCNA one, and it would have spent
-    # hours redrawing unchanged pERK figures, reporting success, and never
-    # producing a PCNA figure at all. Nothing would have errored.
-    #
-    # The markers come from what 06a actually wrote, so this follows the data
-    # rather than a list that has to be kept in step.
-    markers = marker_list()
-    results_dir = os.path.join(G5.OUT_ROOT, "results")
-    for mk in markers:
-        # LS_MARKERS and LS_OUT_ROOT alongside LS_MARKER, because the R scripts
-        # need two things the marker name alone cannot tell them: which marker
-        # is FIRST (that is the one whose figures carry no suffix, so getting it
-        # wrong overwrites the cited set), and where results live. Both are
-        # answered here by the authoritative Python - ls_channels.marker_names
-        # and the config - rather than by a second copy of those rules in R.
-        env = dict(os.environ, LS_MARKER=mk,
-                   LS_MARKERS=",".join(MARKERS),
-                   LS_OUT_ROOT=G5.OUT_ROOT)
-        for script in R_SCRIPTS:
-            name = os.path.basename(script)
-            # R writes UTF-8 (a degree sign in a caption, an em dash in a
-            # warning); the console codepage is not. Decode explicitly, and
-            # never let a stray byte take the loop down.
-            r = subprocess.run(r_command(rscript, script, results_dir),
-                               cwd=_REPO, env=env,
-                               capture_output=quiet, text=True,
-                               encoding="utf-8", errors="replace")
-            if r.returncode:
-                print(f"  {name} FAILED for {mk}:")
-                print((r.stderr or r.stdout or "").strip()[-2000:])
-                return False
-            if quiet and r.stderr:
-                # Rscript writes message() to stderr; progress, not failure.
-                for line in r.stderr.strip().splitlines()[-3:]:
-                    print(f"  [{mk} {name}] " + line)
+    # R FIGURES SWITCHED OFF (2026-10-15, at the operator's request): the
+    # spreadsheets above are still built, but no R script runs. To switch the
+    # figures back on, uncomment the block below and the find_rscript lines
+    # in main().
+    # # ONE R RUN PER MARKER PRESENT.
+    # #
+    # # The figures draw one marker at a time - LS_MARKER selects it, defaulting
+    # # to the FIRST DECLARED marker - so a bare Rscript call rebuilds the first
+    # # marker's figures and nothing else. That is wrong in exactly the situation this loop exists for: the
+    # # long run it is meant to babysit is the PCNA one, and it would have spent
+    # # hours redrawing unchanged pERK figures, reporting success, and never
+    # # producing a PCNA figure at all. Nothing would have errored.
+    # #
+    # # The markers come from what 06a actually wrote, so this follows the data
+    # # rather than a list that has to be kept in step.
+    # markers = marker_list()
+    # results_dir = os.path.join(G5.OUT_ROOT, "results")
+    # for mk in markers:
+    #     # LS_MARKERS and LS_OUT_ROOT alongside LS_MARKER, because the R scripts
+    #     # need two things the marker name alone cannot tell them: which marker
+    #     # is FIRST (that is the one whose figures carry no suffix, so getting it
+    #     # wrong overwrites the cited set), and where results live. Both are
+    #     # answered here by the authoritative Python - ls_channels.marker_names
+    #     # and the config - rather than by a second copy of those rules in R.
+    #     env = dict(os.environ, LS_MARKER=mk,
+    #                LS_MARKERS=",".join(MARKERS),
+    #                LS_OUT_ROOT=G5.OUT_ROOT)
+    #     for script in R_SCRIPTS:
+    #         name = os.path.basename(script)
+    #         # R writes UTF-8 (a degree sign in a caption, an em dash in a
+    #         # warning); the console codepage is not. Decode explicitly, and
+    #         # never let a stray byte take the loop down.
+    #         r = subprocess.run(r_command(rscript, script, results_dir),
+    #                            cwd=_REPO, env=env,
+    #                            capture_output=quiet, text=True,
+    #                            encoding="utf-8", errors="replace")
+    #         if r.returncode:
+    #             print(f"  {name} FAILED for {mk}:")
+    #             print((r.stderr or r.stdout or "").strip()[-2000:])
+    #             return False
+    #         if quiet and r.stderr:
+    #             # Rscript writes message() to stderr; progress, not failure.
+    #             for line in r.stderr.strip().splitlines()[-3:]:
+    #                 print(f"  [{mk} {name}] " + line)
     return True
 
 
@@ -249,9 +253,12 @@ def main():
                     help="give up after this many cycles with no new sections")
     args = ap.parse_args()
 
-    rscript = find_rscript(args.rscript)
-    print(f"Rscript: {rscript}")
-    print("figures: " + ", ".join(os.path.basename(x) for x in R_SCRIPTS))
+    # R figures switched off (2026-10-15) - see refresh(). Uncomment to restore.
+    # rscript = find_rscript(args.rscript)
+    # print(f"Rscript: {rscript}")
+    # print("figures: " + ", ".join(os.path.basename(x) for x in R_SCRIPTS))
+    rscript = None
+    print("figures: off (R steps switched off; spreadsheets only)")
 
     last, stalled, n = None, 0, 0
     while True:

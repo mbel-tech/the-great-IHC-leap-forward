@@ -744,8 +744,9 @@ STAGES = [
           needs=["detect"],
           blurb="06a, 06c and 06d in one run, then the figures for every "
                 "measured marker - the same pass the hourly loop makes, made "
-                "once. 06b, the unblinding join, stays its own step. Needs R "
-                "for the figures."),
+                "once. 06b, the unblinding join, stays its own step. The R "
+                "figures are switched off for now (06e), so this builds the "
+                "spreadsheets only."),
 
     Stage("refresh_loop", "06e  Refresh datasets and figures hourly", "Beyond blinding",
           script="06e_refresh_loop.py",

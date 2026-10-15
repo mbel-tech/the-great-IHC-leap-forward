@@ -188,9 +188,9 @@ print()
 print("--- banding does not change the picture ---")
 read = lambda x, y, w, h: PLANES[0][1][y - 2000:y - 2000 + h, x - 1000:x - 1000 + w]  # noqa: E731
 L.BAND_ROWS = 8
-banded = L.read_scene(read, RECTS[0], 2)
+banded = L.read_blocks(read, RECTS[0], 2)
 L.BAND_ROWS = 1024
-whole = L.read_scene(read, RECTS[0], 2)
+whole = L.read_blocks(read, RECTS[0], 2)
 chk("8-row bands equal one read", np.array_equal(banded, whole))
 chk("...and equal the 2x2 block mean", np.allclose(whole, block_mean(PLANES[0][1], 2)))
 half = np.full((L.SR.PITCH_PX // L.SR.FIELD_DIVISOR,) * 2, 0.5, np.float32)
@@ -282,8 +282,8 @@ with open(L.MANIFEST_CSV, "w", newline="", encoding="utf-8") as fh:
 L.available_memory = lambda: None           # platform cannot say: draw anyway
 chk("...and a platform that cannot say does not block", L.fits(10 ** 12) is None)
 L.available_memory = real
-chk("memory estimate scales with the area", L.memory_needed((0, 0, 4000, 4000), 1)
-    > 5 * L.memory_needed((0, 0, 4000, 4000), 4))
+chk("memory estimate scales with the area", L.memory_needed((0, 0, 20000, 20000), 1)
+    > 5 * L.memory_needed((0, 0, 20000, 20000), 4))
 chk("this machine reports its free memory", isinstance(real(), int))
 
 print()

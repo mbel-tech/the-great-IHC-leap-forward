@@ -66,6 +66,7 @@ import glob
 import importlib.util
 import json
 import os
+import re
 import shutil
 
 import numpy as np
@@ -406,6 +407,15 @@ def _about_this_study(path):
     return bool(uids) and uids <= known
 
 
+#: The copy main() keeps of the export it read, `roi_regions_used_<marker>.csv`
+#: in REFORMAT_DIR. find_regions_csv (and the app's decision_file) skip it.
+USED_COPY = re.compile(r"roi_regions_used_[^.]+\.csv\Z")
+
+
+def used_copy_csv(marker):
+    return os.path.join(REFORMAT_DIR, f"roi_regions_used_{marker}.csv")
+
+
 def find_regions_csv(explicit):
     """Where the ROIs come from. The newest export wins.
 
@@ -438,7 +448,12 @@ def find_regions_csv(explicit):
         # newest download, whatever it was, would be measured as this curation.
         if root == downloads:
             found = [p for p in found if _about_this_study(p)]
-        cand += found
+        # main() keeps a copy of the export it read under USED_COPY's name.
+        # That matches the glob and is written after the export, so it is
+        # always the newest file here: taken as an export, the next run would
+        # re-read the last one without the roi_plates beside it - every
+        # exclusion lost - however stale it is.
+        cand += [p for p in found if not USED_COPY.match(os.path.basename(p))]
     if cand:
         return max(cand, key=os.path.getmtime)
     return None
@@ -1044,7 +1059,7 @@ def _place_marker(marker, regions, plates, args, only=None):
     # boxes are too - the pair has to stay consistent, and a stale source
     # alongside fresh boxes would be worse than none.
     try:
-        used = os.path.join(REFORMAT_DIR, f"roi_regions_used_{marker}.csv")
+        used = used_copy_csv(marker)
         if os.path.abspath(regions) != os.path.abspath(used):
             shutil.copyfile(regions, used)
         with open(os.path.join(REFORMAT_DIR, f"roi_regions_used_{marker}.txt"), "w",

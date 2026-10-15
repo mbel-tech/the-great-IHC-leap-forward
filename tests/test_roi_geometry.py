@@ -702,5 +702,55 @@ with temp_study(acquisition={"layout": "paired",
         chk("...without touching Mk2's boxes", fh.read() == _sentinel, True)
 
 
+print()
+print("--- the newest export is a curator export, not 05a's own used copy ---")
+# 05a copies the export it read to reformatted/roi_regions_used_<marker>.csv as
+# the record of where the boxes came from. That name matches roi_regions*.csv,
+# and the copy is written AFTER the export, so it is always the newest file:
+# with no fresh export, the next run read the copy as if it were one - and
+# since a two-marker export is copied whole, and no roi_plates sits beside the
+# copy, it did so without the operator's exclusions.
+import tempfile as _tf  # noqa: E402
+import time as _time  # noqa: E402
+
+_home = os.environ.get("HOME")
+os.environ["HOME"] = _tf.mkdtemp()      # no stray ~/Downloads of the runner's
+try:
+    os.makedirs(G5.REFORMAT_DIR, exist_ok=True)
+    _real = os.path.join(G5.REFORMAT_DIR, "roi_regions.csv")
+    with open(_real, "w", encoding="utf-8") as fh:
+        fh.write("scene_uid\n")
+    _t = _time.time() - 100
+    os.utime(_real, (_t, _t))
+    _copies = []
+    for _m in ("Mk1", "Mk2"):
+        _c = os.path.join(G5.REFORMAT_DIR, f"roi_regions_used_{_m}.csv")
+        with open(_c, "w", encoding="utf-8") as fh:
+            fh.write("scene_uid\n")
+        _copies.append(_c)
+    chk("a used copy newer than the export is not the export",
+        os.path.basename(G5.find_regions_csv(None) or ""), "roi_regions.csv")
+    os.remove(_real)
+    chk("used copies alone are no export at all", G5.find_regions_csv(None), None)
+    # A real export newer than the copies is still found, flat or stamped.
+    if G5.EXPORT_DIR:
+        _d = os.path.join(G5.EXPORT_DIR, "15.10.2026_10.00")
+        os.makedirs(_d, exist_ok=True)
+        _stamped = os.path.join(_d, "roi_regions_15.10.2026_10.00.csv")
+        with open(_stamped, "w", encoding="utf-8") as fh:
+            fh.write("scene_uid\n")
+        _t = _time.time() + 100
+        os.utime(_stamped, (_t, _t))
+        chk("a stamped export in the export folder is still found",
+            G5.find_regions_csv(None), _stamped)
+        os.remove(_stamped)
+    for _c in _copies:
+        os.remove(_c)
+finally:
+    if _home is None:
+        os.environ.pop("HOME", None)
+    else:
+        os.environ["HOME"] = _home
+
 print("\n" + (f"{fails} FAILED" if fails else "ALL PASS"))
 sys.exit(1 if fails else 0)

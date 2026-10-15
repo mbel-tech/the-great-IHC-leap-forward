@@ -136,6 +136,7 @@ def main():
     if "--check-install" in sys.argv:
         return _check_install()
 
+    _mac_menu_name("The Great IHC Leap Forward")
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     # Before any window exists, so the study picker is drawn light too.
@@ -169,6 +170,47 @@ def main():
     except BaseException as e:                              # noqa: BLE001
         _report(type(e), e, e.__traceback__)
         return 1
+
+
+def _mac_menu_name(name):
+    """Show `name` rather than "python3" as the menu-bar title on macOS.
+
+    The Mac app starts its bundled interpreter, which is not itself an app
+    bundle, so macOS falls back to the process name. Setting CFBundleName on
+    the interpreter's own bundle info before Qt starts is the usual fix. Uses
+    the Objective-C runtime through ctypes rather than adding PyObjC for one
+    line, and is skipped (never fatal) when anything is not as expected.
+    """
+    if sys.platform != "darwin":
+        return
+    try:
+        import ctypes
+        import ctypes.util
+        objc = ctypes.cdll.LoadLibrary(ctypes.util.find_library("objc"))
+        ctypes.cdll.LoadLibrary(ctypes.util.find_library("Foundation"))
+        objc.objc_getClass.restype = objc.sel_registerName.restype = ctypes.c_void_p
+        objc.objc_getClass.argtypes = objc.sel_registerName.argtypes = [ctypes.c_char_p]
+        cls, sel = objc.objc_getClass, objc.sel_registerName
+        # objc_msgSend must be called through a prototype matching each
+        # message on Apple Silicon, so one per shape.
+        addr = ctypes.cast(objc.objc_msgSend, ctypes.c_void_p).value
+        vp = ctypes.c_void_p
+        send = ctypes.CFUNCTYPE(vp, vp, vp)(addr)
+        send_s = ctypes.CFUNCTYPE(vp, vp, vp, ctypes.c_char_p)(addr)
+        send_b = ctypes.CFUNCTYPE(ctypes.c_bool, vp, vp, vp)(addr)
+        send_pp = ctypes.CFUNCTYPE(None, vp, vp, vp, vp)(addr)
+        info = send(send(cls(b"NSBundle"), sel(b"mainBundle")), sel(b"infoDictionary"))
+        # An immutable dictionary would raise an Objective-C exception, which
+        # Python cannot catch: check before writing.
+        if not info or not send_b(info, sel(b"isKindOfClass:"), cls(b"NSMutableDictionary")):
+            return
+
+        def ns(text):
+            return send_s(cls(b"NSString"), sel(b"stringWithUTF8String:"), text.encode())
+
+        send_pp(info, sel(b"setObject:forKey:"), ns(name), ns("CFBundleName"))
+    except Exception:                                       # noqa: BLE001
+        pass
 
 
 def _check_install():

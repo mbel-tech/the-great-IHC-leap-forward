@@ -13,8 +13,17 @@ library, StarDist's model (Measure works offline) and R with the figure packages
 newer version over it upgrades in place, and your studies (in `%USERPROFILE%\.ls-pipeline`)
 are kept. Windows 10 or 11, 64-bit. Detection runs on the CPU.
 
+**Mac** (Apple Silicon M1 or later, macOS 14 or newer): from the same page get
+`The-Great-IHC-Leap-Forward-<version>-mac.dmg`, open it and drag the app onto Applications.
+The app is not signed with a paid Apple developer certificate, so the first time macOS
+refuses to open it: click Done, then **System Settings > Privacy & Security > Open Anyway**.
+After that it opens normally. Everything else is as on Windows, except that the R figures are
+not included and new versions come as a new disk image rather than in-app updates. See
+[packaging/macos/README.md](packaging/macos/README.md).
+
 Releases are built by GitHub Actions from a version tag; see
-[packaging/windows/README.md](packaging/windows/README.md). To run from source instead, see
+[packaging/windows/README.md](packaging/windows/README.md) and
+[packaging/macos/README.md](packaging/macos/README.md). To run from source instead, see
 [Desktop app](#desktop-app).
 
 Automated screening of pERK and PCNA immunofluorescence across whole-brain transverse sections

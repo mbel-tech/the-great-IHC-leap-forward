@@ -1,0 +1,13 @@
+# Held back so every library still loads on the macOS the app promises
+# (MIN_MACOS in build.sh; check_macos_min.py enforces it).
+#
+# itk-elastix 0.25.3 and later publish Apple Silicon wheels for macOS 15 only.
+itk-elastix<0.25.3
+#
+# PySide6 (and shiboken6) wheels are tagged for an older macOS than their
+# libraries are built for: 6.10 and 6.11 load only on macOS 15, 6.12 only on
+# macOS 26. 6.9 loads on 12 and later. The app needs 6.9 or newer.
+PySide6<6.10
+PySide6-Essentials<6.10
+PySide6-Addons<6.10
+shiboken6<6.10

@@ -13,6 +13,7 @@ import os
 import struct
 import sys
 import tempfile
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -220,6 +221,36 @@ with tempfile.TemporaryDirectory() as tmp:
     chk("varying fields are listed",
         "Information/Instrument/Objectives/Objective/LensNA" in d.report["varying"], True)
     chk("the report is JSON", bool(json.dumps(d.report)), True)
+
+print("--- 400 headers of 3000 fields are read in seconds ---")
+def big_flat(i):
+    flat = {}
+    for j in range(2990):
+        flat["Information/Instrument/Things/Thing[Thing:%d]/Part[%d]/Value" % (j // 10, j % 10 + 1)] = str(j)
+    flat["Information/Instrument/Objectives/Objective[Objective:1]@Name"] = "Plan-Apochromat 20x/0.8"
+    flat["Information/Instrument/Objectives/Objective[Objective:1]/LensNA"] = "0.8"
+    flat["Information/Instrument/Objectives/Objective[Objective:1]/Immersion"] = "Air"
+    flat["Information/Instrument/Microscopes/Microscope[Microscope:1]@Name"] = "Axioscan 7"
+    flat["Information/Application/Version"] = "3.%d" % (i % 2)
+    flat["Information/Image/AcquisitionDateAndTime"] = "2025-01-%02dT10:00:00" % (i % 28 + 1)
+    return flat
+many = [("F%d.czi" % i, {"channels": [], "scenes": []}, [], big_flat(i)) for i in range(400)]
+d = A.Detection()
+d.files = [m[0] for m in many]
+t0 = time.time()
+A._report(d, many)
+took = time.time() - t0
+print("     report of 400 x 3000 fields took %.2f s" % took)
+chk("400 headers of 3000 fields report in under 5 s", took < 5, True)
+chk("a bracket key with a slash in the last segment still matches",
+    A.by_tag(A.tag_index({"Objectives/Objective[Plan 20x/0.8]@Name": "x", "Objectives/"
+                          "Objective[Plan 40x/0.95]@Name": "y"}, ("Objective@Name",)),
+             "Objective@Name"), "x")
+chk("...and found the immersion", d.report["instrument"]["objective_immersion"]["value"], "Air")
+chk("...the microscope", d.report["instrument"]["microscope"]["value"], "Axioscan 7")
+chk("...and the NA from the top value", d.report["optics"]["na"], 0.8)
+chk("a varying version is shown as varying",
+    d.report["instrument"]["application_version"]["value"].startswith("3."), True)
 
 print("--- nothing there ---")
 with tempfile.TemporaryDirectory() as tmp:

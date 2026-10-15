@@ -21,6 +21,7 @@ that are absent, and `compare` reports disagreements for a person to judge.
 
 import copy
 import os
+import re
 import statistics
 from collections import Counter
 
@@ -267,25 +268,49 @@ def _colours(d, headers):
 # The report: every header field, and what each one did
 # ---------------------------------------------------------------------------
 
+_BRACKETS = re.compile(r"\[[^\]]*\]")
+
+
 def _plain(path):
     """A flat path without its bracket keys: Objective[Objective:1]/LensNA -> Objective/LensNA."""
-    out, depth = [], 0
-    for ch in path:
-        if ch == "[":
-            depth += 1
-        elif ch == "]":
-            depth -= 1
-        elif depth == 0:
-            out.append(ch)
-    return "".join(out)
+    return _BRACKETS.sub("", path) if "[" in path else path
 
 
-def by_tag(flat, *suffixes):
-    """The first value whose bracket-free path ends with one of `suffixes`, tried in order."""
-    plain = [(_plain(p), v) for p, v in flat.items()]
+def tag_index(flat, suffixes=None):
+    """{bracket-free path: first value} for one file's flat fields, built once.
+
+    With `suffixes`, only paths whose last segment is the last segment of one of
+    them are kept, so the index stays a handful of entries per file.
+    """
+    lasts = {x.rsplit("/", 1)[-1] for x in suffixes} if suffixes else None
+    out = {}
+    for path, value in flat.items():
+        if lasts is not None:
+            # The last segment alone, cheaply; a bracket key holding "/" in the
+            # last segment ("Objective[20x/0.8]@Name") falls back to the full strip.
+            tail = path[path.rfind("/") + 1:]
+            if "]" in tail and "[" not in tail:
+                tail = _plain(path).rsplit("/", 1)[-1]
+            elif "[" in tail:
+                tail = _BRACKETS.sub("", tail)
+            if tail not in lasts:
+                continue
+        out.setdefault(_plain(path), value)
+    return out
+
+
+def by_tag(index, *suffixes):
+    """The first value whose bracket-free path ends with one of `suffixes`, tried in order.
+
+    `index` is a tag_index() (or a raw flat dict, indexed here)."""
+    if any("[" in p for p in index):
+        index = tag_index(index, suffixes)
     for suffix in suffixes:
-        for p, v in plain:
-            if p == suffix or p.endswith("/" + suffix):
+        if suffix in index:
+            return index[suffix]
+        tail = "/" + suffix
+        for p, v in index.items():
+            if p.endswith(tail):
                 return v
     return None
 
@@ -311,7 +336,7 @@ def _most(values):
         return None
     counts = Counter(vals)
     top = counts.most_common(1)[0][0]
-    out = {"value": top, "files": len(vals), "distinct": len(counts)}
+    out = {"value": top, "top": top, "files": len(vals), "distinct": len(counts)}
     if len(counts) > 1:
         out["value"] = "%s (varies: %s)" % (top, ", ".join(
             "%s in %d" % (v, n) for v, n in counts.most_common()))
@@ -347,14 +372,19 @@ _INSTRUMENT_USE = {
 }
 
 
+#: Every suffix _INSTRUMENT looks for, so each file is indexed once for all of them.
+_INSTRUMENT_SUFFIXES = tuple(x for _k, _s, xs in _INSTRUMENT for x in xs)
+
+
 def _instrument(headers):
     out = {}
+    indexes = [tag_index(flat, _INSTRUMENT_SUFFIXES) for _n, _h, _c, flat in headers]
     for key, skey, suffixes in _INSTRUMENT:
         vals = []
-        for _n, h, _c, flat in headers:
+        for (_n, h, _c, _flat), index in zip(headers, indexes):
             v = h.get(skey) if skey else None
             if v in (None, ""):
-                v = by_tag(flat, *suffixes)
+                v = by_tag(index, *suffixes)
             vals.append(v)
         got = _most(vals)
         if got:
@@ -488,7 +518,7 @@ def _report(d, headers):
 
     na = None
     if inst.get("objective_na"):
-        na = _num(inst["objective_na"]["value"].split(" ")[0])
+        na = _num(inst["objective_na"]["top"])
     optics = {"na": na, "pixel_size_um": px, "channels": []}
     seen = set()
     for c in chans:

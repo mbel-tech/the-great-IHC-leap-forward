@@ -21,6 +21,7 @@ Run:  python 06e_refresh_loop.py
 """
 
 import argparse
+import csv
 import glob
 import importlib.util
 import os
@@ -157,12 +158,30 @@ def marker_list():
 
 
 def progress():
-    """(sections measured, sections planned). The stop condition, as numbers."""
+    """(planned sections measured, sections planned). The stop condition.
+
+    MEASURED AND PLANNED, intersected - not two counts compared. The nuclei
+    file can hold sections that are no longer in the plan (a box deleted, a
+    scene renamed, an orphan from an earlier run), and counted on their own
+    those let stale uids stand in for planned sections never measured: done
+    reached total and the loop declared the datasets final with work left.
+
+    Only the scene_uid column is read, streamed. The file is one row per
+    nucleus, and building a dict per row every cycle just to collect a few
+    hundred uids was the bulk of this call's cost.
+    """
     if not os.path.exists(G6C.NUCLEI_CSV):
         return 0, 0
-    measured = {r["scene_uid"] for r in G5.load_csv(G6C.NUCLEI_CSV)}
+    with open(G6C.NUCLEI_CSV, newline="", encoding="utf-8") as fh:
+        rows = csv.reader(fh)
+        header = next(rows, [])
+        if "scene_uid" not in header:
+            measured = set()
+        else:
+            col = header.index("scene_uid")
+            measured = {r[col] for r in rows if len(r) > col}
     planned = {b["scene_uid"] for b in G5.all_boxes()}
-    return len(measured), len(planned)
+    return len(measured & planned), len(planned)
 
 
 def refresh(rscript, quiet=True):

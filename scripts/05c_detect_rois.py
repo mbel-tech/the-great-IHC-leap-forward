@@ -427,6 +427,28 @@ class _Rect:
     def __init__(self, x, y, w, h):
         self.x, self.y, self.w, self.h = x, y, w, h
 
+
+def section_range(doc, boxes, marker, scene):
+    """(low, high, crops used): one section's shared range for `marker`.
+
+    Taken from EVERY box of that marker in the section - ROIs and background
+    discs alike, each read whole - see ls_segment.percentile_range. Its own
+    function so 05b_tune_detection.py tunes on the very range this stage
+    stretches by; raises SegmentError for a flat or empty section.
+    """
+    crops = []
+    for b in boxes:
+        if b["marker"] != marker:
+            continue
+        crop_w, crop_h = int(b["czi_w"]), int(b["czi_h"])
+        if crop_w < 8 or crop_h < 8:
+            continue
+        crops.append(CR.read_plane(
+            doc, _Rect(int(b["czi_x0"]), int(b["czi_y0"]), crop_w, crop_h),
+            plane_index_for(marker), scene=scene).astype(np.float32))
+    lo, hi = SG.percentile_range(crops)
+    return lo, hi, len(crops)
+
 COLUMNS = ["scene_uid", "animal", "marker", "roi_kind", "region", "seed_n",
            "roi_index", "nucleus_id",
            "czi_x", "czi_y", "sec_x", "sec_y",
@@ -1188,20 +1210,9 @@ def main():
             # is holding every crop in memory at once.
             for mk in sorted({b["marker"] for b in by_sec[uid]
                               if needs_shared_norm(b["marker"])}):
-                crops = []
-                for b in by_sec[uid]:
-                    if b["marker"] != mk:
-                        continue
-                    crop_w, crop_h = int(b["czi_w"]), int(b["czi_h"])
-                    if crop_w < 8 or crop_h < 8:
-                        continue
-                    crops.append(CR.read_plane(
-                        doc, _Rect(int(b["czi_x0"]), int(b["czi_y0"]),
-                                   crop_w, crop_h),
-                        plane_index_for(mk), scene=int(g["scene_index"])
-                    ).astype(np.float32))
                 try:
-                    lo, hi = SG.percentile_range(crops)
+                    lo, hi, n_crops = section_range(
+                        doc, by_sec[uid], mk, int(g["scene_index"]))
                 except SG.SegmentError as exc:
                     # A section whose marker plane is flat or empty has no
                     # range to share. Skipped with the reason, never measured
@@ -1210,7 +1221,7 @@ def main():
                     continue
                 section_norm[mk] = (lo, hi)
                 norm_rows.append([uid, mk, segment_plane_for(mk), repr(lo),
-                                  repr(hi), len(crops)])
+                                  repr(hi), n_crops])
             for bi, b in enumerate(by_sec[uid], 1):
                 x0, y0 = int(b["czi_x0"]), int(b["czi_y0"])
                 bw, bh = int(b["czi_w"]), int(b["czi_h"])

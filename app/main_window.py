@@ -428,14 +428,18 @@ class MainWindow(QMainWindow):
         """A different project file is now open: point the stages and the screens at it."""
         if not path or os.path.normcase(os.path.abspath(path)) == os.path.normcase(self.config_path):
             return
+        # First, while the curator is still rooted at the old project: the session already
+        # holds the new one, and the page on screen would save the old curation into it.
+        self.curator.project_changed()
         self.config_path = os.path.abspath(path)
         self.runner.rebind(self.config_path)
         self.setup.build()
-        self._rebase()
+        # Before the curator is reloaded, so it starts from what the sync settles on rather
+        # than from what it replaced - and then saves that back over it.
         line = self.session.sync_curation(self)
+        self._rebase()
         if line:
             self._log(f"curation: {line}")
-            self.curator.refresh_seed()
         self._log(f"project is now {self.config_path}")
 
     def _project_saved(self):

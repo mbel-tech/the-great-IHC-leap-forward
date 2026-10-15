@@ -410,6 +410,9 @@ class CuratorView(QWidget):
     def refresh_seed(self):
         pass
 
+    def project_changed(self):
+        pass
+
     def set_done(self, *a):
         pass
 

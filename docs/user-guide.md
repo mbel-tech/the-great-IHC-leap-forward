@@ -15,7 +15,7 @@ The step list on the left shows six screens in the order you work, each with a o
 | ⌂ | **Project** | Open or create your study's project. Read the **Next up** card (if settings are missing, it names each Set up card and what it lacks) and press **Go**. | You know which screen to go to next. |
 | 1 | **Set up** | Check the few cards it shows: the folders, the file names, the section thickness and markers, and the atlas. Everything the slide files can tell the app is already filled in; the rest is under **Show advanced settings**. Press **Apply** on any card you change. | No red rows on the Slides tab, and the step list says every card is applied. |
 | 2 | **Prepare** | Press **Run all remaining**. It runs straight through to the ROI curator. | The step list shows Prepare done and Next up sends you to Curate. |
-| 3 | **Curate** | In the ROI curator, bring back any section that was set aside by mistake, match each section to its atlas plate and draw the brain regions. Then press **Done: export and go to Measure**. | The curator is exported. |
+| 3 | **Curate** | In the ROI curator, bring back any section that was set aside by mistake, match each section to its atlas plate and draw the brain regions. Then press **Done: export and go to Measure**. | Every section is curated or excluded, for each marker (the step list counts them, for example *23 of 48 sections curated*). |
 | 4 | **Measure** | Press **Run all remaining**. It first checks signal quality and tunes detection (05b); nucleus detection then takes hours and can be stopped and resumed. If the signal check calls a marker's signal *poor*, the run stops before detection: read the report (**Open report**), then press **Run** on *Detect and measure nuclei* to carry on anyway. | Every section is measured. |
 | 5 | **Results** | Press **Run** on *Join the experiment*, check the sampling workbook in the box that opens and press **Unblind and run**. Then press **Run all remaining** for the spreadsheets (the R figures are switched off for now). | `roi_dataset.xlsx` is in your results folder. |
 
@@ -81,13 +81,13 @@ Nucleus detection needs StarDist. The installer and `work/appenv` both have it. 
 - **Step list (left).** The six screens, each with a numbered circle, a one-line description and a progress mark such as *5 of 6 cards* or *10 of 19 stages*. A finished step turns green with a tick; the current one is blue. Progress is read from the output folder, so it is right even for work done outside the app. Under **Advanced** at the foot are *All stages* and *Instrument characterisation*.
 - **Screen header.** The screen's title and (i), a short sentence on what it is for, and a blue **Your part** box saying what you do there.
 - **Notices.** An amber box above the stages warns you about something to fix first.
-- **Stage rows.** Each stage shows a status dot (green done, grey to do, purple waiting for you, blue running, red failed, amber waiting or out of date), its name, its number (for example `04g`) and one plain sentence on what it does. Its buttons are:
+- **Stage rows.** Each stage shows a status dot (green done, grey to do, purple waiting for you, blue running, red failed, amber waiting or out of date), its name in plain words and one plain sentence on what it does. The six step screens leave out the stage's number and the pipeline's own name; hold the pointer over the name to see them (for example `00d  CZI self-test`), or open *All stages*, which shows both. The tables in this guide give the number and the pipeline's name. Under the status, a stage whose last complete run took a minute or more says how long, for example *Last run took 3 h 12 min*. Its buttons are:
   - **Run** runs that stage on its own; once a stage is done the button says Redo. A stage that is *Out of date* (see *Out of date*, section 10) says Run again. On a curator stage the button says **Build page**.
   - **Open** shows a curator page. Stages that make pictures or results have their own Open button instead: *Open pictures*, *Open sheets* or *Open results* opens that folder.
   - **Options** lists the stage's switches. It says *Options (2 changed)* when you have changed any.
   - **(i)** explains what the stage needs first, what it leaves behind, when it last ran, and the technical detail underneath.
 - **Run all remaining.** On Prepare, Measure and Results, runs every stage on that screen that has not finished or is out of date, in order. It stops at the first failure and never runs past a curator you have not exported. On Measure it also stops before nucleus detection when the signal check finds a marker's signal *poor* (section 7). It never unblinds: that always waits for you to press it and confirm. It also leaves out the scene pictures, which you run on their own.
-- **Status bar (bottom).** Shows what is running and its last log line, with a progress bar that also appears on the running stage's row. It slides until the stage reports a count, then fills, for example 12 of 454 sections (3%). When a run finishes, it says if a stage could not make everything (for example *3 scenes not drawn, see log*). **Show log** opens the full log; **Stop after this stage** finishes the current stage cleanly and stops.
+- **Status bar (bottom).** Shows what is running and its last log line, with a progress bar that also appears on the running stage's row. It slides until the stage reports a count, then fills, for example 12 of 454 sections (3%). Once the stage has been counting for a little while it adds the time left, for example *12 of 454 sections (3%), about 2 h 10 min left*. When a run finishes, it says if a stage could not make everything (for example *3 scenes not drawn, see log*). **Show log** opens the full log; **Stop after this stage** finishes the current stage cleanly and stops.
 
 ![The step list: six steps with their descriptions and progress, and the Advanced group at the foot](img/user-guide/10-step-list.png)
 
@@ -140,6 +140,8 @@ Everything the headers say is kept, not only what was used. A summary goes into 
 
 Once a folder is set, the top of the Slides tab says which folder the study reads and how many files the slide headers list. The tab gets a ✓, and counts as done on Home, only when the slides have been read, every file name fits the rule and every marker has a real name (not *Marker1* or *Channel2*). Until then it says what is left under *Still to do on this tab*, for example *2 file names don't fit the rule (Slide file names)* or *name the markers (Microscope and channels > Channels and markers...)*; the Next up card on Home says the same. For the LS study that is 444 files from `D:\SLIDES HE DEC 2025 LS`. Use the buttons only to change it.
 
+**Sampling workbook** names the workbook Results will read to unblind (section 8); leave it empty to use the one in the slide folder. **Check workbook** tries the join now, without unblinding anything: it reads the workbook, matches it against the study's animals and slides, writes nothing and reports how many animals and slides it matched to a group, any animal with no row, and any blank group. Use it early, so a mismatch is fixed before the measuring is done.
+
 Choosing a folder only records where the slides are; nothing is moved. Picking separate files from one folder records a list, which costs no space. If the files are spread over several folders, the app offers to link or copy them and always shows the size first.
 
 ### Study and folders
@@ -155,7 +157,7 @@ Choosing a folder only records where the slides are; nothing is moved. Picking s
 
 The app reads which animal and slide each file is from its name, and builds the section ID (`scene_uid`, for example `LS105_s10a_sc03`) that every later table joins on.
 
-- **Filename pattern.** Usually filled in for you from the slides. To set it yourself press **Set up from an example…**. Type one of your file names (or pick one). The app splits it into pieces and shows its reading, for example *animal LS53 · slide 2 · replicate b*; to change it, press **Animal ID**, **Slide number** or **Replicate letter** and click the piece in the name (**Not in the name** if there is none). The app writes the pattern and checks it against every file. When some files do not fit, it tries the usual causes one at a time (upper/lower case, a different ending such as `-_A568`, a missing replicate letter, other separators) and lists each change it made and how many files it brought in. Files that still do not fit are listed with the likely reason. The pattern itself stays hidden unless you tick **Show the pattern**.
+- **Filename pattern.** Usually filled in for you from the slides. To set it yourself press **Set up from an example…**. Type one of your file names (or pick one). The app splits it into pieces and shows its reading, for example *animal LS53 · slide 2 · replicate b*; to change it, press **Animal ID**, **Slide number** or **Replicate letter** and click the piece in the name (**Not in the name** if there is none). The app writes the pattern and checks it against every file. When some files do not fit, it tries the usual causes one at a time (upper/lower case, a different ending such as `-_A568`, a missing replicate letter, other separators) and lists each change it made and how many files it brought in. Files that still do not fit are listed with the likely reason. The pattern itself stays hidden unless you tick **Show the pattern**. On the card, the rule is shown as the reading of the example, for example *LS53_2.czi reads as animal LS53 · slide 2*; tick **Show advanced settings** to see the pattern there.
 - **Example filename.** One real name, used for that preview.
 - **Case-insensitive names.** On by default; leave it on.
 - **Section order convention.** How the order of serial sections is worked out. There is one choice, scan order.
@@ -174,6 +176,8 @@ In the LS study the pattern also accepts a suffix after a dash, so a name such a
 | Acquisition layout | **multiplex**: one scan holds every marker. **paired**: one scan per marker, each with its own counterstain. | paired: pERK (AF568) and PCNA (AF488) were scanned separately, listed in that order under Markers |
 | Counterstain colour | How DAPI is drawn in pictures | blue |
 | DAPI index, Marker index | Which channel in the CZI file is which | 0 and 1 |
+
+Without **Show advanced settings** this card shows only the section thickness, **Channels and markers…** and, in a paired study, **Find nuclei**; the rest are read from the slides.
 
 **Channels and markers…** opens a table of channels. **Detect from a CZI file…** reads each channel's dye and colour from a real slide and fills the table in. The file knows the dye, not the antibody, so you type or pick the marker name yourself. A marker's name becomes part of folder and file names, so the app asks before you rename one.
 
@@ -343,6 +347,10 @@ The buttons above the page are:
 
 The Curate screen also offers **Continue Prepare** after the atlas plate boxes, and **Bring in browser exports** if you curated in a web browser.
 
+Under the ROI curator's row, once there is an export, the screen says how far each marker's curation has got, for example *pERK curation ● 17 of 24 sections curated*. An excluded section counts as decided. In a paired study the second marker (PCNA) is curated on its own, in the same page: choose it in the curator's *Marker* menu. Its sections are separate physical sections, so nothing decided for one marker reaches the other. Curate is done when every section of both is curated or excluded.
+
+Below that, a **coverage** table for each marker shows how many curated sections each animal (rows) has at each atlas plate (columns). A cell under the target is amber. The target is one section per animal and plate unless you change *Target sections per animal and level* (Set up > Show advanced settings > Curation). It is a goal to curate towards; nothing is held back below it.
+
 ![The Curate screen with the ROI curator inside the app. Done: export and go to Measure is in the bar above the page](img/user-guide/06-curate.png)
 
 In every curator, **a dashed amber border is a proposal the program made; a solid red border is a decision a person made.**
@@ -423,7 +431,9 @@ Measure puts your regions back onto the original slides, finds every nucleus ins
 
 > **Results from before the ROI fixes of 14 October 2026.** If your regions were placed, or your nuclei measured, before the fixes to region placement (half a pixel) and to the saturated-nucleus flag (now read from the scan's own pixels), *Place the ROIs on the slide* and *Detect and measure nuclei* show **Out of date** and say why. Press **Run all remaining**: it places the regions again, measures every section again and rebuilds the per-region table. Then rebuild Results.
 
-![The Measure screen](img/user-guide/07-measure.png)
+> **Detection part way.** Detection keeps every section it has finished, so a run you stopped part way is not done. Its row then says how far it has got, for example *Detection 9 of 15 sections, resume*, and so does the Next up card. **Run all remaining** carries on from there; finished sections are not measured again.
+
+![The Measure screen: the regions placed and the signal checked, detection 9 of 15 sections and ready to resume, each with how long its last run took](img/user-guide/07-measure.png)
 
 | Stage | What it does | Makes | Options |
 | --- | --- | --- | --- |
@@ -516,7 +526,7 @@ Pressing **Run** on *Join the experiment (06b, marked ⚠ unblinds; its button r
 
 ![The Unblind the analysis? box, with the sampling workbook field](img/user-guide/09-unblind-dialog.png)
 
-![The Results screen: Join the experiment is marked as unblinding, then the spreadsheet and figure stages](img/user-guide/08-results.png)
+![The Results screen: Join the experiment is marked as unblinding, then the spreadsheet stages](img/user-guide/08-results.png)
 
 | Stage | What it does | Makes |
 | --- | --- | --- |

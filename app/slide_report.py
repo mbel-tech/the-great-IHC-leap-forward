@@ -50,9 +50,32 @@ def _settings():
     """{dotted key: its plain label} from ls_config, or {} when it cannot be read."""
     try:
         import ls_config as LC
-        return {path: k.label for path, k in LC.BY_PATH.items()}
+        labels = {path: k.label for path, k in LC.BY_PATH.items()}
     except Exception:                                   # noqa: BLE001 - fall back to keys
         return {}
+    for key, words in _SETTING_WORDS.items():
+        # Only where ls_config's label is the key spelled out (Pixel size um).
+        spelled = str(key).split(".")[-1].replace("_", " ").lower()
+        if key not in labels or spelled in str(labels[key]).lower():
+            labels[key] = words
+    return labels
+
+
+#: Settings whose ls_config label is only the key spelled out.
+_SETTING_WORDS = {
+    "pixel_size_um": "Pixel size",
+    "overview_target_um_per_px": "Overview picture resolution",
+    "curation_render.um_per_px": "Curation picture resolution",
+    "scene_render.um_per_px": "Scene picture resolution",
+    "channels.dapi_index": "Counterstain channel",
+    "channels.marker_index": "Marker channel",
+    "acquisition.layout": "How the markers were scanned",
+    "acquisition.markers": "Markers",
+    "acquisition.channels": "Channel table",
+    "display.colours": "Marker colours",
+    "display.nuclear_colour": "Counterstain colour",
+    "slide_naming.pattern": "File name rule",
+}
 
 
 _SETTING = re.compile(r"[a-z]+(?:[_.][a-z]+)+")

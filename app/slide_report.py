@@ -54,9 +54,10 @@ def _settings():
     except Exception:                                   # noqa: BLE001 - fall back to keys
         return {}
     for key, words in _SETTING_WORDS.items():
-        # Only where ls_config's label is the key spelled out (Pixel size um).
+        # Only where ls_config's label is the key spelled out (Pixel size µm,
+        # which ls_config spells from pixel_size_um).
         spelled = str(key).split(".")[-1].replace("_", " ").lower()
-        if key not in labels or spelled in str(labels[key]).lower():
+        if key not in labels or spelled in str(labels[key]).lower().replace("µm", "um"):
             labels[key] = words
     return labels
 

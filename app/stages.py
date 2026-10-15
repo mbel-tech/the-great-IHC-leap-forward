@@ -245,6 +245,12 @@ FIJI_REASON = ("needs Fiji, which the app does not drive. A one-time "
                "instrument characterisation; run scripts/run_all.sh steps "
                "3-8 when starting a new dataset.")
 
+#: Whether 06e draws the R figures. They are switched off in its refresh()
+#: (2026-10-15, at the operator's request), and a screen that still promised
+#: figures had a person looking for files that are never made. The screens say
+#: "figures" only while this is True; tests/test_workflow.py holds it to 06e.
+R_FIGURES = False
+
 
 def detect_cli_reason(frozen=None, has_stardist=None):
     """Why 05c cannot run here, or None when it can.

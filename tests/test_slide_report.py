@@ -82,7 +82,7 @@ chk("the third column is headed Note",
     t["Instrument"].horizontalHeaderItem(2).text(), "Note")
 used = [t["What each value did"].item(r, 2).text() for r in range(t["What each value did"].rowCount())]
 chk("uses name settings by their label, not their key",
-    any("Curation image resolution (um/px)" in u for u in used)
+    any("Curation image resolution (µm/px)" in u for u in used)
     and not any("curation_render.um_per_px" in u for u in used), True)
 chk("...and a field that is a setting too",
     t["What each value did"].item(0, 0).text() != "pixel_size_um", True)

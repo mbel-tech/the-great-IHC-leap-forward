@@ -160,6 +160,9 @@ class Key:
         if self._label:
             return self._label
         leaf = self.parts[-1].replace("_", " ").strip()
+        # A key spelled out is ASCII (section_thickness_um); the label is read
+        # by people, so the unit is written as they write it.
+        leaf = re.sub(r"\bum\b", "µm", leaf)
         return leaf[:1].upper() + leaf[1:]
 
     @property
@@ -296,7 +299,7 @@ SPEC = [
 
     Key("curation_render.um_per_px", "float",
         "Resolution of the curation composites rendered from the CZI.",
-        default=2.6, label="Curation image resolution (um/px)",
+        default=2.6, label="Curation image resolution (µm/px)",
 note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
              "section at that resolution is one picture of 10,000+ px a "
              "side - several GB to render and more than a browser holds "
@@ -321,7 +324,7 @@ note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
 
     Key("scene_render.um_per_px", "float",
         "Resolution of the scene pictures, in micrometres per pixel.",
-        default=2.6, label="Scene picture resolution (um/px)",
+        default=2.6, label="Scene picture resolution (µm/px)",
         note="0.65 is the scan's own pixels, the finest there is; larger "
              "numbers give smaller, softer pictures (5.2 is the overviews' "
              "scale). Each picture pixel is the average of whole native 0.65 "

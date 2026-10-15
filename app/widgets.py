@@ -423,15 +423,18 @@ class StageRow(QFrame):
 
     def refresh(self, *, title, code, plain, status, state, info_html, mark="",
                 can_run=True, option_values=None, changed_count=0, action=None,
-                goto=None, open_visible=None, took=""):
+                goto=None, open_visible=None, tip="", took=""):
         """Refresh everything the row shows. Called on every status refresh.
 
         `action` is the main button's label (default: Redo once done, else Run)
-        and `goto` a screen id that button goes to instead of running. `took` is
-        the line about the last run's length (progress.last_run_words).
+        and `goto` a screen id that button goes to instead of running. `tip` is
+        the name's tooltip: the script number and the pipeline's own name, where
+        the row shows neither. `took` is the line about the last run's length
+        (progress.last_run_words).
         """
         colour = COLOUR.get(state, T.TEXT_MUTED)
         self.name.setText(title)
+        self.name.setToolTip(tip)
         self.code.setText(code)
         self.plain.setText(plain)
         self.status.setText(status)

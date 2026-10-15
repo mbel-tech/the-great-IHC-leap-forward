@@ -101,9 +101,9 @@ PREPARE = Screen(
     "<p><b>Goes in:</b> the slide files and the settings from Set up.</p>"
     "<p><b>Comes out:</b> one standard image per section, the list of sections "
     "that can be measured, and the pages the curators show you.</p>"
-    "<p>Prepare runs straight through to the ROI curator. You turn sections "
-    "upright there, and bring back any section the program set aside in its "
-    "Review mode.</p>"
+    "<p>Prepare runs straight through to the ROI curator, with every section "
+    "already turned upright. There you bring back any section the program set "
+    "aside in its Review mode.</p>"
     "<p>Every stage can be re-run on its own. Stages skip work already done, so "
     "re-running is cheap.</p>",
     parts=[
@@ -149,10 +149,12 @@ CURATE = Screen(
         ("Decisions", "", ["atlas_reframe", "roi_curator",
                            "import_curation"]),
     ],
-    role="In the ROI curator: turn sections upright, bring back any that were set "
-         "aside, place the regions, then press Done: export and go to Measure. Your "
-         "work saves as you go.",
-    subtitle="You decide: rotate, exclude, mark regions")
+    # 04a turns every section upright, so rotating is no longer a step of its
+    # own; the curator's Rotate is there for the odd section it got wrong.
+    role="In the ROI curator: bring back any sections that were set aside, place "
+         "the regions, then press Done: export and go to Measure. Your work saves "
+         "as you go.",
+    subtitle="You decide: exclude, mark regions")
 
 MEASURE = Screen(
     "measure", "Measure",
@@ -180,22 +182,28 @@ MEASURE = Screen(
          "and resume.",
     subtitle="Automatic: find and count nuclei")
 
+#: " and figures" while 06e draws them (S.R_FIGURES), else "": Results names
+#: only what it makes.
+_AND_FIGURES = " and figures" if S.R_FIGURES else ""
+
 RESULTS = Screen(
     "results", "Results",
     "Joins the measurements to the experiment's groups and writes the "
-    "spreadsheets and figures. The first stage here unblinds the analysis.",
+    "spreadsheets%s. The first stage here unblinds the analysis." % _AND_FIGURES,
     "<p><b>Unblinding</b> means the treatment groups are read for the first time. "
     "The app asks you to confirm before it runs that stage.</p>"
     "<p>The spreadsheets themselves stay keyed by animal and can be rebuilt at "
     "any time, including while detection is still running.</p>",
     parts=[
         ("Unblind", "Reads the treatment groups for the first time.", ["join_sampling"]),
-        ("Spreadsheets and figures", "The tables you analyse and the figures drawn from them.",
+        ("Spreadsheets" + _AND_FIGURES,
+         "The tables you analyse" + (" and the figures drawn from them."
+                                     if S.R_FIGURES else "."),
          ["build_results", "excel_sample", "excel_slide", "refresh_loop"]),
     ],
     role="Press Run on Join the experiment once you are sure the regions are "
          "final, then build the spreadsheets.",
-    subtitle="Unblind, then tables and figures")
+    subtitle="Unblind, then tables" + _AND_FIGURES)
 
 INSTRUMENT = Screen(
     "instrument", "Instrument characterisation",
@@ -355,8 +363,8 @@ PLAIN = {
                    "positive, per square millimetre. Still blind.",
     "join_sampling": "Unblinds: joins each animal to its treatment group from the sampling "
                      "workbook.",
-    "excel_sample": "The spreadsheet with one row per region per animal. The figures read "
-                    "this one.",
+    "excel_sample": "The spreadsheet with one row per region per animal."
+                    + (" The figures read this one." if S.R_FIGURES else ""),
     "excel_slide": "The same spreadsheet one level finer, per slide.",
     "build_results": "Rebuilds the per-region numbers and both spreadsheets in one go. "
                      "The R figures are switched off for now. Does not unblind; that "
@@ -878,13 +886,34 @@ def split_title(title):
     return "", title.strip()
 
 
-def display_title(stage, study=None):
+#: The names the step screens use where the stage table's is the pipeline's own
+#: shorthand (self-test, reformat, censor). The table's name stays what the log,
+#: the guide and All stages say, so `technical=True` gives it back.
+BASIC_TITLES = {
+    "verify": "Check every slide file is complete",
+    "czi_selftest": "Check the slide files for faults",
+    "reformat_pcna": "Standard image of every PCNA section",
+    "censor_pcna": "Leave out over-bright pixels - PCNA",
+    "reformat_pcna_final": "Final PCNA images, cleaned",
+    "censor_perk": "Leave out over-bright pixels - pERK",
+    "reformat_perk_final": "Final pERK images, cleaned",
+    "roi_geometry_verify": "Check the regions land back on the slides",
+    "build_results": "Build results: datasets, spreadsheets"
+                     + (", figures" if S.R_FIGURES else ""),
+    "refresh_loop": "Refresh datasets%s hourly" % _AND_FIGURES,
+}
+
+
+def display_title(stage, study=None, technical=False):
     """The stage's name without its script number, in this study's marker names.
 
     The table spells the LS markers out (pERK is the first marker, PCNA the
-    second); a study with other markers sees its own.
+    second); a study with other markers sees its own. Plain words from
+    BASIC_TITLES unless `technical`, which is the advanced view's name.
     """
     _code, name = split_title(stage.title)
+    if not technical:
+        name = BASIC_TITLES.get(stage.sid, name)
     if study is not None and study.markers:
         name = name.replace("pERK", "{m0}").replace("PCNA", "{m1}")
         name = study.words(name)
@@ -1068,6 +1097,15 @@ def state(stage, study, running=None):
     return "todo" if incomplete(stage, study) else "done"
 
 
+def screen_stages(screen_sid, include_curator_pages=True):
+    """The stage ids Run all remaining works through on a screen: its own, and on
+    Prepare the curator pages too (see run_plan)."""
+    wanted = set(SCREENS[screen_sid].stage_ids())
+    if include_curator_pages and screen_sid == "prepare":
+        wanted |= {st.sid for st in S.STAGES if st.curator and st.sid not in HIDDEN}
+    return wanted
+
+
 def run_plan(screen_sid, study, include_curator_pages=True):
     """(stages to run, in order; {stage id: what it waits for}) for Run all remaining.
 
@@ -1079,10 +1117,7 @@ def run_plan(screen_sid, study, include_curator_pages=True):
     inputs are ready, because building a page is automatic - only using it is
     yours.
     """
-    scr = SCREENS[screen_sid]
-    wanted = set(scr.stage_ids())
-    if include_curator_pages and screen_sid == "prepare":
-        wanted |= {st.sid for st in S.STAGES if st.curator and st.sid not in HIDDEN}
+    wanted = screen_stages(screen_sid, include_curator_pages)
     plan, held, planned = [], {}, set()
     for st in S.STAGES:
         if st.sid not in wanted or st.sid in HIDDEN or st.sid in BY_HAND | COVERED:
@@ -1126,14 +1161,20 @@ def run_plan(screen_sid, study, include_curator_pages=True):
 
 
 def progress(screen_sid, study):
-    """(done, total) over the stages of a screen that this study uses and the app runs."""
+    """(done, total) over the stages of a screen that this study uses and the app runs.
+
+    Over the same stages as run_plan, so Prepare's count includes the curator
+    pages it builds: counted apart, "0 of 20 stages" sat beside "21 stages left
+    to run". A page counts once it is built; the export is Curate's to count.
+    """
     done = total = 0
-    for sid in SCREENS[screen_sid].stage_ids():
+    own = set(SCREENS[screen_sid].stage_ids())
+    for sid in screen_stages(screen_sid):
         st = S.BY_ID[sid]
         if sid in BY_HAND or not applies(st, study)[0] or st.cli_reason():
             continue
         total += 1
-        if st.operator:
+        if st.operator and sid in own:
             done += decided(sid, study) and st.done(study.out_root, study.names)
         else:
             done += (st.done(study.out_root, study.names) and not outdated(st, study)
@@ -1608,8 +1649,8 @@ def next_up(study, setup_ok=True, setup_missing=()):
             continue
         if not decided(sid, study):
             if sid == "roi_curator":
-                return "curate", ("Turn the sections upright, check what was set aside, "
-                                  "place the regions, then export from the ROI curator."), sid
+                return "curate", ("Check what was set aside, place the regions, "
+                                  "then export from the ROI curator."), sid
             return "curate", "Curate: work through %s and export your decisions." % \
                 display_title(st, study), sid
     if held:
@@ -1631,6 +1672,9 @@ def next_up(study, setup_ok=True, setup_missing=()):
                 not st.done(study.out_root, study.names) or outdated(st, study)):
             return "results", "Measurements are in. Unblind and build the results.", sid
     r_plan, _ = run_plan("results", study)
+    if r_plan and not S.R_FIGURES:
+        # 06e draws no figures while they are switched off: name only the tables.
+        return "results", "Build the spreadsheets on Results.", None
     if r_plan:
         return "results", "Build the spreadsheets and figures on Results.", None
     # Measuring part of the worklist is allowed (04n orders it so any prefix is

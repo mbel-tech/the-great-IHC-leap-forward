@@ -131,6 +131,13 @@ def row_action(st, state, held):
     return None, None
 
 
+def technical_title(st, study):
+    """'00d  CZI self-test': what the log, the guide and All stages call it."""
+    code, _ = W.split_title(st.title)
+    name = W.display_title(st, study, technical=True)
+    return f"{code}  {name}" if code else name
+
+
 def marks(st):
     if st.unblinds:
         return "⚠ unblinds"
@@ -286,7 +293,13 @@ class StageListScreen(QWidget):
             can_run = bool(st.script) and ok and not st.cli_reason() and not busy
             if state == "waiting" and goto is None:
                 can_run = False             # its prerequisite has not finished
-            row.refresh(title=W.display_title(st, study), code=code,
+            # The step screens are the basic view: plain names, with the script
+            # number and the pipeline's own name kept for All stages and
+            # Instrument (under Advanced) and for the name's tooltip.
+            advanced = self.screen in W.EXTRA
+            row.refresh(title=W.display_title(st, study, technical=advanced),
+                        code=code if advanced else "",
+                        tip="" if advanced else technical_title(st, study),
                         plain=W.plain(st, study), status=words, state=state,
                         info_html=stage_info(st, study, block, values), mark=marks(st),
                         can_run=can_run, option_values=values, changed_count=len(values),
@@ -502,8 +515,8 @@ class CurateScreen(QWidget):
             st = S.BY_ID[sid]
             values = project.stage_options(sid) if project is not None else {}
             state, words = stage_status(st, study, running)
-            code, _ = W.split_title(st.title)
-            row.refresh(title=W.display_title(st, study), code=code, plain=W.plain(st, study),
+            row.refresh(title=W.display_title(st, study), code="",
+                        tip=technical_title(st, study), plain=W.plain(st, study),
                         status=words, state=state, info_html=stage_info(st, study, block, values),
                         mark="", can_run=not busy, option_values=values,
                         changed_count=len(values))
@@ -833,7 +846,7 @@ class SetupScreen(QWidget):
             form = SettingsForm(self.repo_root, project=project,
                                 keys=[k.path for k in keys], parent=page,
                                 headings=W.SECTION_HEADINGS,
-                                channel_tools=(sid == "imaging"))
+                                channel_tools=(sid == "imaging"), advanced=advanced)
             form.setEnabled(not project.read_only)
             pl.addWidget(_scroll(form), 1)
             if sid == "atlas":

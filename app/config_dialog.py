@@ -143,10 +143,18 @@ class _PatternRow(QWidget):
     offered here rather than as a bare text box: the folder is one field above.
     """
 
-    def __init__(self, value, source_getter, parent=None):
+    def __init__(self, value, source_getter, parent=None, advanced=True, example=None,
+                 ignore_case=False):
         super().__init__(parent)
         self.source_getter = source_getter
         self.edit = QLineEdit("" if value is None else str(value))
+        # Basic Set up shows the rule as the example it reads, not as the regex:
+        # the regex is the advanced view's, and the edit still holds the value.
+        self.words = QLabel("")
+        self.words.setWordWrap(True)
+        self.edit.setVisible(advanced)
+        self.words.setVisible(not advanced)
+        self._show_reading(example, ignore_case)
         btn = QPushButton("Set up from an example…")
         btn.setToolTip("Type one of your file names and say which part is which; "
                        "the pattern is written for you and checked against every file")
@@ -154,7 +162,20 @@ class _PatternRow(QWidget):
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(self.edit, 1)
+        lay.addWidget(self.words, 1)
         lay.addWidget(btn)
+
+    def _show_reading(self, example, ignore_case):
+        import naming_build as B
+        pattern = self.edit.text().strip()
+        read = B.reading(example, pattern, ignore_case) if example and pattern else None
+        if read:
+            self.words.setText(f"{_esc(example)} reads as {_esc(read)}")
+        elif pattern:
+            self.words.setText("A rule is set. Press Set up from an example… to see or "
+                               "change it, or Show advanced settings for the pattern.")
+        else:
+            self.words.setText("No rule yet. Press Set up from an example…")
 
     def _build(self):
         from naming_dialog import scan_names
@@ -170,6 +191,8 @@ class _PatternRow(QWidget):
         if dlg.exec() == QDialog.Accepted and dlg.result_block:
             self.edit.setText(dlg.result_block["pattern"])
             self.built = dlg.result_block
+            self._show_reading(dlg.result_block.get("example"),
+                               bool(dlg.result_block.get("case_insensitive")))
 
     def value(self):
         return self.edit.text().strip() or None
@@ -257,11 +280,12 @@ class SettingsForm(QWidget):
     few keys each). `keys` names the dotted keys to show, in order; None shows
     every key the spec offers. Validation always covers the whole study, so a
     card that shows four keys still cannot apply a study the pipeline would
-    refuse.
+    refuse. `advanced` False is Set up's basic view: the file name rule is shown
+    as the example it reads rather than as its regex.
     """
 
     def __init__(self, repo_root, path=None, study_name=None, parent=None, project=None,
-                 keys=None, headings=None, channel_tools=False):
+                 keys=None, headings=None, channel_tools=False, advanced=True):
         super().__init__(parent)
         self.repo_root = repo_root
         # With a project, this edits the project IN MEMORY: Apply changes it and
@@ -301,9 +325,12 @@ class SettingsForm(QWidget):
                 form.addRow(head)
             found, value = LC._get(cfg, key.parts)
             if key.path == "slide_naming.pattern":
+                naming = cfg.get("slide_naming") or {}
                 widget = _PatternRow(
                     value if found else key.default,
-                    self._source_dir)
+                    self._source_dir, advanced=advanced,
+                    example=naming.get("example"),
+                    ignore_case=bool(naming.get("case_insensitive")))
                 getter = widget.value
                 self.pattern_row = widget
             elif key.path == "atlas_source":

@@ -20,6 +20,7 @@ that are absent, and `compare` reports disagreements for a person to judge.
 """
 
 import copy
+import json
 import os
 import re
 import statistics
@@ -735,7 +736,6 @@ def write_report(out_root, detection):
     Returns the path, or None when there is nothing to write, the folder does
     not exist, or it cannot be written. Never raises.
     """
-    import json
     report = getattr(detection, "report", None)
     if not report or not out_root or not os.path.isdir(out_root):
         return None

@@ -806,6 +806,7 @@ class SetupScreen(QWidget):
         if found.report and project.get("out_root"):
             project.note_slides(found.report, found.notes, found.problems, AD.REPORT_FILE)
             AD.write_report(project.get("out_root"), found)
+            self.session.touch()
         fills = AD.fill(project.cfg, found)
         for key, value in fills.items():
             project.set(key, value, by="read from the slides")

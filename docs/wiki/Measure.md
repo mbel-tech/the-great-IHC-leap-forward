@@ -41,9 +41,9 @@ In the LS PCNA scans the DAPI plane is noise at full resolution, so PCNA-stained
 
 **Do a pilot before the full PCNA run.** This route has been tested on synthetic data only. Run 3 sections with check pictures on, look at periventricular regions and background discs, hand-count about six regions and compare with `n_positive`, and check positive nuclei are roughly 7 to 9 µm. The full checklist is in `docs/nuclei-detection-after-roi-curation.md`, section 4.8.
 
-## The amber "results are older than the ROI fixes" notice
+## Out of date
 
-Results measured before the fixes of 14 October 2026 (a half-pixel offset in region placement, and the saturated-nucleus flag now read from the scan's own pixels) keep the old values, and Measure and Results show an amber notice. Run *Place the regions on the slides* again, then *Detect and measure nuclei* with **Redo … already done**, then rebuild Results. The notice goes away once the nuclei are measured again.
+A finished stage here shows an amber **Out of date**, with the reason, when what it was made from has changed since it ran: your ROI export, an earlier stage's output, or a setting it reads. Results from before the fixes of 14 October 2026 (a half-pixel offset in region placement, and the saturated-nucleus flag now read from the scan's own pixels) show it too. Press **Run all remaining**: it runs them again in order, and detection measures every section again rather than resuming. Nothing is deleted until a stage runs.
 
 ## What good looks like
 

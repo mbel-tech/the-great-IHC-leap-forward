@@ -27,7 +27,7 @@ Draws every scene straight from the scan, so you can look at the raw tissue befo
 Many stages share these switches under **Options**:
 
 - **Only the first N sections**: a quick trial run. 0 means all.
-- **Redo … already done**: normally finished work is skipped. Turn this on after changing a setting that affects the stage, then turn it off again.
+- **Redo … already done**: normally finished work is skipped. Turn this on after changing a setting that affects the stage, then turn it off again. From *Place the ROIs on the slide* on you rarely need it: those stages show *Out of date* and redo themselves (see [Measure](Measure#out-of-date)).
 - **Include excluded sections**: also makes pictures of excluded sections, so the curator's Review can show them.
 
 What you change is remembered in the project. **Reset to defaults** undoes it.

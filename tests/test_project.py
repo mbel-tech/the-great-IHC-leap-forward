@@ -176,6 +176,11 @@ chk("...so a run does not look like a config change", P.config_sha(on_disk), P.c
 r4.revert()
 chk("reverting keeps the run (it already happened)", [x["stage"] for x in r4.block["runs"]], ["05c_detect_rois"])
 chk("a run does not make a clean project dirty", (P.Project.open(target).dirty, r4.dirty), (False, False))
+_fp = {"files": {"roi_geometry": "ab"}, "settings": {"pixel_size_um": "cd"}}
+r4.record_run("detect", True, "a", "b", inputs=_fp)
+chk("a run keeps what it read, on disk and in memory",
+    (read(target)["project"]["runs"][-1].get("inputs"), r4.block["runs"][-1].get("inputs")),
+    (_fp, _fp))
 
 print("--- bounds ---")
 r5 = P.Project.open(target)

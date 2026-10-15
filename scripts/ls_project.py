@@ -838,17 +838,22 @@ class Project:
 
     # ---- the run history ------------------------------------------------------
 
-    def record_run(self, stage, ok, started, ended, options=None):
+    def record_run(self, stage, ok, started, ended, options=None, inputs=None):
         """Append a run to `project.runs` on disk and in memory, saving nothing else.
 
         Stages read the file from disk, so a run is always of what is on disk; the
         history row must therefore not drag the person's unsaved edits along with
         it. This rewrites only the `runs` list of the file as it is.
+
+        `inputs` is what the stage read when it started (app/workflow.fingerprint),
+        which is how the app later tells that it is out of date.
         """
         rec = {"stage": stage, "started": started, "ended": ended, "ok": bool(ok),
                "config_sha": None, "code": code_version()}
         if options:
             rec["options"] = dict(options)
+        if inputs:
+            rec["inputs"] = inputs
         if not self.path or not os.path.exists(self.path):
             rec["config_sha"] = self.config_sha()
             self.block.setdefault("runs", []).append(rec)

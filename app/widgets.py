@@ -22,7 +22,8 @@ COLOUR = T.STATUS
 
 WORD = {"done": "Done", "todo": "Not run yet", "manual": "Run outside the app",
         "running": "Running…", "queued": "Queued", "failed": "Failed last time",
-        "notused": "Not used in this study", "waiting": "Waiting for you"}
+        "notused": "Not used in this study", "waiting": "Waiting for you",
+        "outdated": "Out of date"}
 
 QUIET = T.QUIET
 

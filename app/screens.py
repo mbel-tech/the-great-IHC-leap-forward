@@ -92,6 +92,12 @@ def stage_status(st, study, running, held=None):
         return "done", "Decisions exported"
     if state == "todo" and held and st.sid in held:
         return "waiting", waiting_words(held[st.sid], study)
+    if state == "outdated":
+        words = "Out of date: %s" % W.outdated(st, study)
+        if "--force" in W.run_values(st.sid, {}, study):
+            # Said here because for 05c it is hours: nothing is kept from before.
+            words += ". Run redoes all of it"
+        return state, words
     return state, WORD.get(state, state)
 
 

@@ -41,7 +41,7 @@ NOTUSED = "#8c959f"         # a stage this study does not use
 #: Stage status colours, shared by every screen so one state is one colour everywhere.
 STATUS = {"done": OK, "todo": TEXT_MUTED, "manual": PURPLE_TEXT,
           "running": RUNNING, "queued": RUNNING, "failed": DANGER,
-          "notused": NOTUSED, "waiting": WARN}
+          "notused": NOTUSED, "waiting": WARN, "outdated": WARN}
 
 #: Inline style for a hint or secondary line, for rich text and setStyleSheet alike.
 QUIET = f"color:{TEXT_MUTED}"

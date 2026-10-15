@@ -80,13 +80,13 @@ Nucleus detection needs StarDist. The installer and `work/appenv` both have it. 
 
 - **Step list (left).** The six screens, each with a numbered circle, a one-line description and a progress mark such as *5 of 6 cards* or *10 of 19 stages*. A finished step turns green with a tick; the current one is blue. Progress is read from the output folder, so it is right even for work done outside the app. Under **Advanced** at the foot are *All stages* and *Instrument characterisation*.
 - **Screen header.** The screen's title and (i), a short sentence on what it is for, and a blue **Your part** box saying what you do there.
-- **Notices.** An amber box above the stages warns you about something to fix first, for example results measured before a fix (section 10).
-- **Stage rows.** Each stage shows a status dot (green done, grey to do, purple waiting for you, blue running, red failed, amber waiting), its name, its number (for example `04g`) and one plain sentence on what it does. Its buttons are:
-  - **Run** runs that stage on its own; once a stage is done the button says Redo. On a curator stage the button says **Build page**.
+- **Notices.** An amber box above the stages warns you about something to fix first.
+- **Stage rows.** Each stage shows a status dot (green done, grey to do, purple waiting for you, blue running, red failed, amber waiting or out of date), its name, its number (for example `04g`) and one plain sentence on what it does. Its buttons are:
+  - **Run** runs that stage on its own; once a stage is done the button says Redo. A stage that is *Out of date* (see *Out of date*, section 10) says Run again. On a curator stage the button says **Build page**.
   - **Open** shows a curator page. Stages that make pictures or results have their own Open button instead: *Open pictures*, *Open sheets* or *Open results* opens that folder.
   - **Options** lists the stage's switches. It says *Options (2 changed)* when you have changed any.
   - **(i)** explains what the stage needs first, what it leaves behind, when it last ran, and the technical detail underneath.
-- **Run all remaining.** On Prepare, Measure and Results, runs every stage on that screen that has not finished, in order. It stops at the first failure and never runs past a curator you have not exported. On Measure it also stops before nucleus detection when the signal check finds a marker's signal *poor* (section 7). It never unblinds: that always waits for you to press it and confirm. It also leaves out the scene pictures, which you run on their own.
+- **Run all remaining.** On Prepare, Measure and Results, runs every stage on that screen that has not finished or is out of date, in order. It stops at the first failure and never runs past a curator you have not exported. On Measure it also stops before nucleus detection when the signal check finds a marker's signal *poor* (section 7). It never unblinds: that always waits for you to press it and confirm. It also leaves out the scene pictures, which you run on their own.
 - **Status bar (bottom).** Shows what is running and its last log line, with a progress bar that also appears on the running stage's row. It slides until the stage reports a count, then fills, for example 12 of 454 sections (3%). When a run finishes, it says if a stage could not make everything (for example *3 scenes not drawn, see log*). **Show log** opens the full log; **Stop after this stage** finishes the current stage cleanly and stops.
 
 ![The step list: six steps with their descriptions and progress, and the Advanced group at the foot](img/user-guide/10-step-list.png)
@@ -249,7 +249,7 @@ Prepare reads the slides, checks them, builds the atlas, and turns every section
 Many stages share these switches under **Options**:
 
 - **Only the first N sections** (`--limit`): for a quick trial run. 0 means all. Use it on a new study to check the settings before the full run.
-- **Redo … already done** (`--force`): normally finished work is skipped. Turn this on after changing a setting that affects that stage's output, then turn it off again.
+- **Redo … already done** (`--force`): normally finished work is skipped. You rarely need it: a stage made from something that has changed since shows *Out of date*, and its next run redoes everything by itself (section 10). Turn it on to redo a stage the app does not check, then turn it off again.
 - **Include excluded sections**: also makes pictures or masks of excluded sections, so the curator's Review can show them.
 
 What you change is remembered in the project and used every time that stage runs. **Reset to defaults** in the Options panel undoes it.
@@ -415,9 +415,9 @@ Measure puts your regions back onto the original slides, finds every nucleus ins
 
 **Goes in:** the regions you drew in the ROI curator. **Comes out:** `results/roi_nuclei.csv`, one row per nucleus, and the per-region numbers built from it.
 
-> **The amber "These results are older than the ROI fixes" notice.** If your nuclei were measured before the fixes to region placement (half a pixel) and to the saturated-nucleus flag (now read from the scan's own pixels), Measure and Results show an amber notice. Do what it says: run *Place the ROIs on the slide* again, then *Detect and measure nuclei* with **Options > Redo … already done**, then rebuild Results. The notice goes away once the nuclei are measured again; Dismiss hides it until then.
+> **Results from before the ROI fixes of 14 October 2026.** If your regions were placed, or your nuclei measured, before the fixes to region placement (half a pixel) and to the saturated-nucleus flag (now read from the scan's own pixels), *Place the ROIs on the slide* and *Detect and measure nuclei* show **Out of date** and say why. Press **Run all remaining**: it places the regions again, measures every section again and rebuilds the per-region table. Then rebuild Results.
 
-![The Measure screen with the amber notice about results measured before the fixes](img/user-guide/07-measure.png)
+![The Measure screen](img/user-guide/07-measure.png)
 
 | Stage | What it does | Makes | Options |
 | --- | --- | --- | --- |
@@ -560,9 +560,10 @@ Every stage is a script in `scripts/` and can also be run from a terminal; the (
 ### Re-running safely
 
 - **Stages skip finished work.** Pressing Run again only fills the gaps, so it is cheap and safe.
-- **After changing a setting**, re-run the stages that read it with **Redo … already done** switched on in Options. The setting's (i) says which stages read it. Then switch Redo off again.
-- **Changing a curator decision** after Measure has run: export again, then re-run Measure. Nuclei detection keeps finished sections, so use Redo there only for sections whose regions changed.
-- **Results measured before the region fixes of 14 October 2026** (the half-pixel correction and native-pixel clipped-nucleus flags; see section 7) keep the old region placement and the old flags, and the app shows an amber notice on Measure and Results. To bring them up to date, re-run *05a Place the regions on the slides* and *05c Detect and measure nuclei* with **Redo … already done** switched on, then the Results stages.
+- **Out of date.** From *Place the ROIs on the slide* on, a finished stage shows an amber **Out of date** with the reason when what it was made from has changed since it ran: your ROI export, the output of an earlier stage, or a setting it reads (named on the row). A fix to the app that changed its results does the same: regions placed or nuclei measured before the region fixes of 14 October 2026 (the half-pixel correction and native-pixel clipped-nucleus flags; see section 7) show Out of date. Everything made from an out-of-date stage shows it too. **Run all remaining** runs them again in order, and their progress no longer counts as done. Saving the same export again, or changing a setting back, changes nothing.
+- **An out-of-date stage is redone in full.** Nucleus detection normally keeps finished sections; when it is out of date its next run switches Redo on for that run (the row says *Run redoes all of it*, and the log says so), because a resume would keep every section as it was. That takes hours. Your saved Options are not changed.
+- **Out of date never deletes anything.** It only changes the status and what Run all remaining runs; the old outputs stay until the stage runs again. It is judged from the run history the app keeps in the project, so a stage last run outside the app, or with *Only the first N*, is judged by file dates instead, which can tell that an input is newer but not that a setting changed.
+- **After changing a setting** that no Out of date row picks up (stages before *Place the ROIs on the slide*), re-run the stages that read it with **Redo … already done** switched on in Options. The setting's (i) says which stages read it. Then switch Redo off again.
 - **Nothing is deleted.** Excluded sections can be reinstated in the ROI curator's Review. Repair tools back up the results file before changing it.
 - **Stop cleanly** with **Stop after this stage** on the status bar, rather than closing the app mid-stage.
 

@@ -679,6 +679,158 @@ print("--- a resume onto a file written before the provenance columns ---")
 legacy_resume_check()
 
 
+def changed_boxes_check():
+    """A re-export re-measures the sections whose boxes changed, and no others.
+
+    Any change to the curation export used to cost a full re-detection - hours
+    on a real study: the app saw 05a's boxes change and ran 05c with --force,
+    because 05c's plain resume skipped every section that had rows, the moved
+    discs included (the review's bug 7). Now each section is logged with a
+    fingerprint of the boxes (and geometry row) it was measured on, and a
+    resume re-measures exactly the sections whose fingerprint differs, drops
+    the ones no longer in the boxes, and keeps the rest untouched.
+    """
+    try:
+        import pylibCZIrw.czi  # noqa: F401
+    except ImportError:                                          # noqa: BLE001
+        print("   (pylibCZIrw is not installed - the incremental re-detection "
+              "cannot be driven through main())")
+        return
+    marker = G5C.G5.MARKER
+    G5C.G5.use_marker(marker)
+    for p in (G5C.NUCLEI_CSV, G5C.DONE_LOG, G5C.GEOMETRY_CSV, G5C.NORM_CSV,
+              G5C.BACKGROUND_CSV, G5C.NO_ARTIFACT_CSV, G5C.SETTINGS_JSON):
+        if os.path.exists(p):
+            os.remove(p)
+    # Three sections, each read at its own x so a read names its section.
+    secs = {"AB12_2a-s0": 100, "AB12_3a-s0": 200, "AB12_4a-s0": 300}
+    mask_dir = os.path.join(G5C.REFORMAT_DIR, "sections")
+    os.makedirs(mask_dir, exist_ok=True)
+
+    def put(boxes):
+        """Write the geometry and box files for {uid: sec_r}."""
+        gcols = ["scene_uid", "animal", "marker", "czi_file", "scene_index",
+                 "m00", "m01", "m02", "m10", "m11", "m12"]
+        bcols = ["scene_uid", "animal", "marker", "roi_kind", "region",
+                 "seed_n", "czi_x0", "czi_y0", "czi_w", "czi_h", "sec_x",
+                 "sec_y", "sec_r", "sec_poly"]
+        with open(G5C.G5.GEOM_CSV, "w", newline="", encoding="utf-8") as fh:
+            w = csv.writer(fh)
+            w.writerow(gcols)
+            for u in boxes:
+                w.writerow([u, "AB12", marker, u + ".czi", "0",
+                            "1", "0", "0", "0", "1", "0"])
+        with open(G5C.G5.BOX_CSV, "w", newline="", encoding="utf-8") as fh:
+            w = csv.writer(fh)
+            w.writerow(bcols)
+            for u, r in boxes.items():
+                x0 = secs[u]
+                w.writerow([u, "AB12", marker, "roi", "Dm", "1", x0, 0, 24,
+                            20, x0 + 12, 10, r, ""])
+        for u in boxes:
+            np.save(os.path.join(mask_dir, f"{u}_mask.npy"),
+                    np.ones((512, 512), dtype=bool))
+
+    def run(*flags):
+        """(exit code, the sections read) for one main() run."""
+        import pylibCZIrw.czi as _real_pyczi
+        fake_doc = _FakeCzi((20, 24))
+        saved = (_real_pyczi.open_czi, G5C.load_model, sys.argv)
+        _real_pyczi.open_czi = _FakeOpenCzi(fake_doc)
+        G5C.load_model = lambda: _OneNucleusModel()
+        sys.argv = ["05c_detect_rois.py", "--marker", marker, "--order", "uid",
+                    *flags]
+        try:
+            rc = G5C.main()
+        finally:
+            _real_pyczi.open_czi, G5C.load_model, sys.argv = saved
+        by_x = {x: u for u, x in secs.items()}
+        return rc, sorted({by_x[c["roi"][0]] for c in fake_doc.calls})
+
+    def nuclei():
+        return sorted(r["scene_uid"] for r in read(G5C.NUCLEI_CSV))
+
+    def geometry():
+        return {r["scene_uid"]: r["sec_r"] for r in read(G5C.GEOMETRY_CSV)}
+
+    A, B, C = sorted(secs)
+    put({A: "50", B: "50", C: "50"})
+    chk("a first run measures every section", run(), (0, [A, B, C]))
+    chk("...one nucleus each", nuclei(), [A, B, C])
+    chk("...and logs each with a box fingerprint",
+        sorted(G5C.read_done_prints(G5C.DONE_LOG, marker)), [A, B, C])
+    chk("the same boxes again measure nothing", run(), (0, []))
+
+    # B's disc resized, C dropped from the curation, A untouched.
+    put({A: "50", B: "40"})
+    chk("a re-export re-measures only the section whose boxes changed",
+        run(), (0, [B]))
+    chk("...keeps the unchanged section's rows and replaces the changed one's,"
+        " dropping the removed section's", nuclei(), [A, B])
+    chk("...its measured geometry is the new shape, the removed one's gone",
+        geometry(), {A: "50", B: "40"})
+    logged = G5C.read_done_log(G5C.DONE_LOG, marker)
+    chk("...and the done log no longer names the removed section",
+        sorted(logged), [A, B])
+    chk("a resume after that has nothing to do", run(), (0, []))
+
+    # A section ADDED to the curation is measured, and only it.
+    put({A: "50", B: "40", C: "50"})
+    chk("an added section is measured on its own", run(), (0, [C]))
+
+    # Sections measured before the fingerprint existed: two columns per log
+    # line. The measured-geometry record still decides for them.
+    with open(G5C.DONE_LOG, newline="", encoding="utf-8") as fh:
+        old = [r[:2] for r in csv.reader(fh)]
+    with open(G5C.DONE_LOG, "w", newline="", encoding="utf-8") as fh:
+        csv.writer(fh).writerows(old)
+    put({A: "45", B: "40", C: "50"})
+    chk("with no fingerprint, a shape changed since its recorded geometry is "
+        "re-measured", run(), (0, [A]))
+    chk("...and it is fingerprinted now",
+        A in G5C.read_done_prints(G5C.DONE_LOG, marker), True)
+
+    # No fingerprint AND no geometry record: nothing says what the section
+    # was measured on, so it is kept, as every resume before this did.
+    with open(G5C.DONE_LOG, newline="", encoding="utf-8") as fh:
+        old = [r[:2] for r in csv.reader(fh)]
+    with open(G5C.DONE_LOG, "w", newline="", encoding="utf-8") as fh:
+        csv.writer(fh).writerows(old)
+    os.remove(G5C.GEOMETRY_CSV)
+    put({A: "45", B: "30", C: "50"})
+    chk("with neither record, a section is kept as before", run(), (0, []))
+    chk("...rows and all", nuclei(), [A, B, C])
+    chk("--force still re-measures everything", run("--force"), (0, [A, B, C]))
+    chk("...one nucleus each, nothing doubled", nuclei(), [A, B, C])
+
+    # A box file that has lost most of what was measured looks like a trial
+    # 05a run (--limit), not a curation: the measurements stay.
+    put({A: "45"})
+    chk("most sections gone from the boxes: nothing is dropped",
+        (run(), nuclei()), ((0, []), [A, B, C]))
+    put({A: "45", B: "30", C: "50"})
+    chk("...and they are still done when the boxes come back", run(), (0, []))
+
+    # Different detection thresholds still refuse a resume onto the old rows:
+    # only a full --force re-measure can change them.
+    if G5C.backend_for(marker) == "stardist":
+        saved = G5C.stardist_settings
+        G5C.stardist_settings = lambda m: {"prob_thresh": 0.9,
+                                           "nms_thresh": None,
+                                           "source": "test"}
+        try:
+            put({A: "45", B: "35", C: "50"})
+            chk("a box change with new thresholds is refused, not mixed",
+                run(), (1, []))
+        finally:
+            G5C.stardist_settings = saved
+
+
+print()
+print("--- a re-export re-measures only the sections whose boxes changed ---")
+changed_boxes_check()
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="ls5c_")
     try:

@@ -13,18 +13,59 @@ library, StarDist's model (Measure works offline) and R with the figure packages
 newer version over it upgrades in place, and your studies (in `%USERPROFILE%\.ls-pipeline`)
 are kept. Windows 10 or 11, 64-bit. Detection runs on the CPU.
 
+**Updates come from inside the app.** It checks for a newer release each time it starts (offline
+it just carries on), and **Help > Check for updates** checks on demand. A release that changes
+only code installs in place: the app closes, swaps the new code in, checks it and starts again,
+and **Help > Undo last update** goes back one version. A release that changes the libraries,
+Python or R needs the new installer, and the app says so and links it. Studies, settings and
+results are never touched. See [packaging/windows/README.md](packaging/windows/README.md#updates-from-inside-the-app).
+
 **Mac** (Apple Silicon M1 or later, macOS 14 or newer): from the same page get
 `The-Great-IHC-Leap-Forward-<version>-mac.dmg`, open it and drag the app onto Applications.
 The app is not signed with a paid Apple developer certificate, so the first time macOS
 refuses to open it: click Done, then **System Settings > Privacy & Security > Open Anyway**.
-After that it opens normally. Everything else is as on Windows, except that the R figures are
-not included and new versions come as a new disk image rather than in-app updates. See
+After that it opens normally. Everything else is as on Windows, except that R is not included
+(the R figures are switched off anyway; see [Quantification](#quantification)) and a new version
+comes as a new disk image: the app still checks, and when one is out it links the `.dmg`. See
 [packaging/macos/README.md](packaging/macos/README.md).
 
 Releases are built by GitHub Actions from a version tag; see
 [packaging/windows/README.md](packaging/windows/README.md) and
 [packaging/macos/README.md](packaging/macos/README.md). To run from source instead, see
 [Desktop app](#desktop-app).
+
+## Starting a study
+
+**File > New project...** asks for very little:
+
+- **Two folders**: the slides (CZI files, read only, nothing is moved) and an output folder.
+  Everything the study makes goes in the output folder, including the study file itself
+  (`study.json`), so a whole study is one folder you can move or copy.
+- **Section thickness**, the one number a CZI cannot know.
+- **Which atlas**: salmon (Vindas) or zebrafish (Wullimann 1996), both shipped ready-made, or
+  your own, added afterwards in Set up > Atlas.
+- **Marker names** for each marker channel the slides name (AF568, AF488), so folders and
+  workbooks say pERK rather than a dye. Optionally the **sampling workbook**, checked straight
+  away instead of at unblinding (Set up > Slides > **Check workbook** checks it again later).
+
+The rest is read from the slide headers: pixel size, channels and marker colours, how the
+files are named. **Set up > What the slides say...** shows everything the headers hold and flags
+slides that disagree (exposure, bit depth, objective). If the file names need a rule, the
+**file-name guide** asks for one example name, suggests which part is the animal, the slide and
+the replicate, writes the pattern itself and checks it against every file in the folder,
+explaining in plain words any that do not fit. Set up shows only the basic settings; the
+technical ones are behind **Show advanced settings**.
+
+**File > Export settings...** writes the study's settings to a JSON file you choose what goes
+into, and **File > Import settings...** reads one into the open study: it lists every setting
+it would change, refuses one that does not validate, and copies the study file aside first.
+That is how a second study starts from the first one's settings.
+
+The step-by-step guide for a newcomer is [docs/user-guide.md](docs/user-guide.md), also under
+**Help > User guide** in the app; **Help > Wiki** opens short question-led pages
+([docs/wiki/](docs/wiki/)).
+
+## The LS dataset
 
 Automated screening of pERK and PCNA immunofluorescence across whole-brain transverse sections
 of a salmonid, from Zeiss CZI whole-slide scans.
@@ -122,6 +163,10 @@ Every stage is resumable — re-running skips completed work.
 | 4w | `04w_wullimann_plates.py` | Alternative atlas: arranges the Wullimann 1996 cross sections into a plate set, ids sorting rostral to caudal |
 | 4x | `04x_wullimann_polygons.py` | Alternative atlas: turns each plate's region outlines into numbered polygons; `--review` writes the page where they are named |
 
+With the salmon or Wullimann atlas the plates ship in `atlas/`, so 4a to 4a4, 4w and 4x show as
+*Not needed* in the app. They run again only with `atlas_rebuild_plates` on, to rebuild a plate
+set from the source PDF.
+
 The 04-series curation chain is not in `run_all.sh`: it needs the operator between the steps —
 assigning plates, placing ROIs — so there is nothing to batch.
 
@@ -189,7 +234,8 @@ python scripts/ls_atlas_import.py PLATE_SET_DIR --kind polygons --check         
 python scripts/ls_atlas_import.py PLATE_SET_DIR --kind polygons --name mouse_brain  # check, copy, register
 ```
 
-or **Settings > Atlas > Import atlas...** in the app, which asks the same questions and runs the same check.
+or **Tools > All settings... > Import atlas...** in the app (Set up > Atlas has **Add atlas from
+Fiji...** for the simple way), which asks the same questions and runs the same check.
 The folder is judged first and nothing is copied unless it passes; each problem is named with its file and
 line (a vertex off the plate, an image whose size disagrees with `plates.csv`, a polygon on a plate that is
 not listed, and so on). A passing folder is copied to `<out_root>/atlas/plates_<name>/` and registered under
@@ -279,11 +325,15 @@ the full guide; this is the shape of it.
 | 6a | `06a_roi_dataset.py` | The positivity cut, the detector's false-positive rate, and Abercrombie. **Still blind** |
 | 6b | `06b_join_sampling.py` | Joins the sampling workbook — **the unblinding step** |
 | 6c / 6d | `06c_excel_dataset.py`, `06d_excel_by_slide.py` | The spreadsheets, per sample and per slide |
-| 6e | `06e_refresh_loop.py` | Rebuilds 6a→6d and every figure hourly while 5c is still running, once per measured marker |
+| 6e | `06e_refresh_loop.py` | Rebuilds 6a→6d hourly while 5c is still running, once per measured marker |
+
+**The R figure steps are switched off for now** (`R_FIGURES = False` in `app/stages.py`, at the
+operator's request): 6e builds the datasets and spreadsheets only, and the app's screens no
+longer promise figures. The scripts below are unchanged and still run by hand with `Rscript`.
 
 Figures come from `analysis/`: `plot_roi_figures.R` (per-ROI, with statistics, plus the pptx) and
-`plot_by_sample.R` / `plot_by_slide.R` (the two overview panels). 6e runs all three, so running it
-is how they stay in step with the workbooks.
+`plot_by_sample.R` / `plot_by_slide.R` (the two overview panels). With the figures switched back
+on, 6e runs all three, so running it is how they stay in step with the workbooks.
 
 **One point is one animal** in the per-ROI figures. They read 6c's `by_roi` sheet, where an
 animal's nuclei are pooled over its discs and divided by the area those discs covered, so the
@@ -356,11 +406,15 @@ screens, each with its progress read from disk:
 | Step | What it is for |
 |---|---|
 | **Project** | Where the study stands, and a **Next up** card naming the one thing to do now |
-| **Set up** | Slides, then the study's settings as cards: folders, file names, microscope and channels, atlas, nucleus detection |
+| **Set up** | Slides (with **What the slides say...** and **Check workbook**), then the study's settings as cards: folders, file names, microscope and channels, atlas, nucleus detection. Done only when the slides are |
 | **Prepare** | The automatic stages, from slide headers to the images the curators show |
-| **Curate** | The curator pages as tabs: atlas plates and ROIs |
+| **Curate** | The ROI curator, with coverage per animal and level, and each marker's own pass |
 | **Measure** | ROIs back onto the slides, nucleus detection, the per-ROI dataset. Still blind |
-| **Results** | Unblinding (it asks first), the spreadsheets and figures |
+| **Results** | Unblinding (it asks first), then the spreadsheets |
+
+A stage counts as done only when it is complete: detection and curation are counted by
+section, so a half-finished run says how far it got. A stage whose inputs, curator export or
+settings changed after it ran is marked out of date.
 
 **Run all remaining** on a screen runs its missing stages in order. It stops at
 the first failure and never runs past a curator you have not exported yet: a stage
@@ -379,9 +433,15 @@ shows its hint, an (i) with the full reasoning from `ls_config.SPEC`, and a ↺
 to put it back to its default.
 
 The one-time instrument characterisation is under **Tools > Instrument
-characterisation**, and the previous single list of every stage under **View >
-All stages**. A bar along the bottom shows what is running and its last line;
+characterisation**, every setting at once under **Tools > All settings...**, and
+the previous single list of every stage under **View > All stages**. A bar along
+the bottom shows what is running, a **progress bar** with the count done and,
+once it can tell, the time left; a stage's row says how long its last run took.
 **Show log** opens the full log.
+
+**Help** holds the user guide, the wiki, the activity log, the log folder, the
+CZI self-test (stage 00d), and the updater's Check for updates, Undo last update
+and About.
 
 The curator pages themselves are unchanged — the app hosts them, it does not
 reimplement them, and opening the same file in a browser still works exactly as
@@ -490,10 +550,10 @@ and works without one. It stays in `run_all.sh`, and the app lists it greyed out
 with the reason (Tools > Instrument characterisation) rather than hiding it; the Python halves of that chain (01e, 01f,
 01c, 01h) run from the app like any other stage.
 
-Nuclei detection (05c) runs from the app when the interpreter can import
-StarDist — `work/appenv` can — and is greyed out with the reason in the frozen
-build, which does not carry TensorFlow. The refresh loop (06e) stays a `.bat`,
-because it runs for hours.
+Nuclei detection (05c) runs from the app whenever the interpreter can import
+StarDist: the Windows and Mac installers and `work/appenv` all can. The hourly
+refresh loop (06e) stays a `.bat`, because it runs for hours; **Build results**
+on the Results screen is the one-shot version of it.
 
 ### Python version
 
@@ -615,9 +675,9 @@ quantification extends there.
 
 ## Repository contents
 
-Code only. Nothing derived from the imaging data is committed, and neither are the atlas plates —
-they are extracted from a PDF that is not ours to redistribute. Run `04a_atlas_extract.py`
-against your own copy.
+Code, plus the atlas plates in `atlas/` (salmon and Wullimann; cite both, see
+[Atlases, and how to cite them](#atlases-and-how-to-cite-them)). Nothing derived from the imaging
+data is committed.
 
 Four documents, answering four different questions:
 

@@ -10,6 +10,8 @@ Do this once the regions and detection settings are final.
 2. A box titled **Unblind the analysis?** opens. The **Sampling workbook (.xlsx)** field shows which workbook will be read. Leave it empty to use `large scale exp sampling data.xlsx` in the slides folder, or press **Choose…** to pick another.
 3. Press **Unblind and run**.
 
+![The Unblind the analysis? box, with the sampling workbook field](images/09-unblind-dialog.png)
+
 The stage checks the cohort against the workbook's own record of which animals were sliced, and stops loudly if they disagree. If the workbook's header does not match, it names the mismatched columns.
 
 ## Build the spreadsheets
@@ -23,6 +25,8 @@ Then press **Run all remaining**.
 | `results/roi_dataset.csv`, `results/animal_metadata.csv` | The joined data behind the spreadsheets |
 
 The spreadsheets can be rebuilt any time, including while detection is still running.
+
+![The Results screen](images/08-results.png)
 
 ## Before you compare groups
 

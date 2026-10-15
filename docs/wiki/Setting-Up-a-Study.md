@@ -13,6 +13,8 @@ Every field has a short hint, an **(i)** with the full reasoning and which stage
 3. **Fix every red row before you go on.** A red row is a file whose name does not fit the naming pattern, and every stage would silently ignore it. Fix the pattern on the *Slide file names* card, or rename the file.
 4. Press **Use these slides**.
 
+![The Slides tab: one file whose name does not fit the pattern is shown in red](images/02-setup-slides.png)
+
 Choosing a folder only records where the slides are; nothing is moved or copied. Picking files from one folder records a list, which costs no space. If the files are spread over several folders, the app offers to link or copy them and shows the size first.
 
 ## Study and folders
@@ -47,11 +49,15 @@ Animal is required; slide and replicate are optional. An animal ID cannot contai
 
 **Find nuclei** (paired studies) has one row per marker. Leave it on *On the counterstain (DAPI)* unless a marker's scan has no usable DAPI. Then choose *On this marker's own channel*, and only for a marker whose signal is in the nucleus. In the LS study this is needed for PCNA, whose DAPI plane is noise at full resolution. For such a marker only the positive density is reported; see [Measure](Measure#pcna-counted-on-its-own-channel).
 
+![Microscope and channels, with Find nuclei set to the marker's own channel for PCNA](images/03-setup-microscope.png)
+
 ## Pictures
 
 **Curation pictures** set how sharp the pictures in the ROI curator are. *Curation images from* **czi** (default) draws them from the original 16-bit scan at 2.6 µm per pixel (1.3 is the finest allowed). **overview** gives the older, softer pictures. Measurement always reads the scan's own pixels, whatever you set here. A change only affects pictures made afterwards.
 
 **Scene pictures** are optional pictures of every whole scene, for looking at only. Set the folder, resolution (0.65 to 2.6 µm per pixel) and brightness (*Same for all*, so brightness compares, or *Per scene*). Nothing here changes a measurement.
+
+![The Pictures card](images/04-setup-pictures.png)
 
 ## Atlas
 

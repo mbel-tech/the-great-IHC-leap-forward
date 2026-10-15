@@ -29,6 +29,8 @@ The window has a step list down the left with six screens, in the order you work
 2. Go to **Set up** and follow [Setting up a study](Setting-Up-a-Study).
 3. Come back to the **Project** screen whenever you are unsure what to do next. Its **Next up** card names the one thing to do now; press **Go**.
 
+![The Project screen: the study strip, the Next up card with Go, progress for each step and recent activity](images/01-project.png)
+
 ## Finding your way around
 
 - **Your part.** Every screen opens with a blue line that says what you do there. Usually it is one thing.
@@ -36,6 +38,8 @@ The window has a step list down the left with six screens, in the order you work
 - **Stage rows** have a status dot (green done, grey to do, purple waiting for you, blue running, red failed, amber waiting), a **Run** button (which says Redo once done, and Build page on a curator), **Open**, and **Options**.
 - **Run all remaining** on Prepare, Measure and Results runs every unfinished stage on that screen, in order. It stops at the first failure, never runs past a curator you have not exported, and never unblinds.
 - **The status bar** at the bottom shows what is running. **Show log** opens the full log; **Stop after this stage** finishes cleanly and stops.
+
+![The step list: six steps with their descriptions and progress, and the Advanced group at the foot](images/10-step-list.png)
 
 ### Menus
 

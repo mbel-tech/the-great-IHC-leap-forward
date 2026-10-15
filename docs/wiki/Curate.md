@@ -6,6 +6,8 @@ Your work is saved into the project as you go, so closing the app loses nothing,
 
 The bar above the page also has **Reload** (after Prepare rebuilt its pictures), **Open in browser**, and **Own window** (a window of its own you can make full screen).
 
+![The Curate screen with the ROI curator inside the app](images/06-curate.png)
+
 In every curator, **a dashed amber border is a proposal the program made; a solid red border is a decision a person made.**
 
 ## The page
@@ -15,6 +17,8 @@ In every curator, **a dashed amber border is a proposal the program made; a soli
 - **Coach line.** Names the tool you are in and says what a click will do.
 - **Two panes.** The section on the left, the atlas plate on the right.
 - **Section strip (bottom).** Every section, grouped by animal. Purple border: registered. Blue: plate assigned only. Gold edge: favourite. Red and greyed: excluded. Faded: no ROI.
+
+![The ROI curator: top bar, tool rail, coach line, section and plate panes, info cards and the section strip](images/11-roi-curator.png)
 
 **The first time you open it**, a pop-up asks which regions you will draw. The choice applies to the whole study; press **o** to change it. Chosen regions are numbered on the plate in the order you picked them.
 

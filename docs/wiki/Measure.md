@@ -4,6 +4,8 @@ Measure puts your regions back onto the original slides, finds every nucleus ins
 
 **Goes in:** the regions you exported from the ROI curator. **Comes out:** `results/roi_nuclei.csv` (one row per nucleus) and the per-region numbers built from it.
 
+![The Measure screen](images/07-measure.png)
+
 | Stage | What it does | Makes |
 | --- | --- | --- |
 | 05a Verify the inverse transform | Checks that regions map back onto the slides accurately, before anything is measured | A pass or fail in the log |

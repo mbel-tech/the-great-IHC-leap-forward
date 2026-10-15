@@ -291,6 +291,111 @@ chk("...while the page's held work is kept aside, not dropped",
     any(json.load(open(p, encoding="utf-8")).get("LS1_s5") == {"plate": "during"} for p in kept), True)
 server.stop()
 
+print("--- opening another project does not carry the open page's curation into it ---")
+# The whole window, because the bug is in the order it does things: the session is already
+# the new project when the window hears of it, so whatever the page still holds - its
+# unload save, a decision in flight - reaches whatever store the curator writes to then.
+# Every route to another project ends in session.opened: Open, Switch study (the study
+# picker opens the one chosen) and New study (it saves the new project, then sets it).
+from _fixture import write_study                                 # noqa: E402
+import main_window as MW                                         # noqa: E402
+
+for name in ("information", "warning"):
+    setattr(QMessageBox, name, staticmethod(lambda *a, **k: QMessageBox.Ok))
+
+SIZE = "ls_roi_curator_v1_size"
+
+
+def study_with(name, roi, extra=None):
+    """A saved project with `roi` as its ROI curation, and the curator page built."""
+    path = write_study(os.path.join(tmp, name))
+    p = LP.Project.open(path)
+    out_root = p.get("out_root")
+    os.makedirs(os.path.join(out_root, "reformatted"), exist_ok=True)
+    with open(os.path.join(out_root, "reformatted", "roi.html"), "w", encoding="utf-8") as fh:
+        fh.write(PAGE)
+    p.write_curation(KEY, json.dumps(roi), out_root=out_root)
+    for k, v in (extra or {}).items():
+        p.write_curation(k, v, out_root=out_root)
+    return path
+
+
+def in_file(path, key=KEY):
+    """What the project FILE holds for `key` (not the window's copy of the project)."""
+    raw = LP.Project.open(path).curation_text(key)
+    return json.loads(raw) if raw else None
+
+
+A_ROI = {"LS1_s1": {"plate": "A"}}
+B_ROI = {"LS9_s1": {"plate": "B"}}
+C_ROI = {"LS5_s1": {"plate": "C"}}
+pa = study_with("projA", A_ROI, {SIZE: "14"})
+pb = study_with("projB", B_ROI)
+w = MW.MainWindow(REPO, config_path=pa)
+view = w.curator
+view.show_page("reformatted/roi.html")
+chk("project A's page shows A's curation", wait_loaded(A_ROI), True)
+chk("...and holds A's landmark radius", js(f"localStorage.getItem('{SIZE}')"), "14")
+
+# A decision on A's page that is still on its way to disk when B opens: the page
+# setItem()s at once, the bridge call arrives a moment later.
+js("S.LS1_s2 = {plate: 'A late'}; save(); true")
+a_late = dict(A_ROI, LS1_s2={"plate": "A late"})
+a_gen = view.guard.gen
+w.session.open_project(None, pb, confirmed=True)
+settle(lambda: page_state() == B_ROI)
+spin(800)                                                        # several autosaves
+chk("after opening B, B's project file still holds B's curation", in_file(pb), B_ROI)
+chk("...the page shows B's curation", page_state(), B_ROI)
+chk("...and A's landmark radius is not in it", js(f"localStorage.getItem('{SIZE}') === null"), True)
+chk("...nor in B's project file", in_file(pb, SIZE), None)
+chk("A's decision in flight reached A's project file", in_file(pa), a_late)
+view.bridge.saveFrom(a_gen, KEY, json.dumps(dict(a_late, LS1_s3={"plate": "A unload"})))
+chk("a save from A's page arriving after the switch does not reach B", in_file(pb), B_ROI)
+chk("...it goes to A, whose work it is", in_file(pa).get("LS1_s3"), {"plate": "A unload"})
+js("S.LS9_s2 = {plate: 'B new'}; save(); true")
+b_new = dict(B_ROI, LS9_s2={"plate": "B new"})
+chk("a decision made on B's page is saved into B", settle(lambda: in_file(pb) == b_new), True)
+chk("...and not into A", in_file(pa).get("LS9_s2"), None)
+# The new project's page is on a new server port, so a new origin with its own, empty
+# localStorage - unless the port is one an earlier server had. Then the old keys are there,
+# and the seed has to empty those the new project does not have, not only fill the rest.
+js(f"localStorage['{SIZE}'] = '14'; true")             # as A's page left it: not mirrored
+view.project_changed()
+view.refresh_seed()
+view.view.reload()
+wait_loaded(b_new)
+chk("reloaded on the same origin, a key the project lacks is emptied",
+    js(f"localStorage.getItem('{SIZE}') === null"), True)
+chk("...so it never reaches the project's file", in_file(pb, SIZE), None)
+
+print("--- the same for New study ---")
+pc = study_with("projC", C_ROI)
+# Its project and its plain copy both changed since they last agreed, so opening it asks
+# which to keep. The question is modal - the event loop runs while it is up - and the page
+# has to start from the answer, or its first autosave puts the version not chosen back.
+LP.Project.open(pc).write_curation(KEY, json.dumps({"LS5_s1": {"plate": "C in project"}}))
+C_ROI = {"LS5_s1": {"plate": "C edited outside"}}
+with open(os.path.join(tmp, "projC", "out", "curation", KEY + ".json"), "w", encoding="utf-8") as fh:
+    json.dump(C_ROI, fh)
+asked_sync = []
+QMessageBox.question = staticmethod(
+    lambda *a, **k: (asked_sync.append(a[1]), spin(1500), QMessageBox.No)[2])
+b_gen = view.guard.gen
+js("S.LS9_s3 = {plate: 'B late'}; save(); true")
+b_late = dict(b_new, LS9_s3={"plate": "B late"})
+w.session.set_project(LP.Project.open(pc))                       # what New study ends with
+settle(lambda: page_state() == C_ROI)
+spin(800)
+chk("opening it asked which curation to keep", asked_sync, ["Curation differs"])
+chk("after New study, its project file holds only its own curation, as chosen", in_file(pc), C_ROI)
+chk("...the page shows it", page_state(), C_ROI)
+chk("...B's decision in flight reached B", in_file(pb), b_late)
+view.bridge.saveFrom(b_gen, KEY, json.dumps(b_late))
+chk("...and a late save from B's page stays out of it", in_file(pc), C_ROI)
+chk("A's curation is untouched by all of it", in_file(pa).get("LS9_s2"), None)
+w.server.stop()
+
 print()
 print("FAILED: %d" % fails if fails else "ALL PASS")
 sys.exit(1 if fails else 0)

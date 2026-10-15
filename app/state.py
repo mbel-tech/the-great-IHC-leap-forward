@@ -170,6 +170,11 @@ class SaveGuard:
 
     `holding` is for an import that takes a while (04q runs as a stage): saves of those
     keys wait in `held` until it is known whether the import wrote anything.
+
+    `retired` is for opening another project: {gen: store} for the pages that were showing
+    the one open before it. What such a page still sends - its unload save, a decision on
+    its way to disk - is that project's work, so it is written to that project's store,
+    never to the one open now and never dropped.
     """
 
     def __init__(self):
@@ -179,6 +184,7 @@ class SaveGuard:
         self.aside = None
         self.holding = set()
         self.held = {}
+        self.retired = {}
 
     def replaced(self, keys, aside=None):
         """The store now holds an import of `keys`: retire every page loaded before it."""
@@ -207,6 +213,9 @@ class Bridge(QObject):
     def saveFrom(self, gen, key, text):
         """A save from the page loaded as `gen`: written, kept aside, or held back."""
         g = self.guard
+        if gen in g.retired:
+            self._write(g.retired[gen], key, text)
+            return
         if gen != g.gen and key in g.superseded:
             # Not written - it is the curation the import replaced, plus anything done on
             # that page since - and not dropped either, because it is someone's work.
@@ -228,14 +237,17 @@ class Bridge(QObject):
 
     @Slot(str, str)
     def save(self, key, text):
+        self._write(self.store, key, text)
+
+    def _write(self, store, key, text):
         try:
-            self.store.write(key, text)
+            store.write(key, text)
         except Exception as e:                              # noqa: BLE001
             # Everything, not only OSError: a project that cannot be read back raises
             # ProjectError, and an exception escaping a slot is only printed by Qt - to a
             # console the installed app does not have. So was the print() this used to be:
             # the operator went on curating for hours with nothing reaching disk.
-            msg = save_error_text(self.store, key, e)
+            msg = save_error_text(store, key, e)
             print(msg, file=sys.stderr)
             if self.on_error:
                 self.on_error(key, msg)
@@ -268,7 +280,8 @@ def seed_script(store, guard=None):
 
     The seed only fills an empty key, so a decision whose save failed is not
     thrown away by a reload - except a key an import just replaced
-    (`guard.force`), which the first load after the import takes from the store.
+    (`guard.force`), which the first load after the import takes from the store,
+    or empties when the store has none (another project opened that never had it).
     Once: `ls_app_seed_gen` records that load, so a later reload of the same
     generation is back to filling only what is empty.
     """
@@ -284,6 +297,7 @@ def seed_script(store, guard=None):
       if (localStorage.getItem(k) === null || (fresh && FORCE.indexOf(k) >= 0))
         localStorage.setItem(k, SEED[k]);
     }
+    if (fresh) FORCE.forEach(function (k) { if (!(k in SEED)) localStorage.removeItem(k); });
     if (fresh) localStorage.setItem("ls_app_seed_gen", GEN);
   } catch (e) {}
 

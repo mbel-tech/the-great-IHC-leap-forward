@@ -256,6 +256,9 @@ class CuratorView(QWidget):
         page = self.view.page()
         self.bridge = ST.Bridge(self.store, on_save=self._saved, on_error=self._save_failed,
                                 guard=self.guard, on_aside=self._set_aside)
+        # Whose curation a page loaded from this seed shows; `project_changed` needs it once
+        # the store already answers with the next project.
+        self.seeded_project = self.store._project()
         self.channel = QWebChannel(page)
         self.channel.registerObject("lsbridge", self.bridge)
         page.setWebChannel(self.channel)
@@ -356,6 +359,20 @@ class CuratorView(QWidget):
         self.refresh_seed()
         if self.rel:
             self.show_page(self.rel, self.title.text())
+
+    def project_changed(self):
+        """Another project is open now: keep the page that shows the old one out of it.
+
+        Called before anything is rebased, while out_root and `seeded_project` are still the
+        old project's. That page holds the old curation in memory and in localStorage and
+        saves it again - on every decision, every 60 s, on unload - and the store already
+        answers with the new project, so each save would land there. So its loads are retired
+        to a store of their own, the old project's (see `ST.SaveGuard.retired`), and the next
+        load is seeded with the new project's curation over the old, every key.
+        """
+        project = self.seeded_project
+        self.guard.retired[self.guard.gen] = ST.CurationStore(self.out_root, lambda: project)
+        self.guard.replaced(ST.KEYS)
 
     # ---- downloads --------------------------------------------------------
 

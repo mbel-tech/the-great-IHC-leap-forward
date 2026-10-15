@@ -1,6 +1,6 @@
 """Build the code-only update a release carries, and the VERSION.json an install holds.
 
-    python packaging/make_update.py --version 1.2.0 --out dist
+    python packaging/make_update.py --version 1.2.0 --bundle dist/LS-IHC --out dist
         -> dist/update-1.2.0.json
            dist/The-Great-IHC-Leap-Forward-code-1.2.0.zip
     python packaging/make_update.py --version 1.2.0 --version-file-only dist/LS-IHC
@@ -15,9 +15,12 @@ app/, scripts/, analysis/ (and atlas/, when its own fingerprint differs) in
 place. Different: a library, Python or R changed, and only the full installer
 can bring that.
 
-The fingerprint is deliberately coarse. Any edit to a file that decides what is
-in runtime/, R/ or keras/ asks for the installer; a needless reinstall costs a
-download, a missed one would leave the app importing libraries it doesn't have.
+The runtime fingerprint is a hash of the bundle's BUNDLE_VERSIONS.txt: the pip
+freeze of the runtime as built, plus the Python and R versions. It is taken from
+what was built rather than from requirements*.txt, because those say ">=" and
+two builds of the same files can hold different libraries. build.ps1 builds
+against packaging/windows/bundle-lock.txt, so releases share a runtime (and get
+code updates) until someone changes the lock.
 """
 
 import argparse
@@ -37,15 +40,6 @@ CODE_PARTS = ("app", "scripts", "analysis")
 ATLAS_PART = "atlas"
 FILES = ("config.example.json", "README.md")
 
-FINGERPRINT_FILES = (
-    "requirements.txt",
-    "requirements-czi.txt",
-    "packaging/windows/requirements-bundle.txt",
-    "packaging/windows/build.ps1",
-    "packaging/windows/sitecustomize.py",
-)
-
-
 def package_name(version, kind="code"):
     return f"{PRODUCT}-{kind}-{version}.zip"
 
@@ -54,14 +48,11 @@ def manifest_name(version):
     return f"update-{version}.json"
 
 
-def runtime_fingerprint(repo=REPO):
-    """SHA-256 over the files that decide the bundled runtime, line endings normalised."""
-    h = hashlib.sha256()
-    for rel in FINGERPRINT_FILES:
-        with open(os.path.join(repo, rel), "rb") as fh:
-            data = fh.read().replace(b"\r\n", b"\n")
-        h.update(rel.encode() + b"\0" + data + b"\0")
-    return h.hexdigest()
+def runtime_fingerprint(bundle_dir):
+    """SHA-256 of the bundle's BUNDLE_VERSIONS.txt, ignoring line order, case and line endings."""
+    with open(os.path.join(bundle_dir, "BUNDLE_VERSIONS.txt"), encoding="utf-8-sig") as fh:
+        lines = sorted({ln.strip().lower() for ln in fh if ln.strip()})
+    return hashlib.sha256("\n".join(lines).encode()).hexdigest()
 
 
 def _walk(repo, part):
@@ -85,17 +76,17 @@ def atlas_fingerprint(repo=REPO):
     return h.hexdigest()
 
 
-def version_info(version, repo=REPO):
+def version_info(version, repo, bundle_dir):
     return {"version": version,
-            "runtime_fingerprint": runtime_fingerprint(repo),
+            "runtime_fingerprint": runtime_fingerprint(bundle_dir),
             "atlas_fingerprint": atlas_fingerprint(repo)}
 
 
-def write_version_file(dest_dir, version, repo=REPO):
-    os.makedirs(dest_dir, exist_ok=True)
-    path = os.path.join(dest_dir, "VERSION.json")
+def write_version_file(bundle_dir, version, repo=REPO):
+    """bundle_dir/VERSION.json, from the bundle's own BUNDLE_VERSIONS.txt."""
+    path = os.path.join(bundle_dir, "VERSION.json")
     with open(path, "w", encoding="utf-8") as fh:
-        json.dump(version_info(version, repo), fh, indent=2)
+        json.dump(version_info(version, repo, bundle_dir), fh, indent=2)
     return path
 
 
@@ -120,13 +111,14 @@ def _zip(repo, path, parts, files=(), extra=None):
             "sha256": _sha256(path)}
 
 
-def build_package(repo, version, out_dir):
+def build_package(repo, version, out_dir, bundle_dir):
     """Write the code zip, the atlas zip and the manifest into out_dir.
 
+    bundle_dir is the built bundle whose runtime these packages run on.
     Returns (code zip, atlas zip, manifest) paths.
     """
     os.makedirs(out_dir, exist_ok=True)
-    info = version_info(version, repo)
+    info = version_info(version, repo, bundle_dir)
     code = os.path.join(out_dir, package_name(version, "code"))
     atlas = os.path.join(out_dir, package_name(version, "atlas"))
     manifest = dict(info)
@@ -144,16 +136,18 @@ def build_package(repo, version, out_dir):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--version", required=True, help="release version, without the leading v")
-    ap.add_argument("--out", help="folder for the zip and its manifest")
-    ap.add_argument("--version-file-only", metavar="DIR",
-                    help="only write DIR/VERSION.json (the build does this for the bundle)")
+    ap.add_argument("--bundle", required=True,
+                    help="the built bundle (holds BUNDLE_VERSIONS.txt)")
+    ap.add_argument("--out", help="folder for the zips and the manifest")
+    ap.add_argument("--version-file-only", action="store_true",
+                    help="only write <bundle>/VERSION.json (build.ps1 does this)")
     a = ap.parse_args(argv)
     if a.version_file_only:
-        print(write_version_file(a.version_file_only, a.version))
+        print(write_version_file(a.bundle, a.version))
         return 0
     if not a.out:
         ap.error("--out or --version-file-only is needed")
-    for path in build_package(REPO, a.version, a.out):
+    for path in build_package(REPO, a.version, a.out, a.bundle):
         print(f"{path}  {os.path.getsize(path):,} bytes")
     return 0
 

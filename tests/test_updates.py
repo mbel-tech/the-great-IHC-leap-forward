@@ -28,6 +28,9 @@ os.environ["no_proxy"] = os.environ["NO_PROXY"] = "127.0.0.1,localhost"
 
 failures = []
 
+# What build.ps1 writes: pip freeze, then the interpreter and R.
+BUNDLE_VERSIONS = "numpy==2.3.1\nPySide6==6.9.0\ntensorflow==2.20.0\npython==3.13.5\nR==4.5.1\n"
+
 
 def chk(name, got, want):
     ok = got == want
@@ -44,12 +47,10 @@ def sha256(path):
 
 
 def fake_repo(root):
-    """The fingerprint files and a tiny app/, enough to build a package from."""
-    for rel in MU.FINGERPRINT_FILES:
-        src = os.path.join(REPO, rel)
-        dst = os.path.join(root, rel)
-        os.makedirs(os.path.dirname(dst) or root, exist_ok=True)
-        shutil.copyfile(src, dst)
+    """A tiny app/ and a BUNDLE_VERSIONS.txt, enough to build a package from."""
+    os.makedirs(root, exist_ok=True)
+    with open(os.path.join(root, "BUNDLE_VERSIONS.txt"), "w") as fh:
+        fh.write(BUNDLE_VERSIONS)
     for part in ("app", "scripts", "analysis", "atlas"):
         os.makedirs(os.path.join(root, part, "__pycache__"), exist_ok=True)
         with open(os.path.join(root, part, "marker.txt"), "w") as fh:
@@ -70,7 +71,7 @@ try:
     # Built from a small fake repo: the real atlas is 250 MB.
     src = fake_repo(os.path.join(TMP, "src"))
     out = os.path.join(TMP, "dist")
-    zpath, apath, mpath = MU.build_package(src, "9.9.9", out)
+    zpath, apath, mpath = MU.build_package(src, "9.9.9", out, src)
     with zipfile.ZipFile(zpath) as z:
         names = z.namelist()
         version_file = json.loads(z.read("VERSION.json"))
@@ -105,25 +106,32 @@ try:
     chk("atlas fingerprint changes with a plate", MU.atlas_fingerprint(src) != fa0, True)
 
     # ------------------------------------------------------------ the fingerprint
-    fp = MU.runtime_fingerprint(REPO)
-    chk("fingerprint stable", MU.runtime_fingerprint(REPO), fp)
+    # Of the libraries actually built into the runtime, not of the requirement
+    # files: those say ">=", so two builds of the same files can differ.
+    b1 = fake_repo(os.path.join(TMP, "b1"))
+    fp = MU.runtime_fingerprint(b1)
+    chk("fingerprint stable", MU.runtime_fingerprint(b1), fp)
     chk("fingerprint is sha256 hex", len(fp), 64)
+    vf = os.path.join(b1, "BUNDLE_VERSIONS.txt")
+    open(vf, "w", newline="\r\n").write("".join(reversed(BUNDLE_VERSIONS.splitlines(True))))
+    chk("fingerprint ignores line order and CRLF", MU.runtime_fingerprint(b1), fp)
+    open(vf, "w").write(BUNDLE_VERSIONS.replace("numpy==2.3.1", "numpy==2.4.0"))
+    chk("fingerprint changes with a library version", MU.runtime_fingerprint(b1) != fp, True)
+    open(vf, "w").write(BUNDLE_VERSIONS.replace("python==3.13.5", "python==3.13.6"))
+    chk("fingerprint changes with the Python version", MU.runtime_fingerprint(b1) != fp, True)
+    open(vf, "w").write(BUNDLE_VERSIONS.replace("R==4.5.1", "R==4.5.2"))
+    chk("fingerprint changes with the R version", MU.runtime_fingerprint(b1) != fp, True)
+    try:
+        MU.runtime_fingerprint(os.path.join(TMP, "no-bundle"))
+        chk("no BUNDLE_VERSIONS.txt is an error", "no error", "error")
+    except OSError:
+        chk("no BUNDLE_VERSIONS.txt is an error", "error", "error")
 
-    a = fake_repo(os.path.join(TMP, "a"))
-    fa = MU.runtime_fingerprint(a)
-    chk("fingerprint of an identical copy", fa, fp)
-    req = os.path.join(a, "requirements.txt")
-    text = open(req, "rb").read()
-    open(req, "wb").write(text.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
-    chk("fingerprint ignores CRLF", MU.runtime_fingerprint(a), fp)
-    with open(req, "a") as fh:
-        fh.write("\nsomething-new==1.0\n")
-    chk("fingerprint changes with requirements", MU.runtime_fingerprint(a) != fp, True)
-
-    vpath = MU.write_version_file(os.path.join(TMP, "bundle"), "1.2", REPO)
+    b2 = fake_repo(os.path.join(TMP, "b2"))
+    vpath = MU.write_version_file(b2, "1.2", src)
     chk("write_version_file", json.load(open(vpath)),
         {"version": "1.2", "runtime_fingerprint": fp,
-         "atlas_fingerprint": MU.atlas_fingerprint(REPO)})
+         "atlas_fingerprint": MU.atlas_fingerprint(src)})
 
     # ------------------------------------------------------------ versions
     chk("v1 < v1.1", UP.parse_version("v1") < UP.parse_version("v1.1"), True)
@@ -139,7 +147,7 @@ try:
 
     rel_dir = os.path.join(TMP, "release")
     src2 = fake_repo(os.path.join(TMP, "src2"))
-    code_zip, atlas_zip, man = MU.build_package(src2, "1.3", rel_dir)
+    code_zip, atlas_zip, man = MU.build_package(src2, "1.3", rel_dir, src2)
     manifest = json.load(open(man))
     release = {
         "tag_name": "v1.3", "body": "What changed", "html_url": "https://example/rel",
@@ -213,7 +221,7 @@ try:
                                                   or n == "download"], [])
 
     other_dir = os.path.join(TMP, "release-other")
-    oc, oa, om = MU.build_package(src2, "1.4", other_dir)
+    oc, oa, om = MU.build_package(src2, "1.4", other_dir, src2)
     wrong = dict(release, assets=[{"name": os.path.basename(code_zip),
                                     "browser_download_url": url(oc)}])
     om_d = json.load(open(om))

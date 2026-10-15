@@ -40,7 +40,6 @@ UninstallDisplayName=The Great IHC Leap Forward {#AppVersion}
 ; library version no longer ships would otherwise linger in site-packages and
 ; can shadow the new ones.
 Type: filesandordirs; Name: "{app}\runtime"
-Type: filesandordirs; Name: "{app}\updates"
 Type: filesandordirs; Name: "{app}\app"
 Type: filesandordirs; Name: "{app}\scripts"
 Type: filesandordirs; Name: "{app}\analysis"

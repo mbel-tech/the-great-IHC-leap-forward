@@ -12,6 +12,7 @@ on:
       - "packaging/**"
       - ".github/workflows/windows-package.yml"
       - "requirements*.txt"
+      - "app/update*.py"
   workflow_dispatch:
   push:
     tags: ["v*"]
@@ -92,7 +93,7 @@ jobs:
 
       - name: In-app update packages (code, atlas, update-<version>.json)
         run: |
-          dist/LS-IHC/runtime/python.exe packaging/make_update.py --version "${{ steps.v.outputs.version }}" --out dist/update
+          dist/LS-IHC/runtime/python.exe packaging/make_update.py --version "${{ steps.v.outputs.version }}" --bundle dist/LS-IHC --out dist/update
           if ($LASTEXITCODE) { throw "make_update failed" }
 
       - uses: actions/upload-artifact@v4

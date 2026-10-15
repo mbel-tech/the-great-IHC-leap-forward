@@ -84,6 +84,9 @@ import ls_curation as CU  # noqa: E402
 
 OUT_ROOT = CONFIG["out_root"]
 STUDY_ID = CU.study_id(OUT_ROOT)
+# The study's own mark, which moves with out_root: what lets an entry filed under
+# the folder this study had before a move be recognised as its own.
+STUDY_TOKEN = CU.study_token(OUT_ROOT)
 REFORMAT_DIR = os.path.join(OUT_ROOT, "reformatted")
 
 # The one place the "sections/ or sections_<marker>/" rule lives. See
@@ -324,7 +327,10 @@ def compare(state, path):
     stored = read_stored(path)
     if stored is None:
         return None
-    old = CU.own(stored, STUDY_ID) or {}
+    old = CU.own(stored, STUDY_ID, STUDY_TOKEN) or {}
+    moved = CU.carried_from(stored, STUDY_ID, STUDY_TOKEN)
+    if moved:
+        print("Curation from %s was carried over (this study's folder moved)" % moved)
     return {
         "old": len(old),
         "added": sorted(set(state) - set(old)),
@@ -411,7 +417,7 @@ def main(argv=None):
     # and is replaced, as it always was.
     stored = read_stored(args.out)
     with open(args.out, "w", encoding="utf-8") as fh:
-        json.dump(CU.file_under(stored, STUDY_ID, state), fh)
+        json.dump(CU.file_under(stored, STUDY_ID, state, STUDY_TOKEN), fh)
     print("wrote " + args.out)
     print("Regenerate the page to pick it up: python scripts/04l_roi_curator.py ...")
     return 0

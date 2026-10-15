@@ -341,10 +341,10 @@ def main():
                                frame_of=frame_of)
     fresh = len(S)
 
-    study = CU.study_id(out_root)
+    study, token = CU.study_id(out_root), CU.study_token(out_root)
     if merge:
         prior_raw = ST.CurationStore(out_root).read(ROI_KEY)
-        prior = (CU.own(json.loads(prior_raw), study) or {}) if prior_raw else {}
+        prior = (CU.own(json.loads(prior_raw), study, token) or {}) if prior_raw else {}
         kept = {u: v for u, v in prior.items() if u not in S}
         S = {**kept, **S}
         print(f"merging: {fresh} from the export, {len(kept)} kept of "
@@ -371,9 +371,12 @@ def main():
     except ValueError:
         stored = None
     existing = None if merge else raw
+    moved = CU.carried_from(stored, study, token)
+    if moved:
+        print(f"  Curation from {moved} was carried over (this study's folder moved)")
     if existing:
         # This study's records only: they are what a replace replaces.
-        prior_all = CU.own(stored, study) if stored is not None else {}
+        prior_all = CU.own(stored, study, token) if stored is not None else {}
         had = len(prior_all) if prior_all else "?"
 
         # REPLACING NOW DESTROYS THE OTHER MARKER'S CURATION.
@@ -403,7 +406,7 @@ def main():
         print("\n--dry-run: nothing written")
         return 0
 
-    store.write(ROI_KEY, json.dumps(CU.file_under(stored, study, S)))
+    store.write(ROI_KEY, json.dumps(CU.file_under(stored, study, S, token)))
     print(f"\nwrote {store.path(ROI_KEY)}")
     return 0
 

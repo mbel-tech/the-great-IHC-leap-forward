@@ -19,9 +19,28 @@ curation/<key>.json from inside a study's out_root, a flat value IS that study's
 file has always been one study's, and treating it so keeps every importer's behaviour
 on an existing study exactly what it was. (The page, on a shared origin, cannot assume
 that; see its openStore.)
+
+A STUDY THAT MOVED. out_root changes when the data moves to another drive, and with it
+the name its curation is filed under - hours of hand curation that would then sit
+under a folder nothing looks up any more. Not lost, but hidden, which to the operator
+is the same thing. So every write also records, in `_tokens`, the study's own mark:
+`<out_root>/curation/study_id.txt`, a random id made once, which moves WITH the folder.
+An entry under another folder that carries this study's mark is this study's, moved,
+and is carried over: copied under the new folder, the old entry left in place.
+
+The mark, not the uids, is what tells a moved study from a different one: a pilot and
+a main study share uids by construction, and the whole point of filing per study is
+that one never takes the other's work. An entry with no mark (written before marks
+were recorded) can be either, so a page only reports it. A study's OWN file can say
+more: it lives inside out_root, so if its only entry is under another folder, marked or
+not, it is this study's - moved, or received from another machine in a bundle, where the
+sender's mark came along and this copy has made its own.
 """
 
 import os
+import uuid
+
+TOKEN_FILE = os.path.join("curation", "study_id.txt")
 
 
 def study_id(out_root):
@@ -31,14 +50,55 @@ def study_id(out_root):
     return os.path.normcase(os.path.abspath(out_root))
 
 
+def study_token(out_root, create=False):
+    """This study's mark, kept inside out_root so it moves with the data. None if it has
+    none yet and `create` is not set: only the curator builds make one."""
+    path = os.path.join(out_root, TOKEN_FILE)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            token = fh.read().strip()
+        if token:
+            return token
+    except OSError:
+        pass
+    if not create:
+        return None
+    token = uuid.uuid4().hex
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write(token + "\n")
+    os.replace(tmp, path)
+    return token
+
+
 def is_filed(value):
     return isinstance(value, dict) and isinstance(value.get("_studies"), dict)
 
 
-def own(value, study):
-    """This study's part of a stored value: its entry, or the whole of a flat value."""
+def carried_from(value, study, token=None):
+    """The older folder whose entry is this study's, when it has none under `study`.
+
+    One entry carrying this study's mark; failing that, the file's only entry (see the
+    module note). Two marked candidates, or several unmarked ones, are not guessed
+    between. None when there is nothing to carry over.
+    """
+    if not is_filed(value) or study in value["_studies"]:
+        return None
+    marks = value.get("_tokens") if isinstance(value.get("_tokens"), dict) else {}
+    others = [k for k in value["_studies"] if k != study]
+    marked = [k for k in others if token and marks.get(k) == token]
+    if marked:
+        return marked[0] if len(marked) == 1 else None
+    return others[0] if len(others) == 1 else None
+
+
+def own(value, study, token=None):
+    """This study's part of a stored value: its entry, the entry it had under an older
+    folder (carried_from), or the whole of a flat value."""
     if is_filed(value):
-        return value["_studies"].get(study)
+        old = carried_from(value, study, token)
+        return value["_studies"].get(old if old is not None else study)
     return value
 
 
@@ -47,7 +107,7 @@ def legacy(value):
     return value.get("_legacy") if is_filed(value) else None
 
 
-def file_under(value, study, mine):
+def file_under(value, study, mine, token=None):
     """`value` with this study's part replaced by `mine`, every other study's kept.
 
     A flat `value` is this study's (see the module note), so it is replaced. A filed
@@ -57,6 +117,13 @@ def file_under(value, study, mine):
     """
     out = {"_studies": dict(value["_studies"]) if is_filed(value) else {}}
     out["_studies"][study] = mine
+    # Every mark carried through, this study's recorded when it has one: an entry
+    # carried over from an older folder stays there, marked, never deleted.
+    marks = dict(value.get("_tokens") or {}) if is_filed(value) else {}
+    if token:
+        marks[study] = token
+    if marks:
+        out["_tokens"] = marks
     old = legacy(value)
     if isinstance(old, dict) and isinstance(mine, dict):
         old = {k: v for k, v in old.items() if k not in mine}

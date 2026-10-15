@@ -77,10 +77,18 @@ function buildStudy(name, seeded) {
       _studies: {[id]: {A1_s01_sc01: r({excl: true})},
                  "/elsewhere/other_study": {A1_s01_sc02: r({fav: true})}},
       _legacy: {A1_s01_sc03: r({noroi: true})}}));
+    // Two other studies' entries: a SOLE entry in a study's own file is that study's,
+    // moved (ls_curation.carried_from), which is not this case.
     fs.writeFileSync(path.join(cur, "ls_roi_curator_v1_rois.json"), JSON.stringify({
-      _studies: {"/elsewhere/other_study": ["Xx"]}, _legacy: ["Dm"]}));
+      _studies: {"/elsewhere/other_study": ["Xx"], "/elsewhere/third_study": ["Yy"]},
+      _tokens: {"/elsewhere/other_study": "another-study"}, _legacy: ["Dm"]}));
   }
-  const html = path.join(tmp, "roi.html");
+  buildPage(cfgPath, name, seeded);
+  return tmp;
+}
+
+function buildPage(cfgPath, name, seeded) {
+  const html = path.join(path.dirname(cfgPath), "roi.html");
   let ran = false;
   for (const exe of pys) {
     try {
@@ -98,9 +106,23 @@ function buildStudy(name, seeded) {
     scripts.reduce((a, b) => (b.length > a.length ? b : a), ""));
 }
 
-buildStudy("roi_study_a");
+// The same study after its folder was moved to another drive: everything under it
+// moves, and its config is pointed at the new place. The page is rebuilt there, so
+// it names itself by the NEW folder - and the browser still holds its curation
+// under the old one.
+function moveStudy(tmp, name) {
+  const moved = tmp + "-moved";
+  fs.renameSync(tmp, moved);
+  tmps.push(moved);
+  const cfgPath = path.join(moved, "study.json");
+  fs.writeFileSync(cfgPath, fs.readFileSync(cfgPath, "utf8").split(tmp).join(moved));
+  buildPage(cfgPath, name, false);
+}
+
+const tmpA = buildStudy("roi_study_a");
 buildStudy("roi_study_b");
 buildStudy("roi_study_seeded", true);
+moveStudy(tmpA, "roi_study_a_moved");
 tmps.forEach(t => fs.rmSync(t, { recursive: true, force: true }));
 
 const { env, load, chk, note, done } = require("./harness");
@@ -193,6 +215,57 @@ L2.autosave();
 chk("a new backup leaves the old one in the store", store[A.BACKUP_KEY].includes("2026-01-01"), true);
 const LB = load(EXP, "roi_study_b");
 chk("another study's page does not claim what study A already took", uid in LB.S, false);
+
+// ---- a study whose folder moved still opens with its curation ---------------
+// Moving the data between drives changes the folder the page names itself by.
+// The curation filed under the old folder is carried over - copied, the old entry
+// left where it is - because it carries this study's own mark (out_root/curation/
+// study_id.txt, which moved with the folder). Study B's entry above, under the
+// same uids, does not, which is what keeps the collision checks above passing.
+note("");
+clear();
+const MA = load(EXP, "roi_study_a");
+decide(MA, uid, "excl");
+MA.onRoiSize(13);
+MA.selStore(["Dm"]);
+const MB = load(EXP, "roi_study_b");
+decide(MB, uid2, "fav");
+const M = load(`{STUDY, KEY, get S(){return S}, get SEL(){return SEL},
+  get PT_R_CANON(){return PT_R_CANON}, set active(v){active=v}, toggleFav, autosave}`,
+  "roi_study_a_moved");
+chk("the moved study names itself by its new folder", M.STUDY !== MA.STUDY, true);
+chk("...and still opens with its curation", !!(M.S[uid] && M.S[uid].excl), true);
+chk("...and its radius", M.PT_R_CANON, 13);
+chk("...and its ROI selection", JSON.stringify(M.SEL), '["Dm"]');
+chk("...not the other study's, though it shares the uids", !!(M.S[uid2] && M.S[uid2].fav), false);
+chk("the operator is told where it came from", env.els["studyNote"].textContent.includes(MA.STUDY), true);
+M.active = uid2; M.toggleFav();
+const moved = JSON.parse(store[M.KEY])._studies;
+chk("the first save files it under the new folder", !!(moved[M.STUDY][uid] || {}).excl, true);
+chk("...and leaves the old folder's entry in place", !!(moved[MA.STUDY][uid] || {}).excl, true);
+
+// Two old folders carrying this study's mark: no guessing which is the real one.
+note("");
+const two = JSON.parse(store[M.KEY]);
+two._studies["/old/copy_one"] = two._studies[MA.STUDY];
+two._tokens = Object.assign({}, two._tokens, {"/old/copy_one": two._tokens[MA.STUDY]});
+delete two._studies[M.STUDY];
+store[M.KEY] = JSON.stringify(two);
+env.els["studyNote"].textContent = "";
+const M2 = load(`{get S(){return S}}`, "roi_study_a_moved");
+chk("two candidate folders: nothing is carried over", uid in M2.S, false);
+chk("...and the operator is told curation from another folder exists",
+    env.els["studyNote"].textContent.includes("another folder"), true);
+
+// An old folder's entry with no mark at all (saved before pages recorded one) may
+// be this study or another that shares its uids: said, never taken.
+note("");
+store[M.KEY] = JSON.stringify({_studies: {"/old/unmarked": {[uid]: rec({excl: true})}}});
+env.els["studyNote"].textContent = "";
+const M3 = load(`{get S(){return S}}`, "roi_study_a_moved");
+chk("an unmarked old entry is not carried over", uid in M3.S, false);
+chk("...but the operator is told it exists",
+    env.els["studyNote"].textContent.includes("/old/unmarked"), true);
 
 // ---- the seed a page carries comes from its own study's part of the file -----
 // The app mirrors the page's key to out_root/curation/<key>.json, filed per study,

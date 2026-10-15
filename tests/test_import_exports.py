@@ -158,8 +158,12 @@ def other_study_kept(d, plates):
     try:
         with temp_study() as st:
             me = IE.CU.study_id(st.out_root)
+            # This study's own entry beside it, so the other one is not this study's
+            # moved folder (see moved_study_kept).
             store.write(IE.ROI_KEY, json.dumps({
-                "_studies": {"/elsewhere/other_study": {"LS22_s01b_sc00": rec}},
+                "_studies": {"/elsewhere/other_study": {"LS22_s01b_sc00": rec},
+                             me: {"LS22_s01a_sc00": rec}},
+                "_tokens": {"/elsewhere/other_study": "another-study"},
                 "_legacy": {"LS22_s01a_sc00": rec, "UNCLAIMED": rec}}))
             rc = IE.main()
     finally:
@@ -173,6 +177,43 @@ def other_study_kept(d, plates):
     chk("this study's records are written under it", "LS22_s01a_sc00" in after["_studies"][me], True)
     chk("...and what is unclaimed from before filing stays, minus what was replaced",
         after.get("_legacy"), {"UNCLAIMED": rec})
+
+
+def moved_study_kept(d, plates):
+    """A store whose only entry is under an older folder is this study's, moved.
+
+    Moving the data to another drive changes out_root, and so the name its
+    curation is filed under. The store lives inside out_root, so an entry it holds
+    under one other, unmarked folder can only be this study's: the import reads
+    and merges with it, and leaves the old entry where it was.
+    """
+    import json
+
+    out_root = os.path.join(d, "out_moved")
+    store = IE.ST.CurationStore(out_root)
+    rec = {"plate": 2, "pairs": [], "assigned": True, "noroi": False, "fav": False,
+           "rot": 0, "excl": False}
+    old = {"LS22_s01b_sc00": rec, "LS22_s01a_sc00": rec}
+    argv, real_store = sys.argv[:], IE.ST.CurationStore
+    sys.argv = ["import_exports", plates]
+    IE.ST.CurationStore = lambda _root: real_store(out_root)
+    try:
+        with temp_study() as st:
+            me = IE.CU.study_id(st.out_root)
+            store.write(IE.ROI_KEY, json.dumps({"_studies": {"/old/drive/out": old}}))
+            refused = IE.main()
+            sys.argv = ["import_exports", plates, "--merge"]
+            merged = IE.main()
+    finally:
+        sys.argv = argv
+        IE.ST.CurationStore = real_store
+    print("\na study whose folder moved:\n")
+    chk("its old entry counts as its own: a replace that would drop some is refused", refused, 1)
+    chk("--merge is allowed", merged, 0)
+    after = json.loads(store.read(IE.ROI_KEY))
+    chk("...and keeps the old entry's unmentioned section under the new folder",
+        "LS22_s01b_sc00" in after["_studies"][me], True)
+    chk("...and leaves the old folder's entry in place", after["_studies"].get("/old/drive/out"), old)
 
 
 # Two sections of the same marker, one shown as a 768 px composite and one as
@@ -338,6 +379,7 @@ def main():
 
         replace_guard(d, pl)
         other_study_kept(d, pl)
+        moved_study_kept(d, pl)
         per_section_frame(d)
         other_study_frames(d)
 

@@ -346,6 +346,20 @@ def main():
         chk("...replaces this study's", sorted(after["_studies"][Q.STUDY_ID]), sorted(state))
         chk("...and keeps what is still unclaimed from before filing, minus what it replaced",
             after.get("_legacy"), {"UNCLAIMED": rec})
+
+        # ---- this study, after its folder moved to another drive -------------
+        # The file lives in out_root, so its one entry under another, unmarked folder
+        # is this study's: compared against, and left in place by the write.
+        with open(out, "w", encoding="utf-8") as fh:
+            json.dump({"_studies": {"/old/drive/out": {"MINE_ONLY": rec}}}, fh)
+        d = Q.compare(state, out)
+        chk("a moved study's old entry is what is compared", d["only_on_disk"], ["MINE_ONLY"])
+        Q.main(argv + ["--write"])
+        with open(out, encoding="utf-8") as fh:
+            after = json.load(fh)
+        chk("...the write files under the new folder", sorted(after["_studies"][Q.STUDY_ID]), sorted(state))
+        chk("...and leaves the old entry in place", after["_studies"].get("/old/drive/out"),
+            {"MINE_ONLY": rec})
     finally:
         import shutil
         shutil.rmtree(tmp, ignore_errors=True)

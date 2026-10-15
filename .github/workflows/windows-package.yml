@@ -67,7 +67,7 @@ jobs:
           $env:LS_CONFIG = (Resolve-Path config.example.json).Path
           $p = Start-Process dist/LS-IHC/runtime/python.exe -ArgumentList "-m", "app", "--self-test" -WorkingDirectory dist/LS-IHC -Wait -PassThru -NoNewWindow
           Get-Content dist/LS-IHC/lsapp-selftest.log -ErrorAction SilentlyContinue
-          Get-Content dist/LS-IHC/lsapp-crash.log -ErrorAction SilentlyContinue
+          Get-Content "$env:LOCALAPPDATA\The Great IHC Leap Forward\logs\lsapp-crash.log" -ErrorAction SilentlyContinue
           Remove-Item dist/LS-IHC/lsapp-*.log -ErrorAction SilentlyContinue
           if ($p.ExitCode -ne 0) { throw "self-test exited $($p.ExitCode)" }
 

@@ -337,6 +337,9 @@ run_app.bat
 
 `run_app.bat` prefers `work/appenv`, the Python 3.13 venv `build_app.bat` sets up. Running `python -m app` against an interpreter without PySide6 now says which interpreter
 it is and how to fix it, rather than writing a bare traceback to `lsapp-crash.log`.
+That crash log is per-user, so a read-only install folder still gets one:
+`%LOCALAPPDATA%\The Great IHC Leap Forward\logs\lsapp-crash.log` on Windows,
+`~/.local/state/The Great IHC Leap Forward/logs/` elsewhere (the temp folder if neither can be written).
 
 One window, laid out in the order you work. A step bar down the left holds six
 screens, each with its progress read from disk:

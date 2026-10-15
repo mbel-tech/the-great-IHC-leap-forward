@@ -12,6 +12,42 @@ run it, and start **The Great IHC Leap Forward** from the Start menu. Installing
 one over it upgrades in place. Studies and settings live in
 `%USERPROFILE%\.ls-pipeline` and survive upgrades and uninstalling.
 
+## Updates from inside the app
+
+An installed copy checks GitHub for a newer release each time it starts (quietly;
+offline it just carries on) and from **Help > Check for updates**. When one is
+out, a bar under the menu says so.
+
+- **Code-only releases** (app, stage scripts, analysis, atlas) install from
+  inside the app: it downloads a small package, closes, swaps the new code in,
+  checks that it imports, and starts again. If anything fails the old version
+  is put back on its own. **Help > Undo last update** goes back one version.
+  The atlas plates (~250 MB) are downloaded only in releases that change them.
+- **Releases that change libraries, Python or R** need the installer; the app
+  says so and links it.
+- Nothing outside the install folder is touched: studies, settings and results
+  stay where they are. The updater's own files live in `<install>\updates\`.
+
+How it decides: every release carries `update-<version>.json` beside the
+installer. Its `runtime_fingerprint` is a hash of the bundle's
+`BUNDLE_VERSIONS.txt` (the pip freeze of the runtime as built, plus the Python
+and R versions); the installed copy has its own in `VERSION.json`. Same hash:
+code update. Different: installer.
+
+Requirements say `>=`, so two builds normally pick up different library
+versions. To let releases share a runtime, `build.ps1` builds against
+`packaging/windows/bundle-lock.txt` when it exists (the build log prints the
+`BUNDLE_VERSIONS.txt` to copy into it). With no lock, every release is an
+installer release. Change the lock only when you mean to move to newer
+libraries; that release then goes out as an installer.
+
+Updates come only from published releases (a `v*` tag), never from main
+between releases. Copies installed from `v1` predate the updater and need the
+next release's installer once.
+
+`packaging/make_update.py` builds the packages; `app/updates.py`,
+`app/update_apply.py` and `app/update_ui.py` are the app side.
+
 ## Making a release
 
 Push a tag:
@@ -21,7 +57,9 @@ Push a tag:
 
 The `Windows package` workflow builds the bundle, runs `smoke_test.py` and the
 app's `--self-test`, builds the installer, installs it silently and tests the
-installed copy, then publishes a GitHub Release with the installer attached.
+installed copy, then publishes a GitHub Release with the installer and the
+in-app update files attached. Tags are numbered (`v1.1`, `v1.2.3`); the app
+ignores tags it cannot read as a version.
 Run it from the Actions tab (Run workflow) to get an installer as a build
 artifact without releasing.
 

@@ -96,6 +96,9 @@ def main():
         _report(type(e), e, e.__traceback__)
         return 1
 
+    if "--check-install" in sys.argv:
+        return _check_install()
+
     app = QApplication(sys.argv)
     app.setApplicationName("The Great IHC Leap Forward")
     # Before any window exists, so the study picker is drawn light too.
@@ -119,10 +122,59 @@ def main():
         if "--self-test" in sys.argv:
             return _self_test(app, w)
 
+        # Once the window is up: say how the last update went, then ask GitHub
+        # (in the background, silently if offline) whether there is a newer one.
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(0, w.updater.report_last_result)
+        QTimer.singleShot(1500, w.updater.check_in_background)
+
         return app.exec()
     except BaseException as e:                              # noqa: BLE001
         _report(type(e), e, e.__traceback__)
         return 1
+
+
+def _check_install():
+    """Build the main window offscreen on a throwaway study, close it, print ok.
+
+    update_apply.py runs this on freshly swapped-in code and undoes the update
+    when it fails, so a release whose window cannot even be built never becomes
+    the copy someone starts (from which Help > Undo would be out of reach). The
+    study, settings folder and output all live in a temporary folder that is
+    deleted afterwards: the person's own studies are never opened.
+    """
+    import json
+    import shutil
+    import tempfile
+    tmp = tempfile.mkdtemp(prefix="lsapp-check-")
+    # Caught here rather than by _report: its message box, on an offscreen
+    # application nobody can see, would hang the check until it timed out.
+    try:
+        os.environ["LS_HOME"] = os.path.join(tmp, "home")
+        with open(os.path.join(REPO, "config.example.json"), encoding="utf-8") as fh:
+            cfg = json.load(fh)
+        cfg["out_root"] = os.path.join(tmp, "out")
+        cfg["source_dir"] = os.path.join(tmp, "slides")
+        study = os.path.join(tmp, "study.json")
+        with open(study, "w", encoding="utf-8") as fh:
+            json.dump(cfg, fh)
+        os.environ["LS_CONFIG"] = study
+
+        from PySide6.QtWidgets import QApplication
+        app = QApplication([sys.argv[0], "-platform", "offscreen"])
+        import update_ui                                    # noqa: F401
+        from main_window import MainWindow
+        w = MainWindow(REPO, scripts_dir=SCRIPTS, config_path=study)
+        w.server.stop()
+        w.deleteLater()
+        app.processEvents()
+    except BaseException:                                   # noqa: BLE001
+        traceback.print_exc()
+        return 1
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    print("ok (window built)")
+    return 0
 
 
 def _self_test(app, w):

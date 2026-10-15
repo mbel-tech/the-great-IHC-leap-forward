@@ -12,6 +12,7 @@ on:
       - "packaging/**"
       - ".github/workflows/windows-package.yml"
       - "requirements*.txt"
+      - "app/update*.py"
   workflow_dispatch:
   push:
     tags: ["v*"]
@@ -44,10 +45,19 @@ jobs:
           "version=$v" >> $env:GITHUB_OUTPUT
 
       - name: Build the bundle
-        run: packaging/windows/build.ps1 -Out dist/LS-IHC
+        run: packaging/windows/build.ps1 -Out dist/LS-IHC -Version "${{ steps.v.outputs.version }}"
 
       - name: Smoke test (libraries, offline StarDist, R)
         run: dist/LS-IHC/runtime/python.exe packaging/windows/smoke_test.py dist/LS-IHC
+
+      - name: Install check (what the in-app updater runs on new code)
+        timeout-minutes: 5
+        run: |
+          Push-Location dist/LS-IHC
+          runtime/python.exe -m app --check-install
+          $rc = $LASTEXITCODE
+          Pop-Location
+          if ($rc) { throw "--check-install exited $rc" }
 
       - name: App self-test (window, local server, curator in QtWebEngine)
         timeout-minutes: 5
@@ -81,6 +91,11 @@ jobs:
           & "$env:RUNNER_TEMP\installed\runtime\python.exe" packaging/windows/smoke_test.py "$env:RUNNER_TEMP\installed"
           if ($LASTEXITCODE) { throw "smoke test on the installed copy failed" }
 
+      - name: In-app update packages (code, atlas, update-<version>.json)
+        run: |
+          dist/LS-IHC/runtime/python.exe packaging/make_update.py --version "${{ steps.v.outputs.version }}" --bundle dist/LS-IHC --out dist/update
+          if ($LASTEXITCODE) { throw "make_update failed" }
+
       - uses: actions/upload-artifact@v4
         with:
           name: The-Great-IHC-Leap-Forward-Setup-${{ steps.v.outputs.version }}
@@ -94,12 +109,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $exe = (Get-ChildItem dist/The-Great-IHC-Leap-Forward-Setup-*.exe).FullName
+          # The installed app finds these by name (app/updates.py): the
+          # manifest names the zips and says which runtime they need.
+          $files = @($exe) + @(Get-ChildItem dist/update/* | ForEach-Object FullName)
           # A release someone drafted or published for this tag gets the
-          # installer added; otherwise one is created.
+          # files added; otherwise one is created.
           gh release view "$env:GITHUB_REF_NAME" *> $null
           if ($LASTEXITCODE -eq 0) {
-            gh release upload "$env:GITHUB_REF_NAME" $exe --clobber
+            gh release upload "$env:GITHUB_REF_NAME" @files --clobber
           } else {
-            gh release create "$env:GITHUB_REF_NAME" $exe --title "The Great IHC Leap Forward $env:GITHUB_REF_NAME" --generate-notes
+            gh release create "$env:GITHUB_REF_NAME" @files --title "The Great IHC Leap Forward $env:GITHUB_REF_NAME" --generate-notes
           }
           if ($LASTEXITCODE) { throw "release upload failed" }

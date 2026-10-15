@@ -1,7 +1,7 @@
 <#
 Build the installable Windows bundle.
 
-    pwsh packaging/windows/build.ps1 [-Out dist\LS-IHC] [-NoR] [-PythonVersion 3.13.x]
+    pwsh packaging/windows/build.ps1 [-Out dist\LS-IHC] [-Version 1.2.0] [-NoR] [-PythonVersion 3.13.x]
 
 Produces a self-contained folder:
 
@@ -10,6 +10,7 @@ Produces a self-contained folder:
     R\           R and the figure packages (left out with -NoR)
     keras\       StarDist's pretrained model, so Measure works offline
     The Great IHC Leap Forward.cmd           starts the app from the folder (portable use)
+    VERSION.json the version and the fingerprints the in-app updater compares
 
 installer.iss wraps that folder into The-Great-IHC-Leap-Forward-Setup.exe.
 
@@ -23,6 +24,7 @@ Python 3.13 rather than 3.14: pylibCZIrw publishes no cp314 wheel.
 [CmdletBinding()]
 param(
     [string]$Out = "dist\LS-IHC",
+    [string]$Version = "0.0.0-dev",  # the release tag without its v; the updater reads it
     [string]$PythonVersion = "",     # empty = newest 3.13.x on python.org
     [string]$RVersion = "",          # empty = current CRAN release
     [switch]$NoR
@@ -34,6 +36,23 @@ $Repo = (Resolve-Path "$PSScriptRoot\..\..").Path
 $Out = [IO.Path]::GetFullPath((Join-Path $Repo $Out))
 $Cache = Join-Path $Repo "work\packaging-cache"
 New-Item -ItemType Directory -Force $Cache | Out-Null
+
+# bundle-lock.txt is a BUNDLE_VERSIONS.txt from an earlier build, committed.
+# Building against it gives every release the same runtime, so the in-app
+# updater can ship code-only updates (it compares BUNDLE_VERSIONS.txt, see
+# packaging/make_update.py). Without it each build takes the newest of
+# everything, and each release has to go out as an installer. To move to newer
+# libraries, replace the lock with the BUNDLE_VERSIONS.txt the CI log prints.
+$Lock = Join-Path $PSScriptRoot "bundle-lock.txt"
+$Constraints = $null
+if (Test-Path $Lock) {
+    $locked = Get-Content $Lock | Where-Object { $_.Trim() }
+    if (-not $PythonVersion) { $PythonVersion = ($locked | Where-Object { $_ -match '^python==' }) -replace '^python==', '' }
+    if (-not $RVersion) { $RVersion = ($locked | Where-Object { $_ -match '^R==' }) -replace '^R==', '' }
+    $Constraints = Join-Path $Cache "constraints.txt"
+    $locked | Where-Object { $_ -notmatch '^(python|R)==' } | Set-Content $Constraints
+    Write-Host "Building against $Lock"
+}
 
 function Get-Cached([string]$Url) {
     $file = Join-Path $Cache ([IO.Path]::GetFileName($Url))
@@ -93,8 +112,10 @@ Invoke-Checked $Py @((Get-Cached "https://bootstrap.pypa.io/get-pip.py"), "--no-
 # pyinstaller is in requirements.txt for build_app.bat only.
 $req = Join-Path $Cache "requirements-app.txt"
 Get-Content "$Repo\requirements.txt" | Where-Object { $_ -notmatch '^\s*pyinstaller' } | Set-Content $req
-Invoke-Checked $Py @("-m", "pip", "install", "--no-warn-script-location", "--prefer-binary",
+$pipArgs = @("-m", "pip", "install", "--no-warn-script-location", "--prefer-binary",
     "-r", $req, "-r", "$Repo\requirements-czi.txt", "-r", "$PSScriptRoot\requirements-bundle.txt")
+if ($Constraints) { $pipArgs += @("-c", $Constraints) }
+Invoke-Checked $Py $pipArgs
 # Nothing at run time uses these, and they are what makes the bundle large and
 # its paths long: TensorFlow's C++ headers (270 MB, and paths of 160+
 # characters, which broke the installer build at Windows' 260-character limit)
@@ -136,7 +157,10 @@ if (-not $NoR) {
         $RVersion = [regex]::Match($page, 'R-(\d+\.\d+\.\d+)-win\.exe').Groups[1].Value
         $RUrl = "https://cloud.r-project.org/bin/windows/base/R-$RVersion-win.exe"
     } else {
-        $RUrl = "https://cloud.r-project.org/bin/windows/base/old/$RVersion/R-$RVersion-win.exe"
+        # The current release lives in base/, earlier ones in base/old/<v>/.
+        $RUrl = "https://cloud.r-project.org/bin/windows/base/R-$RVersion-win.exe"
+        try { Invoke-WebRequest -Method Head $RUrl | Out-Null }
+        catch { $RUrl = "https://cloud.r-project.org/bin/windows/base/old/$RVersion/R-$RVersion-win.exe" }
     }
     Write-Host "R $RVersion"
     $RDir = Join-Path $Out "R"
@@ -155,6 +179,12 @@ if (-not $NoR) {
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue (Join-Path $RDir "doc\manual")
     Add-Content (Join-Path $Out "BUNDLE_VERSIONS.txt") "R==$RVersion"
 }
+
+# What app/updates.py compares with each release's update-<v>.json. Last, so
+# BUNDLE_VERSIONS.txt already holds the R line.
+Invoke-Checked $Py @("$Repo\packaging\make_update.py", "--version", $Version, "--bundle", $Out, "--version-file-only")
+Write-Host "BUNDLE_VERSIONS.txt (copy to packaging\windows\bundle-lock.txt to pin this runtime):"
+Get-Content (Join-Path $Out "BUNDLE_VERSIONS.txt") | Write-Host
 
 # Precompile, so the install folder is not written to on first start and the
 # uninstaller removes everything it put there. Not checked: a few packages ship

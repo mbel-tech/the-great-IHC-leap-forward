@@ -481,6 +481,151 @@ def join_check(tmp):
         G6A.NUCLEI_CSV, G6A.MEAS_CSV, G6A.SPEC_CSV, G5.all_boxes = keep
 
 
+def geometry_check(tmp):
+    """06a must refuse counts measured on a disc that has since been MOVED.
+
+    check_join() catches a disc inserted or removed, because the kind or the
+    region at an index changes. A disc dragged to a new spot, resized, or a
+    polygon redrawn keeps its index, kind and region - and 05c's resume skips
+    any section that already has nuclei rows - so 06a used to divide the old
+    disc's count by the new disc's area, with nothing anywhere to say so.
+
+    05c now records, per section, the geometry it measured each ROI on
+    (results/roi_measured_geometry.csv). The two halves are tested together:
+    the record is what 05c's own helper writes, and 06a reads it back.
+    """
+    boxes = [dict(box("S1", "roi", "Dm"), sec_poly="", area_um2="3141592.7"),
+             dict(box("S1", "background", "__background__"), sec_poly="",
+                  area_um2="3141592.7"),
+             dict(box("S2", "roi", "Dm"), sec_poly="", area_um2="3141592.7"),
+             dict(box("S2", "background", "__background__"), sec_poly="",
+                  area_um2="3141592.7")]
+    nuc = []
+    for uid in ("S1", "S2"):
+        nuc.append(nucleus(uid, "roi", "Dm", 1, 1, 100.0))
+        nuc.append(nucleus(uid, "background", "__background__", 2, 2, 100.0))
+
+    def by_uid(bs):
+        d = {}
+        for b in bs:
+            d.setdefault(b["scene_uid"], []).append(b)
+        return d
+
+    # The record, as 05c writes it: one call per measured section, through a
+    # csv round trip so every value is the string 06a will read back.
+    gpath = os.path.join(tmp, "geom_measured.csv")
+    with open(gpath, "w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(G5C.GEOMETRY_COLUMNS)
+        for uid, bs in by_uid(boxes).items():
+            w.writerows(G5C.geometry_rows(uid, bs))
+    recorded = G5.load_csv(gpath)
+    report = os.path.join(tmp, "geom_changed.csv")
+
+    unver = G6A.check_geometry(nuc, by_uid(boxes), recorded, report)
+    chk("unchanged geometry passes the geometry check", sorted(unver), [])
+    chk("...and leaves no changed-sections file", os.path.exists(report), False)
+
+    moved = [dict(b) for b in boxes]
+    moved[1]["sec_x"] = 160                  # S1's background disc dragged
+    resized = [dict(b) for b in boxes]
+    resized[2]["area_um2"] = "1570796.3"     # S2's ROI re-mapped smaller
+    for name, bs, want, other in (("moved", moved, "S1", "S2"),
+                                  ("resized", resized, "S2", "S1")):
+        try:
+            G6A.check_geometry(nuc, by_uid(bs), recorded, report)
+            got = "no exit"
+        except SystemExit as exc:
+            got = str(exc)
+        chk(f"a disc {name} after detection -> SystemExit", got != "no exit", True)
+        chk(f"...naming {want}", want in got, True)
+        chk(f"...and not the untouched {other}", other not in got, True)
+        chk("...saying to re-measure with 05c --force", "--force" in got, True)
+        listed = ([r["scene_uid"] for r in G5.load_csv(report)]
+                  if os.path.exists(report) else None)
+        chk("...and lists the sections in a CSV", listed, [want])
+
+    # A section with nuclei but no record predates the record - an older
+    # roi_nuclei.csv. It cannot be checked, so it is REPORTED, not fatal:
+    # refusing would make every existing dataset unusable until re-detected.
+    part = [r for r in recorded if r["scene_uid"] != "S2"]
+    unver = G6A.check_geometry(nuc, by_uid(boxes), part, report)
+    chk("a section measured before the record is reported, not fatal",
+        sorted(unver), "['S2']")
+    chk("...and no record at all is the same, for every section",
+        sorted(G6A.check_geometry(nuc, by_uid(boxes), None, report)),
+        "['S1', 'S2']")
+
+    # And main() runs it: a moved disc on disk stops 06a before it writes.
+    npath, bpath = build(tmp)
+    on_disk = G5.load_csv(bpath)
+    gpath2 = os.path.join(tmp, "geom_measured_main.csv")
+    with open(gpath2, "w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(G5C.GEOMETRY_COLUMNS)
+        for uid, bs in by_uid(on_disk).items():
+            w.writerows(G5C.geometry_rows(uid, bs))
+    on_disk[0]["sec_y"] = 90                 # S1's ROI disc moved
+    with open(bpath, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=BOX_COLS)
+        w.writeheader()
+        w.writerows(on_disk)
+    keep = (G6A.NUCLEI_CSV, G6A.MEAS_CSV, G6A.SPEC_CSV, G6A.GEOMETRY_CSV,
+            G6A.GEOMETRY_CHANGED_CSV, G5.all_boxes)
+    G6A.NUCLEI_CSV = npath
+    G6A.MEAS_CSV = os.path.join(tmp, "geom_measurements.csv")
+    G6A.SPEC_CSV = os.path.join(tmp, "geom_specificity.csv")
+    G6A.GEOMETRY_CSV = gpath2
+    G6A.GEOMETRY_CHANGED_CSV = os.path.join(tmp, "geom_changed_main.csv")
+    G5.all_boxes = lambda: G5.load_csv(bpath)
+    try:
+        try:
+            G6A.main()
+            got = "no exit"
+        except SystemExit as exc:
+            got = str(exc)
+        chk("06a main() refuses counts from a moved disc", got != "no exit", True)
+        chk("...and wrote no measurements", os.path.exists(G6A.MEAS_CSV), False)
+    finally:
+        (G6A.NUCLEI_CSV, G6A.MEAS_CSV, G6A.SPEC_CSV, G6A.GEOMETRY_CSV,
+         G6A.GEOMETRY_CHANGED_CSV, G5.all_boxes) = keep
+
+
+def all_filtered_check(tmp):
+    """A measured section whose every nucleus was dropped reports ZERO, not nothing.
+
+    Artifact and off-tissue nuclei leave before counting. A section where that
+    was all of them was still measured - 05c looked and wrote rows - so its
+    discs are a count of 0, and leaving them out made it look unmeasured.
+    """
+    npath, bpath = build(tmp)
+    rows = G5.load_csv(npath)
+    rows.append(nucleus("S3", "roi", "Dm", 1, 900, 100.0, art=1))
+    with open(npath, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=NUC_COLS)
+        w.writeheader()
+        w.writerows(rows)
+    boxes = G5.load_csv(bpath) + [box("S3", "roi", "Dm")]
+    with open(bpath, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=BOX_COLS)
+        w.writeheader()
+        w.writerows(boxes)
+    keep = (G6A.NUCLEI_CSV, G6A.MEAS_CSV, G6A.SPEC_CSV, G5.all_boxes)
+    G6A.NUCLEI_CSV = npath
+    G6A.MEAS_CSV = os.path.join(tmp, "filt_measurements.csv")
+    G6A.SPEC_CSV = os.path.join(tmp, "filt_specificity.csv")
+    G5.all_boxes = lambda: G5.load_csv(bpath)
+    try:
+        G6A.main()
+        meas = G5.load_csv(G6A.MEAS_CSV)
+    finally:
+        G6A.NUCLEI_CSV, G6A.MEAS_CSV, G6A.SPEC_CSV, G5.all_boxes = keep
+    s3 = [r for r in meas if r["scene_uid"] == "S3"]
+    chk("an all-artifact section still gets its disc row", len(s3), 1)
+    if s3:
+        chk("...with a count of 0", s3[0]["n_nuclei"], 0)
+
+
 def multiplex_fixture(tmp, stem, markers=("M1", "M2"), drop_boxes_for=None):
     """ONE section carrying BOTH markers - what a `multiplex` study images.
 
@@ -676,6 +821,12 @@ def main():
 
         # ---- and the positional nucleus-to-disc join must be checked
         join_check(tmp)
+
+        # ---- and so must a disc that kept its index but MOVED
+        geometry_check(tmp)
+
+        # ---- a section whose nuclei were all dropped still reports zero
+        all_filtered_check(tmp)
 
         # ---- which under `multiplex` means per marker, not per position
         multiplex_join_check(tmp)

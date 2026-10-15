@@ -81,6 +81,11 @@ RESULTS = os.path.join(OUT_ROOT, "results")
 NUCLEI_CSV = os.path.join(RESULTS, "roi_nuclei.csv")
 MEAS_CSV = os.path.join(RESULTS, "roi_measurements.csv")
 SPEC_CSV = os.path.join(RESULTS, "detector_specificity.csv")
+#: What 05c recorded about the shape each ROI was measured on (05c's
+#: GEOMETRY_CSV), and where this stage lists the sections whose shape has
+#: changed since. See check_geometry.
+GEOMETRY_CSV = os.path.join(RESULTS, "roi_measured_geometry.csv")
+GEOMETRY_CHANGED_CSV = os.path.join(RESULTS, "roi_geometry_changed.csv")
 
 T_UM = CONFIG["section_thickness_um"]
 AB = CONFIG["detection"].get("abercrombie", {})
@@ -276,6 +281,94 @@ def check_join(nuc, box_by):
     return orphan
 
 
+def _same_value(a, b):
+    """Whether two CSV cells hold the same value: as numbers where both are,
+    so "128" and "128.0" agree, and as text otherwise (region, sec_poly)."""
+    try:
+        return float(a) == float(b)
+    except (TypeError, ValueError):
+        return (a or "") == (b or "")
+
+
+def check_geometry(nuc, box_by, recorded, report_path):
+    """The shape each ROI was measured on must still be the shape it has.
+
+    check_join() proves every index still names a disc of the same kind and
+    region. It cannot see a disc that was MOVED: dragged, resized, a polygon
+    redrawn, then re-exported. 05a rewrites roi_boxes from that export, 05c's
+    resume skips the section because it already has rows, and the emit loop
+    then divided the nuclei counted in the old shape by the area of the new
+    one - a plausible density, from two different discs.
+
+    `recorded` is 05c's GEOMETRY_CSV: per (section, marker, roi_index), the box
+    columns membership and area depend on, as 05c read them. Any of those that
+    differs now, or a different number of ROIs, is FATAL for the section, as a
+    shifted join is - the count has to be measured again on the shape it will
+    be divided by. The sections are written to `report_path` as well as named,
+    because the fix is per section and the list can be long.
+
+    A section with nuclei and NO record was measured before 05c kept one. That
+    cannot be checked either way, so it is returned and reported, not fatal:
+    refusing would make every existing dataset unusable until re-detected.
+    """
+    rec, fields = {}, []
+    if recorded:
+        fields = [c for c in recorded[0]
+                  if c not in ("scene_uid", "marker", "roi_index")]
+        for r in recorded:
+            rec.setdefault((r["scene_uid"], r["marker"]), {})[
+                int(r["roi_index"])] = r
+    split = {u: split_by_marker(bs) for u, bs in box_by.items()}
+    changed, unverified = {}, set()
+    for uid, mk in sorted({(r["scene_uid"], r.get("marker", "")) for r in nuc}):
+        boxes = split.get(uid, {}).get(mk)
+        if not boxes:
+            continue                    # check_join's case, reported there
+        then = rec.get((uid, mk))
+        if not then:
+            unverified.add(uid)
+            continue
+        if len(then) != len(boxes):
+            changed[(uid, mk)] = (f"measured on {len(then)} ROIs, the boxes "
+                                  f"now have {len(boxes)}")
+            continue
+        for i, b in enumerate(boxes, 1):
+            old = then.get(i, {})
+            diff = [f for f in fields
+                    if not _same_value(old.get(f, ""), b.get(f, ""))]
+            if diff:
+                changed[(uid, mk)] = f"roi_index {i}: " + ", ".join(
+                    f"{f} {old.get(f, '')!r} -> {b.get(f, '')!r}" for f in diff)
+                break
+    if unverified:
+        print(f"  !! {len(unverified)} sections were measured before 05c "
+              f"recorded ROI geometry, so a disc moved since detection cannot "
+              f"be caught on them: {sorted(unverified)[:8]}")
+    if not changed:
+        # A list from an earlier refusal must not outlive the problem it named.
+        if os.path.exists(report_path):
+            os.remove(report_path)
+        return unverified
+    IO.atomic_write_csv(report_path,
+                        [{"scene_uid": u, "marker": m, "reason": why}
+                         for (u, m), why in sorted(changed.items())],
+                        ["scene_uid", "marker", "reason"])
+    shown = sorted(changed.items())[:10]
+    lines = "\n".join(f"    {u} [{m}]  {why}" for (u, m), why in shown)
+    if len(changed) > len(shown):
+        lines += f"\n    ... and {len(changed) - len(shown)} more"
+    redo = " and ".join(f"05c_detect_rois.py --marker {m} --force"
+                        for m in sorted({m for _, m in changed}))
+    raise SystemExit(
+        f"!! {len(changed)} sections have ROIs whose shape changed after "
+        f"their nuclei were counted:\n{lines}\n"
+        f"  Their counts belong to the old shapes and the areas to the new "
+        f"ones, so no density from them is right. All of them are listed in "
+        f"{report_path}. Re-measure them on the current shapes ({redo}), or "
+        f"restore the curator export they were measured with and re-run "
+        f"05a_roi_geometry.py.")
+
+
 def main(argv=None):
     # argv is accepted and ignored: this stage has no flags, and taking it
     # lets 06e call every stage the same way instead of branching on a label.
@@ -293,6 +386,10 @@ def main(argv=None):
     print(f"{len(nuc)} nuclei over "
           f"{len({r['scene_uid'] for r in nuc})} sections")
     check_join(nuc, box_by)
+    check_geometry(nuc, box_by,
+                   G5.load_csv(GEOMETRY_CSV) if os.path.exists(GEOMETRY_CSV)
+                   else None,
+                   GEOMETRY_CHANGED_CSV)
 
     for r in nuc:
         r["_v"] = float(r[STAT])
@@ -335,6 +432,10 @@ def main(argv=None):
     # section look more positive than it is.
     n_art = sum(1 for r in nuc if r["_art"])
     n_off = sum(1 for r in nuc if r["_off"] and not r["_art"])
+    # Every section 05c MEASURED, taken before the drop: one whose nuclei were
+    # all on an artifact or off the tissue was still looked at, and its discs
+    # are a count of 0, not missing.
+    uids = {r["scene_uid"] for r in nuc}
     nuc = [r for r in nuc if not r["_art"] and not r["_off"]]
     print(f"  dropped {n_art} on an artifact, {n_off} off the tissue "
           f"-> {len(nuc)} nuclei quantified")
@@ -358,10 +459,9 @@ def main(argv=None):
     # carries both the correction is the thing to withhold, not to apply.
     shape_by = {}
     own_by = {}                                # marker -> segmented on itself
-    uids, d_all = set(), []
+    d_all = []
     for r in nuc:
         uid = r["scene_uid"]
-        uids.add(uid)
         d_all.append(r["_d"])
         # roi_index is what ties a nucleus to the disc it was found in - 05c
         # numbers the discs in the order roi_boxes_<marker>.csv lists them for

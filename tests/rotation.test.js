@@ -8,7 +8,7 @@
 const { env, load, chk, note, done } = require("./harness");
 const { store, fire } = env;
 
-const X = load(`{KEY, st, rows, toggleRotMode, restoreTilt, secDown, select,
+const X = load(`{KEY, STUDY, st, rows, toggleRotMode, restoreTilt, secDown, select,
   get rotMode(){return rotMode}, get draftRot(){return draftRot},
   set active(v){active=v}, get active(){return active}}`);
 
@@ -16,7 +16,8 @@ const uids = X.rows().map(r => r.uid);
 const uid = uids[0], other = uids[1];
 X.active = uid;
 
-const disk = u => JSON.parse(store[X.KEY] || "{}")[u] || {};
+// The page files its records per study inside the key (roi_curator_study.test.js).
+const disk = u => ((JSON.parse(store[X.KEY] || "{}")._studies || {})[X.STUDY] || {})[u] || {};
 
 chk("starts unrotated", X.st(uid).rot || 0, 0);
 
@@ -49,7 +50,7 @@ chk("a press that never moved changes nothing",
     X.st(uid).rot.toFixed(1), before.toFixed(1));
 
 // Rebuilt from storage alone: this is what a reload would see.
-const reloaded = JSON.parse(store[X.KEY])[uid];
+const reloaded = disk(uid);
 chk("survives a reload", reloaded.rot.toFixed(1), "19.0");
 
 X.restoreTilt();

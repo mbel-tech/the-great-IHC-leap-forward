@@ -3,7 +3,7 @@
 const { env, load, chk, note, done } = require("./harness");
 const { els, store, blobs } = env;
 
-const X = load(`{KEY, S, SEED_STATE, st, rows, select, onSlide, status, initState, hasDecision,
+const X = load(`{KEY, STUDY, S, SEED_STATE, st, rows, select, onSlide, status, initState, hasDecision,
   hasRoiWork, adoptSeed, exportCsv, isExcl, isDone, cellTag, toggleExcl,
   set active(v){active=v}, get active(){return active}}`);
 
@@ -24,14 +24,16 @@ chk("a store holding only blanks counts as empty",
     Object.keys(X.initState(JSON.stringify({B: blank()}), seed)).join(), "A");
 chk("garbage in the store is ignored", Object.keys(X.initState("{not json", seed)).join(), "A");
 
+// The page files its records per study inside the key (roi_curator_study.test.js).
+const disk = () => (JSON.parse(store[X.KEY] || "{}")._studies || {})[X.STUDY] || {};
 els["animal"].value = "LS105";
 const uids = X.rows().map(d => d.uid);
 chk("fixture needs five sections", uids.length >= 5, true);
 X.select(uids[0], true);
 X.onSlide(4);
-chk("select + slide stores no record", uids[0] in JSON.parse(store[X.KEY] || "{}"), false);
+chk("select + slide stores no record", uids[0] in disk(), false);
 X.active = uids[0]; X.toggleExcl();
-chk("...but a decision does", JSON.parse(store[X.KEY])[uids[0]].excl, true);
+chk("...but a decision does", disk()[uids[0]].excl, true);
 
 X.active = null; X.status();
 chk("status() with nothing selected adds no record", "null" in X.S, false);

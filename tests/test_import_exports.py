@@ -109,6 +109,8 @@ def replace_guard(d, plates):
     # D:/LS-analysis/curation.
     argv, real_store = sys.argv[:], IE.ST.CurationStore
 
+    studies = []
+
     def run(*flags):
         sys.argv = ["import_exports", plates, *flags]
         IE.ST.CurationStore = lambda _root: real_store(out_root)
@@ -116,7 +118,8 @@ def replace_guard(d, plates):
             # A throwaway study for main() to read, not the repo config.json -
             # which a fresh clone or CI does not have, and which on the
             # operator's machine is their live study.
-            with temp_study():
+            with temp_study() as st:
+                studies.append(IE.CU.study_id(st.out_root))
                 return IE.main()
         finally:
             sys.argv = argv
@@ -130,7 +133,46 @@ def replace_guard(d, plates):
 
     chk("--merge is allowed", run("--merge"), 0)
     kept = json.loads(store.read(IE.ROI_KEY))
-    chk("...and keeps the unmentioned section", "LS22_s01b_sc00" in kept, True)
+    # Filed per study like the curator page's key (scripts/ls_curation.py): a flat
+    # store is this study's, so it is what the merge read and kept.
+    chk("...and keeps the unmentioned section",
+        "LS22_s01b_sc00" in kept["_studies"][studies[-1]], True)
+
+
+def other_study_kept(d, plates):
+    """An import replaces THIS study's records in a store filed per study, nothing else.
+
+    The curator page files its key per study because every study's page shares one
+    origin, and the app mirrors that value to this store - so it can hold another
+    study's records under the same scene uids.
+    """
+    import json
+
+    out_root = os.path.join(d, "out_other")
+    store = IE.ST.CurationStore(out_root)
+    rec = {"plate": 2, "pairs": [], "assigned": True, "noroi": False, "fav": False,
+           "rot": 0, "excl": False}
+    argv, real_store = sys.argv[:], IE.ST.CurationStore
+    sys.argv = ["import_exports", plates]
+    IE.ST.CurationStore = lambda _root: real_store(out_root)
+    try:
+        with temp_study() as st:
+            me = IE.CU.study_id(st.out_root)
+            store.write(IE.ROI_KEY, json.dumps({
+                "_studies": {"/elsewhere/other_study": {"LS22_s01b_sc00": rec}},
+                "_legacy": {"LS22_s01a_sc00": rec, "UNCLAIMED": rec}}))
+            rc = IE.main()
+    finally:
+        sys.argv = argv
+        IE.ST.CurationStore = real_store
+    print("\nanother study's records in the same store:\n")
+    chk("are not orphans of this import, so it is not refused", rc, 0)
+    after = json.loads(store.read(IE.ROI_KEY))
+    chk("...and are kept", after["_studies"].get("/elsewhere/other_study"),
+        {"LS22_s01b_sc00": rec})
+    chk("this study's records are written under it", "LS22_s01a_sc00" in after["_studies"][me], True)
+    chk("...and what is unclaimed from before filing stays, minus what was replaced",
+        after.get("_legacy"), {"UNCLAIMED": rec})
 
 
 # Two sections of the same marker, one shown as a 768 px composite and one as
@@ -295,6 +337,7 @@ def main():
         chk("and says it found none", nbg3, 0)
 
         replace_guard(d, pl)
+        other_study_kept(d, pl)
         per_section_frame(d)
         other_study_frames(d)
 

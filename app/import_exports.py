@@ -74,6 +74,9 @@ import state as ST                                          # noqa: E402
 # and pulls in nothing heavier than csv, hashlib and ls_io, so that reason
 # does not apply here.
 import ls_atlas as AT                                       # noqa: E402
+# The store is filed per study, the way the curator page keeps its key: this
+# study's records are read and replaced, every other study's carried through.
+import ls_curation as CU                                    # noqa: E402
 
 ROI_KEY = "ls_roi_curator_v1"
 
@@ -338,9 +341,10 @@ def main():
                                frame_of=frame_of)
     fresh = len(S)
 
+    study = CU.study_id(out_root)
     if merge:
         prior_raw = ST.CurationStore(out_root).read(ROI_KEY)
-        prior = json.loads(prior_raw) if prior_raw else {}
+        prior = (CU.own(json.loads(prior_raw), study) or {}) if prior_raw else {}
         kept = {u: v for u, v in prior.items() if u not in S}
         S = {**kept, **S}
         print(f"merging: {fresh} from the export, {len(kept)} kept of "
@@ -361,12 +365,15 @@ def main():
              f"   (no {os.path.basename(regions)} found beside the plates file)"))
 
     store = ST.CurationStore(out_root)
-    existing = None if merge else store.read(ROI_KEY)
+    raw = store.read(ROI_KEY)
+    try:
+        stored = json.loads(raw) if raw else None
+    except ValueError:
+        stored = None
+    existing = None if merge else raw
     if existing:
-        try:
-            prior_all = json.loads(existing)
-        except ValueError:
-            prior_all = {}
+        # This study's records only: they are what a replace replaces.
+        prior_all = CU.own(stored, study) if stored is not None else {}
         had = len(prior_all) if prior_all else "?"
 
         # REPLACING NOW DESTROYS THE OTHER MARKER'S CURATION.
@@ -396,7 +403,7 @@ def main():
         print("\n--dry-run: nothing written")
         return 0
 
-    store.write(ROI_KEY, json.dumps(S))
+    store.write(ROI_KEY, json.dumps(CU.file_under(stored, study, S)))
     print(f"\nwrote {store.path(ROI_KEY)}")
     return 0
 

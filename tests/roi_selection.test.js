@@ -22,7 +22,7 @@ const X = load(`{PLATES, S, st, plateAt, roisOf, allHullsOf, usedRois, polysOf,
   hullOf, firstUnusedRoi, gAdvance, gSync, gRoi, commitPoly,
   isSel, selRank, selColour, dispLabel, selectedHulls, parseSel, polyLabel, selNote,
   selRegions, selOpen, selToggle, selAll, selNone, selConfirm, selCancel, selAsk,
-  selIsOpen, SEL_KEY, SCOPE, SEL_PALETTE, SEL_GREY,
+  selIsOpen, SEL_KEY, STUDY, SCOPE, SEL_PALETTE, SEL_GREY,
   get SEL(){return SEL}, set SEL(v){SEL=v},
   get selDraft(){return selDraft},
   get gTarget(){return gTarget}, set gTarget(v){gTarget=v},
@@ -40,6 +40,10 @@ const HULLS = [hull("C", 1, 1, 1, .05), hull("B", 1, 2, 2, .20), hull("A", 1, 1,
 X.PLATES.length = 0;
 X.PLATES.push({ id: "p1", fp: "f", w: 100, h: 100, missing: 0, seeds: [], hulls: HULLS });
 X.PLATES.push({ id: "p2", fp: "g", w: 100, h: 100, missing: 0, seeds: [], hulls: [HULLS[0]] });
+
+// The choice is filed per study inside its key (roi_curator_study.test.js).
+const ownSel = () => { const v = env.store.ls_roi_curator_v1_rois;
+  return v === undefined ? undefined : JSON.stringify(JSON.parse(v)._studies[X.STUDY]); };
 
 const UID = "S1";
 X.S[UID] = { plate: 0, polys: [], pairs: [] };
@@ -142,7 +146,7 @@ X.selToggle("A"); X.selToggle("A");
 chk("unticking and re-ticking moves it to the end", X.selDraft.join(), "C,A");
 X.selConfirm();
 chk("Confirm applies the choice", X.SEL.join(), "C,A");
-chk("...stores it under its own key", env.store.ls_roi_curator_v1_rois, '["C","A"]');
+chk("...stores it under its own key", ownSel(), '["C","A"]');
 chk("...and closes the pop-up", X.selIsOpen(), false);
 chk("...and re-aims the cursor at the first selected roi (C = roi 1)", X.gTarget, 1);
 
@@ -150,14 +154,14 @@ X.selOpen();
 chk("reopening starts from the saved choice", X.selDraft.join(), "C,A");
 X.selToggle("C");
 X.selCancel();
-chk("Cancel leaves the saved choice alone", X.SEL.join() + "|" + env.store.ls_roi_curator_v1_rois, 'C,A|["C","A"]');
+chk("Cancel leaves the saved choice alone", X.SEL.join() + "|" + ownSel(), 'C,A|["C","A"]');
 
 X.SEL = null; delete env.store.ls_roi_curator_v1_rois;
 X.selAsk();
 chk("the first load asks when nothing is stored", X.selIsOpen(), true);
 X.selCancel();
 chk("cancelling the first question means 'all' ...", X.SEL, null);
-chk("...and is remembered, so it is not asked again", env.store.ls_roi_curator_v1_rois, "[]");
+chk("...and is remembered, so it is not asked again", ownSel(), "[]");
 X.selAsk();
 chk("a stored answer is not asked again", X.selIsOpen(), false);
 
@@ -165,7 +169,8 @@ chk("a stored answer is not asked again", X.selIsOpen(), false);
 
 X.SEL = ["A"]; X.selOpen(); X.selConfirm();
 chk("the curation store is untouched by the selection",
-    "ls_roi_curator_v1_rois" in JSON.parse(env.store.ls_roi_curator_v1 || "{}"), false);
+    "ls_roi_curator_v1_rois" in ((JSON.parse(env.store.ls_roi_curator_v1 || "{}")._studies || {})[X.STUDY] || {}),
+    false);
 
 // ---- atlas_scope: the study's own list ----------------------------------------
 

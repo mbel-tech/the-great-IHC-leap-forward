@@ -19,6 +19,7 @@ and the pages stay synchronous.
 
 import json
 import os
+import sys
 
 from PySide6.QtCore import QObject, Slot
 
@@ -84,9 +85,24 @@ class CurationStore:
             return
         os.makedirs(self.dir, exist_ok=True)
         tmp = self.path(key) + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
-            fh.write(text)
-        os.replace(tmp, self.path(key))
+        try:
+            with open(tmp, "w", encoding="utf-8") as fh:
+                fh.write(text)
+            os.replace(tmp, self.path(key))
+        except BaseException:
+            # The old file is untouched; do not leave the half-written one beside it.
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            raise
+
+    def where(self):
+        """The file a write goes into: the project file when there is one, else the curation folder."""
+        project = self._project()
+        if project is not None and not project.read_only and getattr(project, "path", None):
+            return project.path
+        return self.dir
 
     def all_present(self):
         return {k: self.read(k) for k in KEYS if self.read(k) is not None}
@@ -108,19 +124,43 @@ class CurationStore:
 class Bridge(QObject):
     """What the page calls to persist. One slot, deliberately."""
 
-    def __init__(self, store, on_save=None):
+    def __init__(self, store, on_save=None, on_error=None):
         super().__init__()
         self.store = store
         self.on_save = on_save
+        # `on_error(key, message)`: a save that did not reach disk. The page cannot be told -
+        # its localStorage already holds the decision - so the app has to show it.
+        self.on_error = on_error
 
     @Slot(str, str)
     def save(self, key, text):
         try:
             self.store.write(key, text)
-            if self.on_save:
-                self.on_save(key, len(text))
-        except OSError as e:
-            print(f"curation save failed for {key}: {e}")
+        except Exception as e:                              # noqa: BLE001
+            # Everything, not only OSError: a project that cannot be read back raises
+            # ProjectError, and an exception escaping a slot is only printed by Qt - to a
+            # console the installed app does not have. So was the print() this used to be:
+            # the operator went on curating for hours with nothing reaching disk.
+            msg = save_error_text(self.store, key, e)
+            print(msg, file=sys.stderr)
+            if self.on_error:
+                self.on_error(key, msg)
+            return
+        if self.on_save:
+            self.on_save(key, len(text))
+
+
+def save_error_text(store, key, exc):
+    """One line for the operator: what was not saved, into which file, and why."""
+    where = getattr(exc, "filename", None) or store.where()
+    if isinstance(where, str) and where.endswith(".tmp"):
+        where = where[:-len(".tmp")]
+    text = f"{key} was not saved to {where}: {getattr(exc, 'strerror', None) or exc}"
+    if isinstance(exc, PermissionError):
+        # Windows refuses to replace a file another program has open; this is the usual cause.
+        text += (" - the file may be open in another program (an editor, a sync client, "
+                 "antivirus), or the folder is read-only")
+    return text
 
 
 def seed_script(store):

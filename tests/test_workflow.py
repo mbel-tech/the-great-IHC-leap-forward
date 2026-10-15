@@ -483,6 +483,51 @@ if MW:
     chk("...and its buttons go there",
         (w.stack.currentWidget() is w.pages["instrument"], w.advanced["all"].isChecked()),
         (True, False))
+
+    # Help: every entry must lead somewhere real - a file that exists, the
+    # project's own pages, or a handler the window already has.
+    import updates as UP
+    help_menu = next(a.menu() for a in w.menuBar().actions() if a.text() == "&Help")
+    chk("the Help menu's entries", [a.text() for a in help_menu.actions() if a.text()],
+        ["User guide", "Wiki", "Show the activity log", "Open the log folder",
+         "Run the CZI self-test", "Check for updates…", "Undo last update", "About…"])
+    by_label = {a.text(): a for a in help_menu.actions()}
+    opened, revealed, queued = [], [], []
+    _real_open, _real_reveal = MW.QDesktopServices.openUrl, MW.reveal
+    MW.QDesktopServices.openUrl = staticmethod(lambda url: opened.append(url.toString()))
+    MW.reveal = lambda path: revealed.append(path)
+    w.run_stages = lambda sids: queued.append(list(sids))
+    by_label["User guide"].trigger()
+    guide = os.path.join(REPO, "docs", "user-guide.md")
+    chk("User guide shows the guide beside the code, rendered",
+        (w._guide.isVisible(), os.path.normcase(w._guide.browser.source().toLocalFile()),
+         bool(w._guide.browser.toPlainText().strip())),
+        (True, os.path.normcase(guide), True))
+    w._guide.close()
+    _root, w.repo_root = w.repo_root, TMP             # an installed copy ships no docs/
+    by_label["User guide"].trigger()
+    w.repo_root = _root
+    chk("...and without it, the online copy",
+        opened, [f"https://github.com/{UP.REPO_SLUG}/blob/main/docs/user-guide.md"])
+    by_label["Wiki"].trigger()
+    chk("Wiki opens the project's wiki", opened[-1], f"https://github.com/{UP.REPO_SLUG}/wiki")
+    by_label["Show the activity log"].trigger()
+    chk("Show the activity log opens the log drawer",
+        (w.drawer.toggle.isChecked(), w.drawer.log.isVisibleTo(w)), (True, True))
+    _env = {n: os.environ.get(n) for n in ("LOCALAPPDATA", "XDG_STATE_HOME")}
+    os.environ["LOCALAPPDATA"] = os.path.join(TMP, "LocalAppData")
+    by_label["Open the log folder"].trigger()
+    for n, v in _env.items():
+        os.environ.pop(n, None) if v is None else os.environ.__setitem__(n, v)
+    logs = os.path.join(TMP, "LocalAppData", "The Great IHC Leap Forward", "logs")
+    chk("Open the log folder opens the crash log's folder, made if missing",
+        (revealed, os.path.isdir(logs)), ([logs], True))
+    by_label["Run the CZI self-test"].trigger()
+    chk("Run the CZI self-test runs stage 00d on Prepare, like its own Run button",
+        (queued, w.stack.currentWidget() is w.pages["prepare"]), ([["czi_selftest"]], True))
+    MW.QDesktopServices.openUrl, MW.reveal = _real_open, _real_reveal
+    del w.run_stages
+
     w.goto("curate")
     w.curate.show_curator("roi_curator")
     chk("the ROI curator offers Done above its page",

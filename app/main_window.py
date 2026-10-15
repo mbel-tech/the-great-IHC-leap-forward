@@ -12,12 +12,12 @@ figure - is still here as View > All stages.
 import json
 import os
 
-from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QKeySequence
+from PySide6.QtCore import QObject, Qt, QThread, QTimer, QUrl, Signal
+from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
     QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel, QListWidgetItem, QMainWindow,
-    QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QStackedWidget, QVBoxLayout,
-    QWidget)
+    QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QStackedWidget, QTextBrowser,
+    QVBoxLayout, QWidget)
 
 import ls_project as LP
 import progress as PR
@@ -25,6 +25,7 @@ import stages as S
 import state as ST
 import theme as T
 import workflow as W
+from crash_log import crash_log_path
 from curator_view import CuratorView, LocalServer
 from import_slides import ImportScreen
 from project_session import ProjectSession, now_iso
@@ -34,6 +35,14 @@ import updates as UP
 from update_ui import Updater
 from screens import CurateScreen, HomeScreen, SetupScreen, StageListScreen
 from widgets import COLOUR, QUIET, StepList, UnblindDialog
+
+
+# The project's own pages, by the same repository name the updater checks for
+# releases. The guide is read from docs/ beside the code when it is there (a
+# source checkout); an installed copy ships app/ and scripts/ but not docs/, so
+# it opens the copy on GitHub instead.
+GUIDE_URL = f"https://github.com/{UP.REPO_SLUG}/blob/main/docs/user-guide.md"
+WIKI_URL = f"https://github.com/{UP.REPO_SLUG}/wiki"
 
 
 def _curation_outputs(stage):
@@ -348,7 +357,73 @@ class MainWindow(QMainWindow):
             act = self._migrate_menu.addAction(label)
             act.triggered.connect(slot)
             self._actions.append(act)
-        self.updater.build_menu(self.menuBar())
+        self._build_help_menu()
+
+    def _build_help_menu(self):
+        """Help: where to read more, where the logs are, and the slide check.
+
+        The updater owns the menu (Check for updates, Undo, About); these go
+        above its entries. The CZI self-test is the Prepare stage itself, run
+        exactly as its own Run button runs it, so there is no second copy of it.
+        """
+        menu = self.updater.build_menu(self.menuBar())
+        first = self.updater.check_action
+        for label, tip, slot in (
+                ("User guide", "The complete guide to every screen and stage", self._open_guide),
+                ("Wiki", "Short, question-led pages on GitHub", self._open_wiki),
+                (None, None, None),
+                ("Show the activity log", "What every stage printed, this session",
+                 self._show_log),
+                ("Open the log folder", "Where the crash log is written if the app stops",
+                 self._open_log_folder),
+                ("Run the CZI self-test", "Stage 00d: checks the slide files for faults "
+                 "that would make every measurement wrong", self._run_selftest),
+                (None, None, None)):
+            if label is None:
+                menu.insertSeparator(first)
+                continue
+            act = QAction(label, menu)
+            act.setToolTip(tip)
+            act.triggered.connect(slot)
+            menu.insertAction(first, act)
+            self._actions.append(act)
+        menu.setToolTipsVisible(True)
+
+    def _open_guide(self):
+        """The guide beside the code, rendered here; else the online copy."""
+        path = os.path.join(self.repo_root, "docs", "user-guide.md")
+        if not os.path.isfile(path):
+            QDesktopServices.openUrl(QUrl(GUIDE_URL))
+            return
+        # Not modal, and kept on self, so it can stay open beside the screen it
+        # explains. setSource reads the .md as Markdown and resolves the
+        # guide's own pictures (img/...) relative to the file.
+        if getattr(self, "_guide", None) is None:
+            self._guide = QDialog(self)
+            self._guide.setWindowTitle("User guide")
+            self._guide.resize(900, 760)
+            self._guide.browser = QTextBrowser(self._guide)
+            self._guide.browser.setOpenExternalLinks(True)
+            QVBoxLayout(self._guide).addWidget(self._guide.browser)
+        self._guide.browser.setSource(QUrl.fromLocalFile(path))
+        self._guide.show()
+        self._guide.raise_()
+
+    def _open_wiki(self):
+        QDesktopServices.openUrl(QUrl(WIKI_URL))
+
+    def _show_log(self):
+        self.drawer.toggle.setChecked(True)
+
+    def _open_log_folder(self):
+        """The crash log's folder, from the same helper that writes it (made if missing)."""
+        log = crash_log_path()
+        if log:
+            reveal(os.path.dirname(log))
+
+    def _run_selftest(self):
+        self.goto("prepare")
+        self.run_stages(["czi_selftest"])
 
     def _build_file_menu(self):
         """New / Open / Open Recent / Save / Save As / Revert - the project's own verbs."""

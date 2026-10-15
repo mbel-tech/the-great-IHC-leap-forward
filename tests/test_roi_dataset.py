@@ -864,6 +864,60 @@ def multiplex_join_check(tmp):
         os.path.exists(os.path.join(tmp, "mxbad_measurements.csv")), False)
 
 
+def multiplex_unmeasured_check(tmp):
+    """Under `multiplex`, "measured" is per MARKER: one never run is absent.
+
+    Both markers' boxes sit on the same scene_uid, so the emit loop writes
+    every marker's discs for any section in it. A section 05c measured for M1
+    is therefore in it - and M2's discs there came out as zero counts even
+    where 05c had never been run for M2: "looked and found none" for a marker
+    nobody looked at. X1 has M1 nuclei and nothing for M2; X2 is M1 measured
+    and found empty (logged) and M2 never run (M2 has its sentinel, so the
+    log speaks for it, and X2 is not in it).
+    """
+    nuc, boxes, nid = [], [], 0
+    for uid in ("X1", "X2"):
+        for mk in ("M1", "M2"):
+            boxes.append(dict(box(uid, "roi", "Dm"), marker=mk))
+            boxes.append(dict(box(uid, "background", "__background__"),
+                              marker=mk))
+    for j in range(3):
+        nid += 1
+        nuc.append(dict(nucleus("X1", "roi", "Dm", 1, nid, 200.0), marker="M1"))
+    for v in BG_S1:
+        nid += 1
+        nuc.append(dict(nucleus("X1", "background", "__background__", 2, nid,
+                                v), marker="M1"))
+    npath = os.path.join(tmp, "mxun_nuclei.csv")
+    bpath = os.path.join(tmp, "mxun_boxes.csv")
+    for path, cols, rows in ((npath, NUC_COLS, nuc), (bpath, BOX_COLS, boxes)):
+        with open(path, "w", newline="", encoding="utf-8") as fh:
+            w = csv.DictWriter(fh, fieldnames=cols)
+            w.writeheader()
+            w.writerows(rows)
+    lpath = os.path.join(tmp, "mxun_done.csv")
+    with open(lpath, "w", newline="", encoding="utf-8") as fh:
+        G5C.start_done_log(fh, "M1", ["X1", "X2"])
+        G5C.start_done_log(fh, "M2")
+    keep = G6A.DONE_LOG
+    G6A.DONE_LOG = lpath
+    try:
+        rc, meas = _run_06a_on(tmp, "mxun", npath, bpath)
+    finally:
+        G6A.DONE_LOG = keep
+    chk("multiplex unmeasured: 06a exits 0", rc, 0)
+    got = sorted((r["scene_uid"], r["marker"], r["roi_kind"], r["n_nuclei"])
+                 for r in meas)
+    chk("multiplex unmeasured: a marker never run on a section has no rows",
+        [g for g in got if g[1] == "M2"], [])
+    chk("...while M1's measured-empty section still reports zeros",
+        [g for g in got if g[0] == "X2"],
+        [("X2", "M1", "background", "0"), ("X2", "M1", "roi", "0")])
+    chk("...and M1's measured section keeps its nuclei",
+        [g for g in got if g[0] == "X1"],
+        [("X1", "M1", "background", str(len(BG_S1))), ("X1", "M1", "roi", "3")])
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="lsroi_")
     try:
@@ -977,6 +1031,7 @@ def main():
 
         # ---- which under `multiplex` means per marker, not per position
         multiplex_join_check(tmp)
+        multiplex_unmeasured_check(tmp)
 
         # ---- and the whole nuclei table is never held at once
         memory_check(tmp)

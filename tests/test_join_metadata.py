@@ -56,6 +56,32 @@ chk("live header resolves to the old indices",
     col, {"fish": 0, "timepoint": 1, "environment": 2, "brackish_tank": 3, "sea_tank": 4,
           "treatment": 5, "body_weight_g": 9, "fork_length_cm": 10, "sex": 11, "brain_for": 13,
           "sliced_july_2025": 17})
+# Excel writes a formatted blank cell, and an empty row, as self-closing tags.
+# Read as an open tag, the blank cell swallowed its neighbour's value (a blank
+# treatment took the tank number) and the empty row swallowed the next row.
+import zipfile  # noqa: E402
+with tempfile.TemporaryDirectory() as tmp:
+    book = os.path.join(tmp, "s.xlsx")
+    sheet_xml = (
+        '<worksheet><sheetData>'
+        '<row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c>'
+        '<c r="C1" t="s"><v>2</v></c></row>'
+        '<row r="2"><c r="A2"><v>7</v></c><c r="B2" s="3"/><c r="C2"><v>303</v></c></row>'
+        '<row r="3" spans="1:3"/>'
+        '<row r="4"><c r="A4"><v>8</v></c><c r="B4" t="inlineStr"><is><t>EX</t></is></c>'
+        '<c r="C4"><v>404</v></c></row>'
+        '</sheetData></worksheet>')
+    with zipfile.ZipFile(book, "w") as z:
+        z.writestr("xl/sharedStrings.xml",
+                   "<sst><si><t>Fish ID</t></si><si><t>treatment</t></si>"
+                   "<si><t>brackish Tank</t></si></sst>")
+        z.writestr("xl/worksheets/sheet1.xml", sheet_xml)
+    rows = B.read_sheet(book)
+    chk("a styled blank cell stays blank", rows[1].get(1, ""), "")
+    chk("...and its neighbour keeps its value", rows[1].get(2), "303")
+    chk("an empty row is its own (empty) row", rows[2], {})
+    chk("...and the row after it is read whole", rows[3], {0: "8", 1: "EX", 2: "404"})
+
 shifted = {0: "Fish ID", 1: "new column", **{k + 1: v for k, v in LIVE.items() if k > 0}}
 chk("an inserted column moves every index", B.resolve_columns(shifted)["treatment"], 6)
 msg = ""

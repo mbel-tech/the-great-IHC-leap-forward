@@ -133,9 +133,14 @@ def read_sheet(path):
 
     rows = []
     x = z.read("xl/worksheets/sheet1.xml").decode("utf-8")
-    for r in re.findall(r"<row[^>]*>(.*?)</row>", x, re.S):
+    # Excel writes an empty row, and a formatted blank cell, as a self-closing
+    # tag (`<row r="5"/>`, `<c r="B2" s="3"/>`). Each pattern takes that form
+    # first; read as an open tag it runs on to the NEXT closing tag and the
+    # blank cell takes its neighbour's value - a blank treatment read as a tank.
+    for r in re.findall(r"<row\b[^>]*?(?:/>|>(.*?)</row>)", x, re.S):
         out = {}
-        for ref, attrs, body in re.findall(r'<c r="([A-Z]+\d+)"([^>]*)>(.*?)</c>', r, re.S):
+        for ref, attrs, body in re.findall(
+                r'<c r="([A-Z]+\d+)"([^>]*?)(?:/>|>(.*?)</c>)', r, re.S):
             v = re.search(r"<v>(.*?)</v>", body, re.S)
             t = re.search(r't="([^"]*)"', attrs)
             if v is None:

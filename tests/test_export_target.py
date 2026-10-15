@@ -38,10 +38,10 @@ def chk(label, got, want):
           + ("" if ok else f"   want {want!r}"))
 
 
-def touch(path, when=None):
+def touch(path, when=None, uid=None):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
-        fh.write("scene_uid,region\n")
+        fh.write("scene_uid,region\n" + (f"{uid},Dm\n" if uid else ""))
     if when is not None:
         os.utime(path, (when, when))
     return path
@@ -58,6 +58,10 @@ with tempfile.TemporaryDirectory() as tmp:
     exports = os.path.join(tmp, "exports")
     home = os.path.join(tmp, "home", "Downloads")
     G.REFORMAT_DIR, G.EXPORT_DIR = reformat, exports
+    # This study's sections: a download is only taken when it is about them.
+    G.FOCUS_CSV = os.path.join(tmp, "focus.csv")
+    with open(G.FOCUS_CSV, "w", encoding="utf-8") as fh:
+        fh.write("scene_uid,animal\nLS45_s08b_sc01,LS45\n")
     real_expanduser = os.path.expanduser
     os.path.expanduser = lambda p: p.replace("~", os.path.join(tmp, "home"), 1)
     try:
@@ -77,9 +81,17 @@ with tempfile.TemporaryDirectory() as tmp:
                                  "roi_regions_06.09.2026_18.20.csv"), time.time() - 60)
         chk("a newer stamped export one level deep wins", G.find_regions_csv(None), new)
 
+        # A newer download from ANOTHER study (or an empty one) is not this
+        # study's curation, however recent: it is passed over, not measured.
+        touch(os.path.join(home, "roi_regions(3).csv"), time.time() - 5, uid="XX99_s01a_sc01")
+        touch(os.path.join(home, "roi_regions(4).csv"), time.time() - 4)
+        chk("a download about other sections is not taken",
+            G.find_regions_csv(None), new)
+
         # And the download folder is still searched, flat and one deep.
         newest = touch(os.path.join(home, "07.09.2026_09.00",
-                                    "roi_regions_07.09.2026_09.00.csv"), time.time())
+                                    "roi_regions_07.09.2026_09.00.csv"), time.time(),
+                       uid="LS45_s08b_sc01")
         chk("the download folder is searched too", G.find_regions_csv(None), newest)
 
         # Depth stops at one: a file two levels down is not an export folder.

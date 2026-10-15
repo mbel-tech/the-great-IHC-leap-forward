@@ -53,6 +53,18 @@ chk("...and its landmarks are scaled by the size ratio",
                      pairs: [[10, 10, 20, 20, 0, 0, "roi"]] }, FAKE)
       .pairs[0][2], 30);
 
+// The page saves what resolvePlate returns and resolves it again on the next
+// load. Scaled landmarks stored beside the OLD size were scaled again on every
+// load (and every 60 s autosave), drifting by the ratio each time. Once scaled,
+// the record must name the size its landmarks are now in, and stay marked.
+const once = P.resolvePlate({ plate: 0, plate_id: "plate_002", plate_fp: "old",
+                              plate_px: "100x200",
+                              pairs: [[10, 10, 20, 20, 0, 0, "roi"]] }, FAKE);
+const twice = P.resolvePlate(JSON.parse(JSON.stringify(once)), FAKE);
+chk("a save and reload does not scale the landmarks again", twice.pairs[0][2], 30);
+chk("...the record names the size they are now in", once.plate_px, "150x300");
+chk("...and it is still marked as a resize, not accepted", twice.verified, "resized");
+
 // ls_atlas.scale_between returns (sx, sy), not one k. A 1024x1024 plate
 // re-rendered at 1028x1024 is RESIZED - the aspect moved by 0.39%, inside the
 // tolerance - and a width-only factor would move every landmark's Y by 4 px

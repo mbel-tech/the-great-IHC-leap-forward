@@ -21,7 +21,9 @@ stays visible and can be undone.
 
 Reads the workbook directly, parsing the sheet XML with zipfile rather than
 adding openpyxl - the pipeline needs one value per fish from one sheet, and the
-dependency is not worth it.
+dependency is not worth it. The reader and the matching live in ls_sampling.py,
+shared with Set up's "Check workbook", which runs this join early and
+writes nothing.
 
 Writes:
     results/animal_metadata.csv   one row per animal
@@ -34,11 +36,9 @@ Run:  python 06b_join_sampling.py
 import sys
 import argparse
 import csv
-import html
 import importlib.util
 import os
 import re
-import zipfile
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _spec = importlib.util.spec_from_file_location("_g5", os.path.join(_HERE, "05a_roi_geometry.py"))
@@ -63,96 +63,16 @@ MEAS_CSV = os.path.join(RESULTS, "roi_measurements.csv")
 META_CSV = os.path.join(RESULTS, "animal_metadata.csv")
 DATASET_CSV = os.path.join(RESULTS, "roi_dataset.csv")
 
-DEFAULT_XLSX = os.path.join(CONFIG["source_dir"], "large scale exp sampling data.xlsx")
+# The reader and the matching are ls_sampling's, shared with Set up's "Check
+# workbook", so the check made at the start of a study and this join cannot
+# disagree. Re-exported under their old names: 06c and the tests reach them
+# through this module.
+import ls_sampling as SAMPLING  # noqa: E402
+from ls_sampling import (  # noqa: E402,F401
+    COLUMN_PREFIX, CONTROL_TANKS, EXERCISE_TANKS, _norm, read_sheet, read_table,
+    resolve_columns)
 
-# Which tank means which treatment. The sheet states this itself on the rows
-# written "303/304" and "307/308"; these are the same tanks named singly.
-EXERCISE_TANKS = {"303", "304", "307", "308"}
-CONTROL_TANKS = {"305", "306", "309", "310"}
-
-# The columns this stage needs, by a prefix of the header cell after
-# lower-casing and collapsing whitespace. The live sheet spells them
-# "enviroment" and "sea water  tank"; the prefixes are chosen so a fixed typo
-# still matches, and an inserted column moves the index rather than the
-# meaning.
-COLUMN_PREFIX = {"fish": "fish id", "timepoint": "timepoint", "environment": "enviro",
-                 "brackish_tank": "brackish tank", "sea_tank": "sea water tank",
-                 "treatment": "treatment", "body_weight_g": "body weight",
-                 "fork_length_cm": "fork length", "sex": "sex", "brain_for": "brain for",
-                 "sliced_july_2025": "slicing ihc july 2025"}
-
-
-def _norm(s):
-    return re.sub(r"\s+", " ", str(s or "")).strip().lower()
-
-
-def resolve_columns(header):
-    """{key: column index} from the header row, or a SystemExit naming what is
-    missing. Exactly one header cell may match each prefix."""
-    cells = {i: _norm(v) for i, v in header.items()}
-    out, bad = {}, []
-    for key, prefix in COLUMN_PREFIX.items():
-        hits = [i for i, v in cells.items() if v.startswith(prefix)]
-        if len(hits) != 1:
-            bad.append(f"{key} (header starting '{prefix}': {len(hits)} matches)")
-        else:
-            out[key] = hits[0]
-    if bad:
-        raise SystemExit("the sampling workbook's header does not match: " + "; ".join(bad))
-    return out
-
-
-def read_table(path):
-    """(columns, data rows): the sheet with its header resolved."""
-    rows = read_sheet(path)
-    if not rows:
-        raise SystemExit(f"{path}: the first worksheet is empty")
-    return resolve_columns(rows[0]), rows[1:]
-
-
-def read_sheet(path):
-    """The first worksheet as a list of {column index: value}.
-
-    Parsed from the sheet XML directly. openpyxl would be the obvious tool and
-    is not installed in the pipeline environment; this needs one sheet and no
-    formulas, so it does not earn a dependency.
-    """
-    z = zipfile.ZipFile(path)
-    shared = []
-    if "xl/sharedStrings.xml" in z.namelist():
-        x = z.read("xl/sharedStrings.xml").decode("utf-8")
-        for si in re.findall(r"<si>(.*?)</si>", x, re.S):
-            shared.append(html.unescape(
-                "".join(re.findall(r"<t[^>]*>(.*?)</t>", si, re.S))))
-
-    def colnum(ref):
-        n = 0
-        for c in re.match(r"([A-Z]+)", ref).group(1):
-            n = n * 26 + ord(c) - 64
-        return n - 1
-
-    rows = []
-    x = z.read("xl/worksheets/sheet1.xml").decode("utf-8")
-    # Excel writes an empty row, and a formatted blank cell, as a self-closing
-    # tag (`<row r="5"/>`, `<c r="B2" s="3"/>`). Each pattern takes that form
-    # first; read as an open tag it runs on to the NEXT closing tag and the
-    # blank cell takes its neighbour's value - a blank treatment read as a tank.
-    for r in re.findall(r"<row\b[^>]*?(?:/>|>(.*?)</row>)", x, re.S):
-        out = {}
-        for ref, attrs, body in re.findall(
-                r'<c r="([A-Z]+\d+)"([^>]*?)(?:/>|>(.*?)</c>)', r, re.S):
-            v = re.search(r"<v>(.*?)</v>", body, re.S)
-            t = re.search(r't="([^"]*)"', attrs)
-            if v is None:
-                inline = re.findall(r"<t[^>]*>(.*?)</t>", body, re.S)
-                val = html.unescape("".join(inline)) if inline else ""
-            elif t and t.group(1) == "s":
-                val = shared[int(v.group(1))]
-            else:
-                val = v.group(1)
-            out[colnum(ref)] = html.unescape(str(val)).strip()
-        rows.append(out)
-    return rows
+DEFAULT_XLSX = os.path.join(CONFIG["source_dir"], SAMPLING.DEFAULT_NAME)
 
 
 def main():
@@ -172,50 +92,23 @@ def main():
                      key=lambda a: int(re.sub(r"\D", "", a) or 0))
 
     COL, sheet = read_table(args.xlsx)
-    fish = {r.get(COL["fish"], ""): r for r in sheet}
-    sliced = {f for f, r in fish.items() if r.get(COL["sliced_july_2025"], "") == "x"}
+    joined = SAMPLING.join(animals, COL, sheet)
+    imaged, sliced = joined["imaged"], joined["sliced"]
 
     # The cohort check. An independent column in the same sheet agreeing on
     # every imaged animal is what makes LSnn -> Fish ID more than a guess, so a
     # disagreement means the key is wrong and this must not proceed.
-    imaged = {re.sub(r"\D", "", a) for a in animals}
-    missing = sorted(imaged - set(fish))
+    missing = joined["missing"]
     if missing:
         print(f"FAIL: no sheet row for fish {missing} - the LSnn -> Fish ID key is wrong")
         return 1
-    not_sliced = sorted(imaged - sliced)
+    not_sliced = joined["not_sliced"]
     if not_sliced:
         print(f"WARNING: fish {not_sliced} were imaged but are not marked in "
               f"'slicing IHC July 2025'. The cohort column and the images "
               f"disagree; check before trusting the groups.")
 
-    meta, unresolved = {}, []
-    for a in animals:
-        n = re.sub(r"\D", "", a)
-        r = fish[n]
-        tr = (r.get(COL["treatment"], "") or "").strip().lower()
-        src = "sheet"
-        if not tr:
-            tank = (r.get(COL["brackish_tank"], "") or "").strip()
-            if tank in EXERCISE_TANKS:
-                tr, src = "exercise", "tank"
-            elif tank in CONTROL_TANKS:
-                tr, src = "control", "tank"
-            else:
-                tr, src = "", "unresolved"
-                unresolved.append((a, tank))
-        meta[a] = {
-            "animal": a, "fish_id": n,
-            "timepoint": r.get(COL["timepoint"], ""),
-            "environment": r.get(COL["environment"], ""),
-            "treatment": tr, "treatment_source": src,
-            "brackish_tank": r.get(COL["brackish_tank"], ""),
-            "sex": r.get(COL["sex"], ""),
-            "body_weight_g": r.get(COL["body_weight_g"], ""),
-            "fork_length_cm": r.get(COL["fork_length_cm"], ""),
-            "brain_for": r.get(COL["brain_for"], ""),
-            "sliced_july_2025": int(n in sliced),
-        }
+    meta, unresolved = joined["meta"], joined["unresolved"]
 
     IO.atomic_write_csv(META_CSV, [meta[a] for a in animals],
                         list(next(iter(meta.values())).keys()))

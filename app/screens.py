@@ -690,6 +690,7 @@ class SetupScreen(QWidget):
 
     applied = Signal()
     logged = Signal(str)
+    options_changed = Signal(str, dict)     # stage id, {flag: value}: the workbook
 
     def __init__(self, repo_root, importer, session, parent=None):
         super().__init__(parent)
@@ -768,6 +769,31 @@ class SetupScreen(QWidget):
         self.detect_line.setStyleSheet(QUIET)
         read.addWidget(self.detect_line, 1)
         sl.addLayout(read)
+        # The sampling workbook is 06b's --xlsx option, kept here too so it is
+        # chosen, and checked, when the study is set up rather than first read
+        # at Unblind. The check is 06b's own join (ls_sampling), writing nothing.
+        import workbook_check as WC
+        from widgets import FileField
+        book = QHBoxLayout()
+        book.addWidget(QLabel("Sampling workbook"))
+        self.workbook_field = FileField("", button="Choose…",
+                                        filter="Excel workbook (*.xlsx);;All files (*)")
+        self.workbook_field.edit.setPlaceholderText("(the workbook in the slide folder)")
+        self.workbook_field.valueChanged.connect(self._workbook_chosen)
+        book.addWidget(self.workbook_field, 1)
+        self.check_workbook_btn = QPushButton("Check workbook")
+        self.check_workbook_btn.setToolTip(
+            "Match the study's fish to the workbook the way Unblind will, without writing "
+            "anything: how many get a group, which have no row, which groups are blank")
+        self.check_workbook_btn.clicked.connect(self.check_workbook)
+        book.addWidget(self.check_workbook_btn)
+        sl.addLayout(book)
+        self.workbook_line = QLabel("")
+        self.workbook_line.setWordWrap(True)
+        self.workbook_line.setStyleSheet(QUIET)
+        sl.addWidget(self.workbook_line)
+        self.workbook_check = WC.WorkbookCheck(self)
+        self.workbook_check.finished.connect(self._workbook_checked)
         self._sync_report_btn()
         self.current = QLabel("")
         self.current.setWordWrap(True)
@@ -782,6 +808,9 @@ class SetupScreen(QWidget):
         import ls_config as LC
         from config_dialog import SettingsForm
         self._sync_report_btn()
+        project = self.session.project
+        self.workbook_field.setValue(project.stage_options("join_sampling").get("--xlsx", ""))
+        self.workbook_field.setEnabled(not project.read_only)
         while self.tabs.count() > 1:
             w = self.tabs.widget(1)
             self.tabs.removeTab(1)
@@ -986,6 +1015,40 @@ class SetupScreen(QWidget):
         if not quiet:
             QMessageBox.information(self, "Read from the slides", "\n\n".join(lines))
         return found
+
+    def _workbook_chosen(self, path):
+        """Keep the workbook as 06b's --xlsx, as the Unblind question does."""
+        values = dict(self.session.project.stage_options("join_sampling"))
+        values["--xlsx"] = path
+        self.workbook_line.setText("")
+        self.options_changed.emit("join_sampling", values)
+
+    def check_workbook(self):
+        """Start the dry run of 06b's join; the answer lands in _workbook_checked."""
+        import workbook_check as WC
+        project = self.session.project
+        typed = self.workbook_field.value()
+        path = WC.workbook_path(project.cfg, {"--xlsx": typed} if typed else
+                                project.stage_options("join_sampling"))
+        self.workbook_check.start(project.cfg, path)
+        self.workbook_line.setText("Checking the workbook…")
+
+    def _workbook_checked(self, rep):
+        import ls_sampling as SAMPLING
+        if not rep.get("error") and not rep.get("animals"):
+            self.workbook_line.setText(
+                "The workbook can be read, but the study has no fish to match it to yet: "
+                "none were found in the %s." % rep.get("from", "slide file names"))
+            self.workbook_line.setStyleSheet(QUIET)
+            return
+        lines = SAMPLING.words(rep) if "matched" in rep else [
+            "The workbook could not be checked: %s." % rep.get("error")]
+        if rep.get("from") and not rep.get("error"):
+            lines.append("Fish read from the %s." % rep["from"])
+        bad = bool(rep.get("error") or rep.get("missing") or rep.get("blank"))
+        self.workbook_line.setText(" ".join(lines))
+        self.workbook_line.setStyleSheet(f"color:{COLOUR['failed']}" if bad else QUIET)
+        self.logged.emit("workbook checked: " + lines[0])
 
     def _add_fiji_row(self, layout, project):
         """'Add atlas from Fiji…', when this copy of the pipeline has the importer."""

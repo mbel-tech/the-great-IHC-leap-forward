@@ -53,9 +53,11 @@ Run:  python 06a_roi_dataset.py
 
 import sys
 import collections
+import csv
 import importlib.util
 import os
 import statistics as st
+from array import array
 
 import numpy as np
 
@@ -369,6 +371,37 @@ def check_geometry(nuc, box_by, recorded, report_path):
         f"05a_roi_geometry.py.")
 
 
+class _Disc:
+    """One disc's nuclei, as the few numbers the emit loop reads off them.
+
+    roi_nuclei.csv used to be read whole, a dict per nucleus with eight more
+    keys added - about 2 KB a row, several GB once PCNA's ~5 million rows are
+    in the file. Every decision here is per section, per disc or per (marker,
+    region), so this keeps, per disc, the intensity, diameter, censored and
+    own-channel flag of each nucleus in compact arrays (the medians need the
+    values themselves, not a running sum), and the provenance answers the emit
+    loop takes off a disc's rows. A nucleus costs ~18 bytes here, not ~2 KB.
+
+    The stream keeps file order, so every "first row that says X" below is
+    the same row the old list gave, and every mean and median is taken over
+    the same values: statistics.mean sums exactly and median sorts, so
+    neither depends on the order the values arrive in.
+
+    `kind` and `region` are the first row's. They are the disc's own - 05c
+    writes them off the box - and check_join() has checked them against it.
+    """
+    __slots__ = ("kind", "region", "v", "d", "cen", "own", "shaped",
+                 "segon_unshaped", "segon_own")
+
+    def __init__(self, kind, region):
+        self.kind, self.region = kind, region
+        self.v, self.d = array("d"), array("d")
+        self.cen, self.own = bytearray(), bytearray()
+        self.shaped = True              # all(nucleus_shaped) over the rows
+        self.segon_unshaped = None      # segmented_on of the first unshaped row
+        self.segon_own = None           # ...and of the first own-channel row
+
+
 def main(argv=None):
     # argv is accepted and ignored: this stage has no flags, and taking it
     # lets 06e call every stage the same way instead of branching on a label.
@@ -376,47 +409,27 @@ def main(argv=None):
     if not os.path.exists(NUCLEI_CSV):
         print(f"no {NUCLEI_CSV} - run 05c_detect_rois.py first")
         return 1
-    nuc = G5.load_csv(NUCLEI_CSV)
     box_by = {}
     # EVERY marker's boxes. roi_nuclei.csv holds both once the PCNA pass has
     # run, and the cut is per section and h is per (marker, region), so one
     # run covers both without pooling anything across them.
     for b in G5.all_boxes():
         box_by.setdefault(b["scene_uid"], []).append(b)
-    print(f"{len(nuc)} nuclei over "
-          f"{len({r['scene_uid'] for r in nuc})} sections")
-    check_join(nuc, box_by)
-    check_geometry(nuc, box_by,
-                   G5.load_csv(GEOMETRY_CSV) if os.path.exists(GEOMETRY_CSV)
-                   else None,
-                   GEOMETRY_CHANGED_CSV)
 
-    for r in nuc:
-        r["_v"] = float(r[STAT])
-        r["_cen"] = r["censored"] == "1"
-        r["_art"] = r["artifact"] == "1"
-        # .get, because a roi_nuclei.csv written before 2026-09-02 has no such
-        # column. Absent reads as False, which reproduces the old behaviour
-        # exactly rather than silently reinterpreting an old file - run
-        # 06g_flag_off_tissue.py to backfill it.
-        r["_off"] = r.get("off_tissue") == "1"
-        r["_d"] = float(r["equiv_diam_um"])
-        # What KIND of object this row is, which decides whether Abercrombie
-        # applies to it. Read off the row rather than re-derived from config,
-        # because a dataset outlives the config that made it. Absent means
-        # nuclear - see reads_nucleus_shaped.
-        r["_shaped"] = reads_nucleus_shaped(r.get("nucleus_shaped"))
-        r["_segon"] = r.get("segmented_on") or "the nuclear channel"
-        # NUCLEI found on the marker's own channel (PCNA with no usable DAPI).
-        # Read off the row, like the shape: a nuclear-route row says "nuclear"
-        # (or the counterstain's name), never the marker's, and an old file
-        # with no column is False. Nucleus-shaped only: a fibre or plaque
-        # marker is also segmented on itself, but its objects are regions, not
-        # a cell population, and what 06a does for those - raw counts, with
-        # the Abercrombie reason saying so - is older than this and unchanged.
-        r["_own"] = (bool(r.get("segmented_on"))
-                     and r["segmented_on"] == r["marker"] and r["_shaped"])
-
+    # ONE STREAMING PASS over the nuclei, building every index at once.
+    #
+    # This used to re-scan the whole table for each of three things: the cut
+    # filtered all of it per section, h did the same per (marker, region), and
+    # by_idx did it once more per section. At 883,078 nuclei that is hundreds of
+    # millions of comparisons. 06c_excel_dataset.py already hit exactly this and
+    # records what it cost - a rebuild that ran long enough to be killed
+    # part-written, leaving an xlsx openpyxl could not reopen. PCNA is roughly
+    # six times this file, so the shape matters more than the current runtime.
+    #
+    # And it is a STREAM: no row outlives its own iteration. What is kept is
+    # per disc (see _Disc) and per section, so the table never sits in memory
+    # as rows - which it did, a dict each, until PCNA made that several GB.
+    #
     # Artifact pixels are not tissue and leave the analysis entirely. Censored
     # ones are RIGHT-censored - value lost, but at least the ceiling - so they
     # stay in the count and are excluded only from the intensity statistics.
@@ -430,54 +443,107 @@ def main(argv=None):
     # objects found on glass. Those are worst in a BACKGROUND disc, where they
     # enter median + 3*1.4826*MAD and drag the positivity cut down, making a
     # section look more positive than it is.
-    n_art = sum(1 for r in nuc if r["_art"])
-    n_off = sum(1 for r in nuc if r["_off"] and not r["_art"])
+    n_all = n_art = n_off = n_kept = 0
     # Every section 05c MEASURED, taken before the drop: one whose nuclei were
     # all on an artifact or off the tissue was still looked at, and its discs
     # are a count of 0, not missing.
-    uids = {r["scene_uid"] for r in nuc}
-    nuc = [r for r in nuc if not r["_art"] and not r["_off"]]
-    print(f"  dropped {n_art} on an artifact, {n_off} off the tissue "
-          f"-> {len(nuc)} nuclei quantified")
-
-    # ONE PASS over the nuclei, building every index at once.
-    #
-    # This used to re-scan the whole table for each of three things: the cut
-    # filtered all of it per section, h did the same per (marker, region), and
-    # by_idx did it once more per section. At 883,078 nuclei that is hundreds of
-    # millions of comparisons. 06c_excel_dataset.py already hit exactly this and
-    # records what it cost - a rebuild that ran long enough to be killed
-    # part-written, leaving an xlsx openpyxl could not reopen. PCNA is roughly
-    # six times this file, so the shape matters more than the current runtime.
-    bg_by = collections.defaultdict(list)      # uid -> background values
-    # (uid, marker, roi_index) -> nuclei
-    by_idx = collections.defaultdict(list)
-    diam_by = collections.defaultdict(list)    # (marker, region) -> diameters
+    uids = set()
+    # The first row of each (section, marker, roi_index), every row included:
+    # all that check_join() and check_geometry() read, since both look at one
+    # row per disc and skip the rest. One row per disc, not per nucleus.
+    firsts = {}
+    # (uid, marker, roi_index) -> that disc's kept nuclei. roi_index is what
+    # ties a nucleus to the disc it was found in - 05c numbers the discs in the
+    # order roi_boxes_<marker>.csv lists them for a section, WITHIN THAT
+    # MARKER, and the emit loop below enumerates the same per-marker list in
+    # the same order. The marker is in the key because it is in 05c's
+    # numbering; see split_by_marker.
+    by_idx = {}
+    bg_by = collections.defaultdict(lambda: array("d"))    # uid -> bg values
+    # (marker, region) -> diameters
+    diam_by = collections.defaultdict(lambda: array("d"))
+    d_by_marker = collections.defaultdict(lambda: array("d"))
+    uids_by_marker = collections.defaultdict(set)   # kept nuclei's sections
     # marker -> (segmented_on, nucleus_shaped), for a disc that has no nuclei
     # of its own to read it off. Not-nucleus-shaped wins over nucleus-shaped:
     # one config cannot produce both for one marker, and if a file somehow
     # carries both the correction is the thing to withhold, not to apply.
     shape_by = {}
     own_by = {}                                # marker -> segmented on itself
-    d_all = []
-    for r in nuc:
-        uid = r["scene_uid"]
-        d_all.append(r["_d"])
-        # roi_index is what ties a nucleus to the disc it was found in - 05c
-        # numbers the discs in the order roi_boxes_<marker>.csv lists them for
-        # a section, WITHIN THAT MARKER, and the emit loop below enumerates the
-        # same per-marker list in the same order. The marker is in the key
-        # because it is in 05c's numbering; see split_by_marker.
-        by_idx[(uid, r["marker"], int(r["roi_index"]))].append(r)
-        seen = shape_by.get(r["marker"])
-        if seen is None or (seen[1] and not r["_shaped"]):
-            shape_by[r["marker"]] = (r["_segon"], r["_shaped"])
-        own_by[r["marker"]] = own_by.get(r["marker"], False) or r["_own"]
-        if r["roi_kind"] == "background":
-            if not r["_cen"]:
-                bg_by[uid].append(r["_v"])
-        elif not r["_own"]:
-            diam_by[(r["marker"], r["region"])].append(r["_d"])
+    with open(NUCLEI_CSV, newline="", encoding="utf-8") as fh:
+        for r in csv.DictReader(fh):
+            n_all += 1
+            uid = r["scene_uid"]
+            uids.add(uid)
+            firsts.setdefault((uid, r.get("marker", ""), r["roi_index"]), r)
+            v = float(r[STAT])
+            cen = r["censored"] == "1"
+            art = r["artifact"] == "1"
+            # .get, because a roi_nuclei.csv written before 2026-09-02 has no
+            # such column. Absent reads as False, which reproduces the old
+            # behaviour exactly rather than silently reinterpreting an old
+            # file - run 06g_flag_off_tissue.py to backfill it.
+            off = r.get("off_tissue") == "1"
+            d = float(r["equiv_diam_um"])
+            if art:
+                n_art += 1
+                continue
+            if off:
+                n_off += 1
+                continue
+            n_kept += 1
+            mk = r["marker"]
+            # What KIND of object this row is, which decides whether
+            # Abercrombie applies to it. Read off the row rather than
+            # re-derived from config, because a dataset outlives the config
+            # that made it. Absent means nuclear - see reads_nucleus_shaped.
+            shaped = reads_nucleus_shaped(r.get("nucleus_shaped"))
+            segon = r.get("segmented_on") or "the nuclear channel"
+            # NUCLEI found on the marker's own channel (PCNA with no usable
+            # DAPI). Read off the row, like the shape: a nuclear-route row says
+            # "nuclear" (or the counterstain's name), never the marker's, and
+            # an old file with no column is False. Nucleus-shaped only: a fibre
+            # or plaque marker is also segmented on itself, but its objects are
+            # regions, not a cell population, and what 06a does for those - raw
+            # counts, with the Abercrombie reason saying so - is older than this
+            # and unchanged.
+            own = (bool(r.get("segmented_on"))
+                   and r["segmented_on"] == mk and shaped)
+            key = (uid, mk, int(r["roi_index"]))
+            disc = by_idx.get(key)
+            if disc is None:
+                disc = by_idx[key] = _Disc(r["roi_kind"], r["region"])
+            disc.v.append(v)
+            disc.d.append(d)
+            disc.cen.append(cen)
+            disc.own.append(own)
+            if not shaped:
+                disc.shaped = False
+                if disc.segon_unshaped is None:
+                    disc.segon_unshaped = segon
+            if own and disc.segon_own is None:
+                disc.segon_own = segon
+            d_by_marker[mk].append(d)
+            uids_by_marker[mk].add(uid)
+            seen = shape_by.get(mk)
+            if seen is None or (seen[1] and not shaped):
+                shape_by[mk] = (segon, shaped)
+            own_by[mk] = own_by.get(mk, False) or own
+            if r["roi_kind"] == "background":
+                if not cen:
+                    bg_by[uid].append(v)
+            elif not own:
+                diam_by[(mk, r["region"])].append(d)
+
+    print(f"{n_all} nuclei over {len(uids)} sections")
+    check_join(firsts.values(), box_by)
+    check_geometry(firsts.values(), box_by,
+                   G5.load_csv(GEOMETRY_CSV) if os.path.exists(GEOMETRY_CSV)
+                   else None,
+                   GEOMETRY_CHANGED_CSV)
+    del firsts
+    print(f"  dropped {n_art} on an artifact, {n_off} off the tissue "
+          f"-> {n_kept} nuclei quantified")
 
     # ---- the per-section cut, from that section's own background discs
     cuts, bgstat = {}, {}
@@ -496,11 +562,15 @@ def main(argv=None):
     # the objects that are counted as positive - above their section's cut, or
     # censored - in real ROIs. A section with no cut contributes nothing: its
     # objects are not counted either.
-    for r in nuc:
-        if (r["_own"] and r["roi_kind"] != "background"
-                and r["scene_uid"] in cuts
-                and (r["_cen"] or r["_v"] > cuts[r["scene_uid"]])):
-            diam_by[(r["marker"], r["region"])].append(r["_d"])
+    pos_by_marker = collections.defaultdict(lambda: array("d"))
+    for (uid, mk, _), disc in by_idx.items():
+        if disc.kind == "background" or uid not in cuts:
+            continue
+        cut = cuts[uid]
+        for v, d, c, o in zip(disc.v, disc.d, disc.cen, disc.own):
+            if o and (c or v > cut):
+                diam_by[(mk, disc.region)].append(d)
+                pos_by_marker[mk].append(d)
     hs = {k: st.mean(v) for k, v in diam_by.items() if v}
 
     # THE FALLBACK IS PER MARKER TOO, and it is not an edge case: background
@@ -510,21 +580,21 @@ def main(argv=None):
     # factor on pERK's background rows. The number would change, driven entirely
     # by the other antibody, and nothing would error.
     h_by_marker = {}
-    for mk in {r["marker"] for r in nuc}:
-        d = [r["_d"] for r in nuc if r["marker"] == mk]
+    for mk, d in d_by_marker.items():
         if own_by.get(mk):
             # The same population as the per-region h above; every object of
             # the marker only if none was positive, so a marker with no
             # positives still gets a factor rather than none.
-            pos = [r["_d"] for r in nuc
-                   if r["marker"] == mk and r["_own"]
-                   and r["roi_kind"] != "background"
-                   and r["scene_uid"] in cuts
-                   and (r["_cen"] or r["_v"] > cuts[r["scene_uid"]])]
-            d = pos or d
+            d = pos_by_marker.get(mk) or d
         if d:
             h_by_marker[mk] = st.mean(d)
+    # Every kept diameter, once. statistics.mean sums exactly, so this is the
+    # mean the old single list gave, whatever order the markers come in.
+    d_all = array("d")
+    for d in d_by_marker.values():
+        d_all.extend(d)
     h_all = st.mean(d_all) if d_all else 0.0
+    del d_all
 
     rows, spec = [], []
     for uid in sorted(uids):
@@ -534,10 +604,11 @@ def main(argv=None):
         # and this is the old single loop unchanged.
         for mk, mboxes in split_by_marker(box_by.get(uid, [])).items():
             for i, b in enumerate(mboxes, 1):
-                here = by_idx.get((uid, mk, i), [])
+                here = by_idx.get((uid, mk, i))
                 area = roi_area_um2(b)
-                n_nuc = len(here)
-                usable = [r for r in here if not r["_cen"]]
+                n_nuc = len(here.v) if here else 0
+                usable = ([v for v, c in zip(here.v, here.cen) if not c]
+                          if here else [])
                 # A censored nucleus counts as POSITIVE and is still dropped from
                 # `usable`. That is not an inconsistency: 04j_censor_clipped.py
                 # defines a censored pixel as right-censored at the 16-bit ceiling,
@@ -546,8 +617,8 @@ def main(argv=None):
                 # both halves outright - censoring "MUST NOT be excluded from
                 # detection or from positivity" and MUST be excluded from any
                 # intensity statistic. Do not "fix" this to drop them.
-                n_pos = (sum(1 for r in here if r["_cen"] or r["_v"] > cut)
-                         if cut is not None else "")
+                n_pos = (sum(1 for v, c in zip(here.v, here.cen) if c or v > cut)
+                         if here else 0) if cut is not None else ""
                 h = hs.get((b["marker"], b["region"]),
                            h_by_marker.get(b["marker"], h_all))
                 # ABERCROMBIE APPLIES WHERE THE OBJECTS ARE NUCLEI. N = n *
@@ -559,23 +630,23 @@ def main(argv=None):
                 # back to the marker's other rows, and a marker with no rows at
                 # all to nucleus-shaped - which is what every file written
                 # before the provenance columns is, LS's included.
-                shaped = all(r["_shaped"] for r in here) if here else None
+                shaped = here.shaped if here else None
                 if shaped is None:
                     seg_on, shaped = shape_by.get(b["marker"],
                                                   ("the nuclear channel", True))
                 else:
-                    seg_on = next((r["_segon"] for r in here
-                                   if not r["_shaped"]), "")
+                    seg_on = (here.segon_unshaped
+                              if here.segon_unshaped is not None else "")
                 why = abercrombie_reason(seg_on, shaped, enabled=AB_ON)
                 ab = abercrombie_factor(h, apply=not why)
                 # Whether this disc's objects were found on the marker itself:
                 # its own nuclei answer first, the marker's other rows if it
                 # has none - the same two-step the shape uses above.
-                own = (any(r["_own"] for r in here) if here
+                own = (any(here.own) if here
                        else own_by.get(b["marker"], False))
                 no_denom = denominator_reason(
-                    own, next((r["_segon"] for r in here if r["_own"]),
-                              b["marker"]))
+                    own, (here.segon_own if here and here.segon_own is not None
+                          else b["marker"]))
                 row = {
                     "scene_uid": uid, "animal": b["animal"], "marker": b["marker"],
                     "roi_kind": b["roi_kind"], "region": b["region"],
@@ -605,13 +676,13 @@ def main(argv=None):
                     "denominator_withheld_reason": no_denom,
                     "positive_density_per_mm2": (round(n_pos * ab / (area / 1e6), 1)
                                                  if (cut is not None and area) else ""),
-                    "marker_median_of_roi": (round(st.median([r["_v"] for r in usable]), 1)
+                    "marker_median_of_roi": (round(st.median(usable), 1)
                                              if usable else ""),
                     "section_bg_level": round(bgstat[uid][0], 1) if uid in bgstat else "",
                     "section_bg_spread": round(bgstat[uid][1], 1) if uid in bgstat else "",
                     "section_bg_nuclei": bgstat[uid][2] if uid in bgstat else 0,
                     "section_positivity_cut": round(cut, 1) if cut is not None else "",
-                    "n_censored": sum(1 for r in here if r["_cen"]),
+                    "n_censored": sum(here.cen) if here else 0,
                 }
                 rows.append(row)
 
@@ -681,7 +752,7 @@ def main(argv=None):
     # pooling it in the console would put the two in disagreement.
     markers = sorted({r["marker"] for r in rows}) or [""]
     for mk in markers:
-        m_uids = {r["scene_uid"] for r in nuc if r["marker"] == mk}
+        m_uids = uids_by_marker.get(mk, set())
         m_cuts = [u for u in cuts if u in m_uids]
         m_hs = {k: v for k, v in hs.items() if k[0] == mk}
         m_spec = [s for s in spec if s["marker"] == mk]

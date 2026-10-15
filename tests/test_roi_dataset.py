@@ -601,11 +601,16 @@ def all_filtered_check(tmp):
     npath, bpath = build(tmp)
     rows = G5.load_csv(npath)
     rows.append(nucleus("S3", "roi", "Dm", 1, 900, 100.0, art=1))
+    # S3's one nucleus is off the tissue as well as on an artifact - either
+    # drop alone would do; both are the same "looked, kept nothing".
+    rows[-1]["off_tissue"] = 1
     with open(npath, "w", newline="", encoding="utf-8") as fh:
-        w = csv.DictWriter(fh, fieldnames=NUC_COLS)
+        w = csv.DictWriter(fh, fieldnames=NUC_COLS + ["off_tissue"],
+                           restval="0")
         w.writeheader()
         w.writerows(rows)
-    boxes = G5.load_csv(bpath) + [box("S3", "roi", "Dm")]
+    boxes = (G5.load_csv(bpath) + [box("S3", "roi", "Dm")]
+             + [box("S4", "roi", "Dm")])
     with open(bpath, "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=BOX_COLS)
         w.writeheader()
@@ -624,6 +629,66 @@ def all_filtered_check(tmp):
     chk("an all-artifact section still gets its disc row", len(s3), 1)
     if s3:
         chk("...with a count of 0", s3[0]["n_nuclei"], 0)
+        chk("...and its real area, not a blank",
+            float(s3[0]["roi_area_um2"]) > 0, True)
+        chk("...and a density of 0, not a blank",
+            s3[0]["profile_density_per_mm2"], "0.0")
+    # A section 05c never measured has boxes and no rows at all. That is NOT
+    # a zero - nobody looked - and must stay out of the dataset.
+    chk("a section with boxes but never measured stays absent",
+        [r["scene_uid"] for r in meas if r["scene_uid"] == "S4"], [])
+
+
+def memory_check(tmp):
+    """06a's memory must not grow by a parsed row per nucleus.
+
+    It used to read the whole of roi_nuclei.csv into one dict per row and then
+    add eight more keys to each - about 2 KB a nucleus, several GB once PCNA's
+    ~5 million rows are in the file. What it keeps now is a few numbers per
+    nucleus in compact arrays (the medians need the values themselves) and a
+    record per ROI, so the bound here is far below a dict per row and far
+    above what that needs. tracemalloc counts Python allocations only, which
+    is exactly where the dicts lived.
+    """
+    import random
+    import tracemalloc
+    rnd = random.Random(6)
+    n_sec, per_disc = 4, 5000                  # 40,000 nuclei, 8 discs
+    nuc, boxes, nid = [], [], 0
+    for s in range(n_sec):
+        uid = f"MEM{s}"
+        boxes.append(box(uid, "roi", "Dm"))
+        boxes.append(box(uid, "background", "__background__"))
+        for idx, kind, region in ((1, "roi", "Dm"),
+                                  (2, "background", "__background__")):
+            for _ in range(per_disc):
+                nid += 1
+                nuc.append(nucleus(uid, kind, region, idx, nid,
+                                   rnd.uniform(50, 250),
+                                   diam=rnd.uniform(6, 12),
+                                   cen=int(rnd.random() < 0.02),
+                                   art=int(rnd.random() < 0.01)))
+    npath = os.path.join(tmp, "mem_nuclei.csv")
+    bpath = os.path.join(tmp, "mem_boxes.csv")
+    for path, cols, rows in ((npath, NUC_COLS, nuc), (bpath, BOX_COLS, boxes)):
+        with open(path, "w", newline="", encoding="utf-8") as fh:
+            w = csv.DictWriter(fh, fieldnames=cols)
+            w.writeheader()
+            w.writerows(rows)
+    n = len(nuc)
+    del nuc
+    tracemalloc.start()
+    try:
+        rc, meas = _run_06a_on(tmp, "mem", npath, bpath)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    chk("memory fixture: 06a exits 0", rc, 0)
+    chk("memory fixture: one row per disc", len(meas), 2 * n_sec)
+    per = peak / n
+    print(f"     peak {peak / 1e6:.1f} MB over {n} nuclei = {per:.0f} B each")
+    chk("06a does not hold a parsed row per nucleus (< 200 B each)",
+        per < 200, True)
 
 
 def multiplex_fixture(tmp, stem, markers=("M1", "M2"), drop_boxes_for=None):
@@ -830,6 +895,9 @@ def main():
 
         # ---- which under `multiplex` means per marker, not per position
         multiplex_join_check(tmp)
+
+        # ---- and the whole nuclei table is never held at once
+        memory_check(tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

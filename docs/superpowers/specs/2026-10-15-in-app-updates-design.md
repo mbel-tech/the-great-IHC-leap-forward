@@ -38,13 +38,13 @@ also attaches:
 - `update-<version>.json`: version, the zip's name, size and SHA-256, and the
   **runtime fingerprint**.
 
-The runtime fingerprint is a SHA-256 over the files that decide what is in
-`runtime\`, `R\` and `keras\`: `requirements.txt`, `requirements-czi.txt`,
-`packaging/windows/requirements-bundle.txt`, `packaging/windows/build.ps1`,
-`packaging/windows/sitecustomize.py`. If any of them changed, a code-only
-update cannot be trusted and the app asks for the installer instead.
-Over-triggering (a comment edit in build.ps1) only costs a reinstall; it
-never breaks an install.
+The runtime fingerprint is a SHA-256 of the built bundle's
+`BUNDLE_VERSIONS.txt` (pip freeze + Python + R versions). (Revised after review:
+the first version hashed the requirement files, but those say `>=`, so two
+builds of the same files can differ.) `build.ps1` builds against
+`packaging/windows/bundle-lock.txt` when present so releases share a runtime.
+The atlas (~250 MB) ships as its own zip with its own fingerprint and is only
+downloaded when it changed.
 
 `build.ps1` writes the same `VERSION.json` (version + fingerprint) into the
 bundle, so every installed copy knows what it is.

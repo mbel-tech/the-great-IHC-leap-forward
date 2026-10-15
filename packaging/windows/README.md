@@ -29,11 +29,17 @@ out, a bar under the menu says so.
   stay where they are. The updater's own files live in `<install>\updates\`.
 
 How it decides: every release carries `update-<version>.json` beside the
-installer. Its `runtime_fingerprint` is a hash of `requirements*.txt`,
-`packaging/windows/requirements-bundle.txt`, `build.ps1` and `sitecustomize.py`;
-the installed copy has the same hash in its `VERSION.json`. Same hash: code
-update. Different: installer. Editing any of those files therefore makes the
-next release an installer release, which is the safe direction.
+installer. Its `runtime_fingerprint` is a hash of the bundle's
+`BUNDLE_VERSIONS.txt` (the pip freeze of the runtime as built, plus the Python
+and R versions); the installed copy has its own in `VERSION.json`. Same hash:
+code update. Different: installer.
+
+Requirements say `>=`, so two builds normally pick up different library
+versions. To let releases share a runtime, `build.ps1` builds against
+`packaging/windows/bundle-lock.txt` when it exists (the build log prints the
+`BUNDLE_VERSIONS.txt` to copy into it). With no lock, every release is an
+installer release. Change the lock only when you mean to move to newer
+libraries; that release then goes out as an installer.
 
 Updates come only from published releases (a `v*` tag), never from main
 between releases. Copies installed from `v1` predate the updater and need the

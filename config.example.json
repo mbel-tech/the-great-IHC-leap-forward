@@ -40,6 +40,10 @@
     "_range_note": "`dataset` uses the overviews' frozen range (qc/display_ranges.json), so the same brightness means the same signal in every picture; the brightest nuclei can saturate at fine resolutions. `section` stretches each scene to its own tissue: every picture well exposed, but brightness no longer compares between pictures. A frozen range pushed to the top by clipped pixels is stretched per scene in either mode.",
     "range": "dataset"
   },
+  "curation_coverage": {
+    "_sections_per_level_note": "A goal to curate towards, nothing more: no stage reads it, and nothing is held or refused below it. The levels counted are the plates curated sections were placed on in the newest ROI export, so a level no animal has reached yet is not listed. 1 asks for every animal to be represented at every level any animal was curated at, which is what a matched-level comparison needs.",
+    "sections_per_level": 1
+  },
   "acquisition": {
     "_layout_note": "`multiplex` is one scan per section carrying every marker as a channel, which is what a new study should be. `paired` is the LS layout: each marker is a separate physical scan of the same section, joined by 02_pair_passes. Paired declares no channel table, because each of its scans carries the nuclear channel plus whichever marker that pass used.",
     "layout": "multiplex",

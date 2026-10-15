@@ -759,6 +759,9 @@ SETTING_SECTIONS = [
      "Which brain atlas the regions come from. Choose a built-in one or import your own.",
      ["atlas_source", "atlas_rebuild_plates", "atlas_pdf", "atlas_polygon_mirror",
       "atlas_plate_set.dir", "atlas_figure_sections.two_sections"]),
+    ("curation", "Curation",
+     "What the Curate screen counts your curation against.",
+     ["curation_coverage.sections_per_level"]),
     ("detection", "Nucleus detection",
      "How nuclei are found and counted inside your regions.",
      ["detection.nucleus_diameter_um", "detection.abercrombie.enabled",
@@ -985,36 +988,146 @@ def _first(stage_id, artifact, study):
     return None
 
 
-def curated_sections(study):
-    """(sections decided, sections in the worklist) for the ROI curator, or None.
+def second_pass(study):
+    """The index of the marker curated as a pass of its own, or None.
 
-    Decided is curated (a region in the newest export) or excluded in the
-    curator (roi_plates.csv beside it, excluded=1, as 05a reads it). None when
-    there is no worklist (04n) to count against: then the export alone is all
+    Under `paired` the second marker's scans are separate physical sections
+    with their own uids, curated independently in the same ROI curator page
+    (04l: "nothing about a pERK section reaches its PCNA partner"), so its
+    curation is work of its own. Under `multiplex` one scan carries every
+    marker and one curation covers them all.
+    """
+    if study.layout == "paired" and len(study.markers) > 1:
+        return 1
+    return None
+
+
+def _queue(study, marker=0):
+    """{scene uid: animal} of the sections pass `marker` curates, or None.
+
+    The first marker's is 04n's worklist, the order the curator opens it in.
+    The second marker's is every section of its reformat index: 04l offers it
+    on its full set, since the worklist is keyed on the first marker's uids.
+    """
+    if marker == 0:
+        path = os.path.join(study.out_root, "reformatted", "roi_worklist.csv")
+        uid, keep = "scene_uid", None
+    else:
+        if marker != second_pass(study):
+            return None
+        path = study.names.path("index", study.markers[marker])
+        uid, keep = "id", (lambda r: r.get("kind") == "section")
+    rows = _rows(path)
+    if not rows or uid not in rows[0]:
+        return None
+    head = rows[0]
+    out = {}
+    for r in rows[1:]:
+        d = dict(zip(head, r))
+        if d.get(uid) and (keep is None or keep(d)):
+            out[d[uid]] = d.get("animal", "")
+    return out or None
+
+
+def _exported(study):
+    """({curated uid: plate id}, {excluded uid}) from the newest ROI export.
+
+    Curated is a region in roi_regions; excluded is excluded=1 in the
+    roi_plates.csv beside it, as 05a reads it. The plate is the one roi_plates
+    says the section was placed on. Both markers are in every export, and
+    their uids never collide (04l), so the caller's uids pick its own marker.
+    """
+    regions = decision_file("roi_curator", study)
+    if not regions:
+        return {}, set()
+    plates = os.path.join(os.path.dirname(regions),
+                          os.path.basename(regions).replace("roi_regions", "roi_plates"))
+    level, excluded = {}, set()
+    rows = _rows(plates) or []
+    head = rows[0] if rows else []
+    for r in rows[1:]:
+        d = dict(zip(head, r))
+        if d.get("excluded") == "1":
+            excluded.add(d.get("scene_uid"))
+        else:
+            level[d.get("scene_uid")] = d.get("plate_id", "")
+    curated = {u: level.get(u, "") for u in (_column(regions, "scene_uid") or ())}
+    return curated, excluded
+
+
+def curated_sections(study, marker=0):
+    """(sections decided, sections to curate) for one ROI curator pass, or None.
+
+    Decided is curated or excluded in the curator (_exported). None when there
+    is nothing to count against (no worklist from 04n, or for the second
+    marker no reformat index or no second pass): then the export alone is all
     there is to go on.
     """
-    queue = _column(os.path.join(study.out_root, "reformatted", "roi_worklist.csv"),
-                    "scene_uid")
+    queue = _queue(study, marker)
     if not queue:
         return None
-    regions = decision_file("roi_curator", study)
-    decided_ = set()
-    if regions:
-        decided_ |= _column(regions, "scene_uid") or set()
-        plates = os.path.join(os.path.dirname(regions),
-                              os.path.basename(regions).replace("roi_regions", "roi_plates"))
-        decided_ |= _column(plates, "scene_uid",
-                            lambda r: r.get("excluded") == "1") or set()
-    return len(queue & decided_), len(queue)
+    curated, excluded = _exported(study)
+    return len(queue.keys() & (curated.keys() | excluded)), len(queue)
+
+
+def curation_passes(study):
+    """[(marker index, (decided, total))] for every ROI curator pass that can be counted."""
+    out = []
+    for m in (0, second_pass(study)):
+        count = curated_sections(study, m) if m is not None else None
+        if count is not None:
+            out.append((m, count))
+    return out
+
+
+def coverage_target(study):
+    """Set up's target of curated sections per animal and level (default 1)."""
+    value = (study.cfg.get("curation_coverage") or {}).get("sections_per_level")
+    return value if isinstance(value, int) and value >= 1 else 1
+
+
+def _level_key(level):
+    # plate_9 before plate_10: the plates' own numbers, not their spelling.
+    return [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", level)]
+
+
+def coverage(study, marker=0):
+    """Curated sections per animal and brain level for one pass, or None.
+
+    {"animals": [...], "levels": [...], "counts": {(animal, level): n},
+     "target": n, "under": [(animal, level)] below target}. The animals are
+    every animal in the pass's queue, curated or not, so one with nothing yet
+    shows as a row of gaps. The levels are the plates curated sections were
+    placed on: what is still uncurated has no level yet, so a level no animal
+    has reached is not listed. Excluded sections are decisions, but not
+    coverage: nothing is measured on them.
+    """
+    queue = _queue(study, marker)
+    if not queue:
+        return None
+    curated, _excluded = _exported(study)
+    counts = {}
+    for uid, level in curated.items():
+        if uid in queue and level:
+            key = (queue[uid], level)
+            counts[key] = counts.get(key, 0) + 1
+    animals = sorted(set(queue.values()), key=_level_key)
+    levels = sorted({lv for _a, lv in counts}, key=_level_key)
+    target = coverage_target(study)
+    under = [(a, lv) for a in animals for lv in levels if counts.get((a, lv), 0) < target]
+    return {"animals": animals, "levels": levels, "counts": counts,
+            "target": target, "under": under}
 
 
 def curator_finished(sid, study):
     """True when curator `sid` is exported and, for the ROI curator, every
-    worklist section in that export is curated or excluded."""
+    section of every pass (the second marker's too, under `paired`) is curated
+    or excluded."""
     if not (decided(sid, study) and S.BY_ID[sid].done(study.out_root, study.names)):
         return False
-    count = curated_sections(study) if sid == "roi_curator" else None
-    return count is None or count[0] >= count[1]
+    if sid != "roi_curator":
+        return True
+    return all(n >= m for _i, (n, m) in curation_passes(study))
 
 
 def incomplete(stage, study):
@@ -1156,10 +1269,12 @@ def step_progress(screen_sid, study):
     page is Prepare's work, and what Curate asks of you is the export. Once only
     the ROI curator is left, it counts sections against the worklist instead:
     an export of five sections is an export, and it is not the curation done.
+    Under `paired` the second marker's own pass is added in (second_pass).
     """
     if screen_sid == "curate":
         if _curate_by_section(study):
-            return curated_sections(study)
+            counts = [c for _m, c in curation_passes(study)]
+            return sum(n for n, _m in counts), sum(m for _n, m in counts)
         sids = curators(study)
         done = sum(1 for sid in sids
                    if decided(sid, study) and S.BY_ID[sid].done(study.out_root, study.names))
@@ -1641,6 +1756,18 @@ def next_up(study, setup_ok=True, setup_missing=()):
         n, m = count
         return "curate", (f"{n:,} of {m:,} sections curated. Curate or exclude the rest "
                           "in the ROI curator."), "roi_curator"
+    # The second marker's pass, under `paired`. No stage the app runs reads
+    # it (05c is run for the first marker), so like the above it holds nothing;
+    # it is the next thing to do once the first marker's curation is.
+    second = second_pass(study)
+    count = (curated_sections(study, second)
+             if second is not None and "roi_curator" in curators(study) else None)
+    if count and count[0] < count[1]:
+        n, m = count
+        other = study.marker_label(second)
+        return "curate", (f"{study.marker_label(0)} curation is done. {n:,} of {m:,} "
+                          f"{other} sections curated: choose {other} in the ROI "
+                          "curator's Channel and curate or exclude them."), "roi_curator"
     return "home", "Everything the app can run is done.", None
 
 

@@ -369,6 +369,18 @@ note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
              "clipped pixels is stretched per scene in either mode.",
         consumers=["01l"]),
 
+    Key("curation_coverage.sections_per_level", "int",
+        "How many curated sections each animal should have at each brain level "
+        "(atlas plate). The Curate screen marks the animals and levels below it.",
+        default=1, minimum=1, label="Target sections per animal and level",
+        note="A goal to curate towards, nothing more: no stage reads it, and "
+             "nothing is held or refused below it. The levels counted are the "
+             "plates curated sections were placed on in the newest ROI export, "
+             "so a level no animal has reached yet is not listed. 1 asks for "
+             "every animal to be represented at every level any animal was "
+             "curated at, which is what a matched-level comparison needs.",
+        consumers=["app"]),
+
     # ---- channels (replaced by the channels/markers sub-project) ---------
     # ---- acquisition ------------------------------------------------------
     Key("acquisition.layout", "str",

@@ -41,9 +41,9 @@ done
 NAME="The Great IHC Leap Forward"
 PRODUCT="The-Great-IHC-Leap-Forward"
 BUNDLE_ID="tech.mbel.the-great-ihc-leap-forward"
-# The oldest macOS the app promises to start on. PySide6 6.10+ wheels need 14;
-# check_macos_min.py fails the build if any library needs newer, and
-# constraints.txt holds back the ones that would.
+# The oldest macOS the app promises to start on. check_macos_min.py fails the
+# build if any library needs newer; constraints.txt holds back the ones that
+# would (PySide6 6.10 and later need macOS 15).
 MIN_MACOS="14.0"
 ARCH="aarch64-apple-darwin"
 

@@ -85,5 +85,7 @@ the stages are loaded by file path, so a freezer cannot see their imports.
 
 `check_macos_min.py` reads the minimum macOS of every library in the app and
 fails the build if one needs newer than `MIN_MACOS` (14.0);
-`constraints.txt` holds back libraries whose newest builds need macOS 15.
+`constraints.txt` holds back libraries whose newest builds need macOS 15 or later
+(itk-elastix, and PySide6, whose wheels claim an older macOS than their
+libraries actually load on).
 `bundle-lock.txt`, when committed, pins the runtime as on Windows.

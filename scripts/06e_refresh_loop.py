@@ -40,6 +40,7 @@ if _HERE not in sys.path:
 # lines copy-pasted into every stage.
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
 import ls_channels as CH  # noqa: E402
+import ls_jsonio  # noqa: E402
 
 _REPO = os.path.dirname(_HERE)
 
@@ -60,6 +61,11 @@ G5 = _load("_g5", "05a_roi_geometry.py")
 G6A = _load("_g6a", "06a_roi_dataset.py")
 G6C = _load("_g6c", "06c_excel_dataset.py")
 G6D = _load("_g6d", "06d_excel_by_slide.py")
+
+# One small file per completed pass. The workbooks are 06c's and 06d's files -
+# the app also runs those two on their own - so they cannot say whether THIS
+# pass happened; the sidebar's tick for "build results" looks for this instead.
+PASS_JSON = os.path.join(G5.OUT_ROOT, "results", "build_results_pass.json")
 
 # Every R script that draws from the workbooks this loop rebuilds.
 #
@@ -292,6 +298,9 @@ def main():
         ok = refresh(rscript)
         if not ok:
             return 1
+        ls_jsonio.write_json_atomic(PASS_JSON, {
+            "finished": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "sections_measured": done, "sections_planned": total})
 
         if done >= total:
             print(f"\n[{time.strftime('%H:%M:%S')}] detection complete "

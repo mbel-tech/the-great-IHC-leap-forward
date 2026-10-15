@@ -35,11 +35,26 @@ if _HERE not in sys.path:
 # the whole process. Imported, not re-implemented: this block used to be four
 # lines copy-pasted into every stage.
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
+import ls_jsonio  # noqa: E402
 
 OUT_ROOT = CONFIG["out_root"]
 BASE_PX_UM = CONFIG["pixel_size_um"]
 TEST_DIR = os.path.join(OUT_ROOT, "qc", "test_sections")
 REPORT_DIR = os.path.join(OUT_ROOT, "qc", "tile_artifact")
+
+
+def summary_path(section_dir):
+    """Where one run's numbers go, named by the folder its sections came from.
+
+    The app runs this twice - on qc/test_sections, then on
+    qc/test_sections_corrected - and both runs plot into REPORT_DIR, so the
+    folder alone cannot tell the sidebar which of the two has happened. The
+    summary is the file each run owns: `test_sections_summary.json` and
+    `test_sections_corrected_summary.json`.
+    """
+    return os.path.join(REPORT_DIR, os.path.basename(os.path.normpath(section_dir))
+                        + "_summary.json")
+
 
 # Raw camera tile edge in native pixels, confirmed from Bio-Formats.
 TILE_PX_NATIVE = 2040
@@ -280,9 +295,11 @@ def main():
 
     print(f"Measuring {len(targets)} section(s)\n")
     results = []
+    by_dir = {}
     for path in targets:
         result, panels = analyse(path)
         results.append(result)
+        by_dir.setdefault(os.path.dirname(os.path.abspath(path)), []).append(result)
         if panels:
             out = plot(path, result, panels)
             print(f"  {result['file']}  (pitch {result['expected_pitch_px']} px)")
@@ -297,6 +314,12 @@ def main():
             print(f"      -> {os.path.basename(out)}")
         else:
             print(f"  {result['file']}: {result.get('note', 'no measurement')}")
+
+    # Written whole, after every section is measured, so an interrupted run
+    # leaves no summary and the stage does not read as done.
+    for section_dir, rows in by_dir.items():
+        ls_jsonio.write_json_atomic(summary_path(section_dir),
+                                    {"section_dir": section_dir, "results": rows})
 
     amps = [
         r[f"{a}_pitch_amplitude_pct"]

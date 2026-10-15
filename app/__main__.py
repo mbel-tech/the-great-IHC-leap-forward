@@ -122,6 +122,12 @@ def main():
         if "--self-test" in sys.argv:
             return _self_test(app, w)
 
+        # Once the window is up: say how the last update went, then ask GitHub
+        # (in the background, silently if offline) whether there is a newer one.
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(0, w.updater.report_last_result)
+        QTimer.singleShot(1500, w.updater.check_in_background)
+
         return app.exec()
     except BaseException as e:                              # noqa: BLE001
         _report(type(e), e, e.__traceback__)
@@ -140,7 +146,7 @@ def _check_install():
     try:
         from PySide6.QtWidgets import QApplication
         app = QApplication([sys.argv[0], "-platform", "offscreen"])     # noqa: F841
-        import main_window, stages, workflow                            # noqa: F401,E401
+        import main_window, stages, workflow, update_ui                 # noqa: F401,E401
     except BaseException:                                   # noqa: BLE001
         traceback.print_exc()
         return 1

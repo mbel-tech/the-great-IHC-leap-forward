@@ -30,6 +30,8 @@ from import_slides import ImportScreen
 from project_session import ProjectSession, now_iso
 from runner import Runner
 from study_picker import reveal
+import updates as UP
+from update_ui import Updater
 from screens import CurateScreen, HomeScreen, SetupScreen, StageListScreen
 from widgets import COLOUR, QUIET, StepList, UnblindDialog
 
@@ -238,10 +240,13 @@ class MainWindow(QMainWindow):
         hb.setSpacing(0)
         hb.addWidget(steps)
         hb.addWidget(self.stack, 1)
+        # Help menu, the "a new version is ready" bar and the check behind them.
+        self.updater = Updater(self, UP.install_root())
         central = QWidget()
         vb = QVBoxLayout(central)
         vb.setContentsMargins(0, 0, 0, 0)
         vb.setSpacing(0)
+        vb.addWidget(self.updater.banner)
         vb.addWidget(body, 1)
         vb.addWidget(self.drawer)
         self.setCentralWidget(central)
@@ -332,6 +337,7 @@ class MainWindow(QMainWindow):
             act = self._migrate_menu.addAction(label)
             act.triggered.connect(slot)
             self._actions.append(act)
+        self.updater.build_menu(self.menuBar())
 
     def _build_file_menu(self):
         """New / Open / Open Recent / Save / Save As / Revert - the project's own verbs."""

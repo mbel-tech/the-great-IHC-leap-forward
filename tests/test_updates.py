@@ -323,6 +323,47 @@ try:
 
     src_main = open(os.path.join(REPO, "app", "__main__.py")).read()
     chk("app/__main__.py handles --check-install", "--check-install" in src_main, True)
+
+    # ------------------------------------------------------------ the window side
+    try:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication, QMainWindow
+    except ImportError:
+        print("(PySide6 not installed here: skipping the window-side checks)")
+    else:
+        import update_ui as UI
+        qapp = QApplication.instance() or QApplication([])
+        said = []
+
+        def make(root):
+            win = QMainWindow()
+            u = UI.Updater(win, root)
+            u._say = lambda title, text: said.append(text)
+            menu = u.build_menu(win.menuBar())
+            return win, u, menu
+
+        win, u, menu = make(None)
+        labels = [a.text() for a in menu.actions() if a.text()]
+        chk("Help menu entries", labels, ["Check for updates…", "Undo last update", "About…"])
+        chk("from source: undo disabled", u.undo_action.isEnabled(), False)
+        u.check_now()
+        chk("from source: check says git", "git pull" in (said[-1] if said else ""), True)
+        chk("from source: banner hidden", u.banner.isHidden(), True)
+
+        inst = fresh_install("ui")
+        win, u, menu = make(inst)
+        u.show_decision(UP.Decision("code", version="1.3", notes="n"))
+        chk("code update: banner shown", u.banner.isHidden(), False)
+        chk("code update: banner text", "Version 1.3 is ready to install" in u.banner_text.text(), True)
+        u.show_decision(UP.Decision("current", version="1.2"))
+        chk("up to date on start: banner hidden", u.banner.isHidden(), True)
+        u.show_decision(UP.Decision("current", version="1.2"), quiet=False)
+        chk("up to date from the menu: says so", said[-1], "You have the newest version (1.2).")
+        os.makedirs(os.path.join(inst, "updates"), exist_ok=True)
+        with open(os.path.join(inst, "updates", "last-result.txt"), "w") as fh:
+            fh.write("Updated to 1.3.")
+        u.report_last_result()
+        chk("result of the last update shown once", said[-1], "Updated to 1.3.")
 finally:
     shutil.rmtree(TMP, ignore_errors=True)
 

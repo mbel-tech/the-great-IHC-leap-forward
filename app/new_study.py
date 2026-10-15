@@ -8,6 +8,14 @@ including the study file itself (study.json), so the whole study is one folder.
 What cannot be read from the files is asked: how thick the sections were cut
 (a CZI is one plane of a physical section; it does not know), and which atlas
 the regions come from. The rest is under Set up > Show advanced settings.
+
+Two things are asked here although Set up has them too, because leaving them
+for later cost real work. The markers: once the headers are read, each marker
+channel they name (AF568, AF488) is shown with a name to type, since a marker
+left as a dye name or a placeholder like Marker1 ends up so in every folder and
+workbook. And the sampling workbook, optional: 06b first opened it at Unblind,
+the very end of a study, so a sheet it could not use was found months late.
+Set up > Slides can check it at any time (Check workbook).
 """
 
 import os
@@ -19,9 +27,11 @@ from PySide6.QtWidgets import (
 
 import atlas_registry as AR
 import autodetect as AD
+import ls_channels as CH
 import ls_project as LP
 import slide_read as SRD
 import theme as T
+from widgets import FileField
 
 ATLASES = (
     (AR.SALMON, "Salmon (Vindas), ready-made plates ship with the app"),
@@ -82,6 +92,23 @@ class NewStudyDialog(QDialog):
         self.output = _Folder("Folder for everything this study makes")
         self.output.edit.editingFinished.connect(self._check)
         self.output.edit.textChanged.connect(lambda _t: self._check())
+        # A name per marker the headers name; filled in when the read lands.
+        self.marker_edits = {}
+        self.markers_box = QWidget()
+        self.markers_form = QFormLayout(self.markers_box)
+        self.markers_form.setContentsMargins(0, 0, 0, 0)
+        self.markers_note = QLabel("")
+        self.markers_note.setWordWrap(True)
+        self.markers_note.setStyleSheet(T.HINT)
+        self.markers_box.setVisible(False)
+        self.markers_note.setVisible(False)
+        self.workbook = FileField("", button="Choose…",
+                                  filter="Excel workbook (*.xlsx);;All files (*)")
+        self.workbook.edit.setPlaceholderText("(optional: add it later in Set up)")
+        book_note = QLabel("The sheet with one row per fish and its treatment group. Only "
+                           "read at Unblind; Set up > Slides can check it before then.")
+        book_note.setWordWrap(True)
+        book_note.setStyleSheet(T.HINT)
         out_note = QLabel("The study's settings file, your curation, the pictures and the "
                           "results all go here, so the whole study is one folder.")
         out_note.setWordWrap(True)
@@ -115,11 +142,17 @@ class NewStudyDialog(QDialog):
         form = QFormLayout()
         form.addRow("<b>Slides folder</b>", self.slides)
         form.addRow("", self.found)
+        self.markers_label = QLabel("Marker names")
+        self.markers_label.setVisible(False)
+        form.addRow(self.markers_label, self.markers_box)
+        form.addRow("", self.markers_note)
         form.addRow("<b>Output folder</b>", self.output)
         form.addRow("", out_note)
         form.addRow("Section thickness", self.thickness)
         form.addRow("", thick_note)
         form.addRow("Atlas", atlas_box)
+        form.addRow("Sampling workbook", self.workbook)
+        form.addRow("", book_note)
         form.addRow("Name (optional)", self.name)
 
         self.status = QLabel("")
@@ -155,6 +188,7 @@ class NewStudyDialog(QDialog):
             self.slide_read.cancel()        # a read of the folder before is stale now
             self._create_when_read = False
             self.found.setText("That folder does not exist." if src else "")
+            self._show_markers(None)
             self._check()
             return
         # Replaces any read of an earlier folder still running; that one's
@@ -169,11 +203,43 @@ class NewStudyDialog(QDialog):
         self.detection = found
         self.found.setText("<br>".join(found.lines()) if found is not None
                            else "That folder does not exist.")
+        self._show_markers(found)
         self._check()
         if self._create_when_read:
             self._create_when_read = False
             if self.ok.isEnabled():         # what the files said may still need a look
                 self._create()
+
+    def _show_markers(self, found):
+        """A name to type for each marker the headers name, the dye name to start with.
+
+        A name already typed for a marker of the same name is kept, so reading
+        the folder again does not throw away what was written.
+        """
+        typed = self.marker_names()
+        while self.markers_form.rowCount():
+            self.markers_form.removeRow(0)
+        self.marker_edits = {}
+        markers = AD.markers_found(found)
+        paired = ((getattr(found, "values", None) or {}).get("acquisition.layout")
+                  == CH.LAYOUT_PAIRED)
+        for m in markers:
+            edit = QLineEdit(typed.get(m) or m)
+            edit.setPlaceholderText(m)
+            self.marker_edits[m] = edit
+            self.markers_form.addRow(("%s stains" if paired else "%s is") % m, edit)
+        self.markers_note.setText(
+            "What each marker is (pERK, PCNA). The scans stay matched by their channel "
+            "name; the name typed here is what the screens and tables call it."
+            if paired else
+            "What each marker is (pERK, PCNA). It becomes the folder and file names and "
+            "the marker column in every output; the channel is still found by its dye name.")
+        for w in (self.markers_box, self.markers_label, self.markers_note):
+            w.setVisible(bool(markers))
+
+    def marker_names(self):
+        """{marker as the headers name it: name typed}."""
+        return {m: e.text().strip() for m, e in self.marker_edits.items()}
 
     def _read_failed(self, src, why):
         if src != self._read_for:
@@ -181,6 +247,7 @@ class NewStudyDialog(QDialog):
         self._read_for = None               # so the next try reads it again
         self._create_when_read = False
         self.found.setText("Could not read the slides: " + why)
+        self._show_markers(None)
         self._check()
 
     def done(self, result):
@@ -260,6 +327,14 @@ class NewStudyDialog(QDialog):
             return
         project, found = AD.new_project(self.slides.value(), out, self.thickness.value(),
                                         self._atlas(), self.name.text(), self.detection)
+        named = AD.name_markers(project, self.marker_names())
+        if named:
+            QMessageBox.warning(self, "Marker names", "The marker names need a look first:\n\n"
+                                + "\n\n".join(named[:5]))
+            return
+        if self.workbook.value():
+            # 06b's own --xlsx option, where the Unblind question and Set up keep it.
+            project.set_stage_options("join_sampling", {"--xlsx": self.workbook.value()})
         errors, _ = project.validate()
         if errors:
             QMessageBox.warning(self, "Not made yet",

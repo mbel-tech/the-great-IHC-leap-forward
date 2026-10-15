@@ -195,6 +195,7 @@ class MainWindow(QMainWindow):
         self.setup = SetupScreen(self.repo_root, self.importer, self.session)
         self.setup.applied.connect(self.refresh)
         self.setup.logged.connect(self._log)
+        self.setup.options_changed.connect(self._options_changed)
         self.curate = CurateScreen(self.curator)
         self.lists = {sid: StageListScreen(W.SCREENS[sid])
                       for sid in ("prepare", "measure", "results", "instrument", "all")}

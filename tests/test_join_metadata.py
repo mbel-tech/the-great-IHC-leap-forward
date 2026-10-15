@@ -131,5 +131,75 @@ chk("one shape for every point",
 chk("no per-animal shape palette is left behind", "animal_shapes" in r_src, False)
 chk("...and nothing recycles a scale to fit", "rep_len" in r_src, False)
 
+# ---- Check workbook: 06b's matching, run early and writing nothing ---------
+# Set up's "Check workbook" is the same join 06b makes at Unblind, so it must
+# read with 06b's own functions - two readers would let the check pass a
+# workbook the join then refuses.
+S = load("ls_sampling", "ls_sampling.py")
+
+
+def _where(fn):
+    """The file a function is defined in: one reader, wherever it is imported from."""
+    return os.path.basename(fn.__code__.co_filename)
+
+
+chk("06b reads the sheet with the shared reader",
+    _where(B.read_sheet), _where(S.read_sheet))
+chk("...resolves its header with it",
+    _where(B.resolve_columns), _where(S.resolve_columns))
+chk("...and 06c's reader is the same one",
+    _where(C.G6B.read_table), _where(S.read_table))
+
+import openpyxl  # noqa: E402
+with tempfile.TemporaryDirectory() as tmp:
+    book = os.path.join(tmp, "sampling.xlsx")
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append([LIVE[i] for i in range(len(LIVE))])
+
+    def fish_row(fid, treatment, tank, sliced="x"):
+        row = [None] * len(LIVE)
+        row[0], row[1], row[3], row[5], row[17] = fid, 1, tank, treatment, sliced
+        return row
+    ws.append(fish_row(1, "control", "305"))
+    ws.append(fish_row(2, "exercise", "303"))
+    ws.append(fish_row(3, None, "307"))          # blank, the tank recovers it
+    ws.append(fish_row(4, None, "999"))          # blank, and no tank says
+    wb.save(book)
+    before = sorted(os.listdir(tmp))
+    rep = S.check(book, {"LS1": 2, "LS2": 2, "LS3": 1, "LS4": 1, "LS9": 3})
+    chk("check: no error on a readable workbook", rep["error"], None)
+    chk("check: fish matched to a group", sorted(rep["matched"]), ["LS1", "LS2", "LS3"])
+    chk("check: ...and the slides they cover", rep["slides_matched"], 5)
+    chk("check: a fish with no row is named", rep["missing"], ["LS9"])
+    chk("check: a blank group no tank recovers is named", rep["blank"], [("LS4", "999")])
+    chk("check: a group read from the tank is said so", rep["from_tank"], ["LS3"])
+    chk("check: groups counted as 06b would write them", rep["groups"],
+        {"control": 1, "exercise": 2})
+    chk("check: nothing written beside the workbook", sorted(os.listdir(tmp)), before)
+    lines = S.words(rep)
+    chk("check: the words name the missing fish", any("LS9" in ln for ln in lines), True)
+    # The same rows through 06b's own join give the same groups.
+    col, sheet = S.read_table(book)
+    j = S.join(["LS1", "LS2", "LS3", "LS4"], col, sheet)
+    chk("06b's join and the check agree on every group",
+        {a: m["treatment"] for a, m in j["meta"].items()},
+        {"LS1": "control", "LS2": "exercise", "LS3": "exercise", "LS4": ""})
+
+    junk = os.path.join(tmp, "junk.xlsx")
+    open(junk, "wb").write(b"not a workbook")
+    rep = S.check(junk, {"LS1": 1})
+    chk("check: an unreadable workbook is an error, not a crash",
+        bool(rep["error"]) and rep["matched"] == [], True)
+    rep = S.check(os.path.join(tmp, "nope.xlsx"), {"LS1": 1})
+    chk("check: a missing workbook says so", "no workbook" in (rep["error"] or ""), True)
+    wb = openpyxl.Workbook()
+    wb.active.append(["Fish ID", "something else"])
+    odd = os.path.join(tmp, "odd.xlsx")
+    wb.save(odd)
+    rep = S.check(odd, {"LS1": 1})
+    chk("check: a header 06b cannot read names the column",
+        "treatment" in (rep["error"] or ""), True)
+
 print("\n" + ("ALL PASS" if not fails else f"{fails} FAILED"))
 raise SystemExit(1 if fails else 0)

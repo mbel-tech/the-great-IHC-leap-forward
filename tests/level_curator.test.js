@@ -3,7 +3,7 @@
 const { env, load, chk, note, done } = require("./harness");
 const { els, store, blobs, fire } = env;
 
-const X = load(`{KEY, DATA, PLATES, anchors, rows, assign, render, select, setAnchor,
+const X = load(`{KEY, STUDY, DATA, PLATES, anchors, rows, assign, render, select, setAnchor,
   dropAnchor, showPlate, exportCsv, set active(v){active=v}, get active(){return active}}`,
   "level_curator");
 
@@ -21,7 +21,8 @@ X.active = list[list.length - 1].uid; els["slider"].value = 1; X.setAnchor();
 const asg = X.assign(list);
 chk("two anchors", asg.filter(a => a.kind === "anchor").length, 2);
 chk("everything between is interpolated", asg.slice(1, -1).every(a => a.kind === "interp"), true);
-chk("anchors persist", Object.keys(JSON.parse(store[X.KEY])).length, 2);
+// Filed under this page's study, inside the one key the app mirrors.
+chk("anchors persist", Object.keys(JSON.parse(store[X.KEY])._studies[X.STUDY]).length, 2);
 
 blobs.length = 0; X.exportCsv();
 const lines = blobs[0].split("\n");
@@ -103,20 +104,24 @@ delete X.anchors[list[0].uid];
 // a read-time guard; neither exercises `let anchors = migrateAnchors(...)`
 // itself, the one call every operator's browser actually makes. Seed
 // localStorage the way a real upgrade would find it and load the page again.
+// The flat {uid: anchor} store from before anchors were filed per study, keyed
+// by THIS page's sections: a page takes legacy anchors only for its own uids
+// (level_curator_study.test.js covers the rest).
 note("");
+const [ua, ub, uc] = [list[0].uid, list[1].uid, list[2].uid];
 store[X.KEY] = JSON.stringify({
-  a: { id: X.PLATES[1].id, at: 0 },   // id-keyed, resolves - follows the id
-  b: { id: "plate_does_not_exist_in_this_atlas", at: 0 },   // gone -> dropped
-  c: 1,                                // legacy bare index, resolves
+  [ua]: { id: X.PLATES[1].id, at: 0 },   // id-keyed, resolves - follows the id
+  [ub]: { id: "plate_does_not_exist_in_this_atlas", at: 0 },   // gone -> dropped
+  [uc]: 1,                               // legacy bare index, resolves
 });
 const M = load(`{anchors, droppedAnchors}`, "level_curator");
 chk("an id-keyed anchor survives load-time migration and follows its id",
-    M.anchors["a"].at, 1);
-chk("a gone id-keyed anchor is absent after load-time migration", "b" in M.anchors, false);
-chk("...and counted in droppedAnchors", M.droppedAnchors.includes("b"), true);
+    M.anchors[ua].at, 1);
+chk("a gone id-keyed anchor is absent after load-time migration", ub in M.anchors, false);
+chk("...and counted in droppedAnchors", M.droppedAnchors.includes(ub), true);
 chk("a legacy bare-integer anchor survives load-time migration",
-    M.anchors["c"].at, 1);
-chk("...and picks up the id at that position", M.anchors["c"].id, X.PLATES[1].id);
+    M.anchors[uc].at, 1);
+chk("...and picks up the id at that position", M.anchors[uc].id, X.PLATES[1].id);
 chk("the header notice reports the drop count", els["ndropped"].textContent, "1");
 chk("...and the notice row is shown", els["dropRow"].style.display, "");
 

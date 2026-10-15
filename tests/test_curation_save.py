@@ -158,6 +158,137 @@ chk("...and says so in the log", any("reaching disk again" in s for s in lines),
 with held_open():
     view.bridge.save(KEY, GOOD)
 chk("a new failure streak shows a box again", len(boxes()), 1)
+for b in boxes():
+    b.close()
+server.stop()
+
+print("--- an import is not saved over by the page that was open before it ---")
+# A real page in a real QtWebEngine, because the bug lives between the two: the open
+# curator keeps the pre-import state in memory and in localStorage, re-saves it (on
+# every decision, every 60 s, on unload), and a reload only seeds keys that are empty.
+# The page is the ROI curator's storage pattern and nothing else (04l: `let S =
+# initState(localStorage.getItem(KEY))`, `save`, `setInterval(autosave)`, beforeunload),
+# with the interval cut from 60 s to 200 ms.
+from PySide6.QtCore import QEventLoop, QTimer                   # noqa: E402
+import glob                                                      # noqa: E402
+import json                                                      # noqa: E402
+
+PAGE = """<!doctype html><meta charset="utf-8"><script>
+const KEY = "ls_roi_curator_v1";
+let S = JSON.parse(localStorage.getItem(KEY) || "{}");
+const save = () => localStorage.setItem(KEY, JSON.stringify(S));
+setInterval(save, 200);
+addEventListener("beforeunload", save);
+</script>"""
+
+
+def spin(ms):
+    loop = QEventLoop()
+    QTimer.singleShot(ms, loop.quit)
+    loop.exec()
+
+
+def js(code):
+    got, loop = [], QEventLoop()
+    view.view.page().runJavaScript(code, 0, lambda v: (got.append(v), loop.quit()))
+    QTimer.singleShot(5000, loop.quit)
+    loop.exec()
+    return got[0] if got else None
+
+
+def page_state():
+    raw = js("JSON.stringify(S)")
+    return json.loads(raw) if raw else None
+
+
+def stored():
+    raw = view.store.read(KEY)
+    return json.loads(raw) if raw else None
+
+
+def settle(cond, ms=6000):
+    """Spin until `cond()` holds or `ms` pass; a page load and a few autosaves fit easily."""
+    for _ in range(ms // 100):
+        if cond():
+            return True
+        spin(100)
+    return cond()
+
+
+def wait_loaded(want):
+    """Until the page shows `want` and has saved it at least once more (so it is live)."""
+    return settle(lambda: page_state() == want) and (spin(600) or True)
+
+
+OLD = {"LS1_s1": {"plate": "old"}}
+IMPORTED = {"LS1_s1": {"plate": "imported"}, "LS1_s2": {"plate": "imported"}}
+
+out = os.path.join(tmp, "import")
+os.makedirs(os.path.join(out, "reformatted"))
+with open(os.path.join(out, "reformatted", "roi.html"), "w", encoding="utf-8") as fh:
+    fh.write(PAGE)
+ST.CurationStore(out).write(KEY, json.dumps(OLD))               # curation from an earlier day
+server = CV.LocalServer(out)
+view = CV.CuratorView(server, out)
+view.show()
+lines = []
+view.logged.connect(lines.append)
+view.show_page("reformatted/roi.html")
+chk("the open page starts from the store", wait_loaded(OLD), True)
+
+bundle = os.path.join(tmp, "curation_state.json")
+with open(bundle, "w", encoding="utf-8") as fh:
+    json.dump({KEY: json.dumps(IMPORTED)}, fh)
+keys = view.store.import_bundle(bundle)
+view.curation_replaced(keys)
+settle(lambda: page_state() == IMPORTED)
+spin(800)                                                        # several autosaves
+chk("after the import the store still holds the import", stored(), IMPORTED)
+chk("...the open page was reloaded with it", page_state(), IMPORTED)
+chk("...so its localStorage holds it too", json.loads(js("localStorage.getItem(KEY)") or "null"), IMPORTED)
+backups = glob.glob(os.path.join(out, "curation", "_backup_*", KEY + ".json"))
+chk("what the import replaced is kept in a backup folder",
+    [json.load(open(p, encoding="utf-8")) for p in backups], [OLD])
+
+js("S.LS1_s3 = {plate: 'after'}; save(); true")
+after = dict(IMPORTED, LS1_s3={"plate": "after"})
+chk("a decision made on the reloaded page is saved", settle(lambda: stored() == after), True)
+view.view.reload()
+wait_loaded(after)
+chk("...and a later reload does not seed the import over it again",
+    (page_state(), stored()), (after, after))
+
+lines.clear()
+view.bridge.saveFrom("a page from before the import", KEY, json.dumps(OLD))
+chk("a save from a page loaded before the import is not written", stored(), after)
+aside = glob.glob(os.path.join(out, "curation", "_backup_*", "from_open_page", KEY + ".json"))
+chk("...it is kept aside instead", [json.load(open(p, encoding="utf-8")) for p in aside], [OLD])
+chk("...and the log says where", any(KEY in s and "from_open_page" in s for s in lines), True)
+chk("a backup folder is not a curation file the reconcile would adopt",
+    sorted(LP._files_in(out)), [KEY])
+
+print("--- an import that runs as a stage (04q) ---")
+view.hold([KEY])
+js("S.LS1_s4 = {plate: 'during'}; save(); true")
+during = dict(after, LS1_s4={"plate": "during"})
+spin(600)
+chk("while it runs, the page's saves of that key are held back", stored(), after)
+view.release()
+chk("a run that wrote nothing releases them to the store", stored(), during)
+
+view.hold([KEY])
+js("S.LS1_s5 = {plate: 'during'}; save(); true")
+spin(600)
+STAGE = {"LS1_s9": {"plate": "from 04q"}}
+view.store.write(KEY, json.dumps(STAGE))                         # what 04q --write does
+view.curation_replaced([KEY])
+settle(lambda: page_state() == STAGE)
+spin(800)
+chk("a run that wrote the import keeps it", stored(), STAGE)
+chk("...and the page shows it", page_state(), STAGE)
+kept = sorted(glob.glob(os.path.join(out, "curation", "_backup_*", "from_open_page", KEY + ".json")))
+chk("...while the page's held work is kept aside, not dropped",
+    any(json.load(open(p, encoding="utf-8")).get("LS1_s5") == {"plate": "during"} for p in kept), True)
 server.stop()
 
 print()

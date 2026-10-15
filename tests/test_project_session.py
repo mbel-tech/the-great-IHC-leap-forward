@@ -431,6 +431,12 @@ except ImportError as exc:
     MW = None
 
 if MW:
+    # The window holds the open curator's saves of these keys while the stage runs, and
+    # reloads it with the stage's file after (test_curation_save covers what that does).
+    chk("04q is the stage the window treats as a curation import",
+        [s.sid for s in MW.S.STAGES if MW._curation_outputs(s)], ["import_curation"])
+    chk("...writing the ROI curator's key", MW._curation_outputs(MW.S.BY_ID["import_curation"]),
+        ["ls_roi_curator_v1"])
     path = study("win")
     os.environ["LS_CONFIG"] = path
     w = MW.MainWindow(REPO, config_path=path)

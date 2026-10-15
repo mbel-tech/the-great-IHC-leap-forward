@@ -129,6 +129,8 @@ class CuratorView(QWidget):
         # `project_source` returns the open project, so curation is saved into the
         # project file rather than only into loose files.
         self.store = ST.CurationStore(out_root, project_source)
+        # Outlives each Bridge refresh_seed makes: which page load may still save what.
+        self.guard = ST.SaveGuard()
 
         self.view = QWebEngineView(self)
         self.title = QLabel("", self)
@@ -252,7 +254,8 @@ class CuratorView(QWidget):
         shipped as a copy, so it cannot drift from the QWebChannel on this side.
         """
         page = self.view.page()
-        self.bridge = ST.Bridge(self.store, on_save=self._saved, on_error=self._save_failed)
+        self.bridge = ST.Bridge(self.store, on_save=self._saved, on_error=self._save_failed,
+                                guard=self.guard, on_aside=self._set_aside)
         self.channel = QWebChannel(page)
         self.channel.registerObject("lsbridge", self.bridge)
         page.setWebChannel(self.channel)
@@ -264,7 +267,7 @@ class CuratorView(QWidget):
             qwc = bytes(f.readAll()).decode("utf-8")
             f.close()
 
-        src = qwc + "\n" + ST.seed_script(self.store)
+        src = qwc + "\n" + ST.seed_script(self.store, self.guard)
         sc = QWebEngineScript()
         sc.setName("ls_state_bridge")
         sc.setInjectionPoint(QWebEngineScript.DocumentCreation)
@@ -308,6 +311,51 @@ class CuratorView(QWidget):
         for sc in page.scripts().find("ls_state_bridge"):
             page.scripts().remove(sc)
         self._install_state_bridge()
+
+    def _set_aside(self, key, path):
+        self.logged.emit(f"not saved over the import: {key} from the page open before it, "
+                         f"kept in {path}")
+
+    def hold(self, keys):
+        """Keep the page's saves of `keys` back while an import that runs as a stage writes them.
+
+        Otherwise a save landing after 04q wrote its file would quietly put the old state
+        back. They wait in memory: `release` if the import wrote nothing, `curation_replaced`
+        if it did.
+        """
+        self.guard.holding = set(keys)
+
+    def release(self):
+        """The import wrote nothing: what was held back is saved after all."""
+        held, self.guard.held, self.guard.holding = self.guard.held, {}, set()
+        for key, text in held.items():
+            self.bridge.save(key, text)
+
+    def curation_replaced(self, keys, aside=None):
+        """The store holds an import of `keys` now: show it, and keep the open page off it.
+
+        The page on screen predates the import and would save its old state straight back
+        over it (see `ST.SaveGuard`). So it is retired - anything it still sends for these
+        keys, and anything held back during the import, is kept under `aside` instead - and
+        reloaded with the import seeded over its localStorage.
+        """
+        keys = [k for k in keys if k in ST.KEYS]
+        if not keys:
+            return
+        self.guard.replaced(keys, aside)
+        held, self.guard.held, self.guard.holding = self.guard.held, {}, set()
+        for key, text in held.items():
+            if key in keys:
+                try:
+                    self._set_aside(key, self.store.set_aside(self.guard.aside, key, text))
+                except Exception as e:                      # noqa: BLE001
+                    # It is in the page still, but the page is about to be reloaded.
+                    self._save_failed(key, ST.save_error_text(self.store, key, e))
+            else:
+                self.bridge.save(key, text)
+        self.refresh_seed()
+        if self.rel:
+            self.show_page(self.rel, self.title.text())
 
     # ---- downloads --------------------------------------------------------
 

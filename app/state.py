@@ -17,9 +17,11 @@ script runs means `JSON.parse(localStorage.getItem(KEY))` finds what it expects,
 and the pages stay synchronous.
 """
 
+import datetime
 import json
 import os
 import sys
+import uuid
 
 from PySide6.QtCore import QObject, Slot
 
@@ -107,30 +109,122 @@ class CurationStore:
     def all_present(self):
         return {k: self.read(k) for k in KEYS if self.read(k) is not None}
 
-    def import_bundle(self, path):
-        """Load a JSON of {key: value} exported from a browser. Returns names."""
+    def set_aside(self, folder, key, text):
+        """Keep `text` as curation/<folder>/<key>.json, out of the way. Returns the path.
+
+        For curation that is being replaced rather than lost: what an import overwrote,
+        and what a page still showing the old state tried to save after it. A subfolder,
+        so neither the stages nor the project's reconcile (top-level files only) take it
+        for the live copy.
+        """
+        path = os.path.join(self.dir, folder, key + ".json")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+        return path
+
+    def import_bundle(self, path, aside=None):
+        """Load a JSON of {key: value} exported from a browser. Returns names.
+
+        An import replaces curation wholesale, so what a key held before is kept first,
+        under `aside` (a `backup_folder()` name, a fresh one when not given).
+        """
         with open(path, encoding="utf-8") as fh:
             data = json.load(fh)
+        aside = aside or backup_folder()
         written = []
         for key, value in data.items():
             if not isinstance(key, str):
                 continue
             text = value if isinstance(value, str) else json.dumps(value)
+            old = self.read(key)
+            if old is not None and old != text:
+                self.set_aside(aside, key, old)
             self.write(key, text)
             written.append(key)
         return written
 
 
-class Bridge(QObject):
-    """What the page calls to persist. One slot, deliberately."""
+def backup_folder():
+    """`_backup_<time>_<tag>`, after the folder ls_project's reconcile keeps a loser in.
 
-    def __init__(self, store, on_save=None, on_error=None):
+    The tag keeps two imports in the same second from sharing a folder, and so the
+    second from overwriting what the first one kept.
+    """
+    return "_backup_%s_%s" % (datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
+                              uuid.uuid4().hex[:6])
+
+
+class SaveGuard:
+    """Which page may save which key: what stops a page older than an import saving over it.
+
+    Every page load is stamped with `gen`, baked into its injected script, and every save
+    it makes carries the stamp. A page loaded before an import still holds the old
+    curation in memory, and the ROI curator re-saves it on every decision, every 60 s and
+    on unload; a reload alone does not help, because the seed only fills empty keys and
+    that page's localStorage is not empty. So an import (`replaced`) issues a new `gen`:
+    a save of a replaced key stamped with an older one is kept aside, not written, and
+    the first load after it is seeded with the imported value over the old one (`force`).
+
+    `holding` is for an import that takes a while (04q runs as a stage): saves of those
+    keys wait in `held` until it is known whether the import wrote anything.
+    """
+
+    def __init__(self):
+        self.gen = uuid.uuid4().hex
+        self.superseded = set()
+        self.force = []
+        self.aside = None
+        self.holding = set()
+        self.held = {}
+
+    def replaced(self, keys, aside=None):
+        """The store now holds an import of `keys`: retire every page loaded before it."""
+        self.gen = uuid.uuid4().hex
+        self.superseded |= set(keys)
+        self.force = sorted(set(keys))
+        self.aside = os.path.join(aside or backup_folder(), "from_open_page")
+
+
+class Bridge(QObject):
+    """What the page calls to persist. One write path, deliberately: `saveFrom` only decides
+    whether the page saving is still allowed to, then goes through `save`."""
+
+    def __init__(self, store, on_save=None, on_error=None, guard=None, on_aside=None):
         super().__init__()
         self.store = store
         self.on_save = on_save
         # `on_error(key, message)`: a save that did not reach disk. The page cannot be told -
         # its localStorage already holds the decision - so the app has to show it.
         self.on_error = on_error
+        self.guard = guard or SaveGuard()
+        # `on_aside(key, path)`: a save from a page older than an import, kept at `path`.
+        self.on_aside = on_aside
+
+    @Slot(str, str, str)
+    def saveFrom(self, gen, key, text):
+        """A save from the page loaded as `gen`: written, kept aside, or held back."""
+        g = self.guard
+        if gen != g.gen and key in g.superseded:
+            # Not written - it is the curation the import replaced, plus anything done on
+            # that page since - and not dropped either, because it is someone's work.
+            try:
+                path = self.store.set_aside(g.aside, key, text)
+            except Exception as e:                          # noqa: BLE001
+                msg = save_error_text(self.store, key, e)
+                print(msg, file=sys.stderr)
+                if self.on_error:
+                    self.on_error(key, msg)
+                return
+            if self.on_aside:
+                self.on_aside(key, path)
+            return
+        if key in g.holding:
+            g.held[key] = text
+            return
+        self.save(key, text)
 
     @Slot(str, str)
     def save(self, key, text):
@@ -163,7 +257,7 @@ def save_error_text(store, key, exc):
     return text
 
 
-def seed_script(store):
+def seed_script(store, guard=None):
     """JS run before any page script: seed state, then mirror every write.
 
     Writes are queued until the channel is up. The page saves on the first
@@ -171,15 +265,26 @@ def seed_script(store):
     handshake - without the queue those early saves would reach localStorage and
     never reach disk, which is exactly the silent half-loss this module exists to
     prevent.
+
+    The seed only fills an empty key, so a decision whose save failed is not
+    thrown away by a reload - except a key an import just replaced
+    (`guard.force`), which the first load after the import takes from the store.
+    Once: `ls_app_seed_gen` records that load, so a later reload of the same
+    generation is back to filling only what is empty.
     """
+    guard = guard or SaveGuard()
     seed = {k: v for k, v in ((k, store.read(k)) for k in KEYS) if v is not None}
     return """
 (function () {
-  var SEED = %s;
+  var SEED = %s, GEN = %s, FORCE = %s;
   try {
+    // Still the browser's own setItem here, so none of this is mirrored back.
+    var fresh = localStorage.getItem("ls_app_seed_gen") !== GEN;
     for (var k in SEED) {
-      if (localStorage.getItem(k) === null) localStorage.setItem(k, SEED[k]);
+      if (localStorage.getItem(k) === null || (fresh && FORCE.indexOf(k) >= 0))
+        localStorage.setItem(k, SEED[k]);
     }
+    if (fresh) localStorage.setItem("ls_app_seed_gen", GEN);
   } catch (e) {}
 
   var queue = [], bridge = null;
@@ -189,7 +294,7 @@ def seed_script(store):
   Storage.prototype.setItem = function (k, v) {
     orig.call(this, k, v);
     if (this === window.localStorage) {
-      if (bridge) { bridge.save(String(k), String(v)); }
+      if (bridge) { bridge.saveFrom(GEN, String(k), String(v)); }
       else { queue.push([String(k), String(v)]); }
     }
   };
@@ -199,12 +304,12 @@ def seed_script(store):
     new QWebChannel(qt.webChannelTransport, function (ch) {
       bridge = ch.objects.lsbridge;
       window.__lsbridge = bridge;
-      while (queue.length) { var e = queue.shift(); bridge.save(e[0], e[1]); }
+      while (queue.length) { var e = queue.shift(); bridge.saveFrom(GEN, e[0], e[1]); }
     });
   }
   connect();
 })();
-""" % json.dumps(seed)
+""" % (json.dumps(seed), json.dumps(guard.gen), json.dumps(guard.force))
 
 
 EXPORT_PAGE = """<!doctype html>

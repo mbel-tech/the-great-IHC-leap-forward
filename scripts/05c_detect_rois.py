@@ -672,6 +672,94 @@ def check_header(path, columns, legacy=None):
         f"before the provenance columns were and was never true.")
 
 
+#: Sections whose rows reached roi_nuclei.csv WHOLE, one `marker,scene_uid`
+#: line each, written only after the rows were flushed and fsynced. "Any row of
+#: the section is in the file" cannot tell a finished section from one a crash
+#: or a drive dropout cut off inside writerows; this log can. A file written
+#: before the log existed has none, and its rows are trusted as they always
+#: were - the log is seeded from them on the first resume.
+#:
+#: PER MARKER. A `marker,*` line says that marker's sections are logged from
+#: then on; without it the marker's rows predate the log and are trusted. An
+#: absent marker must not read as "nothing logged", or the first resume of the
+#: second marker after the log appeared would drop its whole dataset as torn.
+DONE_LOG = os.path.join(RESULTS, "roi_nuclei_sections_done.csv")
+
+
+def repair_torn_tail(path):
+    """Cut a last line that has no newline back to the last whole line.
+
+    A write cut off mid-row leaves a fragment, and the next run's first row
+    would be appended onto it - one garbled row with shifted fields. Returns
+    the number of bytes removed (0 when the file already ends on a newline).
+    """
+    size = os.path.getsize(path)
+    if size == 0:
+        return 0
+    with open(path, "rb+") as fh:
+        fh.seek(-1, os.SEEK_END)
+        if fh.read(1) == b"\n":
+            return 0
+        step, pos = 1 << 16, size
+        while pos > 0:
+            start = max(0, pos - step)
+            fh.seek(start)
+            chunk = fh.read(pos - start)
+            i = chunk.rfind(b"\n")
+            if i >= 0:
+                keep = start + i + 1
+                fh.truncate(keep)
+                return size - keep
+            pos = start
+        fh.truncate(0)
+        return size
+
+
+def read_done_log(path, marker):
+    """The sections of `marker` logged as written whole, or None when that
+    marker has no `marker,*` line (its rows predate the log)."""
+    if not os.path.exists(path):
+        return None
+    with open(path, newline="", encoding="utf-8") as fh:
+        mine = {r[1] for r in csv.reader(fh) if len(r) >= 2 and r[0] == marker}
+    if "*" not in mine:
+        return None
+    return mine - {"*"}
+
+
+def start_done_log(fh, marker, trusted=()):
+    """Begin logging `marker`: its sentinel, then the sections trusted as whole."""
+    w = csv.writer(fh)
+    w.writerow([marker, "*"])
+    for u in sorted(trusted):
+        w.writerow([marker, u])
+    fh.flush()
+
+
+def record_done(fh, marker, uid):
+    csv.writer(fh).writerow([marker, uid])
+    fh.flush()
+
+
+def torn_sections(measured, logged):
+    """Sections with rows in the file but no log entry: cut off mid-write."""
+    return set() if logged is None else set(measured) - logged
+
+
+def forget_done(path, marker, uids):
+    """Drop `marker`'s entries for `uids` from the log, atomically."""
+    if not os.path.exists(path):
+        return
+    uids = set(uids)
+    with open(path, newline="", encoding="utf-8") as fh:
+        keep = [r for r in csv.reader(fh)
+                if len(r) >= 2 and not (r[0] == marker and r[1] in uids)]
+    tmp = path + ".tmp"
+    with open(tmp, "w", newline="", encoding="utf-8") as fh:
+        csv.writer(fh).writerows(keep)
+    os.replace(tmp, path)
+
+
 def drop_rows(path, marker, uids, marker_col="marker"):
     """Rewrite `path` without the rows of `marker` whose scene_uid is in `uids`.
 
@@ -969,6 +1057,13 @@ def main():
         # path that appends to roi_nuclei.csv, so it is the only one that can
         # backfill it, and every other caller keeps the plain refusal.
         check_header(NUCLEI_CSV, COLUMNS, legacy=LEGACY_PROVENANCE)
+        cut = repair_torn_tail(NUCLEI_CSV)
+        if cut:
+            print(f"  {NUCLEI_CSV} ended in a part-written line ({cut} bytes) "
+                  f"from a run that was cut off - removed")
+    elif os.path.exists(DONE_LOG):
+        # A log with no dataset beside it describes rows that are gone.
+        os.remove(DONE_LOG)
 
     # Which markers this run must relate its own objects to. Empty for every
     # study that exists: LS is paired, and co-localisation is a multiplex
@@ -1000,6 +1095,19 @@ def main():
             for row in rd:
                 if row and row[0] in by_sec:
                     measured.add(row[0])
+    if exists:
+        logged = read_done_log(DONE_LOG, args.marker)
+        if logged is None:
+            # Written before this marker was logged: trust its rows, as before.
+            with open(DONE_LOG, "a", newline="", encoding="utf-8") as lf:
+                start_done_log(lf, args.marker, measured)
+        torn = torn_sections(measured, logged)
+        if torn:
+            dropped, _ = drop_rows(NUCLEI_CSV, args.marker, torn)
+            measured -= torn
+            print(f"  {len(torn)} {args.marker} section(s) were cut off mid-write "
+                  f"({dropped} rows) - dropped, and measured again: "
+                  + ", ".join(sorted(torn)[:5]) + (" ..." if len(torn) > 5 else ""))
     done = set()
     if exists and not args.force:
         done = set(measured)
@@ -1083,6 +1191,7 @@ def main():
         dropped, kept = drop_rows(NUCLEI_CSV, args.marker, todo)
         print(f"  --force: dropped {dropped} {args.marker} rows over {len(todo)} "
               f"sections, kept {kept}")
+        forget_done(DONE_LOG, args.marker, todo)
     if settings is not None:
         record_settings(args.marker, settings)
     if coloc_present and args.force:
@@ -1127,6 +1236,9 @@ def main():
 
     fh = open(NUCLEI_CSV, "a" if exists else "w", newline="", encoding="utf-8")
     w = csv.writer(fh)
+    dfh = open(DONE_LOG, "a" if exists else "w", newline="", encoding="utf-8")
+    if not exists:
+        start_done_log(dfh, args.marker)
     if not exists:
         w.writerow(COLUMNS)
 
@@ -1369,6 +1481,10 @@ def main():
                     write_overlay(uid, bi, b, seg_img, labels, kept)
         w.writerows(rows)
         fh.flush()
+        # On disk before the section is logged as whole - see DONE_LOG.
+        os.fsync(fh.fileno())
+        if rows:
+            record_done(dfh, args.marker, uid)
         if norm_rows:
             if nfh is None:
                 os.makedirs(RESULTS, exist_ok=True)
@@ -1400,6 +1516,7 @@ def main():
         print(f"\r  {n}/{len(todo)}  {uid}  {len(rows)} nuclei  "
               f"({total_nuc} total)          ", end="")
     fh.close()
+    dfh.close()
     if cfh is not None:
         cfh.close()
     if bfh is not None:

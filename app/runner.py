@@ -280,8 +280,21 @@ class Runner:
                     if not hasattr(mod, "main"):
                         raise AttributeError(
                             f"{stage.script} has no main() - it cannot be run in-process")
-                    mod.main()
+                    rc = mod.main()
                 tee.flush()
+                # Most stages end `sys.exit(main())` and refuse work with
+                # `return 1`. In process nothing calls sys.exit, so the return
+                # value is the only place that refusal shows up - read it as
+                # SystemExit would be read, or the stage is recorded as done.
+                # Only an int or a message counts: a few mains hand back data.
+                failed = ((isinstance(rc, int) and not isinstance(rc, bool) and rc != 0)
+                          or (isinstance(rc, str) and rc))
+                if failed:
+                    said = [ln.strip() for ln in tee.text().splitlines() if ln.strip()]
+                    msg = rc if isinstance(rc, str) else (
+                        said[-1] if said else f"stage exited with status {rc}")
+                    return StageResult(stage.sid, False, time.time() - t0,
+                                       tee.text(), msg)
                 return StageResult(stage.sid, True, time.time() - t0, tee.text())
 
             except SystemExit as e:

@@ -209,6 +209,7 @@ class NewStudyDialog(QDialog):
         except LP.ProjectError as exc:
             QMessageBox.warning(self, "Not saved", str(exc))
             return
+        AD.write_report(out, found)
         self.project, self.detection = project, found
         self.path = project.path
         self.accept()

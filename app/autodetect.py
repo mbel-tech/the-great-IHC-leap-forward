@@ -715,6 +715,8 @@ def new_project(source_dir, out_root, thickness_um, atlas="salmon", name=None,
               by="new study", record=False)
     for key, value in detection.values.items():
         p.set(key, value, by="read from the slides")
+    if detection.report:
+        p.note_slides(detection.report, detection.notes, detection.problems, REPORT_FILE)
     layout = detection.values.get("acquisition.layout")
     # The template's example of the other layout's table is not this study's.
     if layout == CH.LAYOUT_PAIRED:
@@ -722,6 +724,29 @@ def new_project(source_dir, out_root, thickness_um, atlas="salmon", name=None,
     elif layout == CH.LAYOUT_MULTIPLEX:
         p.set("acquisition.markers", [], record=False)
     return p, detection
+
+
+REPORT_FILE = "slide_metadata.json"
+
+
+def write_report(out_root, detection):
+    """Write the whole report (with every header field) into an existing out_root.
+
+    Returns the path, or None when there is nothing to write, the folder does
+    not exist, or it cannot be written. Never raises.
+    """
+    import json
+    report = getattr(detection, "report", None)
+    if not report or not out_root or not os.path.isdir(out_root):
+        return None
+    path = os.path.join(out_root, REPORT_FILE)
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(report, f, indent=1, sort_keys=True, ensure_ascii=False)
+            f.write("\n")
+    except (OSError, TypeError, ValueError):
+        return None
+    return path
 
 
 _CACHE = {}

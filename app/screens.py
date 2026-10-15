@@ -803,6 +803,9 @@ class SetupScreen(QWidget):
             found = AD.detect(source)
         finally:
             QApplication.restoreOverrideCursor()
+        if found.report and project.get("out_root"):
+            project.note_slides(found.report, found.notes, found.problems, AD.REPORT_FILE)
+            AD.write_report(project.get("out_root"), found)
         fills = AD.fill(project.cfg, found)
         for key, value in fills.items():
             project.set(key, value, by="read from the slides")

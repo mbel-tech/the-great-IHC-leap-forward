@@ -262,6 +262,38 @@ with tempfile.TemporaryDirectory() as tmp:
     chk("an unreadable file is reported, not raised", len(d.unreadable), 1)
     chk("a file with no pixel size asks for one", any("pixel size" in p for p in d.problems), True)
 
+print("--- the report in the study file ---")
+import ls_project as LP                                     # noqa: E402
+
+
+class _Det:
+    report = {"read": 2, "varying": {"a": [1, 2]}, "fields": {"x": {"1": 2}}}
+    notes = ["sampled 2"]
+    problems = ["one odd"]
+    values = {}
+
+
+with tempfile.TemporaryDirectory() as out:
+    proj = LP.Project.new("t")
+    proj.note_slides(_Det.report, _Det.notes, _Det.problems)
+    sl = proj.block["slides"]
+    chk("note_slides drops fields", "fields" in sl, False)
+    chk("note_slides keeps notes, problems, file name",
+        (sl["notes"], sl["problems"], sl["full_report"], "read_at" in sl),
+        (["sampled 2"], ["one odd"], "slide_metadata.json", True))
+    chk("a study with slides validates", proj.validate()[0], [])
+    proj.block["slides"] = "x"
+    chk("a non-dict slides is an error", bool(proj.validate()[0]), True)
+    big = dict(_Det.report, varying={"k": "v" * 70000})
+    proj.note_slides(big)
+    chk("an oversize summary drops varying", "varying" in proj.block["slides"], False)
+    path = A.write_report(out, _Det)
+    chk("write_report names the file", os.path.basename(path), "slide_metadata.json")
+    chk("the file holds fields", json.load(open(path))["fields"], {"x": {"1": 2}})
+    chk("no write outside a missing out_root",
+        A.write_report(os.path.join(out, "nope"), _Det), None)
+    chk("...and nothing was created", os.path.exists(os.path.join(out, "nope")), False)
+
 print()
 print("FAILED: " + ", ".join(failures) if failures else "ALL PASS")
 sys.exit(1 if failures else 0)

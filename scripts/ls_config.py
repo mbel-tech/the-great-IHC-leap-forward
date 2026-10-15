@@ -334,6 +334,28 @@ note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
              "that, 2.6 a sixteenth.",
         minimum=0.65, consumers=["01l"]),
 
+    Key("scene_render.source", "str",
+        "Where the scene pictures take their pixels from: `scan` is exact; "
+        "`zeiss_preview` is about ten times faster and changes the pictures "
+        "slightly, never what is measured.",
+        default="scan", choices=["scan", "zeiss_preview"],
+        label="Scene pictures from",
+        note="`scan` (the default) averages the scan's own 0.65 um pixels into "
+             "each picture pixel, here. `zeiss_preview` instead loads the "
+             "smaller copy of each scan that the Zeiss software stored inside "
+             "the CZI when the slide was scanned: about ten times faster "
+             "(15 of every 16 pixels are never unpacked), same resolution, but "
+             "Zeiss did the averaging and compressed that copy separately, so "
+             "pixel values differ slightly from `scan` and the edges of "
+             "saturated (clipped) patches can look a little softer. Only the "
+             "scene pictures change. Nothing is measured from them: detection "
+             "and counting (05c), clipping masks, the overviews and the curator "
+             "pictures always read the scan's own pixels, whatever this says. "
+             "Fastest at 1.3, 2.6 or 5.2 um/px, where Zeiss stored a copy; at "
+             "0.65 both choices read the scan itself. Changing it redraws the "
+             "pictures on the next run.",
+        consumers=["01l"]),
+
     Key("scene_render.range", "str",
         "How the scene pictures are brightened.",
         default="dataset", choices=["dataset", "section"],

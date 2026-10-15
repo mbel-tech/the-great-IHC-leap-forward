@@ -279,7 +279,9 @@ PLAIN = {
                      "browse the whole dataset quickly.",
     "scene_renders": "A picture of every scene on every slide, drawn from the scan files for "
                      "looking at. Each marker gets two folders: the stain with the nuclei, and "
-                     "the stain alone in grey. Nothing is measured from them.",
+                     "the stain alone in grey. Nothing is measured from them. For a much "
+                     "faster run, Set up > Pictures can draw them from the preview copy "
+                     "Zeiss stored in each scan file instead.",
     "pair": "Works out which {m0} scan and which {m1} scan show the same physical section.",
     "channel_identity": "Suggests which dye carries which marker from how the signal looks. "
                         "It only reports; it changes no setting.",
@@ -749,7 +751,8 @@ SETTING_SECTIONS = [
      "curator, and a picture of every scene. Measuring always reads the scan's own "
      "pixels, whatever this says.",
      ["curation_render.source", "curation_render.um_per_px",
-      "scene_render.out_dir", "scene_render.um_per_px", "scene_render.range"]),
+      "scene_render.out_dir", "scene_render.um_per_px", "scene_render.source",
+      "scene_render.range"]),
     ("atlas", "Atlas",
      "Which brain atlas the regions come from. Choose a built-in one or import your own.",
      ["atlas_source", "atlas_rebuild_plates", "atlas_pdf", "atlas_polygon_mirror",
@@ -771,8 +774,8 @@ SECTION_HEADINGS = {
         "pictures run again with Redo."),
     "scene_render.out_dir": (
         "Scene pictures",
-        "Where the pictures of every scene go, how sharp they are and how they are "
-        "brightened."),
+        "Where the pictures of every scene go, how sharp they are, where their "
+        "pixels come from and how they are brightened."),
 }
 
 OTHER_SECTION = ("other", "Other settings",

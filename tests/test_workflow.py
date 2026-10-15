@@ -140,7 +140,8 @@ chk("a new setting lands in Other settings",
 chk("the picture settings share one Pictures card",
     [k.path for sid, _t, _i, keys in cards if sid == "pictures" for k in keys],
     ["curation_render.source", "curation_render.um_per_px",
-     "scene_render.out_dir", "scene_render.um_per_px", "scene_render.range"])
+     "scene_render.out_dir", "scene_render.um_per_px", "scene_render.source",
+     "scene_render.range"])
 chk("...under a heading for each kind of picture",
     [k for k in W.SECTION_HEADINGS if k not in shown], [])
 chk("a card whose settings are not in ls_config yet is hidden",

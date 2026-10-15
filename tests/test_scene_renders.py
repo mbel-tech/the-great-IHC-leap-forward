@@ -82,17 +82,27 @@ class _R:
 
 
 READS = []
+ZOOMS = []
 
 
 class _Doc:
     scenes_bounding_rectangle = {k: _R(*v) for k, v in RECTS.items()}
 
     def read(self, roi, plane, scene, zoom):
-        assert zoom == 1.0, zoom
         x, y, w, h = roi
         rx, ry = RECTS[scene][:2]
         READS.append((scene, h))
-        return PLANES[scene][plane["C"]][y - ry:y - ry + h, x - rx:x - rx + w][:, :, None]
+        ZOOMS.append(zoom)
+        native = PLANES[scene][plane["C"]][y - ry:y - ry + h, x - rx:x - rx + w]
+        if zoom != 1.0:
+            # Zeiss's stored copy: its own averaging, rounded to its own
+            # integers - not the block mean the scan route computes, but near it.
+            b = int(round(1 / zoom))
+            hh, ww = native.shape[0] // b * b, native.shape[1] // b * b
+            small = native[:hh, :ww].astype(np.float64).reshape(
+                hh // b, b, ww // b, b).mean(axis=(1, 3))
+            return (np.floor(small) + 7).astype(np.uint16)[:, :, None]
+        return native[:, :, None]
 
 
 @contextlib.contextmanager
@@ -227,6 +237,35 @@ try:
     chk("finer than native is refused", False)
 except SystemExit as exc:
     chk("finer than native is refused", "0.65" in str(exc))
+
+print()
+print("--- Zeiss's preview copy, when chosen ---")
+READS.clear(); ZOOMS.clear()
+run()
+chk("the default reads the scan itself", ZOOMS and set(ZOOMS) == {1.0}, set(ZOOMS))
+chk("...and the index says so", index_rows()[UIDS[0]].get("source") == "scan")
+ZOOMS.clear()
+run("--source", "zeiss_preview")
+chk("choosing the preview redraws without --force", len(ZOOMS) > 0, len(ZOOMS))
+chk("...from the stored 1/4 copy at 2.6 um/px, one read per plane",
+    ZOOMS == [0.25] * 4, ZOOMS)
+r0 = index_rows()[UIDS[0]]
+chk("...the index says where the pixels came from", r0.get("source") == "zeiss_preview", r0)
+prev = np.asarray(Image.open(pic("stain_only", UIDS[0])))
+chk("...same size as the scan route", prev.shape == (H // 4, W // 4), prev.shape)
+want_m = expect8(block_mean(PLANES[0][1], 4), 200, 20000)
+diff = np.abs(prev.astype(int) - want_m)
+chk("...close to it, but its own pixels", 0 < diff.max() <= 3, diff.max())
+ZOOMS.clear()
+run("--source", "zeiss_preview")
+chk("a second preview run reads nothing", ZOOMS == [], len(ZOOMS))
+run("--source", "zeiss_preview", "--um-px", "0.65", "--limit", "1")
+chk("at 0.65 there is no smaller copy: the scan is read",
+    ZOOMS and set(ZOOMS) == {1.0}
+    and index_rows()[UIDS[0]].get("source") == "scan", set(ZOOMS))
+ZOOMS.clear()
+run("--force")
+chk("back to the scan route with the default", set(ZOOMS) == {1.0})
 
 print()
 print("--- clipping ---")

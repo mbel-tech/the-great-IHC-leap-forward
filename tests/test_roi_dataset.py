@@ -639,6 +639,87 @@ def all_filtered_check(tmp):
         [r["scene_uid"] for r in meas if r["scene_uid"] == "S4"], [])
 
 
+def zero_found_check(tmp):
+    """A section 05c measured and found EMPTY reports zeros, not nothing.
+
+    It has no nucleus rows at all, so all_filtered_check's rule - a section
+    with rows is measured - cannot see it. 05c's done log can: it logs a
+    section measured with nothing found, and does not log one it skipped for
+    want of a shared intensity range or one cut off by a crash. Both of those
+    still have a measured-geometry row, so that record alone is no proof.
+    """
+    npath, bpath = build(tmp)
+    boxes = G5.load_csv(bpath) + [box(u, "roi", "Dm")
+                                  for u in ("S3", "S4", "S5")]
+    with open(bpath, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=BOX_COLS)
+        w.writeheader()
+        w.writerows(boxes)
+    by = {}
+    for b in G5.load_csv(bpath):
+        by.setdefault(b["scene_uid"], []).append(b)
+    # S3 measured, nothing found: geometry and a log entry. S4 skipped
+    # (no_norm) or torn: geometry, no log entry. S5 never reached.
+    gpath = os.path.join(tmp, "zero_geometry.csv")
+    with open(gpath, "w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(G5C.GEOMETRY_COLUMNS)
+        for uid in ("S1", "S2", "S3", "S4"):
+            w.writerows(G5C.geometry_rows(uid, by[uid]))
+    lpath = os.path.join(tmp, "zero_done.csv")
+    with open(lpath, "w", newline="", encoding="utf-8") as fh:
+        G5C.start_done_log(fh, "AF568", ["S1", "S2", "S3"])
+
+    keep = (G6A.NUCLEI_CSV, G6A.MEAS_CSV, G6A.SPEC_CSV, G6A.GEOMETRY_CSV,
+            G6A.GEOMETRY_CHANGED_CSV, getattr(G6A, "DONE_LOG", None),
+            G5.all_boxes)
+
+    def run():
+        G6A.NUCLEI_CSV = npath
+        G6A.MEAS_CSV = os.path.join(tmp, "zero_measurements.csv")
+        G6A.SPEC_CSV = os.path.join(tmp, "zero_specificity.csv")
+        G6A.GEOMETRY_CSV = gpath
+        G6A.GEOMETRY_CHANGED_CSV = os.path.join(tmp, "zero_changed.csv")
+        G6A.DONE_LOG = lpath
+        G5.all_boxes = lambda: G5.load_csv(bpath)
+        try:
+            G6A.main()
+            return G5.load_csv(G6A.MEAS_CSV), None
+        except SystemExit as exc:
+            return None, str(exc)
+        finally:
+            (G6A.NUCLEI_CSV, G6A.MEAS_CSV, G6A.SPEC_CSV, G6A.GEOMETRY_CSV,
+             G6A.GEOMETRY_CHANGED_CSV, G6A.DONE_LOG, G5.all_boxes) = keep
+
+    meas, err = run()
+    chk("06a runs with a measured-empty section", err, None)
+    meas = meas or []
+    s3 = [r for r in meas if r["scene_uid"] == "S3"]
+    chk("a section measured and found empty gets its disc row", len(s3), 1)
+    if s3:
+        chk("...with a count of 0", s3[0]["n_nuclei"], 0)
+        chk("...and its real area", float(s3[0]["roi_area_um2"]) > 0, True)
+        chk("...and a density of 0", s3[0]["profile_density_per_mm2"], "0.0")
+    chk("a skipped or torn section (geometry, no log entry) stays absent",
+        [r["scene_uid"] for r in meas if r["scene_uid"] == "S4"], [])
+    chk("a section never reached stays absent",
+        [r["scene_uid"] for r in meas if r["scene_uid"] == "S5"], [])
+
+    # Zero counted on one shape is not zero on another: a disc moved since
+    # is refused, as it is for a section with nuclei.
+    moved = G5.load_csv(bpath)
+    for b in moved:
+        if b["scene_uid"] == "S3":
+            b["sec_x"] = 160
+    with open(bpath, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=BOX_COLS)
+        w.writeheader()
+        w.writerows(moved)
+    _, err = run()
+    chk("...and a measured-empty disc moved since is refused",
+        err is not None and "S3" in err, True)
+
+
 def memory_check(tmp):
     """06a's memory must not grow by a parsed row per nucleus.
 
@@ -892,6 +973,7 @@ def main():
 
         # ---- a section whose nuclei were all dropped still reports zero
         all_filtered_check(tmp)
+        zero_found_check(tmp)
 
         # ---- which under `multiplex` means per marker, not per position
         multiplex_join_check(tmp)

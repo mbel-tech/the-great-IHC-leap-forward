@@ -492,6 +492,76 @@ def detect_read_check():
 detect_read_check()
 
 
+def _run_main(model, *flags):
+    """main() against the one-box study detect_read_check() left on disk.
+
+    Returns the exit code and how many plane reads were made - 0 reads means
+    the section was not measured again.
+    """
+    import pylibCZIrw.czi as _real_pyczi
+    fake_doc = _FakeCzi((20, 24))
+    saved = (_real_pyczi.open_czi, G5C.load_model, sys.argv)
+    _real_pyczi.open_czi = _FakeOpenCzi(fake_doc)
+    G5C.load_model = lambda: model
+    sys.argv = ["05c_detect_rois.py", "--marker", G5C.G5.MARKER,
+                "--order", "uid", *flags]
+    try:
+        rc = G5C.main()
+    finally:
+        _real_pyczi.open_czi, G5C.load_model, sys.argv = saved
+    return rc, len(fake_doc.calls)
+
+
+def zero_found_check():
+    """A section measured and found EMPTY is done; one skipped is not.
+
+    detect_read_check()'s fake model finds nothing, so its section writes no
+    nucleus rows. The done log used to be written only when there were rows,
+    and the resume took "done" from the rows - so an empty section was never
+    done: every plain resume measured it again, and 06a, which has only the
+    rows to go on, left it out of the dataset instead of reporting zeros.
+
+    A section skipped for want of a shared intensity range (`no_norm`) also
+    writes no rows, and that one was NOT measured: it must stay undone.
+    """
+    try:
+        import pylibCZIrw.czi  # noqa: F401
+    except ImportError:                                          # noqa: BLE001
+        print("   (pylibCZIrw is not installed - the zero-found resume cannot "
+              "be driven through main())")
+        return
+    uid, marker = "AB12_1a-s0", G5C.G5.MARKER
+    logged = G5C.read_done_log(G5C.DONE_LOG, marker) or set()
+    chk("a section measured with nothing found is logged done",
+        uid in logged, True)
+    rc, reads = _run_main(_FakeModel())
+    chk("...and a plain resume does not measure it again", (rc, reads), (0, 0))
+
+    # The same section, forced, but its marker has no range to share.
+    saved = (G5C.needs_shared_norm, G5C.section_range)
+
+    def no_range(*a, **kw):
+        raise G5C.SG.SegmentError("flat marker plane")
+    G5C.needs_shared_norm = lambda m: True
+    G5C.section_range = no_range
+    try:
+        rc, _ = _run_main(_FakeModel(), "--force")
+    finally:
+        G5C.needs_shared_norm, G5C.section_range = saved
+    chk("a no_norm skip completes", rc, 0)
+    logged = G5C.read_done_log(G5C.DONE_LOG, marker) or set()
+    chk("...and is NOT logged done", uid in logged, False)
+    rc, reads = _run_main(_FakeModel())
+    chk("...so the next resume measures it", (rc, reads > 0), (0, True))
+    logged = G5C.read_done_log(G5C.DONE_LOG, marker) or set()
+    chk("...and then it is logged done", uid in logged, True)
+
+
+print()
+print("--- a section measured and found empty ---")
+zero_found_check()
+
+
 class _OneNucleusModel:
     """Stands in for StarDist and reports exactly one object, centred.
 

@@ -394,6 +394,16 @@ def load_csv(path):
         return list(csv.DictReader(fh))
 
 
+def _about_this_study(path):
+    """True when `path` names sections and all of them are in qc/focus.csv."""
+    try:
+        uids = {r.get("scene_uid", "") for r in load_csv(path)} - {""}
+        known = {r["scene_uid"] for r in load_csv(FOCUS_CSV)}
+    except (OSError, KeyError, csv.Error, UnicodeDecodeError):
+        return False
+    return bool(uids) and uids <= known
+
+
 def find_regions_csv(explicit):
     """Where the ROIs come from. The newest export wins.
 
@@ -413,13 +423,20 @@ def find_regions_csv(explicit):
     """
     if explicit:
         return explicit
-    roots = [REFORMAT_DIR, EXPORT_DIR, os.path.join(os.path.expanduser("~"), "Downloads")]
+    downloads = os.path.join(os.path.expanduser("~"), "Downloads")
     cand = []
-    for root in roots:
+    for root in (REFORMAT_DIR, EXPORT_DIR, downloads):
         if not root:
             continue
-        cand += glob.glob(os.path.join(root, "roi_regions*.csv"))
-        cand += glob.glob(os.path.join(root, "*", "roi_regions*.csv"))
+        found = (glob.glob(os.path.join(root, "roi_regions*.csv"))
+                 + glob.glob(os.path.join(root, "*", "roi_regions*.csv")))
+        # The download folder is shared with everything else the browser
+        # saved, other studies' exports included. A file there is taken only
+        # when every section it names is one of THIS study's - otherwise the
+        # newest download, whatever it was, would be measured as this curation.
+        if root == downloads:
+            found = [p for p in found if _about_this_study(p)]
+        cand += found
     if cand:
         return max(cand, key=os.path.getmtime)
     return None

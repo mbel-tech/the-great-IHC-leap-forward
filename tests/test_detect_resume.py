@@ -108,6 +108,53 @@ def legacy_row(uid, marker, n):
     return [r[c] for c in G5C.LEGACY_COLUMNS]
 
 
+def torn_check(tmp):
+    """A run cut off mid-write must not leave a section that resume calls done.
+
+    roi_nuclei.csv is appended section by section onto a drive that has
+    dropped writes. A crash inside writerows left some of a section's rows -
+    enough for "any row present" to call it measured, so it was never redone -
+    and a last line with no newline, onto which the next run glued its first
+    row. The fix: cut a torn last line back to the last whole one, and keep a
+    log of sections whose rows reached the disk whole. A section with rows but
+    no log entry was torn: its rows go and it is measured again.
+    """
+    path = os.path.join(tmp, "torn.csv")
+    write(path, G5C.COLUMNS, [row("S1", "pERK", 1), row("S1", "pERK", 2)])
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write("S2,1,pERK,12.5")                      # cut off mid-row
+    cut = G5C.repair_torn_tail(path)
+    chk("a torn last line is cut off", cut > 0, True)
+    with open(path, "rb") as fh:
+        chk("...and the file ends on a whole line", fh.read().endswith(b"\n"), True)
+    chk("...keeping every whole row", len(read(path)), 2)
+    chk("a whole file is left alone", G5C.repair_torn_tail(path), 0)
+
+    log = os.path.join(tmp, "done.csv")
+    chk("no log yet reads as None (an older file)", G5C.read_done_log(log, "pERK"), None)
+    with open(log, "a", encoding="utf-8") as fh:
+        G5C.start_done_log(fh, "pERK")
+        G5C.record_done(fh, "pERK", "S1")
+    # The second marker's rows predate the log: trusted, never called torn -
+    # read as "nothing logged", its whole dataset would be dropped.
+    chk("a marker the log has not started on reads as None",
+        G5C.read_done_log(log, "PCNA"), None)
+    chk("...so none of its sections is torn",
+        G5C.torn_sections({"S9"}, G5C.read_done_log(log, "PCNA")), set())
+    with open(log, "a", encoding="utf-8") as fh:
+        G5C.start_done_log(fh, "PCNA", {"S9"})
+    chk("a logged section reads back, per marker",
+        sorted(G5C.read_done_log(log, "pERK")), ["S1"])
+    chk("rows without a log entry are a torn section",
+        sorted(G5C.torn_sections({"S1", "S3"}, G5C.read_done_log(log, "pERK"))), ["S3"])
+    chk("with no log, nothing is called torn",
+        G5C.torn_sections({"S1", "S3"}, None), set())
+    G5C.forget_done(log, "pERK", {"S1"})
+    chk("forgetting drops only that marker's sections",
+        (sorted(G5C.read_done_log(log, "pERK")), sorted(G5C.read_done_log(log, "PCNA"))),
+        ([], ["S9"]))
+
+
 def header_check(tmp):
     """A resume onto a pre-off_tissue file must stop and say what to run."""
     old = os.path.join(tmp, "old_nuclei.csv")
@@ -567,6 +614,7 @@ def main():
     try:
         header_check(tmp)
         drop_check(tmp)
+        torn_check(tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print()

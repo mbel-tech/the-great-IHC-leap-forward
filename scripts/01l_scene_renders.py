@@ -142,6 +142,11 @@ FIELD_DIR = os.path.join(QC_DIR, "flatfield")
 _SR = CONFIG.get("scene_render") or {}
 OUT_DIR = LC.scene_render_dir(CONFIG)
 INDEX_CSV = os.path.join(QC_DIR, "scene_renders.csv")
+# Every scene this run tried and could not draw, and why, as 01 keeps
+# overview_failures.csv. Rewritten every run, header only when nothing failed,
+# so an old list cannot outlive the fix.
+FAILURES_CSV = os.path.join(QC_DIR, "scene_render_failures.csv")
+FAILURE_KEYS = ["scene_uid", "file", "animal", "marker_channel", "scene_index", "reason"]
 
 DEFAULT_UM_PX = float(_SR.get("um_per_px", 2.6))
 DEFAULT_RANGE = _SR.get("range", "dataset")
@@ -773,6 +778,9 @@ def main():
                                     "can be had (memory and page file) - close "
                                     "other programs or choose a coarser resolution"))
                         continue
+                    # Per scene: one picture that cannot be written (open in a
+                    # viewer on Windows, say) or drawn must not cost the rest
+                    # of the slide; it is named and the others carry on.
                     try:
                         got = render_scene(reader(doc_n, n_idx), reader(doc_m, m_idx),
                                            rects[si], b, fields_nm, ranges, range_mode,
@@ -786,6 +794,10 @@ def main():
                         save_png(rgb, p_rgb)
                         save_png(only, p_only)
                         del rgb, only, got
+                    except Exception as exc:  # noqa: BLE001 - see above
+                        bad.append((uid, f"{type(exc).__name__}: {exc}"))
+                        print(f"\n  !! {uid}: {type(exc).__name__}: {exc}")
+                        continue
                     finally:
                         gate.release(need)
                     new_rows[index_key(p_only)] = {
@@ -800,8 +812,11 @@ def main():
                         "reader": "pylibCZIrw", "source": source, **facts}
                     drawn.add(uid)
         except Exception as exc:  # noqa: BLE001 - one bad file must not stop the rest
+            # Only the scenes not already drawn or already named: a file that
+            # fails part-way (its handles, say) still drew the ones before.
+            named = {uid for uid, _ in bad}
             bad += [(r["scene_uid"], f"{type(exc).__name__}: {exc}") for r in todo
-                    if r["scene_uid"] not in drawn]
+                    if r["scene_uid"] not in drawn and r["scene_uid"] not in named]
             print(f"\n  !! {fname}: {exc}")
         return new_rows, bad, drawn
 
@@ -841,10 +856,20 @@ def main():
           f"{', Zeiss preview' if source == 'zeiss_preview' else ''}) to {out_dir}")
     if existing:
         print(f"  {existing} already there, left alone (--force redraws them)")
+    by_uid = {r["scene_uid"]: r for r in scenes}
+    os.makedirs(QC_DIR, exist_ok=True)
+    IO.atomic_write_csv(FAILURES_CSV, [
+        {**{k: by_uid.get(uid, {}).get(k, "") for k in FAILURE_KEYS},
+         "scene_uid": uid, "reason": why} for uid, why in failed], FAILURE_KEYS)
     if failed:
         print(f"  {len(failed)} not drawn:")
         for uid, why in failed[:10]:
             print(f"    {uid}  {why}")
+        # A message rather than a bare `return 1`: app/runner.py ignores what
+        # main() returns and reports a SystemExit message as the step failing.
+        # From the command line it is still exit status 1.
+        raise SystemExit(f"{len(failed)} scene(s) not drawn - listed above "
+                         f"and in {FAILURES_CSV}")
 
 
 if __name__ == "__main__":

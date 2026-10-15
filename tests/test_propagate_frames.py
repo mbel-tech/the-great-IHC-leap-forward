@@ -320,5 +320,15 @@ with temp_study(acquisition={"layout": "paired",
     chk("...and does not create qc/perk",
         os.path.exists(os.path.join(P4.OUT_ROOT, "qc", "perk")), False)
 
+# `--limit 40` is the documented way to try 04i on a subset first. It used to
+# write those 40 rows over the whole overrides file, which 04a reads as the
+# complete record - so every other pERK section lost its rotation. A trial run
+# writes beside the real file instead.
+chk("a full run writes the overrides file", P.output_path(0), P.OUT_CSV)
+chk("a --limit run does NOT write over it", P.output_path(40) != P.OUT_CSV, True)
+chk("...but beside it, named as a trial",
+    (os.path.dirname(P.output_path(40)), "trial" in os.path.basename(P.output_path(40))),
+    (os.path.dirname(P.OUT_CSV), True))
+
 print("\n" + (f"{fails} FAILED" if fails else "ALL PASS"))
 sys.exit(1 if fails else 0)

@@ -39,7 +39,7 @@ A flip hypothesis is scored alongside rotation as a check, not as a correction:
 the two scans are the same slide the same way up, so flips should essentially
 never win. If they do, the pairing is suspect.
 
-Run:  python 04i_propagate_to_perk.py --limit 40      # try a subset first
+Run:  python 04i_propagate_to_perk.py --limit 40      # try a subset first (writes a .trial40 file)
       python 04i_propagate_to_perk.py
 """
 
@@ -307,6 +307,20 @@ def derive_rotation(p_source, p_target, total_source, curated_mask=None):
             "final_iou_256": final_iou}
 
 
+def output_path(limit):
+    """Where this run's rows go.
+
+    04a reads the overrides file as the COMPLETE record, so a `--limit` trial
+    written there would leave every section outside the trial at its raw
+    automatic angle. A trial is written beside it and the real file is left
+    as it was.
+    """
+    if not limit:
+        return OUT_CSV
+    root, ext = os.path.splitext(OUT_CSV)
+    return f"{root}.trial{limit}{ext}"
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=0)
@@ -404,7 +418,8 @@ def main():
             print(f"\r  aligned {i}/{len(todo)}", end="")
     print(f"\r  aligned {len(todo)} sections            ")
 
-    IO.atomic_write_csv(OUT_CSV, rows, OVERRIDE_KEYS)
+    out_csv = output_path(args.limit)
+    IO.atomic_write_csv(out_csv, rows, OVERRIDE_KEYS)
 
     live = [r for r in rows if not r["excluded"] and r["align_iou"] != ""]
     s = np.array([r["align_iou"] for r in live], dtype=float)
@@ -412,7 +427,10 @@ def main():
     fm = np.array([r["flip_margin"] for r in live], dtype=float)
     print()
     print("=" * 74)
-    print(f"{len(rows)} rows -> {OUT_CSV}")
+    print(f"{len(rows)} rows -> {out_csv}")
+    if out_csv != OUT_CSV:
+        print(f"  (--limit trial: {OUT_CSV} is untouched; run without --limit "
+              f"to write it)")
     print(f"  exclusions transferred : {n_excl}")
     print(f"  rotations derived      : {len(live)}")
     print(f"  curated sections with no {TARGET_MARKER} partner : {n_nopair}")

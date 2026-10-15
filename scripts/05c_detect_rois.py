@@ -105,6 +105,7 @@ import ls_channels as CH  # noqa: E402
 import ls_segment as SG  # noqa: E402
 import ls_coloc as CO  # noqa: E402
 import ls_jsonio  # noqa: E402
+import ls_io as IO  # noqa: E402
 OUT_ROOT = G5.OUT_ROOT
 REFORMAT_DIR = G5.REFORMAT_DIR
 RESULTS = os.path.join(OUT_ROOT, "results")
@@ -128,6 +129,22 @@ BACKGROUND_CSV = os.path.join(OUT_ROOT, "qc", "roi_background_assumption.csv")
 BACKGROUND_COLUMNS = ["scene_uid", "roi_index", "marker", "segmented_on",
                       "backend", "n_objects", "cut", "above_cut",
                       "below_background"]
+
+#: The sections measured with NO artifact mask, one row per (section, marker).
+#: Without `<uid>_artifact.npy` every nucleus of the section is written with
+#: artifact = 0 - the same value a clean section gets, so roi_nuclei.csv alone
+#: cannot tell "checked, nothing there" from "never checked". The usual cause
+#: is 04a_reformat.py run without --mask-artifacts. Unlike a missing tissue
+#: mask this is not a skip: the counts are still counts, they just have not
+#: had artifacts taken out.
+#:
+#: ALWAYS WRITTEN, header-only when nothing is missing: every run looks for the
+#: mask, so an empty file is a true "none missing". Rewritten atomically each
+#: run; the rows of the sections a run re-measures are replaced and every other
+#: row (other markers, sections not redone) is kept, so it stays in step with
+#: roi_nuclei.csv across resumes and --limit.
+NO_ARTIFACT_CSV = os.path.join(OUT_ROOT, "qc", "roi_no_artifact_mask.csv")
+NO_ARTIFACT_COLUMNS = ["scene_uid", "marker"]
 
 #: The intensity range a marker-segmented section's crops were scaled by, one
 #: row per (section, marker). Provenance for numbers that depend on it, kept in
@@ -427,6 +444,28 @@ class _Rect:
     def __init__(self, x, y, w, h):
         self.x, self.y, self.w, self.h = x, y, w, h
 
+
+def section_range(doc, boxes, marker, scene):
+    """(low, high, crops used): one section's shared range for `marker`.
+
+    Taken from EVERY box of that marker in the section - ROIs and background
+    discs alike, each read whole - see ls_segment.percentile_range. Its own
+    function so 05b_tune_detection.py tunes on the very range this stage
+    stretches by; raises SegmentError for a flat or empty section.
+    """
+    crops = []
+    for b in boxes:
+        if b["marker"] != marker:
+            continue
+        crop_w, crop_h = int(b["czi_w"]), int(b["czi_h"])
+        if crop_w < 8 or crop_h < 8:
+            continue
+        crops.append(CR.read_plane(
+            doc, _Rect(int(b["czi_x0"]), int(b["czi_y0"]), crop_w, crop_h),
+            plane_index_for(marker), scene=scene).astype(np.float32))
+    lo, hi = SG.percentile_range(crops)
+    return lo, hi, len(crops)
+
 COLUMNS = ["scene_uid", "animal", "marker", "roi_kind", "region", "seed_n",
            "roi_index", "nucleus_id",
            "czi_x", "czi_y", "sec_x", "sec_y",
@@ -672,6 +711,94 @@ def check_header(path, columns, legacy=None):
         f"before the provenance columns were and was never true.")
 
 
+#: Sections whose rows reached roi_nuclei.csv WHOLE, one `marker,scene_uid`
+#: line each, written only after the rows were flushed and fsynced. "Any row of
+#: the section is in the file" cannot tell a finished section from one a crash
+#: or a drive dropout cut off inside writerows; this log can. A file written
+#: before the log existed has none, and its rows are trusted as they always
+#: were - the log is seeded from them on the first resume.
+#:
+#: PER MARKER. A `marker,*` line says that marker's sections are logged from
+#: then on; without it the marker's rows predate the log and are trusted. An
+#: absent marker must not read as "nothing logged", or the first resume of the
+#: second marker after the log appeared would drop its whole dataset as torn.
+DONE_LOG = os.path.join(RESULTS, "roi_nuclei_sections_done.csv")
+
+
+def repair_torn_tail(path):
+    """Cut a last line that has no newline back to the last whole line.
+
+    A write cut off mid-row leaves a fragment, and the next run's first row
+    would be appended onto it - one garbled row with shifted fields. Returns
+    the number of bytes removed (0 when the file already ends on a newline).
+    """
+    size = os.path.getsize(path)
+    if size == 0:
+        return 0
+    with open(path, "rb+") as fh:
+        fh.seek(-1, os.SEEK_END)
+        if fh.read(1) == b"\n":
+            return 0
+        step, pos = 1 << 16, size
+        while pos > 0:
+            start = max(0, pos - step)
+            fh.seek(start)
+            chunk = fh.read(pos - start)
+            i = chunk.rfind(b"\n")
+            if i >= 0:
+                keep = start + i + 1
+                fh.truncate(keep)
+                return size - keep
+            pos = start
+        fh.truncate(0)
+        return size
+
+
+def read_done_log(path, marker):
+    """The sections of `marker` logged as written whole, or None when that
+    marker has no `marker,*` line (its rows predate the log)."""
+    if not os.path.exists(path):
+        return None
+    with open(path, newline="", encoding="utf-8") as fh:
+        mine = {r[1] for r in csv.reader(fh) if len(r) >= 2 and r[0] == marker}
+    if "*" not in mine:
+        return None
+    return mine - {"*"}
+
+
+def start_done_log(fh, marker, trusted=()):
+    """Begin logging `marker`: its sentinel, then the sections trusted as whole."""
+    w = csv.writer(fh)
+    w.writerow([marker, "*"])
+    for u in sorted(trusted):
+        w.writerow([marker, u])
+    fh.flush()
+
+
+def record_done(fh, marker, uid):
+    csv.writer(fh).writerow([marker, uid])
+    fh.flush()
+
+
+def torn_sections(measured, logged):
+    """Sections with rows in the file but no log entry: cut off mid-write."""
+    return set() if logged is None else set(measured) - logged
+
+
+def forget_done(path, marker, uids):
+    """Drop `marker`'s entries for `uids` from the log, atomically."""
+    if not os.path.exists(path):
+        return
+    uids = set(uids)
+    with open(path, newline="", encoding="utf-8") as fh:
+        keep = [r for r in csv.reader(fh)
+                if len(r) >= 2 and not (r[0] == marker and r[1] in uids)]
+    tmp = path + ".tmp"
+    with open(tmp, "w", newline="", encoding="utf-8") as fh:
+        csv.writer(fh).writerows(keep)
+    os.replace(tmp, path)
+
+
 def drop_rows(path, marker, uids, marker_col="marker"):
     """Rewrite `path` without the rows of `marker` whose scene_uid is in `uids`.
 
@@ -862,6 +989,40 @@ def mask_at(uid, kind):
     return None
 
 
+def has_mask(uid, kind):
+    """Whether mask_at(uid, kind) would find a file, without loading it."""
+    return any(os.path.exists(os.path.join(d, f"{uid}_{kind}.npy"))
+               for d in section_dirs())
+
+
+def record_no_artifact(path, marker, redone, missing):
+    """Rewrite NO_ARTIFACT_CSV: this run's `redone` sections of `marker` get
+    the rows in `missing` and nothing else; every other row is left alone.
+    """
+    redone = set(redone)
+    rows = []
+    if os.path.exists(path):
+        with open(path, newline="", encoding="utf-8") as fh:
+            rows = [r for r in csv.DictReader(fh)
+                    if not (r.get("marker") == marker
+                            and r.get("scene_uid") in redone)]
+    rows += [{"scene_uid": u, "marker": marker} for u in missing]
+    rows.sort(key=lambda r: (r["marker"], r["scene_uid"]))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    IO.atomic_write_csv(path, rows, NO_ARTIFACT_COLUMNS)
+
+
+def warn_no_artifact(uids, when):
+    """The operator-facing line for sections measured without an artifact mask."""
+    if not uids:
+        return
+    print(f"!! {len(uids)} sections {when} with no artifact mask "
+          f"(<uid>_artifact.npy) - every nucleus in them reads artifact=0 "
+          f"unchecked: {uids[:5]}")
+    print(f"   04a_reformat.py --mask-artifacts makes them; the list -> "
+          f"{NO_ARTIFACT_CSV}")
+
+
 def write_overlay(uid, bi, b, image, labels, kept):
     """One PNG per ROI: the SEGMENTED crop with the segmentation drawn on it.
 
@@ -969,6 +1130,13 @@ def main():
         # path that appends to roi_nuclei.csv, so it is the only one that can
         # backfill it, and every other caller keeps the plain refusal.
         check_header(NUCLEI_CSV, COLUMNS, legacy=LEGACY_PROVENANCE)
+        cut = repair_torn_tail(NUCLEI_CSV)
+        if cut:
+            print(f"  {NUCLEI_CSV} ended in a part-written line ({cut} bytes) "
+                  f"from a run that was cut off - removed")
+    elif os.path.exists(DONE_LOG):
+        # A log with no dataset beside it describes rows that are gone.
+        os.remove(DONE_LOG)
 
     # Which markers this run must relate its own objects to. Empty for every
     # study that exists: LS is paired, and co-localisation is a multiplex
@@ -1000,6 +1168,19 @@ def main():
             for row in rd:
                 if row and row[0] in by_sec:
                     measured.add(row[0])
+    if exists:
+        logged = read_done_log(DONE_LOG, args.marker)
+        if logged is None:
+            # Written before this marker was logged: trust its rows, as before.
+            with open(DONE_LOG, "a", newline="", encoding="utf-8") as lf:
+                start_done_log(lf, args.marker, measured)
+        torn = torn_sections(measured, logged)
+        if torn:
+            dropped, _ = drop_rows(NUCLEI_CSV, args.marker, torn)
+            measured -= torn
+            print(f"  {len(torn)} {args.marker} section(s) were cut off mid-write "
+                  f"({dropped} rows) - dropped, and measured again: "
+                  + ", ".join(sorted(torn)[:5]) + (" ..." if len(torn) > 5 else ""))
     done = set()
     if exists and not args.force:
         done = set(measured)
@@ -1046,6 +1227,13 @@ def main():
             print(f"  (signal quality was not checked for {args.marker}; "
                   f"05b_tune_detection.py does that before detection)")
 
+    # Said BEFORE anything is loaded or dropped, so an operator who meant to
+    # mask artifacts can stop here and lose nothing. Only sections that will
+    # actually be measured: one with no tissue mask is skipped below anyway.
+    no_artifact = [u for u in todo
+                   if has_mask(u, "mask") and not has_mask(u, "artifact")]
+    warn_no_artifact(no_artifact, "will be measured")
+
     # The model is loaded only if something in this run needs it. A study whose
     # markers are all `segment: own` with the threshold backend has no use for
     # StarDist, and load_model() DOWNLOADS weights on first use - so making it
@@ -1083,6 +1271,7 @@ def main():
         dropped, kept = drop_rows(NUCLEI_CSV, args.marker, todo)
         print(f"  --force: dropped {dropped} {args.marker} rows over {len(todo)} "
               f"sections, kept {kept}")
+        forget_done(DONE_LOG, args.marker, todo)
     if settings is not None:
         record_settings(args.marker, settings)
     if coloc_present and args.force:
@@ -1127,6 +1316,9 @@ def main():
 
     fh = open(NUCLEI_CSV, "a" if exists else "w", newline="", encoding="utf-8")
     w = csv.writer(fh)
+    dfh = open(DONE_LOG, "a" if exists else "w", newline="", encoding="utf-8")
+    if not exists:
+        start_done_log(dfh, args.marker)
     if not exists:
         w.writerow(COLUMNS)
 
@@ -1153,6 +1345,11 @@ def main():
     total_rel = 0
     total_bg = 0
     no_tissue_mask = []
+    # Recorded before the loop rather than after it: a run that dies half way
+    # has still written rows for the sections it reached, and those must not
+    # go unlisted. A section listed but not reached has no rows yet and is
+    # redone - and re-recorded - by the resume.
+    record_no_artifact(NO_ARTIFACT_CSV, args.marker, todo, no_artifact)
     for n, uid in enumerate(todo, 1):
         g = geom[uid]
         M = np.array([[float(g["m00"]), float(g["m01"]), float(g["m02"])],
@@ -1188,20 +1385,9 @@ def main():
             # is holding every crop in memory at once.
             for mk in sorted({b["marker"] for b in by_sec[uid]
                               if needs_shared_norm(b["marker"])}):
-                crops = []
-                for b in by_sec[uid]:
-                    if b["marker"] != mk:
-                        continue
-                    crop_w, crop_h = int(b["czi_w"]), int(b["czi_h"])
-                    if crop_w < 8 or crop_h < 8:
-                        continue
-                    crops.append(CR.read_plane(
-                        doc, _Rect(int(b["czi_x0"]), int(b["czi_y0"]),
-                                   crop_w, crop_h),
-                        plane_index_for(mk), scene=int(g["scene_index"])
-                    ).astype(np.float32))
                 try:
-                    lo, hi = SG.percentile_range(crops)
+                    lo, hi, n_crops = section_range(
+                        doc, by_sec[uid], mk, int(g["scene_index"]))
                 except SG.SegmentError as exc:
                     # A section whose marker plane is flat or empty has no
                     # range to share. Skipped with the reason, never measured
@@ -1210,7 +1396,7 @@ def main():
                     continue
                 section_norm[mk] = (lo, hi)
                 norm_rows.append([uid, mk, segment_plane_for(mk), repr(lo),
-                                  repr(hi), len(crops)])
+                                  repr(hi), n_crops])
             for bi, b in enumerate(by_sec[uid], 1):
                 x0, y0 = int(b["czi_x0"]), int(b["czi_y0"])
                 bw, bh = int(b["czi_w"]), int(b["czi_h"])
@@ -1369,6 +1555,10 @@ def main():
                     write_overlay(uid, bi, b, seg_img, labels, kept)
         w.writerows(rows)
         fh.flush()
+        # On disk before the section is logged as whole - see DONE_LOG.
+        os.fsync(fh.fileno())
+        if rows:
+            record_done(dfh, args.marker, uid)
         if norm_rows:
             if nfh is None:
                 os.makedirs(RESULTS, exist_ok=True)
@@ -1400,6 +1590,7 @@ def main():
         print(f"\r  {n}/{len(todo)}  {uid}  {len(rows)} nuclei  "
               f"({total_nuc} total)          ", end="")
     fh.close()
+    dfh.close()
     if cfh is not None:
         cfh.close()
     if bfh is not None:
@@ -1428,6 +1619,7 @@ def main():
         print(f"!! {len(no_tissue_mask)} sections SKIPPED for want of a tissue "
               f"mask in reformatted/: {no_tissue_mask[:5]}")
         print("   Run 04a_reformat.py for them before trusting any count.")
+    warn_no_artifact(no_artifact, "were measured")
     return 0
 
 

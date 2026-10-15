@@ -113,7 +113,11 @@ def replace_guard(d, plates):
         sys.argv = ["import_exports", plates, *flags]
         IE.ST.CurationStore = lambda _root: real_store(out_root)
         try:
-            return IE.main()
+            # A throwaway study for main() to read, not the repo config.json -
+            # which a fresh clone or CI does not have, and which on the
+            # operator's machine is their live study.
+            with temp_study():
+                return IE.main()
         finally:
             sys.argv = argv
             IE.ST.CurationStore = real_store

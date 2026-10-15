@@ -85,6 +85,39 @@ with tempfile.TemporaryDirectory() as tmp:
     chk("...and its progress arrived line by line",
         [g for g in got if g.strip().endswith("/3")], ["  0/3", "  1/3", "  2/3"])
 
+# ------------------------------------------------- main() returning a status
+# Most stages end `sys.exit(main())` and refuse work with `return 1`. In
+# process there is no sys.exit, so the runner has to read main()'s return value
+# itself; a stage that refused must not be recorded as done.
+with tempfile.TemporaryDirectory() as tmp:
+    cfg_path = os.path.join(tmp, "config.json")
+    with open(cfg_path, "w", encoding="utf-8") as fh:
+        json.dump({"out_root": os.path.join(tmp, "out")}, fh)
+    scripts = os.path.join(tmp, "scripts")
+    os.makedirs(scripts)
+    with open(os.path.join(scripts, "98_refuse.py"), "w", encoding="utf-8") as fh:
+        fh.write("def main():\n"
+                 "    print('working...')\n"
+                 "    print('FAIL: no roi_regions.csv found')\n"
+                 "    return 1\n")
+    with open(os.path.join(scripts, "97_zero.py"), "w", encoding="utf-8") as fh:
+        fh.write("def main():\n    print('fine')\n    return 0\n")
+
+    r = R.Runner(scripts, cfg_path)
+
+    class Refuse:
+        sid, title, script, cli_only, argv = "refuse", "Refuse", "98_refuse.py", None, []
+
+    class Zero:
+        sid, title, script, cli_only, argv = "zero", "Zero", "97_zero.py", None, []
+
+    res = r.run(Refuse())
+    chk("main() returning 1 is a failure", res.ok, False)
+    chk("...and the error names the stage's last words",
+        "no roi_regions.csv found" in (res.error or ""), True)
+    chk("main() returning 0 is a success", r.run(Zero()).ok, True)
+
+
 # ------------------------------------------------- switching study, mid-session
 # ls_config caches the parsed config and lives in sys.modules, which the runner
 # does not own. Clearing only its own module cache would reload every stage and

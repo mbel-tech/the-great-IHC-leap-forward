@@ -85,7 +85,9 @@ def parse_name(filename, pattern):
     back off a uid, so an underscore there would hand them half an id without
     any error.
     """
-    m = pattern.match(os.path.basename(filename))
+    # Either separator: a manifest written on Windows names D:\slides\x.czi,
+    # and os.path.basename on any other system would keep the whole path.
+    m = pattern.match(re.split(r"[\\/]", filename)[-1])
     if not m:
         return None
     groups = m.groupdict()

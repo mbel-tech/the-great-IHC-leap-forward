@@ -466,6 +466,42 @@ if MW:
     chk("opening another project points the stages at it", (w.config_path, os.environ["LS_CONFIG"]),
         (os.path.abspath(other_path), os.path.abspath(other_path)))
     chk("the window hands the curators the open project", w.curator.project_source() is w.session.project, True)
+
+    # "Use these slides" used to write source_dir into the file behind the open
+    # project's back: the screen kept the old folder, and the next Save (silently,
+    # once a run had refreshed the disk stamp) put the old folder back.
+    w.session.project.revert()
+    w.session.touch()
+    new_slides = os.path.join(TMP, "win2", "other_slides")
+    os.makedirs(new_slides, exist_ok=True)
+    for n in ("LS1_1.czi", "LS1_2.czi"):
+        open(os.path.join(new_slides, n), "wb").close()
+    asked.clear()
+    w.importer.chose_folder = new_slides
+    w.importer._load([new_slides])
+    w.importer._apply()
+    chk("use these slides: the open project has the new folder",
+        w.session.project.get("source_dir"), os.path.abspath(new_slides))
+    chk("...and it is saved, not left unsaved", (w.session.dirty, read(w.config_path)["source_dir"]),
+        (False, os.path.abspath(new_slides)))
+    chk("...the Slides tab shows it", os.path.abspath(new_slides) in w.setup.current.text(), True)
+    chk("...without a 'changed on disk' question", "The file changed on disk" in asked, False)
+    w.session.record_run("00_manifest", True, "a", "b")
+    w.session.project.set("pixel_size_um", 0.33, by="t")
+    w.session.touch()
+    chk("a later save keeps the new folder", (w.session.save(w), read(w.config_path)["source_dir"]),
+        (True, os.path.abspath(new_slides)))
+    w.importer.chose_folder = None
+    w.importer._load([os.path.join(new_slides, "LS1_1.czi")])
+    w.importer._apply()
+    chk("picking some files of a folder keeps the list in the project",
+        (w.session.project.get("source_files"), read(w.config_path).get("source_files")),
+        (["LS1_1.czi"], ["LS1_1.czi"]))
+    w.importer.chose_folder = new_slides
+    w.importer._load([new_slides])
+    w.importer._apply()
+    chk("...and choosing the whole folder again drops it",
+        (w.session.project.get("source_files"), "source_files" in read(w.config_path)), (None, False))
     w.server.stop()
 
 print()

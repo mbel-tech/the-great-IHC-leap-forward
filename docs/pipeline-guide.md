@@ -283,6 +283,13 @@ this is the slide as it was scanned. Each marker gets two folders: the stain ove
 in the same colours as the curation pictures, and the stain alone in grey, which uses the screen's
 whole brightness range so faint signal stays readable.
 
+Only the section is drawn: everything outside it is black, as in the curator, so the glass around it
+and the PAP pen ring drawn round each section on the slide do not appear. The outline is the one 04a
+draws round the section (made from 01's counterstain overview, the same one 05c uses to decide which
+nuclei are off the tissue); inside it nothing changes. A scene with no overview yet is drawn whole and
+redrawn once the overview exists, and `--keep-background` draws every scene whole on purpose. The
+table's `background` column says which.
+
 The folder, the resolution and the brightness are study settings. The pictures are 2.6 µm per pixel
 by default, and anything down to the scan's own 0.65 µm can be chosen. They are made by averaging
 whole blocks of the native pixels (4 × 4 for 2.6, 2 × 2 for 1.3), so every native pixel contributes

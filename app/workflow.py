@@ -1609,17 +1609,38 @@ def _content(path):
     return _HASHES[path][1]
 
 
-def _input_paths(need, study):
-    """The files a stage reads from stage `need`: a curator's newest export, else its outputs."""
+def _input_groups(need, study):
+    """{fingerprint key: [files]} a stage reads from stage `need`.
+
+    One key, `need`, for a curator's newest export or a stage's outputs. 05a's
+    outputs are a pair PER MARKER (Art marker None), and what reads them reads
+    every marker's: 06a joins each marker's nuclei to its own roi_boxes. So each
+    marker the export holds gets a key of its own, `need:<marker>`, and
+    re-placing the second marker's regions alone changes one. The first marker
+    keeps the plain key, hashed over the same files as before there was a key
+    per marker, so a run recorded then still matches (see _files_changed).
+    """
     n = S.BY_ID[need]
     if n.operator:
         f = decision_file(need, study)
-        return [f] if f else []
-    out = []
+        return {need: [f] if f else []}
+    groups = {need: []}
     for entry in n.outputs:
+        if isinstance(entry, S.Art) and entry.marker is None and study.markers:
+            for i in sorted({0, *export_markers(study)}):
+                key = need if i == 0 else "%s:%s" % (need, study.markers[i])
+                paths = S.Art(entry.artifact, i).resolve(study.names)[1]
+                groups.setdefault(key, []).extend(
+                    [p for p in paths if os.path.exists(p)][:1])
+            continue
         _shown, paths = n._alternatives(entry, study.out_root, study.names)
-        out += [p for p in paths if os.path.exists(p)][:1]
-    return out
+        groups[need] += [p for p in paths if os.path.exists(p)][:1]
+    return groups
+
+
+def _input_paths(need, study):
+    """The files a stage reads from stage `need`: a curator's newest export, else its outputs."""
+    return [p for paths in _input_groups(need, study).values() for p in paths]
 
 
 def _setting(cfg, key):
@@ -1648,8 +1669,9 @@ def fingerprint(sid, study):
     st = S.BY_ID[sid]
     if st.made_from is None:
         return None
-    files = {need: _hash([_content(p) for p in _input_paths(need, study)])
-             for need in st.made_from if applies(S.BY_ID[need], study)[0]}
+    files = {key: _hash([_content(p) for p in paths])
+             for need in st.made_from if applies(S.BY_ID[need], study)[0]
+             for key, paths in _input_groups(need, study).items()}
     settings = {k: _hash(_setting(study.cfg, k)) for k in st.settings}
     return {"files": files, "settings": settings}
 
@@ -1674,6 +1696,10 @@ def _last_ok(study, sid):
 
 
 def _changed_from(need, study):
+    need, _, marker = need.partition(":")
+    if marker:
+        return "%s for %s" % (_changed_from(need, study), study.marker_label(
+            study.markers.index(marker)) if marker in study.markers else marker)
     n = S.BY_ID[need]
     if need == "roi_curator":
         return "your ROI export"
@@ -1729,6 +1755,27 @@ def _settings_changed(st, study):
     return [k for k in now["settings"] if now["settings"][k] != was.get(k)]
 
 
+def _files_changed(st, study, now, was, made):
+    """The fingerprint keys whose files differ from the run record's, in order.
+
+    A marker's key the record does not hold - a run recorded before each
+    marker had a key of its own, or one made before the export held that
+    marker - is judged by date, as a run with no record is: newer than `st`'s
+    results is a change. By hash it would put every such study out of date at
+    once, though nothing it reads had changed.
+    """
+    out = []
+    for k, h in now.items():
+        if k in was or ":" not in k:
+            if h != was.get(k):
+                out.append(k)
+        elif made is not None and any(
+                os.path.getmtime(p) > made
+                for p in _input_groups(k.partition(":")[0], study).get(k, ())):
+            out.append(k)
+    return out
+
+
 def _own_reason(st, study):
     """Why `st`'s own results no longer follow from what it reads, or None."""
     missing, _ = _own_files(st, study)
@@ -1743,7 +1790,7 @@ def _own_reason(st, study):
     if isinstance(then, dict):
         now = fingerprint(st.sid, study)
         was = then.get("files") or {}
-        files = [k for k in now["files"] if now["files"][k] != was.get(k)]
+        files = _files_changed(st, study, now["files"], was, made)
         if files:
             return "%s changed since it ran" % " and ".join(
                 _changed_from(k, study) for k in files)

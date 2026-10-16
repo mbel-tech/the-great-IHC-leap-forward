@@ -347,6 +347,74 @@ for _layout in ("paired", "multiplex"):
         if os.path.exists(_p):
             os.remove(_p)
 
+# What reads 05a's boxes reads every marker's (06a joins each marker's nuclei to
+# its own roi_boxes), so re-placing only the second marker's regions has to
+# reach detection and what follows, and a run recorded before each marker was
+# fingerprinted must not make a study look out of date that is not.
+print("--- what is made from 05a follows every marker's boxes ---")
+_DET = S.BY_ID["detect"]
+S.BY_ID["detect"].cli_only = None
+_c = json.loads(json.dumps(CFG))
+_c.pop("project", None)
+_c.setdefault("acquisition", {}).update(layout="paired", markers=["AF568", "AF488"])
+_s = study(_c)
+
+
+def _place(marker, when, text="g\n"):
+    for _a in ("roi_geometry", "roi_boxes"):
+        _put(_s.names.path(_a, marker), text, when)
+
+
+_put(_export, "scene_uid,marker\nA,AF568\nB,AF488\n", _T0)
+_place("AF568", _T0 + 10)
+_place("AF488", _T0 + 10)
+for _p in _outputs_of("detect", _s):
+    _put(_p, "detect\n", _T0 + 20)
+_put(_log, "AF568,*\nAF568,A,0123456789abcdef\n", _T0 + 20)     # 05c's per-section log
+for _p in _outputs_of("roi_curator", _s) + _outputs_of("tune_detection", _s):
+    _put(_p, "page\n", _T0 + 5)
+_c["project"] = {"runs": [{"stage": x, "ok": True, "inputs": W.fingerprint(x, _s)}
+                          for x in ("roi_geometry", "detect")]}
+chk("both markers placed, detection run since: done", W.state(_DET, study(_c)), "done")
+_place("AF488", _T0 + 30, "moved\n")
+chk("re-placing only the second marker's regions puts detection out of date",
+    W.state(_DET, study(_c)), "outdated")
+chk("...naming that marker", "AF488" in (W.outdated(_DET, study(_c)) or ""), True)
+chk("...and 05c resumes, by section, rather than re-measuring everything",
+    W.run_values("detect", {}, study(_c)), {})
+_place("AF488", _T0 + 30)
+chk("...putting the same boxes back clears it", W.state(_DET, study(_c)), "done")
+# A record from before: one hash for 05a, over the first marker's pair only.
+_m0_files = [_s.names.path(_a, "AF568") for _a in ("roi_geometry", "roi_boxes")]
+_old = {"files": {"roi_geometry": W._hash([W._content(p) for p in _m0_files])},
+        "settings": W.fingerprint("detect", _s)["settings"]}
+_c["project"]["runs"][1]["inputs"] = _old
+_place("AF488", _T0 + 10)
+chk("a run recorded before each marker was fingerprinted is still current",
+    W.state(_DET, study(_c)), "done")
+_place("AF488", _T0 + 30, "moved\n")
+chk("...until the second marker is placed again after it",
+    "AF488" in (W.outdated(_DET, study(_c)) or ""), True)
+# Readiness: 05a with a marker of the export still to place is out of date
+# itself, so detection waits for it rather than measuring half the export.
+_c["project"]["runs"] = []
+for _p in _outputs_of("detect", _s):
+    os.remove(_p)
+for _a in ("roi_geometry", "roi_boxes"):
+    os.remove(_s.names.path(_a, "AF568"))
+_geo_cli = _GEO.cli_only
+_GEO.cli_only = "test: 05a cannot run here"
+chk("only the second marker placed: detection waits for the first's regions",
+    ("detect" in W.run_plan("measure", study(_c))[0],
+     W.run_plan("measure", study(_c))[1].get("detect")), (False, "roi_geometry"))
+_GEO.cli_only = _geo_cli
+chk("...and with 05a runnable, places them first",
+    W.run_plan("measure", study(_c))[0][:2], ["roi_geometry", "detect"])
+S.BY_ID["detect"].cli_only = _det_cli
+for _p in _stale_files:
+    if os.path.exists(_p):
+        os.remove(_p)
+
 print("--- the settings a stage reads are the ones ls_config says it reads ---")
 _spec = {k.path: k for k in LC.SPEC}
 for st in S.STAGES:

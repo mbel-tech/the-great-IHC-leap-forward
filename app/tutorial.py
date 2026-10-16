@@ -7,6 +7,7 @@ to each step's screen with goto() and asks for the pointer bubble with the
 the tutorial study after every change, so leaving and coming back resumes.
 """
 
+import json
 import os
 
 from PySide6.QtCore import QObject, Qt, Signal
@@ -15,6 +16,7 @@ from PySide6.QtWidgets import (QAbstractButton, QDockWidget, QHBoxLayout, QLabel
                                QWidget)
 
 import tutorial_bubble as TB
+import tutorial_check as TC
 import tutorial_pack as TP
 import tutorial_steps as TS
 
@@ -153,19 +155,22 @@ class TutorialController(QObject):
             self.point.connect(self._point)
         self.w.stage_finished.connect(self._stage_finished)
         self.w.study_opened.connect(self._study_opened)
+        self.w.curator.exported.connect(self._exported)
         self.panel.show()
         self._enter()
 
     def stop(self):
         """Disconnect from the window and hide the panel; progress stays saved."""
         for sig, slot in ((self.w.stage_finished, self._stage_finished),
-                          (self.w.study_opened, self._study_opened)):
+                          (self.w.study_opened, self._study_opened),
+                          (self.w.curator.exported, self._exported)):
             try:
                 sig.disconnect(slot)
             except (RuntimeError, TypeError):
                 pass
         self._unhook_click()
         self.point.emit("", "")
+        self._clear_check()
         if self.panel is not None:
             self.panel.hide()
 
@@ -174,6 +179,7 @@ class TutorialController(QObject):
     def _enter(self):
         self.problem = ""
         self._unhook_click()
+        self._clear_check()
         step = self.current
         if step.screen in self.w.pages:
             self.w.goto(step.screen)
@@ -280,12 +286,108 @@ class TutorialController(QObject):
             self._enter()
 
     def _point(self, target, text):
+        inside = target.startswith("curator:") and not self.paused
+        if inside:
+            self.w.curator.point(target[len("curator:"):], text)
+        else:
+            self.w.curator.clear_point()
         if self.bubble is None:
             return
-        if target and not target.startswith("curator:") and not self.paused:
+        if target and not inside and not self.paused:
             self.bubble.show_for(target, text, self.w, self.panel)
         else:
             self.bubble.hide_pointer()
+
+    # ---- the practice curation --------------------------------------------------------
+
+    def _exported(self, path):
+        """The curator's export landed: on the practice step, compare with the answer key."""
+        if self.paused or self._kind()[0] != "curation-checked":
+            return
+        if not os.path.basename(path).startswith("roi_regions"):
+            return
+        try:
+            learner = json.loads(self.w.curator.store.read(TP.ANSWER_KEY) or "{}")
+        except ValueError:
+            learner = {}
+        key = self.pack.answer_curation()
+        self.results = TC.compare(learner, key, self.pack.practice_sections)
+        # Done also takes the window on to Measure; the comparison is shown on the curator.
+        self.w.goto("curate")
+        off = [r for r in self.results if r.kind != "good"]
+        first = off[0].section if off else (self.pack.practice_sections or [""])[0]
+        polys = ((key.get(first) or {}).get("polys")) or []
+        if first:
+            self.w.curator.show_key(first, polys)
+        self._show_check(off, first)
+
+    def _show_check(self, off, section):
+        self._clear_box()
+        p = self.panel
+        good = sum(1 for r in self.results if r.kind == "good")
+        lines = [f"<p><b>{good} of {len(self.results)} regions match the expert's.</b>"]
+        if off:
+            lines.append(f" The expert's outlines are drawn dashed on section "
+                         f"{section}.</p><ul>")
+            lines += [f"<li>{TC.words(r)}</li>" for r in off[:12]]
+            lines.append("</ul>")
+        else:
+            lines.append(" Well done.</p>")
+        box = QLabel("".join(lines))
+        box.setObjectName("tutCheck")
+        box.setWordWrap(True)
+        box.setTextFormat(Qt.RichText)
+        row = QHBoxLayout()
+        retry = QPushButton("Try again")
+        retry.setObjectName("tutRetry")
+        retry.setToolTip("Clear your outlines on the practice sections and draw them again")
+        retry.clicked.connect(self.retry_practice)
+        carry = QPushButton("Carry on")
+        carry.setObjectName("tutCarryOn")
+        carry.setToolTip("Keep your outlines and go on to Measure")
+        carry.clicked.connect(self.carry_on)
+        row.addWidget(retry)
+        row.addWidget(carry)
+        holder = QWidget()
+        hl = QVBoxLayout(holder)
+        hl.setContentsMargins(0, 0, 0, 0)
+        hl.addWidget(box)
+        hl.addLayout(row)
+        p.extra.addWidget(holder)
+        self._check_box = holder
+
+    def _clear_box(self):
+        box = getattr(self, "_check_box", None)
+        if box is not None:
+            box.setParent(None)
+            box.deleteLater()
+            self._check_box = None
+
+    def _clear_check(self):
+        self._clear_box()
+        try:
+            self.w.curator.clear_key()
+        except Exception:                                   # noqa: BLE001
+            pass
+
+    def retry_practice(self):
+        """Take the learner's outlines off the practice sections only, and reload the page."""
+        store = self.w.curator.store
+        try:
+            state = json.loads(store.read(TP.ANSWER_KEY) or "{}")
+        except ValueError:
+            state = {}
+        for sec in self.pack.practice_sections:
+            if isinstance(state.get(sec), dict):
+                state[sec].pop("polys", None)
+        store.write(TP.ANSWER_KEY, json.dumps(state))
+        self._clear_check()
+        self.w.curator.curation_replaced([TP.ANSWER_KEY])
+        self.w.goto("curate")
+
+    def carry_on(self):
+        self._clear_check()
+        self.mark_done(self.current.sid)
 
     def _hook_click(self, target):
         b = self.w.findChild(QAbstractButton, target) if target else None

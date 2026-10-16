@@ -204,7 +204,9 @@ def use_ready(pack, out_root, stage_ids):
                 rel = os.path.relpath(full, base)
                 dst = os.path.join(out_root, rel)
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
-                shutil.copyfile(full, dst)
+                # Whole or not at all: a stage counts as done once its file is there.
+                shutil.copyfile(full, dst + ".part")
+                os.replace(dst + ".part", dst)
                 copied.append(rel)
     return copied
 

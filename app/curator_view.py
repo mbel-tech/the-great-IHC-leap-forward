@@ -50,6 +50,13 @@ import theme as T
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
+
+@functools.lru_cache(maxsize=1)
+def _tutorial_js():
+    """The tutorial's hooks for the curator page (tutorial_curator.js beside this file)."""
+    with open(os.path.join(HERE, "tutorial_curator.js"), encoding="utf-8") as fh:
+        return fh.read()
+
 # A curator export is named `<what>_DD.MM.YYYY_HH.MM.<ext>`. Matched strictly -
 # a loose pattern would pull the date out of an ordinary filename and file it
 # somewhere the operator never asked for.
@@ -185,6 +192,34 @@ class CuratorView(QWidget):
         prof = self.view.page().profile()
         prof.downloadRequested.connect(self._on_download)
         self._install_state_bridge()
+        # The tutorial's pointer and answer-key outlines, put back after every load.
+        self._tut_point = self._tut_key = ""
+        self.view.loadFinished.connect(self._run_tutorial)
+
+    # ---- the tutorial --------------------------------------------------------
+
+    def point(self, selector, text):
+        self._tut_point = f"tutorialPoint({json.dumps(selector)}, {json.dumps(text)});"
+        self._run_tutorial()
+
+    def clear_point(self):
+        if self._tut_point:
+            self._tut_point = ""
+            self._run_tutorial("tutorialClear();")
+
+    def show_key(self, uid, polys):
+        self._tut_key = f"tutorialShowKey({json.dumps(uid)}, {json.dumps(polys)});"
+        self._run_tutorial()
+
+    def clear_key(self):
+        if self._tut_key:
+            self._tut_key = ""
+            self._run_tutorial("tutorialClearKey();")
+
+    def _run_tutorial(self, extra=""):
+        calls = (extra if isinstance(extra, str) else "") + self._tut_point + self._tut_key
+        if calls:
+            self.view.page().runJavaScript(_tutorial_js() + "\n" + calls)
 
     # ---- own window -------------------------------------------------------
 

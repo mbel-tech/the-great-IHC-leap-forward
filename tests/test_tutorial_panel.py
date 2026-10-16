@@ -158,6 +158,47 @@ chk("...and still says something", "Press it" in bub.label())
 ctl_on("finish")
 chk("a step with no target clears it", bub.isVisible(), False)
 
+print("--- practice in the ROI curator ---")
+import json                                                     # noqa: E402
+ctl_on("curator_tour")
+chk("a curator target is not drawn by the Qt pointer", bub.isVisible(), False)
+chk("...it is handed to the page", "tutorialPoint" in w.curator._tut_point)
+ctl_on("practice")
+learner = json.loads(json.dumps(TF.ANSWER))
+learner[TF.PRACTICE[0]]["polys"][0]["v"] = [x + 70 if i % 2 == 0 else x
+                                            for i, x in enumerate(learner[TF.PRACTICE[0]]
+                                                                  ["polys"][0]["v"])]
+learner["LS22_s02a_sc00"] = {"plate": 5, "polys": TF.ANSWER[TF.PRACTICE[1]]["polys"]}
+w.curator.store.write("ls_roi_curator_v1", json.dumps(learner))
+w.curator.exported.emit(os.path.join(OUT, "exports", "roi_landmarks_x.csv"))
+chk("only the regions file starts the check", w.findChild(QWidget, "tutCheck"), None)
+w.curator.exported.emit(os.path.join(OUT, "exports", "roi_regions_x.csv"))
+app.processEvents()
+box = w.findChild(QWidget, "tutCheck")
+chk("the comparison is shown", box is not None)
+chk("...naming the region that is off", box is not None and "Dm" in box.text()
+    and "overlaps" in box.text())
+chk("...on the curator, not Measure", w.stack.currentWidget() is w.pages["curate"])
+chk("...with the expert's outlines drawn", "tutorialShowKey" in w.curator._tut_key)
+chk("Try again and Carry on are offered",
+    (btn("tutRetry") is not None, btn("tutCarryOn") is not None), (True, True))
+btn("tutRetry").click()
+app.processEvents()
+after = json.loads(w.curator.store.read("ls_roi_curator_v1"))
+chk("try again clears the practice sections' outlines",
+    [bool(after[u].get("polys")) for u in TF.PRACTICE], [False, False])
+chk("...and keeps every other section's", bool(after["LS22_s02a_sc00"].get("polys")))
+chk("...and keeps the plate matched", after[TF.PRACTICE[0]].get("plate"), 3)
+chk("...the step is not done yet", c.current.sid, "practice")
+w.curator.store.write("ls_roi_curator_v1", json.dumps(TF.ANSWER))
+w.curator.exported.emit(os.path.join(OUT, "exports", "roi_regions_y.csv"))
+app.processEvents()
+chk("matching outlines are all good", "3 of 3" in w.findChild(QWidget, "tutCheck").text())
+btn("tutCarryOn").click()
+app.processEvents()
+chk("carry on ticks the practice and moves on", c.current.sid, "place_rois")
+chk("...and stops drawing the key", w.curator._tut_key, "")
+
 print("--- the end ---")
 ended = []
 c.finished.connect(lambda: ended.append(1))

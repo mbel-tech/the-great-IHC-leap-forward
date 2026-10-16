@@ -4,12 +4,15 @@ Measure puts your regions back onto the original slides, finds every nucleus ins
 
 **Goes in:** the regions you exported from the ROI curator. **Comes out:** `results/roi_nuclei.csv` (one row per nucleus) and the per-region numbers built from it.
 
-![The Measure screen](images/07-measure.png)
+> **Detection part way.** Detection keeps every section it has finished, so a run you stopped part way is not done. Its row then says how far it has got, for example *Detection 9 of 15 sections, resume*, and so does the Next up card. **Run all remaining** carries on from there; finished sections are not measured again.
+
+![The Measure screen: the regions placed and the signal checked, detection 9 of 15 sections and ready to resume, each with how long its last run took](images/07-measure.png)
 
 | Stage | What it does | Makes |
 | --- | --- | --- |
 | 05a Verify the inverse transform | Checks that regions map back onto the slides accurately, before anything is measured | A pass or fail in the log |
 | 05a Place the regions on the slides | Maps every region from the 256-pixel curation picture back onto the slide's own 0.65 µm pixels | Region geometry for each marker |
+| 05b Check signal quality and tune detection | Measures how bright, clean and even the signal is on a sample of regions, gives a verdict (good, marginal or poor), and picks the nucleus-detection setting that suits it. One setting per marker for the whole study. **Open report** on its row shows the reasons. | `qc/detection_tuning.md` and `.csv` |
 | 05c Detect and measure nuclei | Reads each region at full resolution, finds nuclei with StarDist, measures the marker in each, and flags nuclei on clipped pixels | `results/roi_nuclei.csv` |
 | 06a Per-region dataset | Turns nuclei into per-region numbers: how many cells, how many positive, per mm² | `results/roi_measurements.csv`, `results/detector_specificity.csv` |
 
@@ -17,6 +20,7 @@ Measure puts your regions back onto the original slides, finds every nucleus ins
 
 - **Nuclei are found on DAPI, not on the marker** (PCNA is the exception, below). The marker is measured inside each nucleus afterwards, and "positive" is decided later still, so the positivity rule can change without re-reading any scans.
 - **StarDist** separates touching nuclei. It is used as published, without tuning.
+- **A poor signal stops the run first.** If the signal check calls a marker's signal *poor*, **Run all remaining** stops before detection. Read the report; to measure anyway, press **Run** on *Detect and measure nuclei*.
 - **It takes hours.** Stop with **Stop after this stage** or close the app, and run again later. Finished sections are not redone.
 - **Measurement order.** *balanced* (default) alternates treatment and control, so a part-finished run is already a fair comparison; it reads the group key only to choose the order. *uid* keeps the run fully blind. The finished file is identical either way.
 - **Check pictures** save one picture per region with nuclei outlined: green counted, red found but outside the region. Turn them on for a first run on a new study.

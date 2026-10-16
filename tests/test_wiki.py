@@ -1,4 +1,5 @@
-"""Every link between wiki pages, and every picture, must resolve.
+"""Every link between wiki pages, and every picture, must resolve, and no page may
+describe a screen with wording the user guide has retired.
 
 The wiki is published from docs/wiki/ by .github/workflows/wiki.yml. A page
 links to another by its name without .md, as GitHub wikis do: [Measure](Measure)
@@ -13,6 +14,16 @@ WIKI = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "docs", "w
 # when it is published, so a page's images/<name> resolves there (or in docs/wiki/images/).
 SHARED = os.path.join(WIKI, "..", "img", "user-guide")
 LINK = re.compile(r"(!?)\[[^\]]*\]\(([^)\s]+)\)")
+GUIDE = os.path.join(WIKI, "..", "user-guide.md")
+# Wording for controls and states the screens no longer have, with what the user
+# guide (the complete reference) says now. The wiki shares the guide's screenshots,
+# so a page still using the old words contradicts its own pictures. Each new wording
+# must still be in the guide, so this list cannot drift from it.
+RETIRED = {
+    "**Build…**": "**Set up from an example…**",   # Slide file names: the pattern dialog
+    "**Mark as…**": "**Set up from an example…**",
+    "The curator is exported.": "Every section is curated or excluded",  # Curate's done rule
+}
 
 
 def _slug(heading):
@@ -46,6 +57,17 @@ def problems():
                 found.append(f"{page}: link to missing page {name}")
             elif anchor and anchor not in _anchors(name):
                 found.append(f"{page}: no heading #{anchor} on {name}")
+    with open(GUIDE, encoding="utf-8") as f:
+        guide = f.read()
+    for old, new in RETIRED.items():
+        if new not in guide:
+            found.append(f"user guide no longer says {new!r}: update RETIRED")
+    for page in sorted(pages - {"README"}):
+        with open(os.path.join(WIKI, page + ".md"), encoding="utf-8") as f:
+            text = f.read()
+        for old, new in RETIRED.items():
+            if old in text:
+                found.append(f"{page}: says {old!r}; the screen now says {new!r}")
     return found
 
 

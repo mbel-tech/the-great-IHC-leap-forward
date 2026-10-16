@@ -13,7 +13,7 @@
 
 | What you see | Likely cause | What to do |
 | --- | --- | --- |
-| Red rows on the Slides tab | File names do not fit the naming pattern | Fix the pattern with **Build…** on *Slide file names*, or rename the files |
+| Red rows on the Slides tab | File names do not fit the naming pattern | Fix the pattern with **Set up from an example…** on *Slide file names*, or rename the files |
 | Fewer sections than expected | Unmatched file names, or an incomplete copy | Check the Slides tab and the 00b result |
 | Run all remaining stops at a stage | That stage failed, or it waits for a curator | Read the screen's note and **Show log**. A waiting stage names the curator to export. |
 | "Finish Set up" on the Next up card | A required setting is empty | The card names each Set up card and the settings it lacks |
@@ -24,7 +24,7 @@
 | A section is left out of positivity | It has no background disc | Add one in the ROI curator and export |
 | *Place the ROIs* and *Detect and measure nuclei* say Out of date | They ran before the region fixes of 14 October 2026, or the export changed since | Press Run all remaining on Measure, then rebuild Results. See [Measure](Measure#out-of-date). |
 | The overview stage fails on Python 3.14 | The CZI reader has no 3.14 version | Use Python 3.13 (`run_app.bat`) |
-| Scene pictures: "N scenes not drawn" | Not enough free memory at a fine resolution | Use 1.3 or 2.6 µm per pixel on Set up's Pictures card |
+| Scene pictures: "N scenes not drawn" | Not enough free memory at a fine resolution | Use 1.3 or 2.6 µm per pixel on Set up's Pictures card (under Show advanced settings) |
 | A curator pane is blank | The install is incomplete | Run the self-test (see [Install and first run](Install-and-First-Run)); reinstall if it fails |
 | The app will not start | A missing library or a broken environment | Read `lsapp-crash.log`. To keep curating meanwhile, run `serve_curators.bat` and use a browser. |
 | Unblinding says the workbook header does not match | The sampling workbook's columns differ | Fix the column names to the ones it lists |

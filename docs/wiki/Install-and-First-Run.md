@@ -35,9 +35,9 @@ The window has a step list down the left with six screens, in the order you work
 
 - **Your part.** Every screen opens with a blue line that says what you do there. Usually it is one thing.
 - **(i)** on every screen, stage and setting explains it in plain words: what a stage needs first, what it leaves behind, when it last ran, and the technical detail underneath.
-- **Stage rows** have a status dot (green done, grey to do, purple waiting for you, blue running, red failed, amber waiting), a **Run** button (which says Redo once done, and Build page on a curator), **Open**, and **Options**.
+- **Stage rows** have a status dot (green done, grey to do, purple waiting for you, blue running, red failed, amber waiting or out of date), the stage's name in plain words, a **Run** button (which says Redo once done, and Build page on a curator), **Open**, and **Options**. The stage's number and the pipeline's own name are not on the row: hold the pointer over the name to see them (for example `00d  CZI self-test`), or open *All stages*, which shows both. A stage whose last complete run took a minute or more says how long, for example *Last run took 3 h 12 min*.
 - **Run all remaining** on Prepare, Measure and Results runs every unfinished stage on that screen, in order. It stops at the first failure, never runs past a curator you have not exported, and never unblinds.
-- **The status bar** at the bottom shows what is running. **Show log** opens the full log; **Stop after this stage** finishes cleanly and stops.
+- **The status bar** at the bottom shows what is running, with a progress bar. Once a stage has been counting for a little while it adds the time left, for example *12 of 454 sections (3%), about 2 h 10 min left*. **Show log** opens the full log; **Stop after this stage** finishes cleanly and stops.
 
 ![The step list: six steps with their descriptions and progress, and the Advanced group at the foot](images/10-step-list.png)
 

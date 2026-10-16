@@ -106,6 +106,7 @@ Nucleus detection needs StarDist. The installer and `work/appenv` both have it. 
 | Tools | Switch study | Move to another study's project. |
 | Tools | Migrate browser curation | Bring in curation done earlier in a web browser (section 6). |
 | Help | User guide | This guide. Running from the code it opens here in the app; an installed copy opens it on GitHub. |
+| Help | Tutorial… | Start or continue the tutorial on the demo study (*The tutorial*, below). |
 | Help | Wiki | The project wiki on GitHub: short pages, one question each. |
 | Help | Show the activity log | Opens the full log at the foot of the window (the same as **Show log**). |
 | Help | Open the log folder | The folder holding `lsapp-crash.log`, written if the app ever stops on an error (section 10). |
@@ -119,6 +120,17 @@ A **project** is one study in one file: its settings, every decision you made in
 To hand a study to someone else, use **File > Export a copy**. The output folder holds the images and results and is not part of the project file.
 
 ![The Project screen: the study strip, the Next up card with Go, progress for each step and recent activity](img/user-guide/01-project.png)
+
+### The tutorial
+
+The tutorial walks you through a whole study on a small demo study: a few sections cut from a real slide, at full resolution. It is for someone new to the app and for showing the app to others.
+
+- **Starting it.** Press **Start the tutorial** on the Project screen, or **Help > Tutorial…**. The first time the app opens it also offers the tutorial once. Your own study is closed while the tutorial runs and reopened when you leave; the tutorial study lives in its own folder (`Documents/The Great IHC Leap Forward/Tutorial study`) and never touches your studies.
+- **The panel.** A panel on the right lists the 18 steps, says what to do in each, and an orange box points at the button to press. **Next** stays greyed out until the step is done; **Skip** moves on without doing it; **Back** goes to the step before.
+- **Slow stages.** Drawing scene pictures, composites and nucleus detection take a while even on the demo. On those steps **Use ready-made results** copies in results made earlier from the same slide, so you can carry on at once, or you can run the stage and wait.
+- **Practice in the ROI curator.** You outline the regions on two practice sections yourself and press **Done**. The tutorial compares your outlines with an expert's, says for each region how much overlaps, and draws the expert's outlines dashed on the section. **Try again** clears your outlines on those two sections; **Carry on** moves to the next step.
+- **Leaving and coming back.** **Leave tutorial** reopens the study you had open; while a stage is running it says so and stays put. The Project screen button then says **Continue the tutorial** and picks up at the same step. **Start over** makes a fresh tutorial study; the old one is kept beside it as `Tutorial study.old`.
+- **The demo study.** The app looks for it in a `demo` folder beside the app. If there is none, it asks you to choose the demo pack (a folder or a `.zip`) and remembers your choice.
 
 ## 4. Set up: telling the app about your study
 

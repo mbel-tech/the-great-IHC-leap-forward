@@ -880,7 +880,7 @@ if MW:
     import updates as UP
     help_menu = next(a.menu() for a in w.menuBar().actions() if a.text() == "&Help")
     chk("the Help menu's entries", [a.text() for a in help_menu.actions() if a.text()],
-        ["User guide", "Wiki", "Show the activity log", "Open the log folder",
+        ["Tutorial…", "User guide", "Wiki", "Show the activity log", "Open the log folder",
          "Run the CZI self-test", "Check for updates…", "Undo last update", "About…"])
     by_label = {a.text(): a for a in help_menu.actions()}
     opened, revealed, queued = [], [], []

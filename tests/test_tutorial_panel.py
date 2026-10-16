@@ -164,6 +164,8 @@ ctl_on("curator_tour")
 chk("a curator target is not drawn by the Qt pointer", bub.isVisible(), False)
 chk("...it is handed to the page", "tutorialPoint" in w.curator._tut_point)
 ctl_on("practice")
+chk("the practice step opens the ROI curator's tab", w.curate.current, "roi_curator")
+chk("...so the Done button can be pointed at", bub.attached_to, "target")
 learner = json.loads(json.dumps(TF.ANSWER))
 learner[TF.PRACTICE[0]]["polys"][0]["v"] = [x + 70 if i % 2 == 0 else x
                                             for i, x in enumerate(learner[TF.PRACTICE[0]]

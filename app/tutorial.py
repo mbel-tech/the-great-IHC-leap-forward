@@ -183,6 +183,10 @@ class TutorialController(QObject):
         step = self.current
         if step.screen in self.w.pages:
             self.w.goto(step.screen)
+        if step.screen == "curate" and self.w.curate.current != "roi_curator":
+            # Curate opens on whichever curator tab comes first; the tutorial is
+            # about the ROI curator.
+            self.w.curate.show_curator("roi_curator")
         kind, arg = self._kind()
         if kind in ("stage", "file") and self._already(kind, arg):
             self.progress.done.add(step.sid)
@@ -314,6 +318,8 @@ class TutorialController(QObject):
         self.results = TC.compare(learner, key, self.pack.practice_sections)
         # Done also takes the window on to Measure; the comparison is shown on the curator.
         self.w.goto("curate")
+        if self.w.curate.current != "roi_curator":
+            self.w.curate.show_curator("roi_curator")
         off = [r for r in self.results if r.kind != "good"]
         first = off[0].section if off else (self.pack.practice_sections or [""])[0]
         polys = ((key.get(first) or {}).get("polys")) or []

@@ -64,6 +64,8 @@ That is how a second study starts from the first one's settings.
 The step-by-step guide for a newcomer is [docs/user-guide.md](docs/user-guide.md), also under
 **Help > User guide** in the app; **Help > Wiki** opens short question-led pages
 ([docs/wiki/](docs/wiki/)).
+**Start the tutorial** on the Project screen (or **Help > Tutorial…**) walks through a whole study
+on a small demo study, with practice in the ROI curator checked against an expert's outlines.
 
 ## The LS dataset
 

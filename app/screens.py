@@ -226,6 +226,7 @@ class StageListScreen(QWidget):
         bar = QHBoxLayout()
         bar.setSpacing(10)
         self.run_all = QPushButton("Run all remaining")
+        self.run_all.setObjectName(f"runAll_{screen.sid}")
         self.run_all.setMinimumHeight(34)
         T.mark(self.run_all, kind="primary")
         self.run_all.clicked.connect(self._run_all)
@@ -693,6 +694,13 @@ class HomeScreen(QWidget):
         lay.addWidget(self.recent)
 
         buttons = QHBoxLayout()
+        self.tutorial_btn = QPushButton("Start the tutorial")
+        self.tutorial_btn.setObjectName("tutorialStart")
+        self.tutorial_btn.setToolTip("Learn the app on a small demo study, step by step. "
+                                     "Your own studies are not touched.")
+        T.mark(self.tutorial_btn, kind="primary")
+        self.tutorial_btn.clicked.connect(lambda: self.action.emit("tutorial"))
+        buttons.addWidget(self.tutorial_btn)
         for key, label in (("switch", "Switch study…"), ("open", "Open project…"),
                            ("new", "New project…"), ("copy", "Export a copy…"),
                            ("history", "Project history…")):
@@ -825,6 +833,7 @@ class SetupScreen(QWidget):
             "is still empty is always shown.</p>"))
         lay.addLayout(adv)
         self.tabs = QTabWidget()
+        self.tabs.setObjectName("setupTabs")
         lay.addWidget(self.tabs, 1)
         self._slides_tab = QWidget()
         sl = QVBoxLayout(self._slides_tab)
@@ -845,6 +854,7 @@ class SetupScreen(QWidget):
         sl.addLayout(top)
         read = QHBoxLayout()
         self.detect_btn = QPushButton("Read settings from the slides")
+        self.detect_btn.setObjectName("readSettings")
         self.detect_btn.setToolTip("Read pixel size, file names and channels from the slide "
                                    "files' headers and fill in the settings not yet set")
         self.detect_btn.clicked.connect(self.detect_from_slides)

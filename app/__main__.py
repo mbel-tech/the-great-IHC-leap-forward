@@ -142,6 +142,8 @@ def main():
         from PySide6.QtCore import QTimer
         QTimer.singleShot(0, w.updater.report_last_result)
         QTimer.singleShot(1500, w.updater.check_in_background)
+        # The very first start offers the tutorial, once.
+        QTimer.singleShot(800, w._offer_tutorial_once)
 
         return app.exec()
     except BaseException as e:                              # noqa: BLE001

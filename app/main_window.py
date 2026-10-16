@@ -152,6 +152,10 @@ class ActivityDrawer(QFrame):
 
 
 class MainWindow(QMainWindow):
+    # For the tutorial: a stage ended (id, ok), and a different study was opened.
+    stage_finished = Signal(str, bool)
+    study_opened = Signal(str)
+
     def __init__(self, repo_root, scripts_dir=None, config_path=None):
         super().__init__()
         self.repo_root = repo_root
@@ -540,6 +544,7 @@ class MainWindow(QMainWindow):
         if line:
             self._log(f"curation: {line}")
         self._log(f"project is now {self.config_path}")
+        self.study_opened.emit(self.config_path)
 
     def _project_saved(self):
         """After a save the stages see the new settings; re-root only if out_root moved."""
@@ -937,6 +942,7 @@ class MainWindow(QMainWindow):
                                           inputs=getattr(self, "_run_inputs", None))
         if problem:
             self._log(f"could not record the run in the project: {problem}")
+        self.stage_finished.emit(st.sid, bool(res.ok))
         if _curation_outputs(st):
             if res.ok:
                 # The stage wrote the plain copy only; the project takes it over here (it

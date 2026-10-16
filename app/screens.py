@@ -694,6 +694,13 @@ class HomeScreen(QWidget):
         lay.addWidget(self.recent)
 
         buttons = QHBoxLayout()
+        self.tutorial_btn = QPushButton("Start the tutorial")
+        self.tutorial_btn.setObjectName("tutorialStart")
+        self.tutorial_btn.setToolTip("Learn the app on a small demo study, step by step. "
+                                     "Your own studies are not touched.")
+        T.mark(self.tutorial_btn, kind="primary")
+        self.tutorial_btn.clicked.connect(lambda: self.action.emit("tutorial"))
+        buttons.addWidget(self.tutorial_btn)
         for key, label in (("switch", "Switch study…"), ("open", "Open project…"),
                            ("new", "New project…"), ("copy", "Export a copy…"),
                            ("history", "Project history…")):

@@ -191,6 +191,7 @@ class MainWindow(QMainWindow):
         # Set when the window was asked to close mid-run: it closes once the
         # running stage has finished, never while its thread is still writing.
         self._close_when_idle = False
+        self.tutorial = None            # the TutorialController while the tutorial runs
 
         self.resize(1400, 900)
 
@@ -383,6 +384,8 @@ class MainWindow(QMainWindow):
         menu = self.updater.build_menu(self.menuBar())
         first = self.updater.check_action
         for label, tip, slot in (
+                ("Tutorial…", "Learn the app on a small demo study, step by step",
+                 self.start_tutorial),
                 ("User guide", "The complete guide to every screen and stage", self._open_guide),
                 ("Wiki", "Short, question-led pages on GitHub", self._open_wiki),
                 (None, None, None),
@@ -489,10 +492,116 @@ class MainWindow(QMainWindow):
         from project_history import ProjectHistory
         ProjectHistory(self.session, self).exec()
 
+    # ---- the tutorial -------------------------------------------------------
+
+    def _tutorial_started(self):
+        import tutorial_pack as TP
+        return bool(TP.Progress.load(os.path.join(TP.tutorial_home(), "output")).current)
+
+    def _choose_pack(self):
+        import tutorial_pack as TP
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Choose the demo study for the tutorial", os.path.expanduser("~"),
+            "Demo study (*.zip pack.json)")
+        if not path:
+            return None
+        if os.path.basename(path) == "pack.json":
+            path = os.path.dirname(path)
+        TP.save_settings({"pack": path})
+        return path
+
+    def start_tutorial(self, fresh=False):
+        """Open the tutorial study (made from the demo pack if need be) and show the panel."""
+        import tutorial as TU
+        import tutorial_pack as TP
+        if not self._idle_for("start the tutorial"):
+            return False
+        path = TP.find_pack(self.repo_root) or self._choose_pack()
+        if not path:
+            return False
+        try:
+            pack = TP.open_pack(path)
+        except TP.PackError as exc:
+            QMessageBox.warning(self, "Demo study", str(exc))
+            return False
+        home = TP.tutorial_home()
+        study = os.path.join(home, "output", "study.json")
+        try:
+            if fresh or not os.path.isfile(study):
+                # A folder without its study file is a damaged copy: start it again.
+                study = TP.install(pack, home, fresh=True)
+        except (OSError, TP.PackError) as exc:
+            QMessageBox.warning(self, "Could not make the tutorial study", str(exc))
+            return False
+        before = self.config_path
+        here = os.path.normcase(os.path.abspath(study))
+        if os.path.normcase(os.path.abspath(before)) != here:
+            if not self.session.open_project(self, study):
+                return False
+        if self.tutorial is not None:
+            self._drop_tutorial()
+        self.tutorial = TU.TutorialController(self, pack, study)
+        if os.path.normcase(os.path.abspath(before)) != here:
+            self.tutorial.progress.previous_study = before
+        self.tutorial.start()
+        self.tutorial.panel.leave.clicked.connect(self.leave_tutorial)
+        self.tutorial.panel.start_over.clicked.connect(self._start_tutorial_over)
+        self.refresh()
+        return True
+
+    def _start_tutorial_over(self):
+        if QMessageBox.question(self, "Start the tutorial over",
+                                "Throw away this tutorial study and begin again with a "
+                                "fresh copy? Your own studies are not touched.",
+                                QMessageBox.Yes | QMessageBox.No,
+                                QMessageBox.No) == QMessageBox.Yes:
+            previous = self.tutorial.progress.previous_study if self.tutorial else ""
+            if self.start_tutorial(fresh=True) and previous:
+                self.tutorial.progress.previous_study = previous
+                self.tutorial.progress.save()
+
+    def _drop_tutorial(self):
+        t, self.tutorial = self.tutorial, None
+        t.stop()
+        if t.panel is not None:
+            self.removeDockWidget(t.panel)
+            t.panel.deleteLater()
+        if t.bubble is not None:
+            t.bubble.deleteLater()
+        t.deleteLater()
+
+    def leave_tutorial(self):
+        """Hide the tutorial and reopen the study that was open before it. Its place is kept."""
+        if self.tutorial is None or not self._idle_for("leave the tutorial"):
+            return False
+        previous = self.tutorial.progress.previous_study
+        self.tutorial.progress.save()
+        self._drop_tutorial()
+        if previous and os.path.isfile(previous):
+            self.session.open_project(self, previous)
+        self.refresh()
+        return True
+
+    def _offer_tutorial_once(self):
+        """On the very first start, offer the tutorial once."""
+        import tutorial_pack as TP
+        if TP.settings().get("offered"):
+            return
+        TP.save_settings({"offered": True})
+        if QMessageBox.question(
+                self, "Take the tutorial?",
+                "New to The Great IHC Leap Forward? The tutorial walks you through a whole "
+                "study on a small demo slide, step by step. You can also start it any time "
+                "from the Project screen or the Help menu.",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes) == QMessageBox.Yes:
+            self.start_tutorial()
+
     def _home_action(self, key):
         if key in ("switch", "open", "new") and not self._idle_for("open another project"):
             return
-        if key == "switch":
+        if key == "tutorial":
+            self.start_tutorial()
+        elif key == "switch":
             self._studies()
         elif key == "open":
             self.session.open_project(self, repo_root=self.repo_root)
@@ -768,6 +877,8 @@ class MainWindow(QMainWindow):
         self.setup.update_marks(study)
         sd, st = self.setup.completion()
         self.home.refresh(study, project, sd, st, busy, self.setup.missing())
+        self.home.tutorial_btn.setText("Continue the tutorial" if self._tutorial_started()
+                                       else "Start the tutorial")
         for i, scr in enumerate(W.STEPS):
             if scr.sid == "home":
                 words, complete = "", False

@@ -180,8 +180,8 @@ print("--- defaults ---")
 with tempfile.TemporaryDirectory() as tmp:
     full = C.apply_defaults(minimal(tmp))
     chk("schema_version is filled in", full["schema_version"], C.SCHEMA_VERSION)
-    chk("atlas_plate_set.dir defaults to plates",
-        full["atlas_plate_set"]["dir"], "plates")
+    chk("atlas_plate_set.dir defaults to plates_final",
+        full["atlas_plate_set"]["dir"], "plates_final")
     chk("abercrombie defaults on",
         full["detection"]["abercrombie"]["enabled"], True)
     chk("case_insensitive defaults on",
@@ -218,7 +218,7 @@ with tempfile.TemporaryDirectory() as tmp:
     cfg = C.load()
     chk("load returns the file LS_CONFIG names",
         cfg["source_dir"], os.path.join(tmp, "slides"))
-    chk("load applies defaults", cfg["atlas_plate_set"]["dir"], "plates")
+    chk("load applies defaults", cfg["atlas_plate_set"]["dir"], "plates_final")
 
     chk("a second load is the cached object", C.load() is cfg, True)
 

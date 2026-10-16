@@ -65,7 +65,7 @@ import ls_atlas as AT  # noqa: E402
 chk("default source is salmon", AT.source({}), "salmon")
 chk("salmon keeps the configured plate set",
     AT.set_name({"atlas_plate_set": {"dir": "plates_final"}}), "plates_final")
-chk("salmon default plate set", AT.set_name({}), "plates")
+chk("salmon default plate set", AT.set_name({}), "plates_final")
 chk("wullimann ignores atlas_plate_set",
     AT.set_name({"atlas_source": "wullimann1996", "atlas_plate_set": {"dir": "plates_final"}}),
     "plates_wullimann")

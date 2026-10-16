@@ -9,8 +9,8 @@ A study that already has its own copy of a set keeps it; nothing here overwrites
 | Folder / file | What it is |
 |---|---|
 | `Salmon Atlas full.pdf` | The salmon atlas. Used only to extract the plates again (`04a`). An empty `atlas_pdf` setting points here. |
-| `plates/` | Salmon plates as extracted by `04a` (47 figures, with region seeds). |
-| `plates_final/` | Salmon plates as curated (64 plates). The set the ROI curator and registration use by default on the analysed study. |
+| `plates/` | Salmon atlas pictures as extracted by `04a`, one per PDF page (47, with region seeds). From page 15 on each picture holds two sections stacked, so this set is an input to the atlas chain, not something to curate against. |
+| `plates_final/` | Salmon plates cut one section per plate and curated (64 plates). The set a salmon study uses unless it says otherwise. |
 | `plates_wullimann/` | Wullimann 1996 zebrafish cross sections (42), arranged by `04w`, with their named region outlines (`polygons.csv`, 399 outlines, all reviewed). `04x` found the outlines and read their names; they were then checked by hand on the `04x --review` page, unnamed areas removed and same-name pieces that almost touch joined. |
 | `wullimann1996/` | The 42 cross sections as cut from the book's PDF by `04v` (embedded images at their own resolution), their legends (`legends.csv`, OCR) and the Fig. 5 diagram of the section levels. The input to `04w`. |
 

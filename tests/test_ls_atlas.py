@@ -50,10 +50,10 @@ def write_plates_csv(directory, rows, columns=("plate_id", "image_file",
 # --- which set ------------------------------------------------------------
 chk("the configured set is used",
     A.set_name({"atlas_plate_set": {"dir": "plates_final"}}), "plates_final")
-chk("a config that says nothing gets the extraction set",
-    A.set_name({}), A.EXTRACTED)
+chk("a config that says nothing gets the one-section-per-plate set",
+    A.set_name({}), A.DEFAULT_SET)
 chk("a malformed block is judged, not crashed on",
-    A.set_name({"atlas_plate_set": "plates_final"}), A.EXTRACTED)
+    A.set_name({"atlas_plate_set": "plates_final"}), A.DEFAULT_SET)
 chk("plate_dir joins out_root/atlas/<set>",
     A.plate_dir({"out_root": os.path.join("X:", "s"),
                  "atlas_plate_set": {"dir": "plates_final"}}),

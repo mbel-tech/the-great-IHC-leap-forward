@@ -171,6 +171,28 @@ each. A person looks at those pictures once and says which is right; the answer 
 configuration and every later step reads it from there. For this dataset the answer is scan order —
 the sections were scanned in the order they sit in the brain.
 
+The step also refuses a study it cannot vouch for, and when it does it writes no manifest at all,
+because a stale manifest from an earlier good run is safer than a fresh one that is wrong. Every
+later step measures at the configured pixel size, `pixel_size_um`, and never reads the scale from
+the file again. So a file whose header puts it more than half a per cent away from that — a slide
+scanned through another objective, or one with no scale recorded at all — is named, and the run
+stops. So is a section identifier produced by two different files, because every later output is
+keyed on it and the two would overwrite each other.
+
+For a paired study it then checks the declared markers against the channels the scans actually
+carry. A paired marker is named as its scan names the channel (AF568, not pERK), and the
+counterstain is never listed as a marker. A list that names what the markers stain matches no scan,
+and nothing would say so until the region worklist came out empty hours later. So the manifest is
+written first, so that the operator can see which channels the scans carry, and then the step stops
+and says what to change. The export (01) and the clipping backfill (01k) make the same check when
+they read the manifest.
+
+When the app sets up a new study it reads these same headers first: the pixel size, how the files
+are named, how many channels there are and which is the counterstain, and whether each scan carries
+every marker or only one. It fills those in under Set up's advanced settings, with the evidence
+beside them, and never overwrites a value the person has set. It samples the files when there are
+many, which is why this step is where every file is checked.
+
 > **In the code** — `scripts/00_manifest.py`
 >
 > The rule is stated in the module docstring, and enforced by there being no default:
@@ -184,6 +206,13 @@ the sections were scanned in the order they sit in the brain.
 > ```
 >
 > Reading it from the configuration rather than hard-coding it is what keeps the choice visible.
+>
+> The scale check allows half a per cent: far more than honest headers disagree by, and far less
+> than a different objective would be off by:
+>
+> ```python
+> PX_TOLERANCE = 0.005
+> ```
 
 ## 00b  Verify extraction {#stage-verify}
 
@@ -213,7 +242,7 @@ Gating on them would let a cosmetic quirk block a run for no reason.
 
 ## 01  Export section overviews {#stage-overviews}
 
-*`scripts/01_overviews.py` → `overviews/`, `qc/focus.csv`*
+*`scripts/01_overviews.py` → `overviews/`, `qc/focus.csv`, `qc/overview_failures.csv`*
 
 Each section is written out once as a manageable picture, at exactly 5.20 µm per pixel, together
 with per-section quality measurements: how much tissue there is, how sharply it is focused, and how
@@ -249,6 +278,14 @@ threshold chases that bright tail and returns a value above almost every pixel, 
 as empty. Taking the logarithm first, thresholding there, and mapping the answer back gives a mask
 of the actual section. The same log-space threshold is used for every tissue outline in the pipeline.
 
+A section that cannot be exported is named rather than quietly skipped. If a scan file is missing
+from the slides folder (a drive unplugged, a file still inside its archive) or fails while it is
+being read, the step prints the file and every section lost with it. It lists them one per row,
+with the reason, in `qc/overview_failures.csv`, and the step finishes as a failure. This matters
+because the later check for unaccounted sections starts from `qc/focus.csv`, and a section that was
+never exported is not in it. The list is rewritten on every run, so an old one cannot outlive the
+fix.
+
 > **In the code** — `scripts/01_overviews.py`
 >
 > The tissue threshold, in one line:
@@ -261,7 +298,7 @@ of the actual section. The same log-space threshold is used for every tissue out
 > real intensities. And the scale is asked for as a continuous zoom rather than a pyramid level:
 >
 > ```python
-> plane={"C": channel}, zoom=zoom
+> return CR.read_plane(czidoc, rect, channel, scene=scene, zoom=zoom)
 > ```
 
 ## 01d  Contact sheets and gallery {#stage-contactsheets}
@@ -275,7 +312,7 @@ control are marked rather than dropped, so a gap in a series is never silently i
 
 ## 01l  Pictures of every scene, for viewing {#stage-scene_renders}
 
-*`scripts/01l_scene_renders.py` → `scene_renders/<marker>/stain+DAPI/`, `scene_renders/<marker>/stain_only/`, `qc/scene_renders.csv`*
+*`scripts/01l_scene_renders.py` → `scene_renders/<marker>/stain+DAPI/`, `scene_renders/<marker>/stain_only/`, `qc/scene_renders.csv`, `qc/scene_render_failures.csv`*
 
 Every scene of every slide, drawn straight from the scan file, to be looked at in a file viewer.
 The overviews are too coarse to see nuclei and the curation pictures are already cut and rotated;
@@ -287,8 +324,10 @@ Only the section is drawn: everything outside it is black, as in the curator, so
 and the PAP pen ring drawn round each section on the slide do not appear. The outline is the one 04a
 draws round the section (made from 01's counterstain overview, the same one 05c uses to decide which
 nuclei are off the tissue); inside it nothing changes. A scene with no overview yet is drawn whole and
-redrawn once the overview exists, and `--keep-background` draws every scene whole on purpose. The
-table's `background` column says which.
+redrawn once the overview exists. An overview on which 04a could find no outline is drawn whole too, and
+`--keep-background` draws every scene whole on purpose, for looking at the glass itself. The table's
+`background` column says which, and a picture drawn before that column existed is redrawn on the next
+run.
 
 The folder, the resolution and the brightness are study settings. The pictures are 2.6 µm per pixel
 by default, and anything down to the scan's own 0.65 µm can be chosen. They are made by averaging
@@ -297,7 +336,13 @@ and two nuclei one output pixel apart stay two. The scan is read a band of rows 
 band is averaged down before the next is read, so memory stays at one band plus the finished picture
 however large the scene. The finished picture is still held whole, and at 0.65 µm that can be several
 gigabytes, so each scene is checked against the memory free at the time and one that does not fit is
-skipped with a message saying how much it needs, rather than stopping the run.
+skipped with a message saying how much it needs, rather than stopping the run. Several scan files are
+drawn at once (`--workers`), but another scene is started only while the computer's memory itself, not
+its page file, has room for it, so a machine short of memory simply draws one at a time. A scene that
+cannot be drawn, because it is too big for the memory or because its picture cannot be written (open
+in a viewer, say), is named on screen and the rest of the slide carries on. Every such scene is listed
+with its reason in `qc/scene_render_failures.csv`, and the step ends as failed, saying how many, so a
+run that missed pictures is never shown as done.
 
 Brightness is the overviews' frozen range by default, so the same brightness means the same signal in
 every picture. Because a nucleus is no longer averaged with its surroundings at this resolution, the
@@ -312,9 +357,18 @@ that channel is stretched per scene even in the default mode, the run says so, a
 Parts of a scene's rectangle that were never scanned are black. The table has one row per picture,
 so runs into different folders or at different resolutions each keep their own.
 
+There is a faster, approximate route. The scan file also holds smaller copies of each scan, made by the
+Zeiss software when the slide was scanned. With `scene_render.source` set to `zeiss_preview` (Set up →
+Pictures, *Scene pictures from*), the pictures are taken from the copy at the picture's resolution
+instead of being averaged from the scan's own pixels, which is much faster. The pictures are the same
+size, but Zeiss did the averaging and compressed that copy separately, so values differ slightly and
+clipped patches look diluted. Only these pictures change; nothing measured reads them. At 0.65 µm there
+is no copy and the scan itself is read. The default, `scan`, is exact. The table's `source` column says
+which route drew each picture, and changing the setting redraws them on the next run.
+
 ## 02  Pair the two marker passes {#stage-pair}
 
-*`scripts/02_pair_passes.py` → `pairs.csv`*
+*`scripts/02_pair_passes.py` → `pairs.csv`, `qc/pairing_offsets.csv`*
 
 Both passes imaged the same physical slides, but the scan regions were drawn fresh for each pass —
 one slide has ten scan regions in one pass and twelve in the other — so scene numbers do not
@@ -329,7 +383,13 @@ unambiguous.
 
 Once the offset is known, the pairing is solved as a whole rather than section by section, so one
 badly matched section cannot cascade into its neighbours. Sections that find no partner are listed
-explicitly rather than dropped. This step produces the section identity every later step keys on.
+explicitly rather than dropped. A section with no recorded position on the glass cannot be matched
+by position at all, so it is taken out before the matching rather than allowed to stop it. It keeps
+its own row in `pairs.csv` with the status `no_centre_<marker>`, its slide's row in
+`qc/pairing_offsets.csv` notes it, and the run names it on screen, because the fix belongs in the
+manifest. If no section of one pass on a slide has a position, the other pass's sections are
+reported as unmatched rather than as the only pass scanned. This step produces the section identity
+every later step keys on.
 
 > **In the code** — `scripts/02_pair_passes.py`
 >
@@ -357,8 +417,11 @@ ventricles, so PCNA scores low on both. Activity-dependent signal is spread thro
 so pERK scores near the random expectation.
 
 The step reports its call and writes the evidence, but **does not commit it**. The identification
-was confirmed by the operator and recorded in the configuration — a machine-checkable argument that
-a person then signs off, rather than an assumption nobody revisits.
+is recorded only when the operator confirms it: either by re-running this step with `--accept` once
+the evidence figure agrees, or by entering what each channel stains under *What it stains* in the
+app's channel editor. Either way it goes into the study's `marker_identity` block, beside the
+channel name the scans use. That makes it a machine-checkable argument that a person then signs off,
+rather than an assumption nobody revisits.
 
 \newpage
 
@@ -610,7 +673,18 @@ boxes are merged or split to match it.
 *`scripts/04a4_plate_rebuild.py --dpi 300` → `atlas/plates_final/plates.csv`, `seeds.csv`*
 
 Re-renders each box straight from the PDF at full resolution and carries the region markers across.
-This is the plate set the ROI curator actually shows.
+This is the plate set the ROI curator and the registration use: a salmon study reads `plates_final`
+unless `atlas_plate_set.dir` in its configuration names another. The set 04a extracts, `plates`, is not a
+substitute. It holds one picture per PDF page, and later in the atlas each of those pictures holds two
+sections stacked, so curating against it would treat two brain levels as one plate and put both levels'
+regions on it. Choose the set once, before any landmark is placed: plate ids repeat between sets and
+name different pictures, so changing it later invalidates landmarks made against the old one.
+
+> **In the code** — `scripts/ls_atlas.py`
+>
+> ```python
+> DEFAULT_SET = "plates_final"
+> ```
 
 ## 04w  Build the Wullimann plate set {#stage-atlas_wullimann_plates}
 
@@ -630,6 +704,14 @@ The Wullimann plates carry no coloured dots; each region is drawn as a closed ou
 is the area. This step finds the enclosed regions in each drawing and writes them as polygons,
 numbered in the order the pipeline already numbers regions in. The region curator then shows them as
 the numbered guide when you draw the region on a section.
+
+Each Wullimann plate draws only one hemisphere, so its outlines cover half the brain. With *Mirror
+outlines to both sides* ticked in Set up (`atlas_polygon_mirror`), the curator reflects every outline
+about the midline 04w recorded, so the numbered guide covers both sides. Each side is then an ROI of its
+own with its own atlas number. With a region list chosen, the two sides of a region share its on-screen
+number and are lettered (`1a`, `1b`), as two lobes are. Choosing Wullimann in Set up ticks the box; for an
+atlas that already outlines both sides it is cleared and greyed out. Registration (04e) mirrors
+regardless, because it registers against the micrograph half.
 
 The names are read from the printed labels by OCR and are guesses until a person has checked them, so
 the curator shows only polygons marked reviewed. `--review` writes the page where that happens.
@@ -837,6 +919,10 @@ upright. So instead of copying the angle, the step aligns the pERK tissue outlin
 PCNA one and reads off the angle that does it. The quality of that alignment is reported per
 section, so a failure is visible rather than silent.
 
+A trial on the first few sections (`--limit N`) writes `perk_overrides.trialN.csv` beside the real file
+and leaves that file as it was. The final pERK reformat reads the overrides file as the complete record,
+so a partial one written there would leave every section outside the trial at its raw angle.
+
 > **In the code** — `scripts/04i_propagate_to_perk.py`
 >
 > ```python
@@ -950,7 +1036,11 @@ so making both in one run keeps the two from drifting apart.
 
 *`scripts/04o_section_rgb.py --marker AF488 --all --thumbs` → `reformatted/sections_rgb/`, `reformatted/sections_rgb_thumb/`*
 
-The same for the PCNA channel, thumbnails included.
+The same for the PCNA channel, thumbnails included. Each marker's composites always go in a folder of
+their own. In a study where every marker was imaged in one scan (the `multiplex` acquisition layout),
+all markers share one section folder, so the marker's name goes into the composite folder's name
+(`sections_<marker>_rgb`). Without that, the second marker's run would find the first marker's pictures
+already there and the curator would show them under the wrong name.
 
 ## 04p  Trace every scanned section {#stage-provenance}
 
@@ -1044,6 +1134,11 @@ unchanged: the guided cursor walks your selection, one polygon per region.
   deselected stays on its section, shown with `-` in place of a number, and the sidebar says how many
   are outside the selection.
 - Closing the first question without choosing means *all regions*, as before, and is remembered.
+- **A region the plate has no outline for.** `ADD ROI` (or `n`) asks for the region's name and gives it
+  the plate's next free ROI number; the next polygon drawn on the section is that region, and it exports
+  like any other polygon. Added regions are kept per study under their own key, which the app saves with
+  the project as `curation/ls_roi_curator_v1_custom.json`, so one study's additions never appear on
+  another study's plates.
 
 Circles are no longer used for anatomy at all. The disc survives only for the **background reference
 regions** — patches of tissue the operator judges to hold no signal — which are measured by exactly
@@ -1073,6 +1168,14 @@ This step reads the three exported tables back and rebuilds the curator's workin
 so work done in any browser reaches the application. The previous state is backed up before anything
 is written.
 
+Every curator page opened from the same place shares one browser store, and two studies (a pilot and the
+main study, say) easily share section names. So each study's curation is filed under its own folder, and
+neither study's page shows or overwrites the other's work. When a study's folder moves, to another drive
+for instance, its curation follows it. The folder carries a mark, `curation/study_id.txt`, made once, and
+the curator, this import and the app all recognise the study's older entry by that mark and carry it over.
+The curator's header says so. Curation found under another folder without the mark is reported, not
+taken, because it may belong to a different study.
+
 ## 04k  Level curator (superseded) {#stage-level_curator}
 
 *`scripts/04k_level_curator.py` → `reformatted/level_curator.html`* · **an operator decides here**
@@ -1096,6 +1199,20 @@ produces a table with one row per nucleus, and **everything after that table is 
 table.** That is a deliberate architectural choice: changing one's mind about where positivity falls
 costs a re-run of one cheap step, not a re-read of hundreds of gigabytes of scans.
 
+**When a finished step goes out of date.** From 05a on, a finished step can stop matching what it
+was made from without any file going missing: the curation is re-exported, an earlier step is run
+again, or a setting it reads is changed. So each run in the app records what the step read when it
+started, by content rather than by date, which means saving the same export twice changes nothing.
+A finished step whose inputs or settings have changed since, whose results predate a recorded fix
+to the code, or which is made from a step that is itself out of date, shows as **Out of date**, with
+the reason in words. 05a is out of date while the export holds a marker whose regions it has not
+yet placed, and re-placing either marker's regions puts detection and everything after it out of
+date. Re-running the signal check (05b) does so only if it chooses a different cut. *Run all
+remaining* then runs the step and everything downstream in order. The status changes nothing on
+disk: the old outputs stay where they are until the step runs. A trial run on the first few
+sections records nothing, so it cannot make a step look current, and runs made before this record
+existed, or outside the app, are judged by file dates instead.
+
 ## 05a  Verify the inverse transform {#stage-roi_geometry_verify}
 
 *`scripts/05a_roi_geometry.py --verify`*
@@ -1108,7 +1225,7 @@ the same amount on a plain linear ramp with no composition involved at all.
 
 ## 05a  Place the ROIs on the slide {#stage-roi_geometry}
 
-*`scripts/05a_roi_geometry.py` → `reformatted/roi_geometry_AF568.csv`, `roi_boxes_AF568.csv`*
+*`scripts/05a_roi_geometry.py` → `reformatted/roi_geometry_<marker>.csv`, `roi_boxes_<marker>.csv`, `roi_regions_used_<marker>.csv`, one set per marker*
 
 The operator drew regions on a 256-pixel square in which one pixel spans about 25 µm. A nucleus is
 7 µm. **Nothing can be counted in that frame.** Detection has to read the original scan at its native
@@ -1135,6 +1252,19 @@ because mapping a radius would assume the transform preserves shape.
 Sections whose geometry cannot be reconstructed, and regions carrying neither a radius nor a corner
 list, are refused rather than guessed at.
 
+**Where the regions come from.** The step reads the newest export from the ROI curator, and the
+plate table beside it for the operator's exclusions. The export may have landed in the folder chosen
+for exports, the reformat folder or the browser's download folder; a file in the download folder is
+used only when every section it names belongs to this study, because that folder also holds whatever
+else the browser saved, other studies' exports included. A file can also be named on the command
+line. The step keeps a copy of the export it read beside the boxes, as the record of which curation
+they came from. That copy is never itself taken for a newer export, which would quietly re-read the
+old curation without its plate table and lose every exclusion. For a paired study the curator's
+export normally carries both markers, and each marker's regions are placed separately, into that
+marker's own files, so placing PCNA can never overwrite the pERK boxes. A marker whose regions place
+nothing is not written at all, and its existing boxes are kept. `--marker` restricts a run to one
+marker, and is refused if the export does not hold it.
+
 > **In the code** — `scripts/05a_roi_geometry.py`
 >
 > ```python
@@ -1156,7 +1286,11 @@ Run just before detection. For each marker it reads a sample of regions — by d
 of twelve sections, spread evenly over the animals — off the plane detection will segment: DAPI for a
 marker measured inside nuclei, the marker's own channel for one segmented on itself (PCNA in the LS
 study). Every crop is read at full resolution; a region bigger than the window is cut to its centre,
-never shrunk.
+never shrunk. The model is shown exactly what detection will show it: each box is read whole and
+stretched the way 05c stretches it (for a marker segmented on itself, under the one range shared by
+every crop of the section, background discs included), and only then cut to its window. So the cut
+is chosen on the same input it will be used on. The signal measurements below are taken on the raw
+window.
 
 It measures, per crop: the **background** and **foreground** levels (the medians either side of an
 Otsu cut), the **noise** (from neighbouring-pixel differences, so it does not depend on how crowded
@@ -1183,6 +1317,11 @@ thresholds each marker was measured with and refuses to add sections measured wi
 to those already in the results; changing the setting mid-study means re-measuring that marker with
 *Redo finished sections*.
 
+A **poor** verdict means dim nuclei will be missed whatever the settings, so in the app *Run all
+remaining* stops after the check instead of going on into hours of detection, and says which marker
+and why. This is a pause, not a failure: the report (*Open report*) and the tuned setting are kept,
+and pressing Run on detection carries on anyway.
+
 ## 05c  Detect and measure nuclei {#stage-detect}
 
 *`scripts/05c_detect_rois.py` → `results/roi_nuclei.csv`*
@@ -1199,9 +1338,30 @@ partly a property of the threshold. Here the counterstain finds the objects, the
 afterwards, and positivity is decided later still — in a different step, changeable without
 re-reading a single scan.
 
+There is one declared exception: PCNA on the LS slides. Its scans carry a DAPI plane that is noise at
+full resolution, so there is no counterstain to find nuclei on, and the study declares that marker
+`segment: own`: StarDist runs on the PCNA channel itself. That is defensible only because PCNA is a
+nuclear antigen, so its objects are nuclei. The cost stands: there is no count of all cells, so 06a
+reports positive density alone for such a marker. And every crop of a section is stretched under one
+shared intensity range, recorded in `results/roi_normalisation.csv`, rather than each to its own, so a
+background disc's noise does not look like signal. Which route each nucleus took is recorded on its
+row (`segmented_on`).
+
 The region is not a rectangle but the box is, so a nucleus found inside the box is kept only if it
 falls inside the actual region. That is decided by mapping the nucleus back to the 256-pixel frame
 and testing it there, against the polygon the operator drew.
+
+Each nucleus also carries flags, recorded rather than acted on, so that 06a decides what to leave
+out: whether it sits on a masked artifact, whether it sits off the tissue, and whether any of its
+own marker pixels clipped. The first two are looked up at the nucleus's own position on the slide:
+in 04g's artifact mask, and in a tissue outline 04a writes at the overview's 5.20 µm per pixel. They
+are not read off the 256-pixel frame, where a cell spans about 30 µm and a nucleus near the edge of
+the tissue or of a small bubble would be judged by whichever cell it landed in. Where either finer
+mask is missing (a study reformatted before 04a wrote it), the coarse frame decides and the run says
+which sections that was. A section with no tissue outline at all is skipped and reported. A section
+with no artifact mask is still measured, but its nuclei would read as clean without ever having
+been checked. So the run warns before it starts and again at the end, and lists those sections in
+`qc/roi_no_artifact_mask.csv`. The usual cause is the final reformat run without `--mask-artifacts`.
 
 **Segmentation uses StarDist, and the reason is bias rather than preference.** The conventional
 alternative, thresholding followed by watershed, under-segments where nuclei touch — it merges two
@@ -1210,7 +1370,8 @@ cells are densely packed, while others are not. The counting error would therefo
 exactly some regions and mild in others, and **a region-correlated counting bias survives into the
 results looking like an anatomical finding.** StarDist instead proposes each nucleus as a whole shape,
 so two nuclei in contact become two shapes rather than one blob to be split by guesswork. It is used
-pretrained, with its own default thresholds, without retraining or per-dataset tuning.
+pretrained and without retraining. The one setting chosen for these data is its probability cut,
+picked once per marker for the whole study by 05b, where the count is most stable.
 
 **The DAPI crop is normalised before segmentation; the marker channel never is.** DAPI is normalised
 because the pretrained network expects its input in a particular range, and a dim region and a
@@ -1229,8 +1390,27 @@ segmentation, same statistics — and are distinguished only by a label. That yi
 reference level measured rather than assumed, and a false-positive rate, because the same detector
 is run over tissue the operator called empty.
 
-The step is resumable per section and writes atomically, so an interrupted run costs one section
-rather than the whole run. It takes hours.
+The step is resumable per section, so an interrupted run costs one section rather than the whole
+run. It takes hours. A section counts as finished only once all its rows are safely on disk and it
+is logged in `results/roi_nuclei_sections_done.csv`, together with a fingerprint of the boxes and
+geometry it was measured on. A resume decides from that log:
+
+- a section measured and found empty is finished, not unmeasured: it is not measured again on every
+  resume, and 06a reports it as zero;
+- a section whose boxes changed since (a disc moved or resized, a polygon redrawn) is measured
+  again, and only that section, so re-exporting a few corrected regions costs minutes rather than a
+  full re-run. In the app, detection that is out of date only because boxes changed is resumed
+  rather than redone; *Redo finished sections* is added only when a setting it reads changed, a
+  recorded fix applies, or some sections cannot be checked;
+- a section no longer in the boxes loses its rows, unless most of the measured sections have
+  vanished at once, which looks like a trial 05a run and keeps everything;
+- a section cut off part-way, by a crash or a dropped drive, is measured again, and a half-written
+  last line is trimmed first;
+- a section measured before the log recorded what it was measured on cannot be checked. It is kept
+  as it is and named in the run's output, and *Redo finished sections* re-measures it.
+
+The shape each region was measured on is also written to `results/roi_measured_geometry.csv`, which
+is what lets 06a catch a region that has moved.
 
 > **In the code** — `scripts/05c_detect_rois.py`
 >
@@ -1238,8 +1418,9 @@ rather than the whole run. It takes hours.
 > return StarDist2D.from_pretrained("2D_versatile_fluo")
 > ```
 >
-> Pretrained and unmodified — the model's published defaults, not values tuned until this dataset
-> gave a pleasing answer.
+> Pretrained and unmodified. The only setting chosen for this dataset is the probability cut, one
+> per marker, placed where the count stops depending on it, not tuned until the data gave a
+> pleasing answer.
 
 ## 06a  Per-ROI dataset {#stage-roi_dataset}
 
@@ -1265,7 +1446,23 @@ is usable at all — **it is not correlated with treatment group.** Positivity i
 regions is several-fold higher than that background rate.
 
 **Two densities are reported side by side.** One counts every nucleus; the other counts the subset
-above that section's own cut. Both are divided by the region's area as computed in 05a.
+above that section's own cut. Both are divided by the region's area as computed in 05a. For a marker
+segmented on its own channel (PCNA, see 05c) there is no count of all cells, so only the positive
+density is reported and the total density and fraction positive are left empty.
+
+**A zero is a measurement; a gap is not.** Nuclei on a masked artifact or off the tissue are left
+out. A section that was measured and found nothing, or whose every nucleus was left out that way, is
+reported with zero counts over its real area, because it was looked at. A section detection has not
+measured yet is absent, not zero, and this is decided per marker. That matters where every marker
+shares a section, as in a multiplex study: one marker's run must not make another read as "looked
+and found none".
+
+**A count is refused if its region has moved since.** If a disc was dragged or resized, or a polygon
+redrawn, after its nuclei were counted, the old count would be divided by the new area and give a
+plausible, wrong density. Detection records the shape each region was measured on, and this step
+compares it with the current boxes. On a mismatch it stops, names the sections, lists them all in
+`results/roi_geometry_changed.csv`, and says to re-measure them. Sections measured before detection
+kept that record cannot be checked either way, and are reported as unverified, not refused.
 
 **A censored nucleus is counted as positive by construction.** Its true intensity is unknown but is
 at least the sensor ceiling, which is above any cut, so calling it anything else would be a statement
@@ -1331,7 +1528,19 @@ sampling workbook.
 The join validates itself rather than trusting the spreadsheet: the cohort it produces is checked
 against an independent column in the workbook recording which animals were sliced for this
 experiment, and a disagreement is reported loudly. A run that mis-assigns animals to groups should
-fail obviously rather than produce a plausible and wrong result.
+fail obviously rather than produce a plausible and wrong result. An animal with no row in the
+workbook stops the join. Where the workbook leaves a treatment blank, the tank the animal was held
+in recovers it, and every row records whether its group came from the sheet or from the tank.
+
+The workbook is `large scale exp sampling data.xlsx` in the slides folder unless the study names
+another (`--xlsx`, which can be set when the study is created or later in Set up). It used to be
+opened for the first time here, at the very end of a study, so a renamed column or a fish nobody
+typed in was found months after the slides. Set up's **Check workbook** now runs the same join at
+any time, on whichever animals the study already knows. It writes nothing, and it reports only
+totals: how many animals and slides matched a group, how large each group is, which animals have no
+row, and which have a blank treatment the tank cannot recover. It never shows which animal is in
+which group. It uses the same reading and matching code as this step, so the early check and the
+real join cannot disagree.
 
 > **In the code** — `scripts/06b_join_sampling.py`
 >
@@ -1346,7 +1555,8 @@ fail obviously rather than produce a plausible and wrong result.
 One row per region per sample, plus per-disc, per-section and coverage sheets. It formats; it does
 not re-derive any number. Buildable part-way through a run.
 
-**The per-ROI figures read this workbook**, because one row here is one animal — the unit the
+**The per-ROI figures read this workbook** when they are drawn (the R figure steps are switched off
+for now; see 06e), because one row here is one animal — the unit the
 treatment comparison is made on. The pooling happens in this stage and is weighted by area
 measured: an animal's nuclei summed over its discs, over the area those discs covered.
 
@@ -1360,25 +1570,46 @@ away.
 Worth being precise about the level: a slide is not a section. A slide carries several sections, so
 grouping by slide is coarser than grouping by section and finer than grouping by animal.
 
-`plot_by_slide.R` reads this workbook, and it is a picture of variability rather than a bigger
+`plot_by_slide.R` reads this workbook when the figures are drawn (they are switched off for now;
+see 06e), and it is a picture of variability rather than a bigger
 sample: slides from one animal are not independent replicates of a treatment. The per-ROI figures
 and every test on them read 06c's per-animal sheet instead.
 
 ## 06e  Build results: datasets, spreadsheets, figures {#stage-build_results}
 
-*`scripts/06e_refresh_loop.py --once` → `results/roi_dataset.xlsx`, `results/roi_dataset_by_slide.xlsx`, `results/ROI_plots/`*
+*`scripts/06e_refresh_loop.py --once` → `results/roi_dataset.xlsx`, `results/roi_dataset_by_slide.xlsx`, `results/build_results_pass.json`*
 
-The per-region dataset, both spreadsheets and every figure, in one run: the same pass the hourly
-loop below makes, made once. It runs 06a first, because 06a owns every per-region number and the
-spreadsheets only group and format it, then draws the figures once per marker measured. The
-unblinding join, 06b, is not part of it and stays a step someone runs on purpose. The figures need R.
+The per-region dataset and both spreadsheets, in one run: the same pass the hourly loop below
+makes, made once. It runs 06a first, because 06a owns every per-region number and the spreadsheets
+only group and format it, then 06c and 06d. The unblinding join, 06b, is not part of it and stays a
+step someone runs on purpose.
+
+**The R figure steps are switched off for now**, at the operator's request. The step no longer
+looks for R or runs the figure scripts under `analysis/`, so it draws no figures and needs no R.
+The spreadsheets are built exactly as before. The figure code is commented out rather than deleted,
+so turning the figures back on means restoring it, and the R scripts themselves are unchanged.
+
+Each completed pass leaves a small record of its own, `results/build_results_pass.json`. The two
+workbooks cannot show that this step ran, because 06c and 06d write them too when they are run on
+their own.
+
+> **In the code** — `scripts/06e_refresh_loop.py`
+>
+> ```python
+> print("figures: off (R steps switched off; spreadsheets only)")
+> ```
 
 ## 06e  Refresh datasets and figures hourly {#stage-refresh_loop}
 
-*`scripts/06e_refresh_loop.py` → `results/ROI_plots/`*
+*`scripts/06e_refresh_loop.py` → `results/roi_dataset.xlsx`, `results/roi_dataset_by_slide.xlsx`*
 
-Detection takes many hours, so this rebuilds both spreadsheets and redraws the figures once an hour
-while it runs, and stops when every section has been measured. It is a long-running loop rather than
+Detection takes many hours, so this rebuilds both spreadsheets once an hour
+while it runs. With the R figure steps switched off (see above) it rebuilds the dataset and the
+spreadsheets only, and redraws no figures. It stops when every planned section has been measured.
+Only sections still in the plan count, so a stale or orphaned section left in the nuclei table
+cannot make the run look finished while planned sections are still waiting. It also stops, and
+reports failure, if the number measured has not moved for three cycles, because that means
+detection has died or been stopped. It is a long-running loop rather than
 a one-shot step, which is why the desktop application does not run it — it would hold the app's
 runner open for hours.
 
@@ -1491,7 +1722,8 @@ treated as replicates.
 # What this guide does not cover
 
 **The statistics and the figures.** Model choice, contrasts and the figure deck are downstream of
-everything described here and live in the R layer under `analysis/`. `docs/pipeline-methods.md` §14
+everything described here and live in the R layer under `analysis/`. The pipeline does not run its figure steps at present; see
+06e. `docs/pipeline-methods.md` §14
 summarises the approach.
 
 **How the software is built and run.** Installation, the two Python environments, the desktop

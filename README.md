@@ -406,7 +406,7 @@ screens, each with its progress read from disk:
 | Step | What it is for |
 |---|---|
 | **Project** | Where the study stands, and a **Next up** card naming the one thing to do now |
-| **Set up** | Slides (with **What the slides say...** and **Check workbook**), then the study's settings as cards: folders, file names, microscope and channels, atlas, nucleus detection. Done only when the slides are |
+| **Set up** | Slides (with **What the slides say...**, **Check workbook** and **Load the groups for Shotgun**), then the study's settings as cards: folders, file names, microscope and channels, atlas, nucleus detection. Done only when the slides are |
 | **Prepare** | The automatic stages, from slide headers to the images the curators show |
 | **Curate** | The ROI curator, with coverage per animal and level, and each marker's own pass |
 | **Measure** | ROIs back onto the slides, nucleus detection, the per-ROI dataset. Still blind |

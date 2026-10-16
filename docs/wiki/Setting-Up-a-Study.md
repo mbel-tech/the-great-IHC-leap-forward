@@ -19,6 +19,8 @@ Every field has a short hint, an **(i)** with the full reasoning and which stage
 
 **Sampling workbook** names the workbook Results will read to unblind; leave it empty to use the one in the slide folder. **Check workbook** tries the join now, without unblinding anything: it matches the workbook against the study's animals and slides, writes nothing, and reports how many it matched to a group, any animal with no row and any blank group. Use it early, so a mismatch is fixed before the measuring is done.
 
+**Load the groups for Shotgun** reads the same workbook the same way and keeps each animal's treatment group in the study (`groups.order` and `groups.by_animal`), so the ROI curator's Shotgun deck can lay favourites out by treatment while you are still curating; press **Build page** on the ROI curator afterwards to turn Shotgun on. The deck shows the groups by design. Nothing else does: the curator's sections, plates and ROIs, every count and threshold, and Set up itself (which shows only how many animals each group has) stay keyed by animal, and 05c uses the groups only for the order it measures sections in. Results are still joined to the groups at Unblind. **Remove the groups** makes the study blind again, and a copy shared as blinded never carries them.
+
 Choosing a folder only records where the slides are; nothing is moved or copied. Picking files from one folder records a list, which costs no space. If the files are spread over several folders, the app offers to link or copy them and shows the size first.
 
 ## Study and folders

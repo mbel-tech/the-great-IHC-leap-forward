@@ -881,6 +881,44 @@ class SetupScreen(QWidget):
         self.workbook_line.setWordWrap(True)
         self.workbook_line.setStyleSheet(QUIET)
         sl.addWidget(self.workbook_line)
+        # The groups from that workbook, for the Shotgun deck, which lays the
+        # favourites out by treatment while the study is still being curated.
+        # Loading them writes groups.order / groups.by_animal and nothing else:
+        # curation, counting and every screen stay keyed by animal, and the
+        # per-fish groups are never shown here, only how many fish each has.
+        groups = QHBoxLayout()
+        self.groups_btn = QPushButton("Load the groups for Shotgun")
+        self.groups_btn.setToolTip(
+            "Check the workbook, then keep each fish's treatment group in the study so the "
+            "ROI curator's Shotgun deck can lay slides out by group")
+        self.groups_btn.clicked.connect(self.load_groups)
+        groups.addWidget(self.groups_btn)
+        self.clear_groups_btn = QPushButton("Remove the groups")
+        self.clear_groups_btn.setToolTip("Take the treatment groups out of the study again; "
+                                         "the Shotgun deck turns off")
+        self.clear_groups_btn.clicked.connect(self.clear_groups)
+        groups.addWidget(self.clear_groups_btn)
+        groups.addWidget(InfoButton(
+            "Treatment groups before Unblind",
+            "<p>The Shotgun deck in the ROI curator puts each treatment on its own half "
+            "of the slide, so it needs the groups while you are still curating. Loading "
+            "them here reads the same workbook, the same way, as Unblind does.</p>"
+            "<p><b>What sees the groups:</b> the Shotgun deck's layout, and the order "
+            "05c measures sections in (so a part-finished run is balanced; the counts "
+            "are the same either way). <b>What stays blind:</b> the curator's sections, "
+            "plates and ROIs, every count and threshold, and this screen, which shows "
+            "only how many fish each group has. Results are joined to the groups at "
+            "Unblind (06b), as before.</p>"
+            "<p>After loading, press <b>Build page</b> on the ROI curator so its "
+            "Shotgun buttons turn on. <b>Remove the groups</b> makes the study blind "
+            "again. A copy shared as blinded never carries them.</p>"))
+        groups.addStretch(1)
+        sl.addLayout(groups)
+        self.groups_line = QLabel("")
+        self.groups_line.setWordWrap(True)
+        self.groups_line.setStyleSheet(QUIET)
+        sl.addWidget(self.groups_line)
+        self._load_groups_after_check = False
         self.workbook_check = WC.WorkbookCheck(self)
         self.workbook_check.finished.connect(self._workbook_checked)
         self._sync_report_btn()
@@ -900,6 +938,7 @@ class SetupScreen(QWidget):
         project = self.session.project
         self.workbook_field.setValue(project.stage_options("join_sampling").get("--xlsx", ""))
         self.workbook_field.setEnabled(not project.read_only)
+        self._sync_groups()
         while self.tabs.count() > 1:
             w = self.tabs.widget(1)
             self.tabs.removeTab(1)
@@ -1112,8 +1151,11 @@ class SetupScreen(QWidget):
         self.workbook_line.setText("")
         self.options_changed.emit("join_sampling", values)
 
-    def check_workbook(self):
-        """Start the dry run of 06b's join; the answer lands in _workbook_checked."""
+    def check_workbook(self, load=False):
+        """Start the dry run of 06b's join; the answer lands in _workbook_checked.
+
+        With `load`, the groups it finds are then kept for the Shotgun deck."""
+        self._load_groups_after_check = bool(load)
         import workbook_check as WC
         project = self.session.project
         typed = self.workbook_field.value()
@@ -1129,6 +1171,9 @@ class SetupScreen(QWidget):
                 "The workbook can be read, but the study has no fish to match it to yet: "
                 "none were found in the %s." % rep.get("from", "slide file names"))
             self.workbook_line.setStyleSheet(QUIET)
+            if self._load_groups_after_check:
+                self._load_groups_after_check = False
+                self._sync_groups("No groups loaded: the study has no fish yet.", bad=True)
             return
         lines = SAMPLING.words(rep) if "matched" in rep else [
             "The workbook could not be checked: %s." % rep.get("error")]
@@ -1138,6 +1183,84 @@ class SetupScreen(QWidget):
         self.workbook_line.setText(" ".join(lines))
         self.workbook_line.setStyleSheet(f"color:{COLOUR['failed']}" if bad else QUIET)
         self.logged.emit("workbook checked: " + lines[0])
+        if self._load_groups_after_check:
+            self._load_groups_after_check = False
+            self._keep_groups(rep)
+
+    def load_groups(self):
+        """Check the workbook, then keep its groups (see _keep_groups)."""
+        self.check_workbook(load=True)
+        self.groups_line.setText("Reading the groups from the workbook…")
+        self.groups_line.setStyleSheet(QUIET)
+
+    def _keep_groups(self, rep):
+        """Write groups.order / groups.by_animal from a finished check, after asking."""
+        import ls_sampling as SAMPLING
+        project = self.session.project
+        key = SAMPLING.group_key(rep)
+        if project.read_only or not key["by_animal"]:
+            self._sync_groups("No groups loaded: the workbook gave no fish a group."
+                              if not project.read_only else None, bad=True)
+            return
+        missing = (rep.get("missing") or []) + [a for a, _ in rep.get("blank") or []]
+        text = ("This keeps each fish's treatment group in the study, for the Shotgun deck.\n\n"
+                "%s\n\nThe curator's sections, plates and ROIs and every count stay keyed by "
+                "animal; only the deck's layout and the order 05c measures sections in use "
+                "the groups." % " ".join(SAMPLING.words(rep)))
+        if missing:
+            text += ("\n\nLeft out, with no group: %s. The deck skips them."
+                     % ", ".join(missing))
+        if QMessageBox.question(self, "Load the treatment groups?", text,
+                                QMessageBox.Yes | QMessageBox.No,
+                                QMessageBox.No) != QMessageBox.Yes:
+            self._sync_groups()
+            return
+        project.set("groups.order", key["order"], by="Set up: sampling workbook")
+        project.set("groups.by_animal", key["by_animal"], by="Set up: sampling workbook")
+        self.session.touch()
+        self.build()
+        self.applied.emit()
+        self.logged.emit("treatment groups loaded from the workbook for the Shotgun deck "
+                         "(%d fish)" % len(key["by_animal"]))
+        self._sync_groups()
+
+    def clear_groups(self):
+        """Take the groups out of the study: blind again, Shotgun off."""
+        project = self.session.project
+        if project.read_only:
+            return
+        changed = project.set("groups.order", [], by="Set up: groups removed")
+        changed = project.set("groups.by_animal", {}, by="Set up: groups removed") or changed
+        if changed:
+            self.session.touch()
+            self.build()
+            self.applied.emit()
+            self.logged.emit("treatment groups removed from the study")
+        self._sync_groups()
+
+    def _sync_groups(self, note=None, bad=False):
+        """The groups line and buttons from the study as it stands."""
+        project = self.session.project
+        by_animal = {a: g for a, g in (project.get("groups.by_animal") or {}).items()
+                     if g and not str(a).startswith("_")}
+        order = [g for g in project.get("groups.order") or [] if g]
+        self.groups_btn.setEnabled(not project.read_only)
+        self.clear_groups_btn.setEnabled(not project.read_only and bool(by_animal))
+        if note:
+            self.groups_line.setText(note)
+        elif by_animal:
+            counts = {}
+            for g in by_animal.values():
+                counts[g] = counts.get(g, 0) + 1
+            self.groups_line.setText(
+                "Groups kept for the Shotgun deck: %s (left to right: %s). Press Build page "
+                "on the ROI curator to turn Shotgun on. Curation and counting stay blind."
+                % (", ".join("%s %d fish" % (g, counts[g]) for g in sorted(counts)),
+                   ", ".join(order) or "not set"))
+        else:
+            self.groups_line.setText("No treatment groups in the study: the analysis is "
+                                     "blind until Unblind, and Shotgun is off.")
+        self.groups_line.setStyleSheet(f"color:{COLOUR['failed']}" if bad else QUIET)
 
     def _add_fiji_row(self, layout, project):
         """'Add atlas from Fiji…', when this copy of the pipeline has the importer."""

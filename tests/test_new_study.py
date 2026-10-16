@@ -192,6 +192,36 @@ chk("...writing nothing", sorted(os.listdir(STUDY.root)), before)
 chk("...not in the results either",
     os.path.exists(os.path.join(project.get("out_root"), "results", "animal_metadata.csv")),
     False)
+
+print("--- Set up > Slides: load the groups for Shotgun ---")
+chk("blind until asked: no groups in the study", project.get("groups.by_animal") or {}, {})
+chk("...and Remove is off", s.clear_groups_btn.isEnabled(), False)
+from PySide6.QtWidgets import QMessageBox                       # noqa: E402
+_q = QMessageBox.question
+QMessageBox.question = staticmethod(lambda *a, **k: QMessageBox.Yes)
+try:
+    s.groups_btn.click()
+    end = time.monotonic() + 20
+    while s.workbook_check.busy and time.monotonic() < end:
+        app.processEvents()
+        time.sleep(0.005)
+    app.processEvents()
+finally:
+    QMessageBox.question = _q
+chk("Load keeps each fish's group for the deck", project.get("groups.by_animal"),
+    {"LS22": "control"})
+chk("...and the order the deck draws them in", project.get("groups.order"), ["control"])
+chk("...recorded by name only, never by value",
+    [d for d in project.block.get("decisions", []) if d["key"].startswith("groups.")
+     and ("to" in d or "from" in d)], [])
+chk("...the screen gives counts, not which fish",
+    "control 1 fish" in s.groups_line.text() and "LS22" not in s.groups_line.text(), True)
+chk("...and Remove turns on", s.clear_groups_btn.isEnabled(), True)
+s.clear_groups_btn.click()
+chk("Remove makes the study blind again",
+    (project.get("groups.by_animal"), project.get("groups.order")), ({}, []))
+chk("...and says so", "blind" in s.groups_line.text(), True)
+
 s.workbook_field.setValue(os.path.join(STUDY.root, "none.xlsx"))
 s.check_workbook_btn.click()
 end = time.monotonic() + 20

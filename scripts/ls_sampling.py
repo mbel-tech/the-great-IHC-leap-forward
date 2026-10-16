@@ -15,6 +15,7 @@ study is not the process's LS_CONFIG.
     join(animals, col, sheet)   what 06b decides per animal
     check(path, animals)        that join as a report, never raising
     words(report)               the report as lines for a person
+    group_key(report)           groups.order / groups.by_animal from a check
 """
 
 import html
@@ -175,7 +176,8 @@ def check(path, animals):
     animals = dict(animals or {})
     rep = {"path": path, "error": None, "animals": len(animals), "matched": [],
            "slides": sum(animals.values()), "slides_matched": 0, "missing": [],
-           "blank": [], "from_tank": [], "not_sliced": [], "groups": {}}
+           "blank": [], "from_tank": [], "not_sliced": [], "groups": {},
+           "by_animal": {}}
     if not path or not os.path.isfile(path):
         rep["error"] = f"no workbook at {path}" if path else "no workbook chosen"
         return rep
@@ -199,11 +201,27 @@ def check(path, animals):
         if not m["treatment"]:
             continue
         rep["matched"].append(a)
+        rep["by_animal"][a] = m["treatment"]
         rep["slides_matched"] += animals[a]
         rep["groups"][m["treatment"]] = rep["groups"].get(m["treatment"], 0) + 1
         if m["treatment_source"] == "tank":
             rep["from_tank"].append(a)
     return rep
+
+
+def group_key(rep):
+    """The `groups` block a check gives: {"order": [...], "by_animal": {...}}.
+
+    What the Shotgun deck (04l) lays slides out by, so a deck can be built
+    before Unblind. The order is alphabetical, which puts "control" on the left
+    of every slide; groups.order in the settings changes it. Only animals that
+    got a group are in it: an unresolved one is left out, never guessed at.
+    Empty when the check failed or matched nobody.
+    """
+    if rep.get("error") or not rep.get("by_animal"):
+        return {"order": [], "by_animal": {}}
+    by_animal = dict(rep["by_animal"])
+    return {"order": sorted(set(by_animal.values())), "by_animal": by_animal}
 
 
 def words(rep):

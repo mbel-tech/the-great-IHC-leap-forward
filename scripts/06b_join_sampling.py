@@ -4,26 +4,25 @@
 why the numbering lands here and not earlier. Everything upstream is keyed by
 animal ID alone.
 
-**The key is LSnn -> Fish ID nn, and the sheet validates it itself.** All 12
-imaged animals match, and the sheet's `slicing IHC July 2025` column is marked
-for exactly those 12 - an independent column agreeing on every one. That is
-asserted rather than trusted: if it ever stops holding the key is wrong, and a
-run that mis-assigns animals to groups should fail loudly rather than produce a
-plausible table. Note it is NOT `Brain for == IHC`, which covers 40 fish and is
-the wider allocation rather than what was sliced.
+**Which columns.** The study's `sampling` block says which sheet column is the
+animal and which hold the treatment; it is chosen in Set up > Slides > Match
+the sheet, and read here only when this stage runs. Two or more treatment
+columns make one group ("exercise \u00b7 1"). A study with no block whose sheet
+has the LS headers gets the choice this stage made before there was one:
+Fish ID matched by number (LS22 is fish 22), `treatment`, and the tank rule
+below. Anything else stops and says to choose the columns.
 
-**Three animals have a blank treatment, and the tank recovers it.** Across all
-153 fish the tanks partition cleanly - 303/304/307/308 exercise, 305/306/309/310
-control - and at timepoint 1 exactly 32 fish are labelled control and exactly 32
-are blank, the blanks being the exercise tanks. Whoever filled the sheet typed
-only the control side. Every row carries `treatment_source` so the inference
-stays visible and can be undone.
+**A blank treatment is left blank unless a fill rule says otherwise.** In the
+LS sheet the tanks partition cleanly - 303/304/307/308 exercise,
+305/306/309/310 control - and whoever filled the sheet typed only the control
+side at timepoint 1, so the LS choice carries those as rules. Every row
+carries `treatment_source` (sheet / rule / unresolved) so the inference stays
+visible and can be undone.
 
-Reads the workbook directly, parsing the sheet XML with zipfile rather than
-adding openpyxl - the pipeline needs one value per fish from one sheet, and the
-dependency is not worth it. The reader and the matching live in ls_sampling.py,
-shared with Set up's "Check workbook", which runs this join early and
-writes nothing.
+Every other sheet column not marked Ignore is carried into both outputs under
+its header, lower-cased with `_` for spaces. The reader and the matching live
+in ls_sampling.py, shared with Set up, which runs this join early and writes
+nothing.
 
 Writes:
     results/animal_metadata.csv   one row per animal
@@ -89,32 +88,33 @@ def main():
 
     meas = G5.load_csv(MEAS_CSV)
     animals = sorted({r["animal"] for r in meas},
-                     key=lambda a: int(re.sub(r"\D", "", a) or 0))
+                     key=lambda a: (int(re.sub(r"\D", "", a) or 0), a))
 
-    COL, sheet = read_table(args.xlsx)
-    joined = SAMPLING.join(animals, COL, sheet)
-    imaged, sliced = joined["imaged"], joined["sliced"]
-
-    # The cohort check. An independent column in the same sheet agreeing on
-    # every imaged animal is what makes LSnn -> Fish ID more than a guess, so a
-    # disagreement means the key is wrong and this must not proceed.
-    missing = joined["missing"]
-    if missing:
-        print(f"FAIL: no sheet row for fish {missing} - the LSnn -> Fish ID key is wrong")
+    saved = CONFIG.get("sampling") or {}
+    headers, rows = SAMPLING.table(args.xlsx, saved.get("sheet") or None)
+    mapping = SAMPLING.mapping_for(saved, headers)
+    if mapping is None:
+        print("FAIL: the animal and treatment columns are not chosen - use Set up > "
+              "Slides > Match the sheet")
         return 1
-    not_sliced = joined["not_sliced"]
-    if not_sliced:
-        print(f"WARNING: fish {not_sliced} were imaged but are not marked in "
-              f"'slicing IHC July 2025'. The cohort column and the images "
-              f"disagree; check before trusting the groups.")
+    joined = SAMPLING.join(animals, headers, rows, mapping)
+
+    # Every measured animal must have exactly one row: an animal joined to the
+    # wrong row, or to none, would put it in a group it is not in.
+    if joined["duplicate"]:
+        print(f"FAIL: {joined['duplicate']} are on more than one row of the sheet")
+        return 1
+    if joined["missing"]:
+        print(f"FAIL: no sheet row for {joined['missing']} (IDs matched "
+              f"{'by name' if joined['rule'] == 'exact' else 'by number'} in column "
+              f"'{mapping['id_column']}') - check it in Set up > Slides > Match the sheet")
+        return 1
 
     meta, unresolved = joined["meta"], joined["unresolved"]
+    cols = list(next(iter(meta.values())).keys())
+    IO.atomic_write_csv(META_CSV, [meta[a] for a in animals], cols)
 
-    IO.atomic_write_csv(META_CSV, [meta[a] for a in animals],
-                        list(next(iter(meta.values())).keys()))
-
-    carry = ["fish_id", "timepoint", "environment", "treatment", "treatment_source",
-             "sex", "body_weight_g", "fork_length_cm"]
+    carry = [c for c in cols if c != "animal"]
     out = []
     for r in meas:
         m = meta.get(r["animal"], {})
@@ -124,28 +124,25 @@ def main():
     print("=" * 72)
     print(f"{len(animals)} animals -> {META_CSV}")
     print(f"{len(out)} rows      -> {DATASET_CSV}")
-    print(f"  cohort check: all {len(imaged)} imaged animals are in the sheet"
-          + (f", {len(imaged & sliced)} marked sliced" if sliced else ""))
+    print(f"  id column '{mapping['id_column']}', matched "
+          f"{'by name' if joined['rule'] == 'exact' else 'by number'}; groups from "
+          + ", ".join(f"'{h}'" for h in mapping["group_columns"]))
     print()
-    print(f"  {'animal':7} {'fish':>4} {'tp':>3} {'environment':12} "
-          f"{'treatment':10} {'from':10} {'sex':4} {'ROIs':>5}")
+    print(f"  {'animal':8} {'sheet id':>8} {'group':24} {'from':10} {'ROIs':>5}")
     for a in animals:
         m = meta[a]
         n = sum(1 for r in meas if r["animal"] == a and r["roi_kind"] == "roi")
-        print(f"  {a:7} {m['fish_id']:>4} {m['timepoint']:>3} {m['environment']:12} "
-              f"{m['treatment'] or '(none)':10} {m['treatment_source']:10} "
-              f"{m['sex']:4} {n:>5}")
+        print(f"  {a:8} {m['sheet_id']:>8} {m['treatment'] or '(none)':24} "
+              f"{m['treatment_source']:10} {n:>5}")
     if unresolved:
         print(f"\n  UNRESOLVED treatment: {unresolved} - left blank, not guessed")
     print()
     cells = {}
     for a in animals:
-        k = (meta[a]["timepoint"], meta[a]["treatment"])
-        cells.setdefault(k, []).append(a)
+        cells.setdefault(meta[a]["treatment"], []).append(a)
     print("  design:")
     for k in sorted(cells):
-        print(f"    timepoint {k[0]}  {k[1] or '(none)':10} n={len(cells[k])}  "
-              f"{', '.join(cells[k])}")
+        print(f"    {k or '(none)':24} n={len(cells[k])}  {', '.join(cells[k])}")
     print("=" * 72)
     return 0
 

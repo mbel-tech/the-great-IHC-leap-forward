@@ -760,9 +760,13 @@ STAGES = [
           outputs=["results/roi_dataset.csv", "results/animal_metadata.csv"],
           needs=["roi_dataset"],
           made_from=["roi_dataset"],
+          # Which columns are the animal and the treatment: choosing again
+          # changes the groups, so the joined tables are out of date.
+          settings=["sampling"],
           blurb="THE UNBLINDING STEP - the first stage permitted to read a group "
-                "label. Joins LSnn to the sampling workbook and asserts the "
-                "cohort matches its own 'slicing IHC July 2025' column."),
+                "label. Joins each animal to its row of the sampling workbook, by "
+                "the columns chosen in Set up > Slides > Match the sheet, and stops "
+                "if any animal has no row or more than one."),
 
     Stage("excel_sample", "06c  Spreadsheet - per sample", "Beyond blinding",
           script="06c_excel_dataset.py",

@@ -800,6 +800,20 @@ note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
              "because they become file names.",
         consumers=["app"]),
 
+    Key("sampling", "raw",
+        "Which sampling-sheet column is the animal and which hold the treatment.",
+        default=None, ui=False, in_example=False,
+        note="Chosen in Set up > Slides > Match the sheet; read by Check workbook and Load "
+             "the groups for Shotgun when pressed, and by 06b when it runs. "
+             "{id_column, group_columns: [...], ignore_columns: [...], match: auto|exact|"
+             "number, fill: [{when, is: [...], set, to}], sheet}. Columns are named by "
+             "header text, case and spacing ignored. Two or more group columns make one "
+             "group. A fill rule gives a blank treatment cell a value when another column "
+             "says so. Not the unblinding key itself: it says where the groups are, not "
+             "what they are. Absent: a sheet with the LS headers is read as before, "
+             "anything else must be chosen. See scripts/ls_sampling.py.",
+        consumers=["06b", "app"]),
+
     # ---- unblinding (replaced by the metadata-join sub-project) ----------
     Key("groups.order", "list_str",
         "Which treatment is the LEFT half of every Shotgun slide, and the "

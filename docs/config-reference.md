@@ -59,6 +59,7 @@ A key marked *required* has to be present before any stage will run.
 | `atlas_scope` | raw |  | `04l` | Which regions this study cares about: the ones the atlas already labels, and the ones still wanted. |
 | `project` | raw |  | `app` | The app's record of this project: when it was made, what the CZI files said, what was decided and when, and which stages have run. |
 | `curation` | raw |  | `app` | The curation decisions (ROI polygons, which ROIs to draw, rotations, levels), kept inside the project file. |
+| `sampling` | raw |  | `06b`, `app` | Which sampling-sheet column is the animal and which hold the treatment. |
 | `groups.order` | list_str | `[]` | `04l`, `06c`, `06d` | Which treatment is the LEFT half of every Shotgun slide, and the order the halves are drawn in. |
 | `groups.by_animal` | raw | `{}` | `04l`, `05c`, `06c`, `06d` | Subject ID -> treatment, using exactly the labels in groups.order. |
 

@@ -69,7 +69,11 @@ def make_pack(tmp, name="pack"):
     _header_czi(os.path.join(root, "slides", "LS22_1a.czi"))
     with open(os.path.join(REPO, "config.example.json"), encoding="utf-8") as fh:
         cfg = json.load(fh)
-    cfg["source_dir"] = cfg["out_root"] = cfg["export_dir"] = cfg["atlas_pdf"] = ""
+    cfg["source_dir"] = cfg["out_root"] = ""
+    # As a pack from anywhere might carry them: an optional folder left blank (refused
+    # by the settings check), and scene pictures sent to a folder of the real study's.
+    cfg["export_dir"] = cfg["atlas_pdf"] = ""
+    cfg.setdefault("scene_render", {})["out_dir"] = os.path.join(tmp, "real study pictures")
     cfg.setdefault("study", {})["name"] = "Tutorial study"
     with open(os.path.join(root, "study", "study.json"), "w", encoding="utf-8") as fh:
         json.dump(cfg, fh, indent=2)

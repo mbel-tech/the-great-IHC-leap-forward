@@ -499,7 +499,12 @@ class MainWindow(QMainWindow):
         return bool(TP.Progress.load(os.path.join(TP.tutorial_home(), "output")).current)
 
     def _choose_pack(self):
-        import tutorial_pack as TP
+        """Ask for the demo pack; remembered only once it opens (see start_tutorial)."""
+        QMessageBox.information(
+            self, "Demo study",
+            "The tutorial needs its demo study, which is not installed with this copy of "
+            "the app. If you have it (a folder holding pack.json, or a .zip of one), "
+            "choose it next.")
         path, _ = QFileDialog.getOpenFileName(
             self, "Choose the demo study for the tutorial", os.path.expanduser("~"),
             "Demo study (*.zip pack.json)")
@@ -507,8 +512,31 @@ class MainWindow(QMainWindow):
             return None
         if os.path.basename(path) == "pack.json":
             path = os.path.dirname(path)
-        TP.save_settings({"pack": path})
         return path
+
+    def _open_pack(self):
+        """The demo pack, opened; None if there is none or it would not open (already said)."""
+        import tutorial_pack as TP
+        path = TP.find_pack(self.repo_root)
+        if path:
+            try:
+                return TP.open_pack(path)
+            except (TP.PackError, OSError) as exc:
+                if TP.settings().get("pack") != path:
+                    QMessageBox.warning(self, "Demo study", str(exc))
+                    return None
+                # Chosen earlier and no good now: forget it, or it is refused on every start.
+                TP.save_settings({"pack": None})
+        path = self._choose_pack()
+        if not path:
+            return None
+        try:
+            pack = TP.open_pack(path)
+        except (TP.PackError, OSError) as exc:
+            QMessageBox.warning(self, "Demo study", str(exc))
+            return None
+        TP.save_settings({"pack": path})
+        return pack
 
     def start_tutorial(self, fresh=False):
         """Open the tutorial study (made from the demo pack if need be) and show the panel."""
@@ -516,20 +544,17 @@ class MainWindow(QMainWindow):
         import tutorial_pack as TP
         if not self._idle_for("start the tutorial"):
             return False
-        path = TP.find_pack(self.repo_root) or self._choose_pack()
-        if not path:
-            return False
-        try:
-            pack = TP.open_pack(path)
-        except TP.PackError as exc:
-            QMessageBox.warning(self, "Demo study", str(exc))
+        pack = self._open_pack()
+        if pack is None:
             return False
         home = TP.tutorial_home()
         study = os.path.join(home, "output", "study.json")
+        installed = False
         try:
             if fresh or not os.path.isfile(study):
                 # A folder without its study file is a damaged copy: start it again.
                 study = TP.install(pack, home, fresh=True)
+                installed = True
         except (OSError, TP.PackError) as exc:
             QMessageBox.warning(self, "Could not make the tutorial study", str(exc))
             return False
@@ -538,6 +563,12 @@ class MainWindow(QMainWindow):
         if os.path.normcase(os.path.abspath(before)) != here:
             if not self.session.open_project(self, study):
                 return False
+        elif installed:
+            if self.tutorial is not None:
+                # Before the reload, or it hears the study open and saves its old place
+                # into the fresh study.
+                self._drop_tutorial()
+            self._reload_project(study)
         if self.tutorial is not None:
             self._drop_tutorial()
         self.tutorial = TU.TutorialController(self, pack, study)
@@ -548,6 +579,20 @@ class MainWindow(QMainWindow):
         self.tutorial.panel.start_over.clicked.connect(self._start_tutorial_over)
         self.refresh()
         return True
+
+    def _reload_project(self, study):
+        """The open study's file was replaced underneath it (Start over): open it again.
+
+        Opening the same path is otherwise a no-op, which would keep the old study in
+        memory: its curation, and a save that conflicts with the new file.
+        """
+        try:
+            project = LP.Project.open(study)
+        except LP.ProjectError as exc:
+            QMessageBox.warning(self, "Could not open the tutorial study", str(exc))
+            return
+        self.session.set_project(project)
+        self._project_opened(study, again=True)
 
     def _start_tutorial_over(self):
         if QMessageBox.question(self, "Start the tutorial over",
@@ -586,6 +631,10 @@ class MainWindow(QMainWindow):
         """On the very first start, offer the tutorial once."""
         import tutorial_pack as TP
         if TP.settings().get("offered"):
+            return
+        # A copy with no demo study could only answer Yes with a file picker; the offer
+        # waits for a copy that has one.
+        if not TP.find_pack(self.repo_root):
             return
         TP.save_settings({"offered": True})
         if QMessageBox.question(
@@ -636,9 +685,13 @@ class MainWindow(QMainWindow):
 
     # ---- project changes ----------------------------------------------------
 
-    def _project_opened(self, path):
-        """A different project file is now open: point the stages and the screens at it."""
-        if not path or os.path.normcase(os.path.abspath(path)) == os.path.normcase(self.config_path):
+    def _project_opened(self, path, again=False):
+        """A different project file is now open: point the stages and the screens at it.
+
+        `again`: the same file, opened afresh because it was replaced (see _reload_project).
+        """
+        if not path or (not again and os.path.normcase(os.path.abspath(path))
+                        == os.path.normcase(self.config_path)):
             return
         # First, while the curator is still rooted at the old project: the session already
         # holds the new one, and the page on screen would save the old curation into it.

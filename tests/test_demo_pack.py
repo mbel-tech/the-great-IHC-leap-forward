@@ -55,7 +55,8 @@ MP.append_metadata(SRC, MP.ET.tostring(root, encoding="unicode"))
 src_meta = czi_meta.summarise(MP.read_xml(SRC))
 
 STUDY = os.path.join(TMP, "study.json")
-json.dump({"source_dir": "/x", "out_root": "/y", "curation": {"a": 1}, "study": {"name": "LS"}},
+json.dump({"source_dir": "/x", "out_root": "/y", "curation": {"a": 1}, "study": {"name": "LS"},
+           "export_dir": "/shared/exports", "scene_render": {"out_dir": "/real/pictures"}},
           open(STUDY, "w"))
 PACK = os.path.join(TMP, "pack")
 rc = MP.main(["cut", "--czi", SRC, "--scenes", "1,2", "--study", STUDY,
@@ -80,6 +81,8 @@ chk("practice sections renumbered", meta["practice_sections"], ["LS22_s01a_sc00"
 study = json.load(open(os.path.join(PACK, "study", "study.json")))
 chk("study paths blanked and curation dropped",
     (study["source_dir"], study["out_root"], "curation" in study), ("", "", False))
+chk("no folder of the source study is kept",
+    ("export_dir" in study, "out_dir" in (study.get("scene_render") or {})), (False, False))
 chk("a made-up workbook", os.path.isfile(os.path.join(PACK, "study", "sampling.xlsx")))
 try:
     MP.crop_czi(SRC, os.path.join(TMP, "z.czi"), [9])

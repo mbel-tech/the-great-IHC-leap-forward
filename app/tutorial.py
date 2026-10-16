@@ -256,6 +256,10 @@ class TutorialController(QObject):
         step = self.current
         if self.paused or not step.ready:
             return
+        # A Run all may still be running (or have queued) this very stage: copying in
+        # over files it is writing would leave neither whole.
+        if not self.w._idle_for("copy in the ready-made results"):
+            return
         TP.use_ready(self.pack, self.out_root, step.ready)
         try:
             self.w.refresh()
@@ -286,6 +290,9 @@ class TutorialController(QObject):
         if self.paused:
             self._unhook_click()
             self.point.emit("", "")
+            # The expert's outlines belong to the tutorial's sections; another study can
+            # have a section of the same name holding other tissue.
+            self._clear_check()
         else:
             self._enter()
 

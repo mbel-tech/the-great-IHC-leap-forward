@@ -66,6 +66,8 @@ app.processEvents()
 home = TP.tutorial_home()
 chk("the tutorial study is opened", norm(w.config_path), norm(os.path.join(home, "output",
                                                                             "study.json")))
+chk("...with settings every stage accepts",
+    [b for b in boxes if "problems" in (b[0] or "")], [])
 chk("...its panel is shown", w.findChild(QWidget, "tutorialPanel").isVisible())
 chk("...and the study it left is remembered", norm(w.tutorial.progress.previous_study), real)
 w.tutorial.next()
@@ -92,21 +94,59 @@ app.processEvents()
 chk("continuing resumes at the same step", w.tutorial.progress.current, "project")
 chk("...without remembering the tutorial as the study to go back to",
     norm(w.tutorial.progress.previous_study), real)
+
+print("--- starting over ---")
+import json                                                     # noqa: E402
+w.curator.store.write("ls_roi_curator_v1", json.dumps(TF.ANSWER))
+w.session.project.save(force=True)
+QMessageBox.question = staticmethod(lambda *a, **k: QMessageBox.Yes)
+w._start_tutorial_over()
+app.processEvents()
+QMessageBox.question = staticmethod(lambda *a, **k: asked.append(a[1]) or QMessageBox.No)
+chk("start over leaves no outlines from before",
+    json.loads(w.curator.store.read("ls_roi_curator_v1") or "{}"), {})
+chk("...and starts at the first step", w.tutorial.progress.current, "welcome")
+saved = None
+try:
+    w.session.project.save()
+except Exception as exc:                                        # noqa: BLE001
+    saved = type(exc).__name__
+chk("...and the fresh study saves without a conflict", saved, None)
+chk("...still going back to the study it left", norm(w.tutorial.progress.previous_study), real)
 w.leave_tutorial()
 app.processEvents()
 
 print("--- no pack ---")
-os.environ.pop("LS_TUTORIAL_PACK")
+pack_path = os.environ.pop("LS_TUTORIAL_PACK")
 boxes.clear()
 picked = []
-import tutorial_pack                                            # noqa: E402
 MW.QFileDialog.getOpenFileName = staticmethod(lambda *a, **k: picked.append(1) or ("", ""))
 w.start_tutorial()
-chk("with no pack it offers to choose one", picked, [1])
+chk("with no pack it says what is needed", len(boxes), 1)
+chk("...then offers to choose one", picked, [1])
 chk("...and opens nothing", norm(w.config_path), real)
+
+print("--- a chosen pack that is no good ---")
+bad = os.path.join(TMP, "not a pack")
+os.makedirs(bad)
+MW.QFileDialog.getOpenFileName = staticmethod(
+    lambda *a, **k: picked.append(2) or (os.path.join(bad, "pack.json"), ""))
+picked.clear()
+w.start_tutorial()
+chk("a bad pack is not remembered", TP.settings().get("pack"), None)
+MW.QFileDialog.getOpenFileName = staticmethod(lambda *a, **k: picked.append(3) or ("", ""))
+TP.save_settings({"pack": bad})              # as an older version would have left it
+picked.clear()
+w.start_tutorial()
+chk("a remembered pack that is no good offers the picker again", picked, [3])
+chk("...and is forgotten", TP.settings().get("pack"), None)
 
 print("--- first run ---")
 asked.clear()
+w._offer_tutorial_once()
+chk("with no demo study the first-run offer is not made", asked, [])
+chk("...and is kept for when there is one", TP.settings().get("offered"), None)
+os.environ["LS_TUTORIAL_PACK"] = pack_path
 w._offer_tutorial_once()
 w._offer_tutorial_once()
 chk("the first-run offer appears once", len(asked), 1)

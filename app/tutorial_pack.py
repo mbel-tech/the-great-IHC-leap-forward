@@ -18,7 +18,6 @@ tutorial settings file in the app's home folder.
 import json
 import os
 import shutil
-import tempfile
 import zipfile
 
 ANSWER_KEY = "ls_roi_curator_v1"
@@ -106,8 +105,33 @@ class Pack:
             return {}
 
 
+def _cache_dir():
+    import ls_config as LC
+    return os.path.join(LC.app_home(), "tutorial-pack")
+
+
 def _extract(zpath):
-    dest = tempfile.mkdtemp(prefix="ls-tutorial-pack-")
+    """Unzip the pack once into the app's home and reuse it while the zip is unchanged.
+
+    Every start would otherwise leave a whole copy of the pack (slides and
+    ready-made results) in the temp folder.
+    """
+    st = os.stat(zpath)
+    stamp = f"{os.path.basename(zpath)}|{st.st_size}|{int(st.st_mtime)}"
+    cache = _cache_dir()
+    dest = os.path.join(cache, "pack")
+    stamp_file = os.path.join(cache, "stamp.txt")
+    try:
+        with open(stamp_file, encoding="utf-8") as fh:
+            if fh.read() == stamp:
+                return _pack_root(dest)
+    except OSError:
+        pass
+    if os.path.exists(stamp_file):
+        os.remove(stamp_file)          # until this extraction is whole
+    if os.path.isdir(dest):
+        shutil.rmtree(dest)
+    os.makedirs(dest)
     real = os.path.realpath(dest)
     try:
         with zipfile.ZipFile(zpath) as z:
@@ -124,11 +148,23 @@ def _extract(zpath):
     except PackError:
         shutil.rmtree(dest, ignore_errors=True)
         raise
-    # A zip made of the folder itself has one top-level folder holding pack.json.
-    if not os.path.isfile(os.path.join(dest, "pack.json")):
-        subs = [d for d in os.listdir(dest) if os.path.isdir(os.path.join(dest, d))]
-        if len(subs) == 1 and os.path.isfile(os.path.join(dest, subs[0], "pack.json")):
-            return os.path.join(dest, subs[0])
+    with open(stamp_file, "w", encoding="utf-8") as fh:
+        fh.write(stamp)
+    return _pack_root(dest)
+
+
+def _pack_root(dest):
+    """Where pack.json is: the top, or the one folder a zip of the folder itself holds.
+
+    A zip made by macOS Finder also holds __MACOSX/ and dot files beside it; they
+    are not part of the pack.
+    """
+    if os.path.isfile(os.path.join(dest, "pack.json")):
+        return dest
+    subs = [d for d in os.listdir(dest) if os.path.isdir(os.path.join(dest, d))
+            and d != "__MACOSX" and not d.startswith(".")]
+    if len(subs) == 1 and os.path.isfile(os.path.join(dest, subs[0], "pack.json")):
+        return os.path.join(dest, subs[0])
     return dest
 
 
@@ -152,6 +188,32 @@ def open_pack(path):
 
 # ---- installing -------------------------------------------------------------------
 
+KEEP_PATHS = ("source_dir", "out_root")
+
+
+def clear_paths(cfg):
+    """Drop every folder or file setting but the slides and the output folder.
+
+    A study's settings can point outside the study (scene pictures written to a
+    folder of their own, exports somewhere shared). Kept in the tutorial study,
+    those would write into the real study's folders. Dropped rather than
+    blanked: an empty optional folder is refused by the settings check, which
+    would stop every stage. An allow-list, so a path setting added later is
+    dropped too.
+    """
+    import ls_config as LC
+    for key in LC.SPEC:
+        if not key.type.startswith("path") or key.path in KEEP_PATHS:
+            continue
+        *parents, leaf = key.path.split(".")
+        d = cfg
+        for part in parents:
+            d = d.get(part) if isinstance(d, dict) else None
+        if isinstance(d, dict):
+            d.pop(leaf, None)
+    return cfg
+
+
 def install(pack, home, fresh=False):
     """Make the tutorial study in `home` from the pack; returns its study file."""
     if os.path.isdir(home) and os.listdir(home):
@@ -167,10 +229,9 @@ def install(pack, home, fresh=False):
     with open(os.path.join(pack.root, "study", "study.json"), encoding="utf-8") as fh:
         cfg = json.load(fh)
     cfg.pop("curation", None)
+    # Again here, not only when the pack was cut: a pack can come from anywhere.
+    clear_paths(cfg)
     cfg["source_dir"], cfg["out_root"] = slides, out
-    for key in ("export_dir", "atlas_pdf"):
-        if key in cfg:
-            cfg[key] = ""
     study = os.path.join(out, "study.json")
     with open(study, "w", encoding="utf-8") as fh:
         json.dump(cfg, fh, indent=2)

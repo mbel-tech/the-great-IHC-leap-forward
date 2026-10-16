@@ -138,9 +138,10 @@ def cmd_cut(a):
     renamed = {p: new_uid(p, scene_map) for p in practice}
     with open(a.study, encoding="utf-8") as fh:
         cfg = json.load(fh)
-    for key in ("source_dir", "out_root", "export_dir", "atlas_pdf"):
-        if key in cfg:
-            cfg[key] = ""
+    import tutorial_pack as TP
+    TP.clear_paths(cfg)
+    for key in TP.KEEP_PATHS:
+        cfg[key] = ""
     for key in ("curation", "project", "groups"):
         cfg.pop(key, None)
     cfg.setdefault("study", {})["name"] = "Tutorial study"

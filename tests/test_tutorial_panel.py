@@ -105,6 +105,13 @@ chk("a slow step offers ready-made results", btn("tutReady").isVisible())
 w.stage_finished.emit("scene_renders", False)
 chk("a failure is said in the panel", "did not finish" in c.panel.text.text())
 chk("...and ready-made is still offered", btn("tutReady").isEnabled())
+w._thread = object()                     # Prepare's Run all is still going
+btn("tutReady").click()
+app.processEvents()
+chk("ready-made results are not copied over a running stage's files",
+    os.path.isfile(os.path.join(OUT, "qc", "scene_renders.csv")), False)
+chk("...and the step waits", c.current.sid, "scene_pictures")
+w._thread = None
 btn("tutReady").click()
 app.processEvents()
 chk("use_ready copies the pack's results",
@@ -196,6 +203,14 @@ w.curator.store.write("ls_roi_curator_v1", json.dumps(TF.ANSWER))
 w.curator.exported.emit(os.path.join(OUT, "exports", "roi_regions_y.csv"))
 app.processEvents()
 chk("matching outlines are all good", "3 of 3" in w.findChild(QWidget, "tutCheck").text())
+w.curator.show_key(TF.PRACTICE[0], [])          # as if some were off
+w.study_opened.emit(STUDY.path)
+app.processEvents()
+chk("another study does not get the expert's outlines", w.curator._tut_key, "")
+w.study_opened.emit(study)
+app.processEvents()
+w.curator.exported.emit(os.path.join(OUT, "exports", "roi_regions_z.csv"))
+app.processEvents()
 btn("tutCarryOn").click()
 app.processEvents()
 chk("carry on ticks the practice and moves on", c.current.sid, "place_rois")

@@ -63,6 +63,21 @@ with zipfile.ZipFile(evil, "w") as zz:
     zz.writestr("../evil.txt", "x")
 chk("zip slip refused", raises(lambda: TP.open_pack(evil)) is not None)
 chk("...nothing written outside", os.path.exists(os.path.join(TMP, "evil.txt")), False)
+chk("...nor beside the unpacked copy",
+    os.path.exists(os.path.join(os.environ["LS_HOME"], "tutorial-pack", "evil.txt")), False)
+
+z2 = TP.open_pack(zpath)
+chk("a zip pack is unpacked once and reused", z2.root, z.root)
+chk("...after a refused zip, too", os.path.isfile(os.path.join(z2.root, "pack.json")))
+mac = os.path.join(TMP, "finder.zip")
+with zipfile.ZipFile(mac, "w") as zz:
+    for dirpath, _dirs, files in os.walk(src):
+        for f in files:
+            full = os.path.join(dirpath, f)
+            zz.write(full, os.path.join("pack", os.path.relpath(full, src)))
+    zz.writestr("__MACOSX/pack/._pack.json", "x")
+    zz.writestr(".DS_Store", "x")
+chk("a zip made by macOS Finder opens", raises(lambda: TP.open_pack(mac)), None)
 
 print("--- finding a pack ---")
 app_root = os.path.join(TMP, "app")
@@ -89,6 +104,12 @@ chk("outputs inside the tutorial folder", proj.get("out_root"), os.path.join(hom
 chk("slide copied", os.path.isfile(os.path.join(home, "slides", "LS22_1a.czi")))
 chk("workbook is the unblinding stage's option", proj.stage_options("join_sampling"),
     {"--xlsx": os.path.join(home, "sampling.xlsx")})
+import ls_config as LC                                          # noqa: E402
+with open(study, encoding="utf-8") as fh:
+    installed = json.load(fh)
+chk("the installed settings pass the settings check", LC.validate(installed)[0], [])
+chk("...with no folder of another study kept",
+    "out_dir" in (installed.get("scene_render") or {}), False)
 chk("install twice refuses", raises(lambda: TP.install(p, home)) is not None)
 open(os.path.join(home, "output", "mine.txt"), "w").write("x")
 TP.install(p, home, fresh=True)

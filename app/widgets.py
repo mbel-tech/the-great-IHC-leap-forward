@@ -378,6 +378,7 @@ class StageRow(QFrame):
         # A curator opens its page; a stage named in workflow.FOLDERS opens the
         # folder of pictures it made, once there is something in it.
         self.open_btn = QPushButton(open_label or "Open")
+        self.open_btn.setObjectName(f"open_{stage.sid}")
         T.mark(self.open_btn, kind="small")
         self._has_open = bool(stage.curator or open_label)
         self.open_btn.setVisible(self._has_open)
@@ -386,6 +387,7 @@ class StageRow(QFrame):
         self.info = InfoButton(stage.title, "")
         al.addWidget(self.info)
         self.run_btn = QPushButton("Build page" if stage.curator else "Run")
+        self.run_btn.setObjectName(f"run_{stage.sid}")
         self.run_btn.setMinimumWidth(96)
         self.run_btn.clicked.connect(self._action)
         al.addWidget(self.run_btn)

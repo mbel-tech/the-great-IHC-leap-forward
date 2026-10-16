@@ -154,6 +154,7 @@ class CuratorView(QWidget):
         # bar rather than on the screen around it so it moves with the page into
         # its own window.
         self.done_btn = QPushButton("", self)
+        self.done_btn.setObjectName("curatorDone")
         T.mark(self.done_btn, kind="primary")
         self.done_btn.setVisible(False)
         self.done_btn.clicked.connect(self.done_requested.emit)

@@ -226,6 +226,7 @@ class StageListScreen(QWidget):
         bar = QHBoxLayout()
         bar.setSpacing(10)
         self.run_all = QPushButton("Run all remaining")
+        self.run_all.setObjectName(f"runAll_{screen.sid}")
         self.run_all.setMinimumHeight(34)
         T.mark(self.run_all, kind="primary")
         self.run_all.clicked.connect(self._run_all)
@@ -825,6 +826,7 @@ class SetupScreen(QWidget):
             "is still empty is always shown.</p>"))
         lay.addLayout(adv)
         self.tabs = QTabWidget()
+        self.tabs.setObjectName("setupTabs")
         lay.addWidget(self.tabs, 1)
         self._slides_tab = QWidget()
         sl = QVBoxLayout(self._slides_tab)
@@ -845,6 +847,7 @@ class SetupScreen(QWidget):
         sl.addLayout(top)
         read = QHBoxLayout()
         self.detect_btn = QPushButton("Read settings from the slides")
+        self.detect_btn.setObjectName("readSettings")
         self.detect_btn.setToolTip("Read pixel size, file names and channels from the slide "
                                    "files' headers and fill in the settings not yet set")
         self.detect_btn.clicked.connect(self.detect_from_slides)

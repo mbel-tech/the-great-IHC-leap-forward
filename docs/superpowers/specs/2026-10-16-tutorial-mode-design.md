@@ -123,8 +123,8 @@ file..." to point at a lab-shared `.zip`. Which of these is used is the
 user's later decision; both paths are built.
 
 **Making the pack**: a script `scripts/make_demo_pack.py` crops the chosen
-whole scenes from a source CZI losslessly (subblocks copied, no re-encoding,
-native resolution kept), writes `study.json`, runs the slow stages once to
+whole scenes from a source CZI losslessly (native pixels of every channel
+written with lossless zstd compression, never JPEG-XR or downsampled), writes `study.json`, runs the slow stages once to
 fill `ready/`, and copies the answer-key curation for the practice sections.
 It records the source slide and scene ids in `pack.json`. Before the answer
 key is trusted, the script checks that the cropped sections reformat to the

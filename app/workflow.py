@@ -805,6 +805,9 @@ BASIC = {
     "slide_naming.pattern",
     "section_thickness_um",
     "atlas_source",
+    # Beside the atlas, not under advanced: with Wullimann's one-sided outlines
+    # it decides whether the curator numbers one hemisphere or both.
+    "atlas_polygon_mirror",
 }
 
 

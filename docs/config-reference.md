@@ -51,7 +51,7 @@ A key marked *required* has to be present before any stage will run.
 | `detection.auto` | raw |  | `05c` | What 05b measured about each marker's signal and the detection settings it chose from that. |
 | `atlas_source` | str | `"salmon"` | `04e`, `04k`, `04l`, `04w`, `04x` | Which atlas the run uses: salmon (the default), wullimann1996, or one you imported. |
 | `atlas_rebuild_plates` | bool | `false` | `app` | Build the built-in atlas's plates again from its source instead of using the plates that ship with the app. |
-| `atlas_polygon_mirror` | bool | `false` | `04l` | Mirror the plate outlines about the midline, for an atlas whose outlines cover one hemisphere (Wullimann). |
+| `atlas_polygon_mirror` | bool | `false` | `04l` | Draw the plate outlines on both sides of the brain in the ROI curator, numbered 1a/1b, 2a/2b... For an atlas whose outlines cover one hemisphere (Wullimann); greyed out for any other. |
 | `atlases` | raw | `{}` | `04e`, `04k`, `04l` | Atlases this study registered itself, beside the built-in salmon and wullimann1996: {name: {set_dir, region_kind, ...}}. |
 | `atlas_plate_set.dir` | str | `"plates_final"` | `04e`, `04k`, `04l` | Which plate set the ROI curator and the registration use. |
 | `atlas_figure_sections.two_sections` | str_opt |  | `04a3b` | Inclusive figure-number range, as a string, of merged figures holding two sections each - e.g. "31-47". Empty leaves every figure at whatever 04a2 detected. |

@@ -373,6 +373,34 @@ class SettingsForm(QWidget):
         if channel_tools and "acquisition.layout" not in self.rows:
             self._add_channel_tools(form, cfg)
 
+        if self.widgets.get("atlas_polygon_mirror") is not None and \
+                isinstance(getattr(self, "atlas_combo", None), QComboBox):
+            self.atlas_combo.currentTextChanged.connect(self._atlas_changed)
+            self._sync_mirror(self.atlas_combo.currentText(), tick=False)
+
+    def _mirror_allowed(self, name):
+        """Whether `name`'s outlines cover one side and so can be mirrored."""
+        try:
+            return bool(AR.get(self._load(), name).mirror_allowed)
+        except ValueError:
+            return False
+
+    def _sync_mirror(self, name, tick):
+        """Mirroring only means something for a one-sided atlas, so it is greyed
+        out for the others. `tick` also sets it to that atlas's default, which
+        is what choosing an atlas in the list does; opening the form does not."""
+        box = self.widgets["atlas_polygon_mirror"]
+        allowed = self._mirror_allowed(name)
+        if tick:
+            box.setChecked(allowed)
+        box.setEnabled(allowed)
+        box.setToolTip("" if allowed else
+                       "This atlas outlines both sides already, so there is nothing to mirror")
+
+    def _atlas_changed(self, name):
+        if name:
+            self._sync_mirror(name, tick=True)
+
     def _add_channel_tools(self, form, cfg):
         cb = QPushButton("Channels and markers...")
         cb.setToolTip("name each channel, say which are markers, and choose "

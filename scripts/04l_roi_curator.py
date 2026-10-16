@@ -1493,7 +1493,8 @@ canvas{display:block;width:100%;height:100%;object-fit:contain;cursor:crosshair;
        highlighted and numbered on the atlas plate; the rest are dimmed and
        cannot be clicked. The choice applies to every section and animal, and
        you can reopen this with <b>o</b> at any time. It never deletes a
-       polygon you have already drawn.</p>
+       polygon you have already drawn. Choose <b>None</b> to draw no ROIs at
+       all, for example to only assign plates and pick favourites for Shotgun.</p>
     <input id="selFilter" placeholder="filter regions..." oninput="selRender()">
     <div id="selList" onclick="selPick(event)"></div>
     <div class="selbar">
@@ -2857,6 +2858,9 @@ addEventListener("mouseup", ()=>{
 //
 // null means nothing was chosen, and then every region is selected and the
 // numbers are the stored `roi`, i.e. exactly what this page did before.
+// [] means the operator chose NO ROIs: they assign plates and pick favourites
+// for Shotgun and draw nothing. Stored as {"none": true}, because a stored []
+// already means "asked, chose all".
 const SEL_KEY = "ls_roi_curator_v1_rois";
 const SEL_SEED = __ROISEL__;
 const SEL_GREY = "#7d8590";
@@ -2871,6 +2875,7 @@ const PART_LETTERS = "abcdefghijklmnopqrstuvwxyz";
 function parseSel(raw){
   try {
     const a = typeof raw === "string" ? JSON.parse(raw) : raw;
+    if(a && typeof a === "object" && !Array.isArray(a) && a.none === true) return [];
     if(!Array.isArray(a)) return null;
     const out = [];
     for(const n of a) if(typeof n === "string" && n && !out.includes(n)) out.push(n);
@@ -2884,6 +2889,7 @@ let SEL = (() => {
   try { const raw = ownOr(SEL_KEY); if(raw !== undefined) v = parseSel(raw); } catch(e){}
   return v || parseSel(SEL_SEED);
 })();
+const noRois    = () => SEL !== null && !SEL.length;
 const isSel     = h => SEL === null || SEL.includes(h.region);
 const selRank   = h => SEL === null ? 0 : SEL.indexOf(h.region) + 1;
 const selColour = h => !h ? "#4da3ff"
@@ -2974,8 +2980,8 @@ function selRender(){
         + `<span class="sw"></span><span class="nm">${selEsc(n)}</span>`
         + `<span class="ct">${selEsc(why)}</span></div>`).join("");
   }
-  el("selCount").textContent = `${selDraft.length} selected`;
-  el("selOk").disabled = !selDraft.length;
+  el("selCount").textContent = selDraft.length ? `${selDraft.length} selected`
+    : "none selected - no ROIs, just plates and favourites (for Shotgun)";
 }
 function selPick(e){
   let t = e && e.target;
@@ -2997,9 +3003,9 @@ function selNone(){ if(selIsOpen()){ selDraft = []; selRender(); } }
 function selClose(){ selDraft = null; el("selDlg").style.display = "none"; }
 function selStore(v){ try { saveStudy(SEL_KEY, v); } catch(e){} }
 function selConfirm(){
-  if(!selIsOpen() || !selDraft.length) return;
+  if(!selIsOpen()) return;
   SEL = selDraft.slice();
-  selStore(SEL);
+  selStore(SEL.length ? SEL : {none: true});
   selClose();
   draft = null; gSync(); drawPl(); drawSec(); status();
 }
@@ -3654,9 +3660,11 @@ function status(){
     el("secTitle").textContent = tgt
       ? (draft ? `SECTION - drawing ROI ${dispLabel(tgt)} (${nameOf(tgt)}) - ${nv} corners`
                : `SECTION - draw ROI ${dispLabel(tgt)} (${nameOf(tgt)})`)
+      : noRois() ? "SECTION - no ROIs chosen"
       : "SECTION - every ROI on this plate is drawn";
     el("plTitle").textContent = tgt
       ? `ATLAS PLATE - ROI ${dispLabel(tgt)} (${nDone + 1} of ${nRois}) is the target`
+      : noRois() ? "ATLAS PLATE - no ROIs chosen; assign the plate"
       : "ATLAS PLATE - list finished; click an ROI to go back to it";
     el("lmHint").innerHTML = tgt
       ? `<b style="color:${selColour(tgt)}">ROI ${dispLabel(tgt)}</b> &middot; `
@@ -3664,6 +3672,7 @@ function status(){
         + `<br><span style="color:var(--dim)">click each corner &middot; `
         + `<b>Enter</b>, a double-click or the first corner closes it &middot; `
         + `z drops a corner &middot; Skip if it is not on this section</span>`
+      : noRois() ? "no ROIs chosen - assign the plate, press <b>f</b> to favourite it for Shotgun, <b>o</b> to choose ROIs"
       : `all ${nRois} ROIs drawn - click one on the plate to redo it`;
     if(!draft && nPoly) el("lmHint").innerHTML +=
       `<br><span style="color:var(--dim)">drag a corner to move it &middot; click an`
@@ -3799,6 +3808,7 @@ function coach(){
                     + " This is the only rotation step."],
     guide: ["Guided", tgt
       ? `Click where ROI ${dispLabel(tgt)} belongs on the section. Enter or double-click closes the region.`
+      : noRois() ? "No ROIs chosen (press o to change). Assign the plate and mark favourites for Shotgun."
       : "Every chosen ROI on this plate is drawn. Click one on the plate to redo it."],
     lm:    ["Landmarks", "Click the section, then the matching point on the plate."
                        + " Wheel zooms; middle or right drag pans."]}[mode];

@@ -684,9 +684,10 @@ note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
         consumers=["app"]),
 
     Key("atlas_polygon_mirror", "bool",
-        "Mirror the plate outlines about the midline, for an atlas whose "
-        "outlines cover one hemisphere (Wullimann).",
-        default=False, label="Mirror atlas polygons",
+        "Draw the plate outlines on both sides of the brain in the ROI curator, "
+        "numbered 1a/1b, 2a/2b... For an atlas whose outlines cover one "
+        "hemisphere (Wullimann); greyed out for any other.",
+        default=False, label="Mirror outlines to both sides",
         note="Each Wullimann plate draws one hemisphere beside the micrograph "
              "of the other, so the outlines cover half the brain. Mirroring "
              "gives the numbered guide on both sides in 04l. Registration "

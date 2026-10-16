@@ -219,7 +219,7 @@ Changing the resolution or brightness makes the next run redraw the pictures.
 | Atlas | **salmon** (default), **wullimann1996** (zebrafish), or one you added |
 | Rebuild atlas plates | Advanced, off. The salmon and Wullimann plates ship ready-made with the app, so the plate-building stages are left out. Turn on only to make a plate set again from the PDF. |
 | Atlas PDF | The salmon atlas file the plates and regions are taken from (only used when rebuilding) |
-| Mirror atlas polygons | For an atlas whose outlines cover only one side of the brain (Wullimann) |
+| Mirror outlines to both sides | For an atlas whose outlines cover only one side of the brain (Wullimann) |
 | Atlas plate set | Which set of plates the ROI curator shows. Leave at `plates`. |
 | Two-section figures | Salmon only: the figure numbers that show two sections each, for example `31-47` |
 

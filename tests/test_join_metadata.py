@@ -177,6 +177,13 @@ with tempfile.TemporaryDirectory() as tmp:
     chk("check: groups counted as 06b would write them", rep["groups"],
         {"control": 1, "exercise": 2})
     chk("check: nothing written beside the workbook", sorted(os.listdir(tmp)), before)
+    chk("group_key: the Shotgun key holds only fish with a group",
+        S.group_key(rep), {"order": ["control", "exercise"],
+                           "by_animal": {"LS1": "control", "LS2": "exercise",
+                                         "LS3": "exercise"}})
+    chk("group_key: a failed check gives no key",
+        S.group_key({"error": "x", "by_animal": {"LS1": "control"}}),
+        {"order": [], "by_animal": {}})
     lines = S.words(rep)
     chk("check: the words name the missing fish", any("LS9" in ln for ln in lines), True)
     # The same rows through 06b's own join give the same groups.

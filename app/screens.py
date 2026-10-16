@@ -870,10 +870,16 @@ class SetupScreen(QWidget):
         self.workbook_field.edit.setPlaceholderText("(the workbook in the slide folder)")
         self.workbook_field.valueChanged.connect(self._workbook_chosen)
         book.addWidget(self.workbook_field, 1)
+        self.match_sheet_btn = QPushButton("Match the sheet…")
+        self.match_sheet_btn.setToolTip(
+            "Say which column is the animal and which hold the treatment, checked against "
+            "the animals in the slide file names as you choose")
+        self.match_sheet_btn.clicked.connect(self.match_sheet)
+        book.addWidget(self.match_sheet_btn)
         self.check_workbook_btn = QPushButton("Check workbook")
         self.check_workbook_btn.setToolTip(
-            "Match the study's fish to the workbook the way Unblind will, without writing "
-            "anything: how many get a group, which have no row, which groups are blank")
+            "Match the study's animals to the workbook the way Unblind will, without "
+            "writing anything: how many get a group, which have no row, which are blank")
         self.check_workbook_btn.clicked.connect(self.check_workbook)
         book.addWidget(self.check_workbook_btn)
         sl.addLayout(book)
@@ -938,6 +944,7 @@ class SetupScreen(QWidget):
         project = self.session.project
         self.workbook_field.setValue(project.stage_options("join_sampling").get("--xlsx", ""))
         self.workbook_field.setEnabled(not project.read_only)
+        self.match_sheet_btn.setEnabled(not project.read_only)
         self._sync_groups()
         while self.tabs.count() > 1:
             w = self.tabs.widget(1)
@@ -1151,6 +1158,31 @@ class SetupScreen(QWidget):
         self.workbook_line.setText("")
         self.options_changed.emit("join_sampling", values)
 
+    def match_sheet(self):
+        """Open Match the sheet on the chosen workbook; Save keeps the study's `sampling`."""
+        import sheet_match as SM
+        import workbook_check as WC
+        project = self.session.project
+        typed = self.workbook_field.value()
+        path = WC.workbook_path(project.cfg, {"--xlsx": typed} if typed else
+                                project.stage_options("join_sampling"))
+        if not path or not os.path.isfile(path):
+            self.workbook_line.setText("Choose the sampling workbook first: %s."
+                                       % ("there is no file at " + path if path
+                                          else "none is chosen"))
+            self.workbook_line.setStyleSheet(f"color:{COLOUR['failed']}")
+            return
+        animals, where = WC.study_animals(project.cfg)
+        dlg = SM.SheetMatchDialog(path, animals, where, project.get("sampling"), self)
+        if not dlg.exec() or project.read_only:
+            return
+        if project.set("sampling", dlg.mapping(), by="Set up: Match the sheet"):
+            self.session.touch()
+            self.logged.emit("sampling sheet columns chosen: animal '%s', treatment %s"
+                             % (dlg.mapping()["id_column"],
+                                ", ".join("'%s'" % h for h in dlg.mapping()["group_columns"])))
+        self.check_workbook()
+
     def check_workbook(self, load=False):
         """Start the dry run of 06b's join; the answer lands in _workbook_checked.
 
@@ -1173,7 +1205,7 @@ class SetupScreen(QWidget):
             self.workbook_line.setStyleSheet(QUIET)
             if self._load_groups_after_check:
                 self._load_groups_after_check = False
-                self._sync_groups("No groups loaded: the study has no fish yet.", bad=True)
+                self._sync_groups("No groups loaded: the study has no animals yet.", bad=True)
             return
         lines = SAMPLING.words(rep) if "matched" in rep else [
             "The workbook could not be checked: %s." % rep.get("error")]
@@ -1199,7 +1231,7 @@ class SetupScreen(QWidget):
         project = self.session.project
         key = SAMPLING.group_key(rep)
         if project.read_only or not key["by_animal"]:
-            self._sync_groups("No groups loaded: the workbook gave no fish a group."
+            self._sync_groups("No groups loaded: the workbook gave no animal a group."
                               if not project.read_only else None, bad=True)
             return
         missing = (rep.get("missing") or []) + [a for a, _ in rep.get("blank") or []]
@@ -1221,7 +1253,7 @@ class SetupScreen(QWidget):
         self.build()
         self.applied.emit()
         self.logged.emit("treatment groups loaded from the workbook for the Shotgun deck "
-                         "(%d fish)" % len(key["by_animal"]))
+                         "(%d animals)" % len(key["by_animal"]))
         self._sync_groups()
 
     def clear_groups(self):
@@ -1255,7 +1287,7 @@ class SetupScreen(QWidget):
             self.groups_line.setText(
                 "Groups kept for the Shotgun deck: %s (left to right: %s). Press Build page "
                 "on the ROI curator to turn Shotgun on. Curation and counting stay blind."
-                % (", ".join("%s %d fish" % (g, counts[g]) for g in sorted(counts)),
+                % (", ".join("%s %d animals" % (g, counts[g]) for g in sorted(counts)),
                    ", ".join(order) or "not set"))
         else:
             self.groups_line.setText("No treatment groups in the study: the analysis is "

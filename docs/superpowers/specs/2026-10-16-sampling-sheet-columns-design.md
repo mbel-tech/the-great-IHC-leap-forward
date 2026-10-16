@@ -37,8 +37,8 @@ cannot be read at all.
   "ignore_columns": [],
   "match": "auto",
   "fill": [
-    {"column": "brackish Tank", "values": ["303", "304", "307", "308"], "group": "exercise"},
-    {"column": "brackish Tank", "values": ["305", "306", "309", "310"], "group": "control"}
+    {"when": "brackish Tank", "is": ["303", "304", "307", "308"], "set": "treatment", "to": "exercise"},
+    {"when": "brackish Tank", "is": ["305", "306", "309", "310"], "set": "treatment", "to": "control"}
   ]
 }
 ```
@@ -47,12 +47,16 @@ cannot be read at all.
   header renamed later is reported by name; nothing is guessed.
 - `match`: `auto` = exact text first, then by number if exact matches nothing;
   `exact` and `number` force one. The check always says which one was used.
-- `fill` rules apply only to animals whose group cells are all blank, in order.
-  Each animal so filled is marked `group_source = rule` in the results.
+- A `fill` rule gives one blank treatment cell (`set`) a value (`to`) when
+  another column (`when`) holds one of `is`; the first rule that fits wins.
+  An animal is grouped only when every treatment cell has a value. Each animal
+  so filled is marked `treatment_source = rule` in the results.
 - The workbook path stays where it is today (06b's `--xlsx` option).
 - **Studies with no `sampling` block:** if the sheet has this study's headers,
-  the old mapping is used, tank rule included, so the laptop study's results
-  do not change. Otherwise Check and Unblind stop with "choose the animal and
+  the old mapping is used, tank rule included, so the laptop study's groups
+  and sources do not change. The carried columns are now named from the
+  headers (`brackish_tank`, `slicing_ihc_july_2025`), and the sheet's ID is
+  `sheet_id` rather than `fish_id`; nothing downstream reads those names. Otherwise Check and Unblind stop with "choose the animal and
   treatment columns in Set up > Slides > Match the sheet...".
 - `sampling` is in `ls_config.SPEC` (validated, exported with settings). It is
   not the unblinding key itself, so a blinded copy keeps it.

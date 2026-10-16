@@ -169,11 +169,12 @@ with tempfile.TemporaryDirectory() as tmp:
     before = sorted(os.listdir(tmp))
     rep = S.check(book, {"LS1": 2, "LS2": 2, "LS3": 1, "LS4": 1, "LS9": 3})
     chk("check: no error on a readable workbook", rep["error"], None)
+    chk("check: an LS sheet with no choice saved reads as before", rep["rule"], "number")
     chk("check: fish matched to a group", sorted(rep["matched"]), ["LS1", "LS2", "LS3"])
     chk("check: ...and the slides they cover", rep["slides_matched"], 5)
     chk("check: a fish with no row is named", rep["missing"], ["LS9"])
-    chk("check: a blank group no tank recovers is named", rep["blank"], [("LS4", "999")])
-    chk("check: a group read from the tank is said so", rep["from_tank"], ["LS3"])
+    chk("check: a blank group no rule fills is named", [a for a, _w in rep["blank"]], ["LS4"])
+    chk("check: a group filled by the tank rule is said so", rep["from_rule"], ["LS3"])
     chk("check: groups counted as 06b would write them", rep["groups"],
         {"control": 1, "exercise": 2})
     chk("check: nothing written beside the workbook", sorted(os.listdir(tmp)), before)
@@ -186,13 +187,70 @@ with tempfile.TemporaryDirectory() as tmp:
         {"order": [], "by_animal": {}})
     lines = S.words(rep)
     chk("check: the words name the missing fish", any("LS9" in ln for ln in lines), True)
-    # The same rows through 06b's own join give the same groups.
-    col, sheet = S.read_table(book)
-    j = S.join(["LS1", "LS2", "LS3", "LS4"], col, sheet)
+    # 06b's own join of the same rows gives the same groups, with sources.
+    headers, rows = S.table(book)
+    m = S.legacy_mapping(headers)
+    j = S.join(["LS1", "LS2", "LS3", "LS4"], headers, rows, m)
     chk("06b's join and the check agree on every group",
-        {a: m["treatment"] for a, m in j["meta"].items()},
-        {"LS1": "control", "LS2": "exercise", "LS3": "exercise", "LS4": ""})
+        {a: (x["treatment"], x["treatment_source"]) for a, x in j["meta"].items()},
+        {"LS1": ("control", "sheet"), "LS2": ("exercise", "sheet"),
+         "LS3": ("exercise", "rule"), "LS4": ("", "unresolved")})
+    chk("...every other column carried under its header",
+        {"timepoint", "brackish_tank", "slicing_ihc_july_2025"} <= set(j["meta"]["LS1"]), True)
+    chk("...and the ID column as sheet_id", j["meta"]["LS1"]["sheet_id"], "1")
 
+print("--- any sheet: the columns are chosen ---")
+with tempfile.TemporaryDirectory() as tmp:
+    book = os.path.join(tmp, "other.xlsx")
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "notes"
+    ws.append(["nothing here"])
+    ws2 = wb.create_sheet("animals")
+    ws2.append(["Animal", "Diet", "Week", "Weight", "Comment"])
+    ws2.append(["LS1", "High", 1, 3.5, "ok"])
+    ws2.append(["ls2", "Low", 1, 3.1, ""])
+    ws2.append(["LS3", "High", 2, 2.9, "x"])
+    ws2.append(["LS4", "", 2, 3.0, ""])
+    ws2.append(["LS77", "Low", 1, 3.0, ""])
+    wb.save(book)
+    chk("sheet_names: every worksheet, in order", [n for n, _m in S.sheet_names(book)],
+        ["notes", "animals"])
+    headers, rows = S.table(book, "animals")
+    chk("table: the header row", headers, ["Animal", "Diet", "Week", "Weight", "Comment"])
+    chk("not an LS sheet: no legacy choice", S.legacy_mapping(headers), None)
+    rep = S.check(book, {"LS1": 1, "LS2": 1})
+    chk("no choice and not LS: says to choose the columns",
+        "Match the sheet" in (rep["error"] or ""), True)
+    g = S.guess(headers, rows, ["LS1", "LS2", "LS3"])
+    chk("guess: the column that matches the animals is the ID", g["id_column"], "Animal")
+    chk("guess: no treatment-like header, none guessed", g["group_columns"], [])
+    m = {"id_column": "animal", "group_columns": ["Diet", "Week"],
+         "ignore_columns": ["Comment"], "match": "auto", "fill": [], "sheet": "animals"}
+    j = S.join(["LS1", "LS2", "LS3", "LS4", "LS9"], headers, rows, m)
+    chk("exact match, case ignored", j["rule"], "exact")
+    chk("two treatment columns make one group",
+        {a: x["treatment"] for a, x in j["meta"].items()},
+        {"LS1": "High \u00b7 1", "LS2": "Low \u00b7 1", "LS3": "High \u00b7 2", "LS4": ""})
+    chk("...an animal with no row is missing", j["missing"], ["LS9"])
+    chk("...a sheet ID with no slide is listed", j["unused_ids"], ["LS77"])
+    chk("...Ignore keeps a column out of the results", "comment" in j["meta"]["LS1"], False)
+    chk("...Keep carries it", j["meta"]["LS1"]["weight"], "3.5")
+    m["fill"] = [{"when": "Weight", "is": ["3"], "set": "Diet", "to": "Low"}]
+    j = S.join(["LS4"], headers, rows, m)
+    chk("a fill rule gives the blank cell its value",
+        (j["meta"]["LS4"]["treatment"], j["meta"]["LS4"]["treatment_source"]),
+        ("Low \u00b7 2", "rule"))
+    m2 = dict(m, id_column="Gone")
+    rep = S.check(book, {"LS1": 1}, m2)
+    chk("a renamed header is named, not guessed", "'Gone'" in (rep["error"] or ""), True)
+    found, rule, dup = S.match_ids(["7", "7.0", "8"], ["LS7", "LS8"], "number")
+    chk("an ID on two rows matches nobody", (sorted(found), dup), (["LS8"], ["LS7"]))
+    found, rule, _d = S.match_ids(["22", "23"], ["LS22"], "auto")
+    chk("auto falls back to the number when no name matches", (found, rule),
+        ({"LS22": 0}, "number"))
+
+with tempfile.TemporaryDirectory() as tmp:
     junk = os.path.join(tmp, "junk.xlsx")
     open(junk, "wb").write(b"not a workbook")
     rep = S.check(junk, {"LS1": 1})
@@ -205,8 +263,49 @@ with tempfile.TemporaryDirectory() as tmp:
     odd = os.path.join(tmp, "odd.xlsx")
     wb.save(odd)
     rep = S.check(odd, {"LS1": 1})
-    chk("check: a header 06b cannot read names the column",
-        "treatment" in (rep["error"] or ""), True)
+    chk("check: a sheet that is not LS asks for the columns",
+        "Match the sheet" in (rep["error"] or ""), True)
+
+print("--- 06b itself, end to end ---")
+with tempfile.TemporaryDirectory() as tmp:
+    book = os.path.join(tmp, "sampling.xlsx")
+    wb = openpyxl.Workbook()
+    wb.active.append([LIVE[i] for i in range(len(LIVE))])
+    for fid, tr, tank in ((1, "control", "305"), (2, None, "303")):
+        row = [None] * len(LIVE)
+        row[0], row[1], row[3], row[5], row[17] = fid, 1, tank, tr, "x"
+        wb.active.append(row)
+    wb.save(book)
+    os.makedirs(os.path.dirname(B.MEAS_CSV), exist_ok=True)
+    with open(B.MEAS_CSV, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=["animal", "roi_kind", "value"])
+        w.writeheader()
+        w.writerows([{"animal": "LS1", "roi_kind": "roi", "value": "1"},
+                     {"animal": "LS2", "roi_kind": "roi", "value": "2"}])
+    argv = sys.argv
+    sys.argv = ["06b", "--xlsx", book]
+    try:
+        code = B.main()
+    finally:
+        sys.argv = argv
+    chk("06b on an LS sheet with no choice saved runs", code, 0)
+    with open(B.META_CSV, newline="", encoding="utf-8") as fh:
+        got = {r["animal"]: (r["treatment"], r["treatment_source"]) for r in csv.DictReader(fh)}
+    chk("...and writes the groups it wrote before", got,
+        {"LS1": ("control", "sheet"), "LS2": ("exercise", "rule")})
+    with open(B.DATASET_CSV, newline="", encoding="utf-8") as fh:
+        ds = list(csv.DictReader(fh))
+    chk("...the dataset carries the group and the sheet's columns",
+        (ds[1]["treatment"], "timepoint" in ds[1]), ("exercise", True))
+    sys.argv = ["06b", "--xlsx", book]
+    B.CONFIG["sampling"] = {"id_column": "Fish ID", "group_columns": ["treatment"],
+                            "match": "exact", "fill": []}
+    try:
+        code = B.main()
+    finally:
+        sys.argv = argv
+        B.CONFIG.pop("sampling", None)
+    chk("a saved choice that matches no animal stops 06b", code, 1)
 
 print("\n" + ("ALL PASS" if not fails else f"{fails} FAILED"))
 raise SystemExit(1 if fails else 0)

@@ -73,10 +73,14 @@ def study_animals(cfg):
     return slides, "slide file names"
 
 
-def run(cfg, path):
-    """The report (ls_sampling.check), with where the fish were read from."""
+def run(cfg, path, mapping=None):
+    """The report (ls_sampling.check), with where the animals were read from.
+
+    `mapping` is a choice not saved yet (the Match window's); None uses the
+    study's `sampling` block."""
     animals, where = study_animals(cfg)
-    rep = SAMPLING.check(path, animals)
+    rep = SAMPLING.check(path, animals, mapping if mapping is not None
+                         else (cfg or {}).get("sampling"))
     rep["from"] = where
     return rep
 
@@ -97,16 +101,17 @@ class WorkbookCheck(QObject):
     def busy(self):
         return self._running is not None
 
-    def start(self, cfg, path):
-        """Check `path` against `cfg`'s fish; a check still running is dropped."""
+    def start(self, cfg, path, mapping=None):
+        """Check `path` against `cfg`'s animals; a check still running is dropped."""
         self._n += 1
         self._running = self._n
-        threading.Thread(target=self._run, args=(self._n, copy.deepcopy(cfg), path),
+        threading.Thread(target=self._run, args=(self._n, copy.deepcopy(cfg), path,
+                                                 copy.deepcopy(mapping)),
                          daemon=True, name="workbook-check").start()
 
-    def _run(self, n, cfg, path):
+    def _run(self, n, cfg, path, mapping=None):
         try:
-            rep = run(cfg, path)
+            rep = run(cfg, path, mapping)
         except Exception as exc:                            # noqa: BLE001 - say why
             rep = {"error": "%s: %s" % (type(exc).__name__, exc)}
         try:

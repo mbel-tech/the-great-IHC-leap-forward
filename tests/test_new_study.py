@@ -186,7 +186,7 @@ while s.workbook_check.busy and time.monotonic() < end:
     app.processEvents()
     time.sleep(0.005)
 app.processEvents()
-chk("...and says how many were matched", "1 of 1 fish (4 of 4 slides) matched to a group"
+chk("...and says how many were matched", "1 of 1 animals (4 of 4 slides) matched to a group"
     in s.workbook_line.text(), True)
 chk("...writing nothing", sorted(os.listdir(STUDY.root)), before)
 chk("...not in the results either",
@@ -215,12 +215,62 @@ chk("...recorded by name only, never by value",
     [d for d in project.block.get("decisions", []) if d["key"].startswith("groups.")
      and ("to" in d or "from" in d)], [])
 chk("...the screen gives counts, not which fish",
-    "control 1 fish" in s.groups_line.text() and "LS22" not in s.groups_line.text(), True)
+    "control 1 animals" in s.groups_line.text() and "LS22" not in s.groups_line.text(), True)
 chk("...and Remove turns on", s.clear_groups_btn.isEnabled(), True)
 s.clear_groups_btn.click()
 chk("Remove makes the study blind again",
     (project.get("groups.by_animal"), project.get("groups.order")), ({}, []))
 chk("...and says so", "blind" in s.groups_line.text(), True)
+
+print("--- Set up > Slides: Match the sheet ---")
+import sheet_match as SM                                         # noqa: E402
+other = os.path.join(STUDY.root, "other.xlsx")
+wb = openpyxl.Workbook()
+wb.active.append(["Code", "Animal", "Diet", "Week"])
+wb.active.append(["a", "LS22", "high", 1])
+wb.active.append(["b", "LS99", "low", 2])
+wb.save(other)
+dlg = SM.SheetMatchDialog(other, {"LS22": 4}, "slide file names", None)
+roles = [c.currentText() for c in dlg.roles]
+chk("the ID column is guessed from the slide names", roles[1], "Animal ID")
+chk("...the check says the animal has a row", "1 of 1" in dlg.check.text(), True)
+chk("...and no treatment yet: Save is off", dlg.save_btn.isEnabled(), False)
+dlg.roles[2].setCurrentText("Treatment")
+dlg.roles[3].setCurrentText("Treatment")
+chk("two treatment columns make one group", "high \u00b7 1 1" in dlg.check.text(), True)
+chk("...and Save turns on", dlg.save_btn.isEnabled(), True)
+dlg.roles[0].setCurrentText("Animal ID")
+chk("one ID column: choosing another moves it", dlg.roles[1].currentText(), "Keep")
+chk("...and the check shows the slide has no row", "No row for LS22" in dlg.check.text(), True)
+dlg.roles[1].setCurrentText("Animal ID")
+chk("the window's choice", {k: v for k, v in dlg.mapping().items() if k != "fill"},
+    {"id_column": "Animal", "group_columns": ["Diet", "Week"], "ignore_columns": [],
+     "match": "auto"})
+dlg.close()
+
+_exec = SM.SheetMatchDialog.exec
+
+
+def _save(self):
+    self.roles[2].setCurrentText("Treatment")
+    return True
+
+
+SM.SheetMatchDialog.exec = _save
+try:
+    s.workbook_field.setValue(other)
+    s.workbook_field.valueChanged.emit(other)
+    s.match_sheet_btn.click()
+    end = time.monotonic() + 20
+    while s.workbook_check.busy and time.monotonic() < end:
+        app.processEvents()
+        time.sleep(0.005)
+    app.processEvents()
+finally:
+    SM.SheetMatchDialog.exec = _exec
+chk("Save keeps the choice in the study", (project.get("sampling") or {}).get("group_columns"),
+    ["Diet"])
+chk("...and the workbook is checked with it", "1 of 1 animals" in s.workbook_line.text(), True)
 
 s.workbook_field.setValue(os.path.join(STUDY.root, "none.xlsx"))
 s.check_workbook_btn.click()

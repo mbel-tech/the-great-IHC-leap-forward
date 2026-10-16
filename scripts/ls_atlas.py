@@ -33,10 +33,16 @@ import shutil
 import atlas_registry as REG
 import ls_io as IO
 
-# What `04a_atlas_extract.py` writes, and the fallback when a study declares
-# nothing. `ls_config` carries the same default; this is the one place a READER
-# asks, so the two cannot be given different answers by accident.
+# What `04a_atlas_extract.py` writes. The retired matchers 04b/04c still read it
+# by name.
 EXTRACTED = "plates"
+
+# What a salmon study uses when it declares no set. Not EXTRACTED: from page 15
+# of the atlas PDF on, each extracted picture holds two sections stacked, so a
+# plate there is two brain levels at once and the regions seeded on it land on
+# the wrong one. `plates_final` is the same atlas cut one section per plate.
+# `ls_config` carries the same default.
+DEFAULT_SET = "plates_final"
 
 # ONE vocabulary, used by this module, by the page's `verifyPlate` and by the
 # `plate_verified` column. Three names for the same state is how a section
@@ -135,9 +141,9 @@ def set_name(cfg):
         return fixed
     block = (cfg or {}).get("atlas_plate_set")
     if not isinstance(block, dict):
-        return EXTRACTED
+        return DEFAULT_SET
     name = block.get("dir")
-    return name if isinstance(name, str) and name else EXTRACTED
+    return name if isinstance(name, str) and name else DEFAULT_SET
 
 
 # `plate_dir`'s own parameter is ALSO spelled `set_name` - the override it

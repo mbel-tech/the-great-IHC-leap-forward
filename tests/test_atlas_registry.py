@@ -47,11 +47,11 @@ chk("ls_atlas.SOURCES is the built-ins", AT.SOURCES, ("salmon", "wullimann1996")
 chk("the old module constants survive", (AT.SALMON, AT.WULLIMANN, AT.WULLIMANN_SET),
     ("salmon", "wullimann1996", "plates_wullimann"))
 chk("default atlas is salmon", AT.source({}), "salmon")
-chk("salmon plate set is the study's own choice (default plates)", AT.set_name({}), "plates")
+chk("salmon plate set is the study's own choice (default plates_final)", AT.set_name({}), "plates_final")
 chk("...and follows atlas_plate_set.dir",
     AT.set_name({"atlas_plate_set": {"dir": "plates_final"}}), "plates_final")
 chk("...a malformed block is judged, not crashed on",
-    AT.set_name({"atlas_plate_set": "oops"}), "plates")
+    AT.set_name({"atlas_plate_set": "oops"}), "plates_final")
 chk("salmon reformatted folder unchanged", AT.reformatted_dir({}), "plates")
 chk("wullimann plate set is fixed",
     AT.set_name({"atlas_source": "wullimann1996", "atlas_plate_set": {"dir": "plates_final"}}),

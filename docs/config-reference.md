@@ -53,7 +53,7 @@ A key marked *required* has to be present before any stage will run.
 | `atlas_rebuild_plates` | bool | `false` | `app` | Build the built-in atlas's plates again from its source instead of using the plates that ship with the app. |
 | `atlas_polygon_mirror` | bool | `false` | `04l` | Mirror the plate outlines about the midline, for an atlas whose outlines cover one hemisphere (Wullimann). |
 | `atlases` | raw | `{}` | `04e`, `04k`, `04l` | Atlases this study registered itself, beside the built-in salmon and wullimann1996: {name: {set_dir, region_kind, ...}}. |
-| `atlas_plate_set.dir` | str | `"plates"` | `04e`, `04k`, `04l` | Which plate set the ROI curator and the registration use. |
+| `atlas_plate_set.dir` | str | `"plates_final"` | `04e`, `04k`, `04l` | Which plate set the ROI curator and the registration use. |
 | `atlas_figure_sections.two_sections` | str_opt |  | `04a3b` | Inclusive figure-number range, as a string, of merged figures holding two sections each - e.g. "31-47". Empty leaves every figure at whatever 04a2 detected. |
 | `atlas_figure_sections.drop_inset_boxes` | raw | `{}` | `04a3b` | Merged figure id -> the 1-based index of the box to drop, counted top to bottom. |
 | `atlas_scope` | raw |  | `04l` | Which regions this study cares about: the ones the atlas already labels, and the ones still wanted. |

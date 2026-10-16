@@ -710,16 +710,18 @@ note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
 
     Key("atlas_plate_set.dir", "str",
         "Which plate set the ROI curator and the registration use.",
-        default="plates", label="Atlas plate set", choices=["plates", "plates_merged", "plates_final"],
+        default="plates_final", label="Atlas plate set", choices=["plates", "plates_merged", "plates_final"],
         note="Both read this, so they cannot drift apart. IDs COLLIDE between "
              "sets - the same plate_NNN name exists in more than one set and "
              "points at a different image - so a landmark file records the set "
              "it was made against. Set this once, before any landmark is "
              "placed; changing it later invalidates landmarks made against the "
-             "old set. plates = one image per atlas page as extracted; "
-             "plates_merged = one image per figure; plates_final = the curated "
-             "set. Start at plates and move up as the atlas chain produces "
-             "them.",
+             "old set. plates_final = one section per plate, cut from the salmon atlas and "
+             "curated (64 plates) - use this one. plates = the pictures as "
+             "extracted from the PDF, one per page: from page 15 on each "
+             "holds TWO sections stacked, so the ROI curator and registration "
+             "would treat two brain levels as one plate. plates_merged = one "
+             "image per figure, an intermediate step.",
         consumers=["04e", "04k", "04l"]),
 
     Key("atlas_figure_sections.two_sections", "str_opt",

@@ -433,7 +433,7 @@ def plates_ship(study):
     if source == "wullimann1996":
         set_dir = "plates_wullimann"
     elif source == "salmon":
-        set_dir = (cfg.get("atlas_plate_set") or {}).get("dir") or "plates"
+        set_dir = (cfg.get("atlas_plate_set") or {}).get("dir") or "plates_final"
     else:
         return False
     return os.path.isfile(os.path.join(bundle, set_dir, "plates.csv"))

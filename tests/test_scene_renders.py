@@ -15,7 +15,9 @@ overlapping scenes with different content, and checks:
   * existing pictures are kept unless --force, and finer than native is refused;
   * clipped pixels neither carry the tile field's pattern nor set the range,
     and a frozen range pinned at the clip ceiling is replaced per scene;
-  * the index keeps one row per picture, so runs into other folders add rows.
+  * the index keeps one row per picture, so runs into other folders add rows;
+  * everything outside 04a's silhouette of the section is black, as in the
+    curator, unless --keep-background, and the section itself is untouched.
 
 Run:  python tests/test_scene_renders.py
 """
@@ -370,6 +372,65 @@ chk("the failures list names that scene and why",
 run()
 chk("...and a clean run empties the list",
     list(csv.DictReader(open(L.FAILURES_CSV, encoding="utf-8"))) == [])
+
+print()
+print("--- only the section is drawn, as in the curator ---")
+# 01's counterstain overview of scene 0 at 5.2 um/px: the section is the
+# bright block in the middle, the glass around it dark.
+K = 8                                           # 5.2 / 0.65
+ov = np.full((round(H / K), round(W / K)), 10, np.uint8)
+ov[10:28, 15:37] = 180                          # native rows 80-224, cols 120-296
+ov_dir = os.path.join(L.OVERVIEW_DIR, "LS1", "AF568")
+os.makedirs(ov_dir, exist_ok=True)
+Image.fromarray(ov).save(os.path.join(ov_dir, UIDS[0] + "_DAPI.png"))
+READS.clear()
+run()
+chk("a picture drawn before its overview existed is redrawn", len(READS) > 0,
+    len(READS))
+rows = index_rows()
+chk("the index says which were blanked",
+    rows[UIDS[0]].get("background") == "blanked"
+    and rows[UIDS[1]].get("background") == "no outline",
+    (rows[UIDS[0]].get("background"), rows[UIDS[1]].get("background")))
+rgb = np.asarray(Image.open(pic("stain+DAPI", UIDS[0])))
+only = np.asarray(Image.open(pic("stain_only", UIDS[0])))
+want_m = expect8(block_mean(PLANES[0][1], 4), 200, 20000)
+want_n = expect8(block_mean(PLANES[0][0], 4), 1000, 14000)
+inner = (slice(25, 52), slice(35, 70))          # well inside the block, 2.6 um px
+outer = np.ones(only.shape, bool)
+outer[16:60, 26:78] = False                     # well outside it
+chk("outside the section both pictures are black",
+    not only[outer].any() and not rgb[outer].any(),
+    (int(only[outer].max()), int(rgb[outer].max())))
+chk("inside it the pixels are exactly as before",
+    np.abs(only[inner].astype(int) - want_m[inner]).max() <= 1
+    and np.abs(rgb[inner][..., 2].astype(int) - want_n[inner]).max() <= 1)
+chk("the scene without an overview is drawn whole",
+    np.asarray(Image.open(pic("stain_only", UIDS[1]))).min() > 0)
+READS.clear()
+run()
+chk("...and a second run reads nothing", READS == [], len(READS))
+# A picture whose index row predates the `background` column is redrawn.
+with open(L.INDEX_CSV, encoding="utf-8") as fh:
+    old_rows = list(csv.DictReader(fh))
+for r in old_rows:
+    r.pop("background", None)
+with open(L.INDEX_CSV, "w", newline="", encoding="utf-8") as fh:
+    wr = csv.DictWriter(fh, [k for k in L.INDEX_KEYS if k != "background"])
+    wr.writeheader()
+    wr.writerows(old_rows)
+READS.clear()
+run()
+chk("pictures drawn before this change are redrawn without --force",
+    len(READS) > 0 and not np.asarray(Image.open(pic("stain_only", UIDS[0])))[outer].any())
+run("--keep-background")
+only = np.asarray(Image.open(pic("stain_only", UIDS[0])))
+chk("--keep-background redraws the whole rectangle",
+    np.abs(only.astype(int) - want_m).max() <= 1
+    and index_rows()[UIDS[0]].get("background") == "kept")
+chk("an overview of another size is not used",
+    L.scene_silhouette(os.path.join(ov_dir, UIDS[0] + "_DAPI.png"),
+                       (0, 0, W * 2, H * 2)) is None)
 
 print()
 print("ALL PASS" if not fails else f"{fails} FAILED")

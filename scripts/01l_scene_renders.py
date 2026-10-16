@@ -45,6 +45,28 @@ rim on LS105). Clipped pixels stay at the top of the range instead.
 Parts of a scene's rectangle that hold no tiles at all read as 0 and are
 drawn black: there is nothing there to show.
 
+Outside the section
+-------------------
+
+Only the section is drawn; the slide around it is black, as it is in the
+curator. A scene's rectangle holds a good deal of glass besides the section,
+and on these slides that glass carries the PAP pen ring drawn round each
+section - bright in the marker channels, so at the frozen range it printed a
+broad red or green ring round every picture that the curator never showed.
+The curator is clean because 04o blanks everything outside 04a's tissue
+silhouette; this blanks the same silhouette, `04a.overview_silhouette` (the
+one 05c judges `off_tissue` by), made from 01's counterstain overview of the
+scene and stretched over the picture. Inside it nothing changes: the pixels,
+resolution and brightness are exactly as they were.
+
+Where 01 has made no overview of the scene the picture is drawn whole, as
+before, and the CSV's `background` column says `no outline`; it is redrawn
+once the overview exists. Where the overview holds no silhouette 04a could
+form (nothing tissue-like on it) it says `no silhouette`, also drawn whole.
+`--keep-background` draws every scene whole on purpose, for looking at the
+glass itself, and the column says `kept`. Pictures drawn before this column
+existed are redrawn on the next run.
+
 Brightness: `--range dataset` (the default) uses 01's frozen display range,
 `qc/display_ranges.json`, so the same brightness means the same signal on
 every picture - the reason the overviews froze theirs. At 2.6 um/px a nucleus
@@ -186,7 +208,8 @@ INDEX_KEYS = ["scene_uid", "file", "animal", "slide", "variant",
               "nuclear_lo", "nuclear_hi", "nuclear_range_from",
               "marker_lo", "marker_hi", "marker_range_from",
               "clipped_fraction_marker", "tilefield_applied",
-              "stain_counterstain_png", "stain_only_png", "reader", "source"]
+              "stain_counterstain_png", "stain_only_png", "reader", "source",
+              "background"]
 
 
 def _load(script, name):
@@ -195,6 +218,11 @@ def _load(script, name):
     spec.loader.exec_module(mod)
     return mod
 
+
+OVERVIEW_DIR = os.path.join(OUT_ROOT, "overviews")
+#: Picture rows the silhouette is stretched over at once: a whole 0.65 um/px
+#: scene's float32 weights at once would be GBs.
+MASK_BAND_ROWS = 1024
 
 # 04o owns the banded block-mean read, the composite and which plane is which.
 # Borrowed so these pictures and the curation composites cannot drift apart in
@@ -290,6 +318,67 @@ def read_preview(doc, rect, b, idx, scene):
     hh, ww = min(h, got.shape[0]), min(w, got.shape[1])
     out[:hh, :ww] = got[:hh, :ww]
     return out
+
+
+def overview_png(row):
+    """01's counterstain overview of this scene: the picture the silhouette is
+    made from, as 04o makes its own from it."""
+    return os.path.join(OVERVIEW_DIR, row.get("animal", ""), row["marker_channel"],
+                        row["scene_uid"] + "_DAPI.png")
+
+
+def scene_silhouette(path, rect):
+    """04a's tissue silhouette of the scene in the overview frame, or None.
+
+    None when there is no overview, no silhouette can be formed from it, or
+    the overview is not this scene rectangle - one of another size would put
+    the section's outline in the wrong place.
+    """
+    if not os.path.exists(path):
+        return None
+    try:
+        with Image.open(path) as im:
+            ow, oh = im.size
+    except OSError:
+        return None
+    scale = float(CONFIG.get("overview_target_um_per_px") or 5.2) / NATIVE_UM
+    if abs(rect[2] / scale - ow) > 2 or abs(rect[3] / scale - oh) > 2:
+        return None
+    mask = SR.RF.overview_silhouette(path)
+    return None if mask is None else np.asarray(mask, bool)
+
+
+def _axis(n_out, b, n_native, n_ov):
+    """Linear-interpolation indices and weights placing output pixels on the
+    overview: output pixel j covers native [j*b, (j+1)*b), overview pixel p
+    covers native [p*k, (p+1)*k), centres to centres."""
+    k = n_native / n_ov
+    f = (np.arange(n_out, dtype=np.float64) + 0.5) * b / k - 0.5
+    f = np.clip(f, 0, n_ov - 1)
+    i0 = np.floor(f).astype(np.int64)
+    i1 = np.minimum(i0 + 1, n_ov - 1)
+    return i0, i1, (f - i0).astype(np.float32)
+
+
+def blank_outside(planes, mask, rect, b):
+    """Zero every pixel of `planes` (same-shaped uint8 arrays) outside the
+    silhouette `mask`, IN PLACE.
+
+    The silhouette is interpolated and cut at one half, as 04o's frame_masks
+    does, so its edge is not a staircase of 5.2 um overview pixels. Banded,
+    so the memory is one band of weights whatever the resolution.
+    """
+    h, w = planes[0].shape[:2]
+    m = mask.astype(np.float32)
+    y0, y1, wy = _axis(h, b, rect[3], m.shape[0])
+    x0, x1, wx = _axis(w, b, rect[2], m.shape[1])
+    for r0 in range(0, h, MASK_BAND_ROWS):
+        r1 = min(h, r0 + MASK_BAND_ROWS)
+        a = wy[r0:r1, None]
+        rows = m[y0[r0:r1]] * (1 - a) + m[y1[r0:r1]] * a
+        inside = (rows[:, x0] * (1 - wx) + rows[:, x1] * wx) > 0.5
+        for p in planes:
+            p[r0:r1][~inside] = 0
 
 
 def section_range(values, tissue, clipped=None):
@@ -525,12 +614,16 @@ def fits(need):
     return free
 
 
-def same_drawing(row, um_px, range_mode, only_path, source="scan"):
+def same_drawing(row, um_px, range_mode, only_path, source="scan",
+                 background="blanked"):
     """True when the index says the picture on disk was drawn as asked now.
 
     Changing the resolution or brightness in Set up has to redraw the pictures
     on the next run without anyone remembering --force; a picture with no row
     (drawn before the index existed, or by hand) is kept, as 01 keeps its own.
+    `background` is what this run would do outside the section (see
+    `background_for`); a picture drawn before 01 made its overview is redrawn
+    once the overview is there.
     """
     if row is None:
         return True
@@ -538,9 +631,22 @@ def same_drawing(row, um_px, range_mode, only_path, source="scan"):
         same_px = abs(float(row.get("um_per_px") or 0) - um_px) < 0.005
     except ValueError:
         same_px = False
+    drawn = row.get("background")
+    if drawn == "no silhouette":     # tried, and the overview had no outline
+        drawn = "blanked"
     return (same_px and row.get("range") == range_mode
             and (row.get("source") or "scan") == source
+            and drawn == background
             and index_key(row) == index_key(only_path))
+
+
+def background_for(row, keep_background):
+    """What a picture of this scene is drawn with outside the section now:
+    `kept` when asked, `no outline` when 01 has made no overview to take the
+    section's outline from, else `blanked`."""
+    if keep_background:
+        return "kept"
+    return "blanked" if os.path.exists(overview_png(row)) else "no outline"
 
 
 def save_png(img, path):
@@ -641,6 +747,10 @@ def main():
                          f"{DEFAULT_SOURCE})")
     ap.add_argument("--marker", choices=MARKERS or None, default=None,
                     help="only the scans of this marker (default: every marker)")
+    ap.add_argument("--keep-background", action="store_true",
+                    help="draw the whole scene rectangle, glass and pen ring "
+                         "included (default blanks everything outside the "
+                         "section, as the curator does)")
     ap.add_argument("--force", action="store_true",
                     help="redraw pictures that already exist (default skips them)")
     ap.add_argument("--workers", type=int, default=DEFAULT_WORKERS, metavar="N",
@@ -729,7 +839,8 @@ def main():
                     os.path.join(mdir, ONLY_DIR, uid + ".png")]
             if (not args.force and all(os.path.exists(p) for p in both)
                     and same_drawing(index.get(index_key(both[1])), um_px, range_mode,
-                                     both[1], source)):
+                                     both[1], source,
+                                     background_for(r, args.keep_background))):
                 existing += 1
                 continue
             todo.append(r)
@@ -789,6 +900,14 @@ def main():
                             bad.append((uid, "empty scene rectangle"))
                             continue
                         rgb, only, facts = got
+                        bg = background_for(r, args.keep_background)
+                        if bg == "blanked":
+                            sil = scene_silhouette(overview_png(r), rects[si])
+                            if sil is None:
+                                bg = "no silhouette"
+                            else:
+                                blank_outside((rgb, only), sil, rects[si], b)
+                        facts["background"] = bg
                         p_rgb = os.path.join(mdir, nuc_dir, uid + ".png")
                         p_only = os.path.join(mdir, ONLY_DIR, uid + ".png")
                         save_png(rgb, p_rgb)

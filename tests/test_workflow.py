@@ -702,7 +702,15 @@ chk("...and the cells under target are named", cov["under"], [("A2", "plate_020"
 _html = __import__("screens").coverage_html(cov, "AF568")
 chk("the coverage table marks the cell under target, and only that one",
     _html.count("background:"), 1)
-chk("...and says how many are under", "1 animal and level under the target of 1" in _html, True)
+# What is counted is table cells, one per animal at one level, so the line
+# names them as cells and gets the plural right ("6 animal and levels" read
+# as broken English on a real study).
+chk("...and says how many cells are under, in the singular for one",
+    "1 animal/level cell under the target of 1" in _html, True)
+chk("...and in the plural for more than one",
+    "4 animal/level cells under the target of 2" in __import__("screens").coverage_html(
+        W.coverage(study(dict(CV_CFG, curation_coverage={"sections_per_level": 2})), 0),
+        "AF568"), True)
 chk("the Curate screen lists both passes, each with its own count",
     re.sub("<[^>]+>", "", __import__("screens").passes_html(cv)).split("\n")[0],
     "AF568 curation ● 4 of 5 sections curatedAF488 curation ● 0 of 4 sections curated "

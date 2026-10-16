@@ -182,7 +182,9 @@ def coverage_html(cov, label=""):
         body.append(f"<tr><th style='{cell};text-align:left'>{esc(a or '?')}</th>"
                     + "".join(tds) + "</tr>")
     gaps = len(under)
-    say = (f"{gaps} animal and level{'s' if gaps != 1 else ''} under the target of {t}"
+    # What is counted is cells of the table, one animal at one level, so the
+    # plural belongs on "cell": "6 animal and levels" read as broken English.
+    say = (f"{gaps} animal/level cell{'s' if gaps != 1 else ''} under the target of {t}"
            if gaps else f"every animal at or over the target of {t} at every level")
     return (f"<b>{esc(label)} coverage</b> <span style='{QUIET}'>curated sections per "
             f"animal and atlas level; {say} (Set up &gt; Curation)</span>"

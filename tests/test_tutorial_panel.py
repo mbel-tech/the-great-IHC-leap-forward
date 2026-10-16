@@ -29,6 +29,7 @@ def chk(name, got, want=True):
         failures.append(name)
 
 
+from PySide6.QtCore import QRect                                # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget, QPushButton  # noqa: E402
 from PySide6.QtWidgets import QMessageBox                       # noqa: E402
 app = QApplication.instance() or QApplication([])
@@ -129,6 +130,33 @@ chk("...and nothing ticks meanwhile", c.current.sid, cur)
 w.study_opened.emit(study)
 app.processEvents()
 chk("back in the tutorial study it resumes", (c.paused, panel.isVisible()), (False, True))
+
+print("--- the pointer bubble ---")
+bub = w.findChild(QWidget, "tutorialBubble")
+chk("the controller made a pointer", bub is not None)
+ctl_on("prepare_run")
+target = w.findChild(QPushButton, "runAll_prepare")
+chk("it points at a visible target", bub.attached_to, "target")
+centre = target.mapTo(w, target.rect().center())
+chk("...its outline holds the button", bub.outline.contains(centre))
+before = QRect(bub.outline)
+w.resize(1100, 800)
+app.processEvents()
+w.resize(1500, 950)
+app.processEvents()
+chk("resizing re-places it", bub.outline != before or bub.outline.contains(
+    target.mapTo(w, target.rect().center())))
+w.goto("results")
+app.processEvents()
+chk("another screen hides it", bub.isVisible(), False)
+w.goto("prepare")
+app.processEvents()
+chk("coming back shows it again", bub.isVisible())
+bub.show_for("noSuchControl", "Press it", w, c.panel)
+chk("a missing target attaches to the panel", bub.attached_to, "panel")
+chk("...and still says something", "Press it" in bub.label())
+ctl_on("finish")
+chk("a step with no target clears it", bub.isVisible(), False)
 
 print("--- the end ---")
 ended = []

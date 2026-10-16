@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (QAbstractButton, QDockWidget, QHBoxLayout, QLabel
                                QListWidget, QListWidgetItem, QPushButton, QVBoxLayout,
                                QWidget)
 
+import tutorial_bubble as TB
 import tutorial_pack as TP
 import tutorial_steps as TS
 
@@ -118,6 +119,7 @@ class TutorialController(QObject):
         self.paused = False
         self.problem = ""
         self.panel = None
+        self.bubble = None
         self._clicker = None
 
     # ---- the current step ----------------------------------------------------
@@ -147,6 +149,8 @@ class TutorialController(QObject):
             p.back.clicked.connect(self.back)
             p.skip.clicked.connect(self.skip)
             p.ready.clicked.connect(self.use_ready)
+            self.bubble = TB.PointerOverlay(self.w)
+            self.point.connect(self._point)
         self.w.stage_finished.connect(self._stage_finished)
         self.w.study_opened.connect(self._study_opened)
         self.panel.show()
@@ -274,6 +278,14 @@ class TutorialController(QObject):
             self.point.emit("", "")
         else:
             self._enter()
+
+    def _point(self, target, text):
+        if self.bubble is None:
+            return
+        if target and not target.startswith("curator:") and not self.paused:
+            self.bubble.show_for(target, text, self.w, self.panel)
+        else:
+            self.bubble.hide_pointer()
 
     def _hook_click(self, target):
         b = self.w.findChild(QAbstractButton, target) if target else None

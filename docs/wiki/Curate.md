@@ -6,7 +6,11 @@ Your work is saved into the project as you go, so closing the app loses nothing,
 
 The bar above the page also has **Reload** (after Prepare rebuilt its pictures), **Open in browser**, and **Own window** (a window of its own you can make full screen).
 
-![The Curate screen with the ROI curator inside the app](images/06-curate.png)
+**How far curation has got.** Once there is an export, the screen says so for each marker, for example *pERK curation ● 17 of 24 sections curated*; an excluded section counts as decided. In a paired study the second marker (PCNA) is curated on its own, in the same page: choose it in the curator's *Marker* menu. Its sections are separate physical sections, so nothing decided for one marker reaches the other. **Curate is done when every section of both markers is curated or excluded.**
+
+Below that, a **coverage** table for each marker shows how many curated sections each animal (rows) has at each atlas plate (columns). A cell under the target is amber. The target is one section per animal and plate unless you change it on Set up's *Curation* tab (see [Setting up a study](Setting-Up-a-Study#curation)). It is a goal to curate towards; nothing is held back below it.
+
+![The Curate screen: curation progress and coverage for each marker, then the ROI curator inside the app](images/06-curate.png)
 
 In every curator, **a dashed amber border is a proposal the program made; a solid red border is a decision a person made.**
 

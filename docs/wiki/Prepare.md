@@ -20,7 +20,7 @@ Each stage's **(i)** says what it makes and where. `docs/pipeline-guide.md` expl
 
 ### Optional: pictures of every scene (01l)
 
-Draws every scene straight from the scan, so you can look at the raw tissue before anything is cropped or rotated. Nothing later reads these pictures. It takes a long time, so **Run all remaining skips it**: press its own **Run** when you want them. Settings are on Set up's *Pictures* card.
+Draws every scene straight from the scan, so you can look at the raw tissue before anything is cropped or rotated. Nothing later reads these pictures. It takes a long time, so **Run all remaining skips it**: press its own **Run** when you want them. Settings are on Set up's *Pictures* card (under **Show advanced settings**).
 
 ## Common options
 

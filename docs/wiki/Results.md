@@ -16,7 +16,7 @@ The stage checks the cohort against the workbook's own record of which animals w
 
 ## Build the spreadsheets
 
-Then press **Run all remaining**.
+Then press **Run all remaining**. The R figures are switched off for now, so it builds the spreadsheets only; the R scripts are still in the `analysis/` folder and can be run by hand with `Rscript`.
 
 | File | What it holds |
 | --- | --- |
@@ -26,7 +26,7 @@ Then press **Run all remaining**.
 
 The spreadsheets can be rebuilt any time, including while detection is still running.
 
-![The Results screen](images/08-results.png)
+![The Results screen: Join the experiment is marked as unblinding, then the spreadsheet stages](images/08-results.png)
 
 ## Before you compare groups
 

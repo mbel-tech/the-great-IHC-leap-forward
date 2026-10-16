@@ -5,11 +5,11 @@ Do the six screens top to bottom. Each has a blue **Your part** line saying what
 | # | Screen | What you do there | You are done when |
 | --- | --- | --- | --- |
 | ⌂ | **Project** | Open or create your study's project. Read the **Next up** card and press **Go**. | You know which screen is next. |
-| 1 | **Set up** | Point the app at your slides, then fill in the cards: folders, file names, microscope and channels, pictures, atlas, nucleus detection. Press **Apply** on each. | No red rows on the Slides tab, and every card is applied. |
+| 1 | **Set up** | Check the few cards it shows: the folders, the file names, the section thickness and markers, and the atlas. Everything the slide files can tell the app is already filled in; the rest is under **Show advanced settings**. Press **Apply** on any card you change. | No red rows on the Slides tab, and every card is applied. |
 | 2 | **Prepare** | Press **Run all remaining**. It runs straight through to the ROI curator. | Prepare shows done and Next up sends you to Curate. |
-| 3 | **Curate** | In the ROI curator, bring back any section set aside by mistake, match each section to its atlas plate and draw the brain regions. Press **Done: export and go to Measure**. | The curator is exported. |
-| 4 | **Measure** | Press **Run all remaining**. Nucleus detection takes hours and can be stopped and resumed. | Every section is measured. |
-| 5 | **Results** | Press **Run…** on *Join the experiment*, check the sampling workbook and press **Unblind and run**. Then press **Run all remaining**. | `roi_dataset.xlsx` is in your results folder. |
+| 3 | **Curate** | In the ROI curator, bring back any section set aside by mistake, match each section to its atlas plate and draw the brain regions. Press **Done: export and go to Measure**. | Every section is curated or excluded, for each marker (the step list counts them, for example *23 of 48 sections curated*). |
+| 4 | **Measure** | Press **Run all remaining**. It first checks signal quality and tunes detection; nucleus detection then takes hours and can be stopped and resumed. | Every section is measured. |
+| 5 | **Results** | Press **Run…** on *Join the experiment*, check the sampling workbook and press **Unblind and run**. Then press **Run all remaining** for the spreadsheets (the R figures are switched off for now). | `roi_dataset.xlsx` is in your results folder. |
 
 ## Trying a new study on a few sections first
 

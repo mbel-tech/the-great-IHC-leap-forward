@@ -129,7 +129,9 @@ SCENE_PICTURES = ("scene",)
 #: Native rows of the scene read, drawn and written at a time (as 04o reads
 #: in bands): one band of a scene is held, never the whole picture.
 BAND_ROWS = 1024
-#: Text height of a box's number tag on the scene picture, native px (~10 um).
+#: Smallest text height of a box's number tag, native px (~10 um). Larger
+#: scenes get larger tags (tag_px), so the numbers can be read with the whole
+#: scene fitted to a screen.
 TAG_PX = 16
 #: Sections whose roi_nuclei.csv rows are held at once. The file is millions
 #: of rows once a second marker is in it (see 06a's _Disc), so it is scanned
@@ -460,10 +462,17 @@ def draw_crop(path, plane, labels, kinds, outline, lo, hi, lines):
         Image.fromarray(np.vstack([top, rgb])).save(tmp, format="PNG")
 
 
-def tag(n):
-    """Box number `n` as "NN", white on black: a small uint8 RGB array."""
+def tag_px(width):
+    """Text height of the tags on a scene picture `width` px wide: 1/120 of
+    the width, never under TAG_PX - about 100 px on a 12,000 px scene."""
+    return max(TAG_PX, int(width) // 120)
+
+
+def tag(n, size=TAG_PX):
+    """Box number `n` as "NN", white on black: a small uint8 RGB array,
+    text `size` px high."""
     from PIL import Image, ImageDraw, ImageFont
-    font = ImageFont.load_default(size=TAG_PX)
+    font = ImageFont.load_default(size=int(size))
     text = f"{int(n):02d}"
     left, top, right, bottom = font.getbbox(text)
     pad = 2
@@ -508,17 +517,25 @@ def draw_scene(doc, g, marker, boxes, outlines, kinds_by_roi, lo, hi, path,
     of BAND_ROWS rows is read (the marker plane, the scene named), put in
     grey with the section's stretch, and every box meeting it drawn as its
     crop is: the nuclei painted, the shape outlined; then each box's number
-    tag on top. Per box, the shape outline and the tag are made once and the
-    rows in the band sliced from them, so what is held is one band plus
-    box-sized arrays. Painting is given the label rows one above and one
-    below the band (within the box), so an outline on a band's edge is
-    found exactly as in the crop: the picture does not depend on BAND_ROWS.
+    tag (tag_px(width) high) on top. Per box, the shape outline and the tag
+    are made once and the rows in the band sliced from them, so what is held
+    is one band plus box-sized arrays. A box's nucleus outlines are found on
+    its label rows one above and one below the band (within the box), so an
+    outline on a band's edge is found exactly as in the crop: the picture
+    does not depend on BAND_ROWS.
+
+    Boxes can overlap. Their nuclei are composited into ONE kind map for the
+    band before anything is painted, so a pixel is blended once, as in a
+    crop: where two boxes both have a nucleus at a pixel, the box with the
+    lower roi_index draws it (fill and outline); elsewhere each box draws
+    its own. Shape outlines and tags of every box come after, in box order.
     """
     sx, sy, sw, sh = scene_rect(g)
     scene = int(g["scene_index"])
     _, Minv = affine_of(g)
     channel = D5.plane_index_for(marker)
     top_strip = LO.strip(sw, lines, True, UM_PX, SCENE_BAR_UM)
+    size = tag_px(sw)
 
     marks = []      # (top, left, h, w, labels or None, kinds, shape outline)
     tags = []       # (top, left, tag array)
@@ -536,12 +553,13 @@ def draw_scene(doc, g, marker, boxes, outlines, kinds_by_roi, lo, hi, path,
         labels = outlines[bi][0] if bi in outlines else None
         marks.append((y0 - sy, x0 - sx, h, w, labels, kinds_by_roi.get(bi, {}),
                       LO.shape_mask_outline(h, w, in_px)))
-        t = tag(bi)
+        t = tag(bi, size)
         tags.append((y0 - sy - t.shape[0], x0 - sx - t.shape[1], t))
 
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with LO.PngRows(path, sw, top_strip.shape[0] + sh) as png:
-        png.write(top_strip)
+        for r in range(0, top_strip.shape[0], BAND_ROWS):
+            png.write(top_strip[r:r + BAND_ROWS])
         del top_strip
         for r0 in range(0, sh, BAND_ROWS):
             n = min(BAND_ROWS, sh - r0)
@@ -552,18 +570,26 @@ def draw_scene(doc, g, marker, boxes, outlines, kinds_by_roi, lo, hi, path,
                                f"{plane.shape}, not {(n, sw)}")
             band = np.repeat(LO.grey(plane, lo, hi)[:, :, None], 3, axis=2)
             del plane
-            for top, left, h, w, labels, kinds, _ in marks:
+            code = np.zeros((n, sw), np.uint8)
+            edge = np.zeros((n, sw), bool)
+            taken = np.zeros((n, sw), bool)
+            for top, left, h, w, labels, kinds, _ in marks:   # roi_index order
                 at = _meet(top, left, h, w, r0, n, sw)
                 if labels is None or at is None:
                     continue
                 br, bc, ar, ac = at
                 m0 = max(ar.start - 1, 0)
                 m1 = min(ar.stop + 1, h)
+                lab = labels[m0:m1]
                 rows = slice(ar.start - m0, ar.stop - m0)
-                work = np.zeros((m1 - m0, w, 3), np.uint8)
-                work[rows, ac] = band[br, bc]
-                LO.paint(work, labels[m0:m1], kinds)
-                band[br, bc] = work[rows, ac]
+                here = lab[rows, ac] > 0
+                free = here & ~taken[br, bc]
+                code[br, bc][free] = LO.kind_codes(lab, kinds)[rows, ac][free]
+                edge[br, bc][free] = LO.edges(lab)[rows, ac][free]
+                taken[br, bc] |= here
+            del taken
+            LO.paint_codes(band, code, edge)
+            del code, edge
             for top, left, h, w, _, _, shape in marks:
                 at = _meet(top, left, h, w, r0, n, sw)
                 if at is not None:

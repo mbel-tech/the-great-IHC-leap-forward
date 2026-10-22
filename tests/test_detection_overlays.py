@@ -486,8 +486,9 @@ with temp_study(acquisition=PAIRED) as study:
     covered = np.zeros((sh, sw), bool)
     for x in (10, 80, 150):
         covered[Y0 - sy:Y0 - sy + H, x - sx:x - sx + W] = True
+    chk("tag text height on a 220 px scene: TAG_PX", OV.tag_px(sw), 16)
     for bi, x in ((1, 10), (2, 80), (3, 150)):
-        t = OV.tag(bi)
+        t = OV.tag(bi, OV.tag_px(sw))
         th, tw = t.shape[:2]
         top, left = Y0 - sy - th, x - sx - tw
         r0, c0 = max(top, 0), max(left, 0)
@@ -527,6 +528,105 @@ with temp_study(acquisition=PAIRED) as study:
     OV.BAND_ROWS = band_saved
     chk("one 10,000-row band: the same pixels",
         all(np.array_equal(png(p), a) for p, a in banded.items()), True)
+
+    print()
+    print("--- draw_scene on its own: overlapping boxes, the scene edge, big tags ---")
+
+    class ArrayCzi:
+        """Reads cut from one array whose [0, 0] is CZI (0, 0)."""
+
+        def __init__(self, arr):
+            self.arr = arr
+
+        def read(self, **kw):
+            x, y, w, h = (int(v) for v in kw["roi"])
+            return self.arr[y:y + h, x:x + w].copy()
+
+    def geom_for(x, y, w, h):
+        return {"scene_index": "6", "m00": "1", "m01": "0", "m02": "0",
+                "m10": "0", "m11": "1", "m12": "0", "scene_x": str(x),
+                "scene_y": str(y), "scene_w": str(w), "scene_h": str(h)}
+
+    def crop_like(arr, b, labels, kinds, lo_, hi_):
+        """The image area of b's crop, made as draw_crops/draw_crop make it."""
+        x0, y0, w, h = (int(b[k]) for k in ("czi_x0", "czi_y0", "czi_w", "czi_h"))
+        rgb = np.repeat(grey(arr[y0:y0 + h, x0:x0 + w], lo_, hi_)[:, :, None], 3, 2)
+        OV.LO.paint(rgb, labels, kinds)
+        inside = OV.grid_inside(b)
+        rgb[shape_mask_outline(h, w, lambda xs, ys: inside(x0 + xs, y0 + ys))] = SHAPE_COLOUR
+        return rgb
+
+    def scene_of(arr, rect, boxes_, outl, kinds_by, lo_, hi_, name):
+        path = os.path.join(study.out_root, "scratch", name)
+        OV.draw_scene(ArrayCzi(arr), geom_for(*rect), MARKER, boxes_, outl, kinds_by,
+                      lo_, hi_, path, [name])
+        return png(path)[-rect[3]:]
+
+    base = np.random.default_rng(7).normal(200, 4, (100, 200))
+    base[40:46, 55:61] = 2000.0                 # one nucleus, in both boxes
+    base[30:36, 35:41] = 2000.0                 # one in box 1 only
+    b1, b2 = box(A, 10), box(A, 40)            # x 10..70 and 40..100
+    l1 = np.zeros((H, W), np.int32)
+    l1[20:26, 45:51] = 1
+    l1[10:16, 25:31] = 2
+    l2 = np.zeros((H, W), np.int32)
+    l2[20:26, 15:21] = 1
+    k1, k2 = {1: "positive", 2: "positive"}, {1: "positive"}
+    lo2, hi2 = 100.0, 3000.0
+    ov = scene_of(base, (0, 0, 200, 100), [b1, b2], {1: (l1, 10, 20), 2: (l2, 40, 20)},
+                  {1: k1, 2: k2}, lo2, hi2, "overlap.png")
+    c1 = crop_like(base, b1, l1, k1, lo2, hi2)
+    c2 = crop_like(base, b2, l2, k2, lo2, hi2)
+    gv = int(grey(base[42:43, 57:58], lo2, hi2)[0, 0])
+    once = np.rint((1 - FILL_ALPHA) * gv + FILL_ALPHA * np.array([255, 0, 255])).astype(int)
+    chk("overlapping boxes: a shared nucleus is blended once",
+        ov[42, 57].tolist(), once.tolist())
+    chk("...the same as in box 1's crop", ov[42, 57].tolist(), c1[22, 47].tolist())
+    chk("...and in box 2's crop", ov[42, 57].tolist(), c2[22, 17].tolist())
+    chk("...its outline is magenta", ov[40, 57].tolist(), list(COLOURS["positive"]))
+    chk("a nucleus in box 1 only: as in box 1's crop",
+        ov[30:36, 35:41].tolist(), c1[10:16, 25:31].tolist())
+
+    # A scene rectangle that cuts two boxes: x 40..140 over boxes at 10..70
+    # and 110..170, each with nuclei inside and across the scene's edge.
+    bl, br_ = box(A, 10), box(A, 110)
+    ll = np.zeros((H, W), np.int32)
+    ll[10:16, 32:38] = 1                        # inside, by the left edge
+    ll[25:31, 27:33] = 2                        # across the left edge (x 40)
+    lr = np.zeros((H, W), np.int32)
+    lr[15:21, 27:33] = 1                        # across the right edge (x 140)
+    lr[30:36, 5:11] = 2
+    base2 = np.random.default_rng(8).normal(200, 4, (100, 200))
+    for lab, x in ((ll, 10), (lr, 110)):
+        base2[Y0:Y0 + H, x:x + W][lab > 0] = 2000.0
+    kl, kr = {1: "positive", 2: "negative"}, {1: "censored", 2: "positive"}
+    ed = scene_of(base2, (40, 10, 100, 80), [bl, br_], {1: (ll, 10, Y0), 2: (lr, 110, Y0)},
+                  {1: kl, 2: kr}, lo2, hi2, "edge.png")
+    chk("a box across the scene's left edge: its visible part is its crop's",
+        bool(np.array_equal(ed[Y0 - 10:Y0 - 10 + H, 0:30],
+                            crop_like(base2, bl, ll, kl, lo2, hi2)[:, 30:])), True)
+    chk("a box across the right edge: likewise",
+        bool(np.array_equal(ed[Y0 - 10:Y0 - 10 + H, 70:100],
+                            crop_like(base2, br_, lr, kr, lo2, hi2)[:, :30])), True)
+    ed7 = None
+    OV.BAND_ROWS = 7
+    try:
+        ed7 = scene_of(base2, (40, 10, 100, 80), [bl, br_],
+                       {1: (ll, 10, Y0), 2: (lr, 110, Y0)}, {1: kl, 2: kr},
+                       lo2, hi2, "edge7.png")
+    finally:
+        OV.BAND_ROWS = band_saved
+    chk("...and the same in 7-row bands", bool(np.array_equal(ed7, ed)), True)
+
+    chk("tag_px(12000) == 100", OV.tag_px(12000), 100)
+    wide = np.zeros((200, 12000))
+    bw = dict(box(A, 600), czi_y0="150")
+    wd = scene_of(wide, (0, 0, 12000, 200), [bw], {}, {}, 0.0, 1.0, "wide.png")
+    t = OV.tag(1, 100)
+    chk("a 12,000 px wide scene: the tag is 100 px text",
+        t.shape[0] > 70 and t.shape[0] <= 110, True)
+    chk("...placed just above-left of its box",
+        bool(np.array_equal(wd[150 - t.shape[0]:150, 600 - t.shape[1]:600], t)), True)
 
     print()
     print("--- review focus: an empty ROI, a section with no cut ---")

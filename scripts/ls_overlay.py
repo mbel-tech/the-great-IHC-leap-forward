@@ -83,9 +83,17 @@ def stretch(sample):
 
 
 def grey(plane, lo, hi):
-    """`plane` mapped lo->0, hi->255, clipped, as a uint8 HxW array."""
-    g = np.clip((np.asarray(plane, float) - lo) / max(hi - lo, 1e-6), 0, 1)
-    return (g * 255).astype(np.uint8)
+    """`plane` mapped lo->0, hi->255, clipped, as a uint8 HxW array.
+
+    float32, worked in place: one temporary the size of `plane`, not three
+    float64 ones - a whole-scene band is 1024 x 20,000 px. The crops and the
+    scene picture both come through here, so they stay pixel-identical."""
+    g = np.array(plane, np.float32)
+    g -= np.float32(lo)
+    g /= np.float32(max(hi - lo, 1e-6))
+    np.clip(g, 0, 1, out=g)
+    g *= np.float32(255)
+    return g.astype(np.uint8)
 
 
 def edges(labels):
@@ -117,6 +125,12 @@ def paint(rgb, labels, kinds):
     len(KINDS) full-image operations however many nuclei there are. A mask per
     label would cost labels x H x W, minutes on a real crop.
     """
+    paint_codes(rgb, kind_codes(labels, kinds), edges(labels))
+
+
+def kind_codes(labels, kinds):
+    """uint8 array shaped like `labels`: KINDS.index(kind) + 1 of each
+    pixel's label, 0 where there is no label or it is not in `kinds`."""
     top = int(labels.max()) if labels.size else 0
     lut = np.zeros(top + 1, np.uint8)
     for lid, kind in kinds.items():
@@ -124,7 +138,14 @@ def paint(rgb, labels, kinds):
             lut[lid] = KINDS.index(kind) + 1
     code = lut[np.clip(labels, 0, top)]
     code[labels <= 0] = 0
-    edge = edges(labels)
+    return code
+
+
+def paint_codes(rgb, code, edge):
+    """paint's drawing step, given each pixel's kind code (kind_codes) and
+    whether it is a nucleus outline (edges): every fill, then every outline,
+    each pixel blended at most once. A caller compositing several label
+    images (06i's whole-scene picture) builds one code map and paints once."""
     for i, kind in enumerate(KINDS, start=1):
         fill = FILL_COLOURS.get(kind)
         m = code == i

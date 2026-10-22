@@ -1633,7 +1633,10 @@ bright ones. Nothing downstream reads these pictures.
 | Blue outline | Off the tissue: not counted |
 
 The ROI shape is a thin white line. Brightness is a viewing stretch only, the same for every
-picture of a section so they compare.
+picture of a section so they compare. A section with too few background nuclei has no cut, so
+nothing in it is called: every counted nucleus, censored ones included, is outlined cyan, and the
+strip says "no cut: too few background nuclei". For a marker segmented on its own channel the
+fraction positive is withheld, as in the dataset, and the strip shows "n/a".
 
 Pictures go under `detection_overlays/<marker>/<animal>/`, one folder per animal:
 
@@ -1647,11 +1650,19 @@ sections that were not drawn and why: a picture that disagrees with 06a's counts
 The run ends with "N not drawn".
 
 It needs 06a first, and refuses to run if 06a's tables are missing or older than the nuclei
-table. It is made on request only: Run all remaining skips it. Pictures are at full resolution,
-and the scene pictures are very large, so use **Skip the whole-scene pictures** (`--no-scenes`)
-or **Only the first N scenes of each marker** (`--limit`, applied per marker) for a trial. The desktop button draws every marker
-that has measured sections, in the study's order, and the run ends with one "N not drawn" line over
-all of them. To draw one marker, or chosen animals only, use the command line:
+table. It is made on request only: Run all remaining skips it.
+
+The first run is slow. Older versions of the detection step did not save the nucleus outlines,
+so for every section measured before outlines were saved the first run re-runs StarDist once,
+which takes about as long as detection itself did. The outlines are saved as it goes, and after that redraws are fast:
+a rerun draws only what changed. Pictures are at full resolution, and each whole-scene picture is
+large, roughly 100-500 MB, so a study's scene pictures can fill tens of GB. **Skip the
+whole-scene pictures** (`--no-scenes`) draws only the crops; **Only the first N scenes of each
+marker** (`--limit`, applied per marker) makes a trial. Open the scene pictures in Fiji: many
+photo viewers refuse images this size.
+
+The desktop button draws every marker that has measured sections, in the study's order, and the
+run ends with one "N not drawn" line over all of them. To draw one marker, or chosen animals only, use the command line:
 `python scripts/06i_detection_overlays.py --marker AF488 --animal LS22 LS23`.
 
 ## Repairing older outputs

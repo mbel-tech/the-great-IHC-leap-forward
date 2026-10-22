@@ -327,6 +327,26 @@ if _do is not None:
     chk("...reads pixels with pylibCZIrw", _do.reader, "pylibCZIrw")
 chk("06i is no longer parked in NOT_LISTED", "06i_detection_overlays.py" in S.NOT_LISTED, False)
 
+# The cost of the first run is said wherever the user meets the stage: it
+# re-runs StarDist for sections measured before outlines were saved, and
+# whole-scene pictures are 100-500 MB each, so --no-scenes is offered.
+with open(os.path.join(SCRIPTS, "06i_detection_overlays.py"), encoding="utf-8") as _fh:
+    _doc06i = _fh.read().split('"""')[1]
+with open(os.path.join(REPO, "docs", "pipeline-guide.md"), encoding="utf-8") as _fh:
+    _guide = _fh.read()
+_sec = _guide.split("{#stage-detection_overlays}", 1)[-1].split("\n## ", 1)[0]
+with open(os.path.join(REPO, "app", "workflow.py"), encoding="utf-8") as _fh:
+    _wf = _fh.read()
+_plain = _wf.split('"detection_overlays": "', 1)[-1].split('",\n', 1)[0]
+for _name, _text in (("06i docstring", _doc06i), ("stage blurb", _do.blurb if _do else ""),
+                     ("guide section", _sec), ("app plain words", _plain)):
+    _flat = " ".join(_text.replace('"\n', " ").replace('"', " ").split())
+    chk(f"{_name}: first run re-runs StarDist", "StarDist" in _flat and "first run" in _flat)
+    chk(f"{_name}: then fast", "fast" in _flat)
+    chk(f"{_name}: scene pictures 100-500 MB", "500 MB" in _flat)
+    chk(f"{_name}: --no-scenes / skip whole-scene pictures",
+        "--no-scenes" in _flat or "Skip the whole-scene pictures" in _flat)
+
 print()
 print("ALL PASS" if not failures else f"{len(failures)} FAILED")
 sys.exit(1 if failures else 0)

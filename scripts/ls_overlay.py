@@ -46,8 +46,9 @@ def kind_of(row, cut):
 
     `row` is a dict of strings; None means the nucleus lies outside the ROI.
     Artifact is checked before off_tissue, as 06a does, so a nucleus with both
-    flags is drawn as artifact. With no cut (`cut is None`) a counted,
-    uncensored nucleus cannot be judged and is drawn negative.
+    flags is drawn as artifact. With no cut (`cut is None`) no counted nucleus
+    is called, censored ones included (06a gives such a section no n_positive),
+    so every counted nucleus is drawn negative: not called.
 
     A counted, uncensored row whose marker_median is empty or not a number
     cannot be judged either; 06a would crash on float(""), so this raises a
@@ -60,10 +61,10 @@ def kind_of(row, cut):
         return "artifact"
     if row.get("off_tissue") == "1":
         return "off_tissue"
-    if row.get("censored") == "1":
-        return "censored"
     if cut is None:
         return "negative"
+    if row.get("censored") == "1":
+        return "censored"
     try:
         median = float(row["marker_median"])
     except (KeyError, ValueError):
@@ -236,9 +237,33 @@ def _wrap(font, text, width):
     return lines or [""]
 
 
+#: Bar lengths (um) tried, longest first, when the one asked for does not fit.
+BAR_STEPS = (500, 200, 100, 50, 20, 10)
+
+
+def bar_label(um):
+    return f"{um} \u00b5m"
+
+
+def fit_bar(bar_um, um_px, room, label_width, gap=0):
+    """(um, px) of the scale bar to draw in `room` px, or None for no bar.
+
+    bar_um when it and its label (`label_width(text)` px, `gap` px after the
+    bar) fit; else the longest of BAR_STEPS under bar_um that does; else
+    None. A bar is never shortened to fit: its length is always the length
+    its label says."""
+    for um in [bar_um] + [s for s in BAR_STEPS if s < bar_um]:
+        px = max(1, round(um / um_px))
+        if px + gap + label_width(bar_label(um)) <= room:
+            return um, px
+    return None
+
+
 def strip(width, lines, legend, um_px, bar_um):
     """Black strip with white text: `lines`, then optionally the colour legend,
-    then a scale bar of bar_um micrometres. Returns uint8 RGB (h, width, 3).
+    then a scale bar of bar_um micrometres - or, when that does not fit the
+    width, the longest of BAR_STEPS that does, labelled with its own length;
+    no bar when none fits (fit_bar). Returns uint8 RGB (h, width, 3).
 
     Lines wider than `width` are wrapped, never cut: later stages put long
     summaries here. PIL is imported here, not at module level, so importing
@@ -263,10 +288,9 @@ def strip(width, lines, legend, um_px, bar_um):
                 x, legend_rows = 0, legend_rows + 1
             items.append((x, legend_rows - 1, kind))
             x += int(w)
-    bar_px = max(1, round(bar_um / um_px))
-    bar_px = min(bar_px, room)
+    bar = fit_bar(bar_um, um_px, room, font.getlength, gap=size)
 
-    height = pad * 2 + row_h * (len(text_rows) + legend_rows + 1)
+    height = pad * 2 + row_h * (len(text_rows) + legend_rows + (1 if bar else 0))
     img = Image.new("RGB", (width, height), (0, 0, 0))
     d = ImageDraw.Draw(img)
     y = pad
@@ -282,10 +306,12 @@ def strip(width, lines, legend, um_px, bar_um):
         d.text((x0 + sw + pad // 2, y + r * row_h), LEGEND_LABELS[kind],
                font=font, fill=(255, 255, 255))
     y += legend_rows * row_h
-    bar_t = 4
-    by = y + (row_h - bar_t) // 2
-    d.rectangle([pad, by, pad + bar_px - 1, by + bar_t - 1], fill=(255, 255, 255))
-    d.text((pad + bar_px + size, y), f"{bar_um} \u00b5m", font=font, fill=(255, 255, 255))
+    if bar:
+        um, bar_px = bar
+        bar_t = 4
+        by = y + (row_h - bar_t) // 2
+        d.rectangle([pad, by, pad + bar_px - 1, by + bar_t - 1], fill=(255, 255, 255))
+        d.text((pad + bar_px + size, y), bar_label(um), font=font, fill=(255, 255, 255))
     return np.asarray(img, np.uint8).copy()
 
 
@@ -342,17 +368,24 @@ class PngRows:
             os.remove(self._part)
 
     def close(self):
+        """Finish the PNG and rename it into place. Any failure on the way
+        (a full disk) closes the file, deletes the .part and re-raises; a
+        second close, after success or failure, does nothing."""
         if self._f.closed:
             return
         if self.rows != self.height:
             got = self.rows
             self.abort()
             raise ValueError(f"{got} rows written, height is {self.height}")
-        self._buf += self._z.flush()
-        self._flush(final=True)
-        self._chunk(b"IEND", b"")
-        self._f.close()
-        os.replace(self._part, self.path)
+        try:
+            self._buf += self._z.flush()
+            self._flush(final=True)
+            self._chunk(b"IEND", b"")
+            self._f.close()
+            os.replace(self._part, self.path)
+        except BaseException:
+            self.abort()
+            raise
 
     def __enter__(self):
         return self

@@ -824,6 +824,10 @@ STAGES = [
                 "positives outlined white. One whole-scene picture and one crop per "
                 "ROI and background disc, at full resolution, so they are large. "
                 "Counts drawn are 06a's; a section that disagrees is not drawn. "
+                "The first run re-runs StarDist once for every section measured "
+                "before outlines were saved, about as long as detection; later "
+                "runs are fast. Scene pictures are roughly 100-500 MB each; "
+                "--no-scenes draws only the crops. "
                 "Needs 06a's output; run on request only."),
 
     # ---- Repair older outputs ----------------------------------------------

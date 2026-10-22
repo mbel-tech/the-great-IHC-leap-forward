@@ -152,6 +152,25 @@ narrow = LO.strip(300, [long_line], True, 0.65, 50)
 chk("long line wraps to taller strip", narrow.shape[0] > LO.strip(300, ["x"], True, 0.65, 50).shape[0], True)
 chk("narrow strip width kept", narrow.shape[1], 300)
 
+# A bar is never drawn at a length its label does not say: when bar_um (and
+# its label) does not fit, the largest of 500/200/100/50/20/10 um that does
+# is drawn and labelled; when none fits there is no bar at all.
+chk("fit_bar: 50 um fits in 786 px", LO.fit_bar(50, 0.65, 786, lambda t: 37), (50, 77))
+chk("fit_bar: 50 um does not fit in 106 px -> 20 um",
+    LO.fit_bar(50, 0.65, 106, lambda t: 37, gap=14), (20, 31))
+chk("fit_bar: 500 um in 386 px -> 200 um",
+    LO.fit_bar(500, 0.65, 386, lambda t: 45, gap=14), (200, 308))
+chk("fit_bar: nothing fits in 46 px -> None",
+    LO.fit_bar(50, 0.65, 46, lambda t: 37, gap=14), None)
+mid = LO.strip(120, [], False, 0.65, 50)
+chk("strip 120 px, 50 um asked: a 20 um bar (31 px), not a cut 50 um one",
+    (31 in max_white_runs(mid), 77 in max_white_runs(mid), max(max_white_runs(mid))),
+    (True, False, 31))
+tiny = LO.strip(60, [], False, 0.65, 50)
+chk("strip 60 px: no bar fits, none drawn (all black)", int(tiny.max()), 0)
+chk("no cut, a censored nucleus is not called: negative",
+    LO.kind_of(row(1, cen=1), None), "negative")
+
 with tempfile.TemporaryDirectory() as td:
     from PIL import Image
     rng = np.random.default_rng(0)
@@ -209,6 +228,40 @@ with tempfile.TemporaryDirectory() as td:
     chk("PngRows rejects too many rows", got, "ValueError")
     pw.abort()
     chk("abort leaves nothing", os.listdir(td).count("e.png.part"), 0)
+
+    # A write that fails while closing (a full disk): the handle is closed,
+    # the .part deleted, the error re-raised; a second close does nothing.
+    path = os.path.join(td, "g.png")
+    pw = LO.PngRows(path, 53, 37)
+    pw.write(im)
+    real = pw._f
+
+    class FullDisk:
+        @property
+        def closed(self):
+            return real.closed
+
+        def write(self, b):
+            raise OSError(28, "No space left on device")
+
+        def close(self):
+            real.close()
+
+    pw._f = FullDisk()
+    try:
+        pw.close()
+        got = "no error"
+    except OSError as exc:
+        got = exc.errno
+    chk("PngRows failed close: re-raised, handle closed, no part, no png",
+        (got, real.closed, os.path.exists(path + ".part"), os.path.exists(path)),
+        (28, True, False, False))
+    try:
+        pw.close()
+        got = "no-op"
+    except Exception as exc:  # noqa: BLE001
+        got = repr(exc)
+    chk("PngRows: a second close is a no-op", got, "no-op")
 
     big = rng.integers(0, 256, (600, 700, 3), dtype=np.uint8)  # > 1 MiB raw, random
     path = os.path.join(td, "f.png")

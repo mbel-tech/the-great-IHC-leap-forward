@@ -15,8 +15,10 @@ roi_nuclei.csv) it writes, under `<out_root>/detection_overlays/<marker>/<animal
 
 Each crop is the box 05c segmented, at native pixels (nothing resampled, nothing
 blanked), with a black strip stacked ABOVE it - never over it - holding the
-identity, the counts, the colour legend and a 50 um bar. Colours and the
-positivity rule are ls_overlay's, which 06a counts by:
+identity, the counts, the colour legend and a 50 um bar (a shorter one,
+labelled with its own length, on a crop too narrow for 50 um; none on one
+too narrow for 10 um). Colours and the positivity rule are ls_overlay's,
+which 06a counts by:
 
   positive     magenta 40% fill + magenta outline (counted, above the cut)
   censored     magenta fill + white outline (counted positive: clipped pixels)
@@ -25,9 +27,11 @@ positivity rule are ls_overlay's, which 06a counts by:
   artifact     orange outline (not counted)
   off tissue   blue outline (not counted)
 
-and the ROI shape itself as a 1-px white line. Brightness is a viewing stretch
-only: 1st..99.8th percentile over every box of the section, the same for all of
-a section's pictures so they compare.
+and the ROI shape itself as a 1-px white line. A section with no cut (too few
+background nuclei) calls nothing: every counted nucleus, censored or not, is
+drawn cyan and the strip says "no cut: too few background nuclei".
+Brightness is a viewing stretch only: 1st..99.8th percentile over every box
+of the section, the same for all of a section's pictures so they compare.
 
 The scene picture is the scene's whole rectangle as scanned, native pixels,
 nothing blanked (a tile never scanned reads 0: black), with every box's
@@ -56,10 +60,14 @@ and gets one row in `detection_overlays/failures.csv` with the reason, and the
 run ends with "<N> not drawn: see <failures.csv>".
 
 `detection_overlays/index.csv` has one row per picture (keyed by its path
-under detection_overlays/) with the counts drawn and a fingerprint of the
-inputs: the section's roi_nuclei.csv rows, its cut, its boxes and the outline
-file. A rerun skips a section whose pictures carry the fingerprint it has now;
-`--force` redraws them all.
+under detection_overlays/) with the counts drawn and a fingerprint of what
+its pictures are drawn from: the section's own roi_nuclei.csv rows, its exact
+cut, its box rows, its geometry row, the outline file, its fish and slide,
+and of roi_measurements.csv only the section's columns the pictures show
+(counts, %, cut, region) - not the study-wide Abercrombie factors or
+densities, which change whenever any section is measured. A rerun skips a
+section whose pictures carry the fingerprint it has now; `--force` redraws
+them all.
 
 Needs 06a: refused (exit 2) when roi_measurements.csv is missing or older than
 roi_nuclei.csv, since the cut and the counts printed come from it. Not in the
@@ -67,6 +75,13 @@ run order - drawn on request.
 
 `--no-scenes` / `--no-crops` skip one kind of picture: it is neither drawn
 nor removed, and the other kind is redrawn only when out of date.
+
+What it costs. The first run re-runs StarDist once for every section measured
+before 05c saved outlines (every section detected by an older 05c): about as
+long as detection itself took. Those outlines are saved, so every later run
+is fast, redrawing only what changed. Whole-scene pictures are large -
+roughly 100-500 MB each at full resolution - so `--no-scenes` draws only the
+crops; a trial with `--limit` shows what a full run will hold.
 
 Without --marker every marker with measured sections is drawn, in the study's
 order, and the run ends with one "<N> not drawn:" line over all of them. The
@@ -144,6 +159,8 @@ BATCH = 32
 #: The most a row's centroid may differ from its label's, in native px. The
 #: CSV rounds to 0.1, so a true match is within 0.071.
 CENTROID_TOL = 0.5
+#: ls_overlay.kind_codes' code for a nucleus outside its box's shape.
+OUTSIDE_CODE = LO.KINDS.index("outside") + 1
 
 
 class NotDrawn(Exception):
@@ -349,14 +366,24 @@ def fingerprint(uid, marker, rows=None, cut=None, boxes=None, context=None):
     return h.hexdigest()
 
 
+#: The roi_measurements.csv columns a picture shows or checks against (the
+#: strip's counts, %, cut and region; the scene total's withheld %). Nothing
+#: else of 06a's row goes into the fingerprint: abercrombie_factor and the
+#: densities are pooled over every section of a (marker, region), so they
+#: change whenever any section is measured, and no picture shows them.
+MEAS_SHOWN = ("roi_index", "roi_kind", "region", "n_nuclei", "n_positive",
+              "frac_positive", "n_censored", "section_positivity_cut",
+              "denominator_withheld_reason")
+
+
 def scene_context(g, animal, slide, exact_cut, meas_rows):
     """What a section's pictures depend on besides rows, boxes and outlines:
     the affine that places the ROI shape, the identity on line 1, the exact
-    cut nuclei are coloured by, and 06a's rows (counts, pct, region) that the
-    strip prints."""
+    cut nuclei are coloured by, and the MEAS_SHOWN columns of the section's
+    own 06a rows - only what changes a pixel or a word of its pictures."""
     return {"geometry": sorted((g or {}).items()), "animal": animal,
             "slide": slide, "exact_cut": repr(exact_cut),
-            "measurements": [sorted(r.items()) for r in
+            "measurements": [[(k, r.get(k, "")) for k in MEAS_SHOWN] for r in
                              sorted(meas_rows, key=lambda r: int(r["roi_index"]))]}
 
 
@@ -530,9 +557,14 @@ def draw_scene(doc, g, marker, boxes, outlines, kinds_by_roi, lo, hi, path,
 
     Boxes can overlap. Their nuclei are composited into ONE kind map for the
     band before anything is painted, so a pixel is blended once, as in a
-    crop: where two boxes both have a nucleus at a pixel, the box with the
-    lower roi_index draws it (fill and outline); elsewhere each box draws
-    its own. Shape outlines and tags of every box come after, in box order.
+    crop. Where two boxes both have a nucleus at a pixel, a box that counts
+    or flags it (any kind but "outside") wins over a box that has it
+    outside its shape - a box's corners lie outside its own disc, and a
+    neighbour's disc can reach into them - so a counted nucleus is never
+    drawn yellow; between two that count it (or two that both have it
+    outside) the lower roi_index draws it, fill and outline. Elsewhere each
+    box draws its own. Shape outlines and tags of every box come after, in
+    box order.
     """
     sx, sy, sw, sh = scene_rect(g)
     scene = int(g["scene_index"])
@@ -577,6 +609,7 @@ def draw_scene(doc, g, marker, boxes, outlines, kinds_by_roi, lo, hi, path,
             code = np.zeros((n, sw), np.uint8)
             edge = np.zeros((n, sw), bool)
             taken = np.zeros((n, sw), bool)
+            parts = []      # (band rows, band cols, kind codes, outlines)
             for top, left, h, w, labels, kinds, _ in marks:   # roi_index order
                 at = _meet(top, left, h, w, r0, n, sw)
                 if labels is None or at is None:
@@ -586,12 +619,21 @@ def draw_scene(doc, g, marker, boxes, outlines, kinds_by_roi, lo, hi, path,
                 m1 = min(ar.stop + 1, h)
                 lab = labels[m0:m1]
                 rows = slice(ar.start - m0, ar.stop - m0)
-                here = lab[rows, ac] > 0
-                free = here & ~taken[br, bc]
-                code[br, bc][free] = LO.kind_codes(lab, kinds)[rows, ac][free]
-                edge[br, bc][free] = LO.edges(lab)[rows, ac][free]
-                taken[br, bc] |= here
-            del taken
+                parts.append((br, bc, LO.kind_codes(lab, kinds)[rows, ac],
+                              LO.edges(lab)[rows, ac]))
+            # Pass 1: every box's nuclei it counts or flags (any kind but
+            # outside); pass 2: the outside ones, only where still free. A
+            # nucleus in a box's corner, outside its shape but inside a
+            # neighbour's, is drawn as the neighbour counts it.
+            for counted in (True, False):
+                for br, bc, kc, ke in parts:
+                    want = (kc > 0) & ((kc != OUTSIDE_CODE) if counted
+                                       else (kc == OUTSIDE_CODE))
+                    free = want & ~taken[br, bc]
+                    code[br, bc][free] = kc[free]
+                    edge[br, bc][free] = ke[free]
+                    taken[br, bc] |= want
+            del taken, parts
             LO.paint_codes(band, code, edge)
             del code, edge
             for top, left, h, w, _, _, shape in marks:
@@ -614,6 +656,9 @@ def scene_record(prep, uid, marker, boxes, ident, fp, meas):
     Totals are over its ROIs - roi_kind "roi", not background discs - from
     the counts drawn; a box too small for 05c to segment has no outlines and
     adds 06a's row for it (0). `meas` is {roi_index: roi_measurements row}.
+    The total % positive is blank ("n/a" on the strip) wherever 06a withholds
+    the fraction (denominator_withheld_reason: segmented on the marker
+    itself), as each ROI's is.
     """
     roi_recs = []
     for bi, b in enumerate(boxes, 1):
@@ -634,12 +679,16 @@ def scene_record(prep, uid, marker, boxes, ident, fp, meas):
     tot = {k: sum(int(r[k]) for r in roi_recs)
            for k in ("n_counted", "n_outside", "n_artifact", "n_off_tissue",
                      "n_censored")}
+    # 06a withholds the fraction for a marker segmented on its own channel
+    # (n_nuclei is then not a count of cells); the total withholds it too.
+    withheld = any(meas.get(bi, {}).get("denominator_withheld_reason")
+                   for bi, b in enumerate(boxes, 1) if b["roi_kind"] != "background")
     if ident["cut"] == "":
         tot["n_positive"] = tot["pct_positive"] = ""
     else:
         tot["n_positive"] = sum(int(r["n_positive"]) for r in roi_recs)
         tot["pct_positive"] = (round(100 * tot["n_positive"] / tot["n_counted"], 1)
-                               if tot["n_counted"] else "")
+                               if tot["n_counted"] and not withheld else "")
     path = os.path.join(LO.overlay_dir(OUT_ROOT, marker, ident["animal"]),
                         LO.overlay_name(marker, uid, "scene"))
     rec = {"path": _rel(path), "marker": marker, "animal": ident["animal"],
@@ -713,11 +762,17 @@ def prepare_scene(doc, uid, marker, boxes, g, raw, header, cut, meas_by,
             except ValueError as exc:
                 raise NotDrawn(f"roi{bi:02d}: {exc}") from None
         n = {k: sum(1 for v in kinds.values() if v == k) for k in LO.KINDS}
+        # Censored is counted off the rows, not the kinds: with no cut a
+        # censored nucleus is drawn not called (negative), yet 06a still
+        # reports it in n_censored.
+        n_cen = sum(1 for lid, k in kinds.items()
+                    if k in ("positive", "censored", "negative")
+                    and rows[lid].get("censored") == "1")
         counts = {"n_counted": n["positive"] + n["censored"] + n["negative"],
                   "n_positive": (n["positive"] + n["censored"]
                                  if cut is not None else ""),
                   "n_outside": n["outside"], "n_artifact": n["artifact"],
-                  "n_off_tissue": n["off_tissue"], "n_censored": n["censored"]}
+                  "n_off_tissue": n["off_tissue"], "n_censored": n_cen}
         m = meas_by.get(bi)
         if m is None:
             raise Disagrees(f"roi{bi:02d}: no row in roi_measurements.csv - "
@@ -962,6 +1017,7 @@ def _draw_marker(args, marker):
                 n_same += 1
                 continue
             kinds_drawn = {p for k in todo_kinds for p in k}
+            scene_why = None
             try:
                 g = geom.get(uid)
                 if g is None:
@@ -975,7 +1031,18 @@ def _draw_marker(args, marker):
                                    "roi_measurements.csv disagree on the cut - "
                                    "re-run 06a_roi_dataset.py")
                 if "scene" in kinds_drawn:
-                    scene_rect(g)       # refused before anything is read
+                    # Refused before anything is read. Only the scene picture
+                    # needs the rectangle: without it the crops are still
+                    # drawn, and the scene is listed as not drawn, its old
+                    # picture kept (an old geometry file says nothing
+                    # against it).
+                    try:
+                        scene_rect(g)
+                    except NotDrawn as exc:
+                        if "roi" not in kinds_drawn:
+                            raise
+                        scene_why = f"scene picture not drawn: {exc}"
+                        kinds_drawn -= set(SCENE_PICTURES)
                 path = os.path.join(CONFIG["source_dir"], g["czi_file"])
                 recs = []
                 with CR.open_czi(path, int(float(g.get("scene_w") or 0)) or None,
@@ -1011,11 +1078,16 @@ def _draw_marker(args, marker):
                 n_small += sum(1 for bi, b in enumerate(boxes, 1)
                                if bi not in prep["outlines"]
                                and min(int(b["czi_w"]), int(b["czi_h"])) < 8)
+                if scene_why:
+                    fails.append({"marker": marker, "animal": ident["animal"],
+                                  "slide": ident["slide"], "scene_uid": uid,
+                                  "reason": scene_why})
                 save_tables()
                 n_crops = sum(1 for r in recs if r["picture"] != "scene")
                 print(f"  {uid}: {n_crops} crops"
                       + (" + scene" if "scene" in kinds_drawn else "")
-                      + f" ({prep['how']} outlines)")
+                      + f" ({prep['how']} outlines)"
+                      + (f"; {scene_why}" if scene_why else ""))
                 continue
             # Pictures that would disagree with the numbers now go; any other
             # failure leaves the ones already drawn, index rows and all.

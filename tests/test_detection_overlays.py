@@ -587,6 +587,29 @@ with temp_study(acquisition=PAIRED) as study:
     chk("a nucleus in box 1 only: as in box 1's crop",
         ov[30:36, 35:41].tolist(), c1[10:16, 25:31].tolist())
 
+    # A nucleus in box 1's corner, outside disc 1 (centre x 35.5, r 20) but
+    # inside disc 2 (centre x 65.5): box 2 counts it, so the scene must show
+    # it counted, as box 2's crop does - not yellow, as box 1's corner has it.
+    base3 = np.random.default_rng(9).normal(200, 4, (100, 200))
+    base3[42:48, 63:69] = 2000.0
+    m1_ = np.zeros((H, W), np.int32)
+    m1_[22:28, 53:59] = 1
+    m2_ = np.zeros((H, W), np.int32)
+    m2_[22:28, 23:29] = 1
+    ko1, ko2 = {1: "outside"}, {1: "positive"}
+    ovo = scene_of(base3, (0, 0, 200, 100), [b1, b2], {1: (m1_, 10, 20), 2: (m2_, 40, 20)},
+                   {1: ko1, 2: ko2}, lo2, hi2, "overlap_outside.png")
+    co2 = crop_like(base3, b2, m2_, ko2, lo2, hi2)
+    chk("overlap: counted in box 2, outside box 1's disc -> drawn counted",
+        ovo[42:48, 63:69].tolist(), co2[22:28, 23:29].tolist())
+    chk("...its outline is magenta, not yellow", ovo[42, 65].tolist(),
+        list(COLOURS["positive"]))
+    # And the other way round: box 1 counts it, box 2 has it outside.
+    ovo2 = scene_of(base3, (0, 0, 200, 100), [b1, b2], {1: (m1_, 10, 20), 2: (m2_, 40, 20)},
+                    {1: {1: "negative"}, 2: {1: "outside"}}, lo2, hi2, "overlap_outside2.png")
+    chk("...counted by the lower box, outside the higher: the lower's colour",
+        ovo2[42, 65].tolist(), list(COLOURS["negative"]))
+
     # A scene rectangle that cuts two boxes: x 40..140 over boxes at 10..70
     # and 110..170, each with nuclei inside and across the scene's edge.
     bl, br_ = box(A, 10), box(A, 110)
@@ -797,6 +820,142 @@ with temp_study(acquisition=PAIRED) as study:
     area = png(roi1)[-H:]
     chk("the nucleus at 200.5 is drawn positive",
         area[edge_px(N)].tolist(), list(COLOURS["positive"]))
+
+    def a_pictures():
+        return [os.path.join(folder, f) for f in pngs_in(folder) if f"_{A}_" in f]
+
+    def mtimes(paths):
+        return [os.path.getmtime(p) for p in paths]
+
+    print()
+    print("--- the fingerprint holds only what the pictures show ---")
+    meas_rows = read_rows(meas_csv)
+    meas_orig = [dict(r) for r in meas_rows]
+    fp0 = OV.fingerprint(A, MARKER)
+    a_now = a_pictures()
+    for p in a_now:
+        os.utime(p, (past, past))
+    study_wide = ("abercrombie_factor", "mean_nucleus_diam_um", "cell_density_per_mm2",
+                  "positive_density_per_mm2", "profile_density_per_mm2")
+    for r in meas_rows:
+        if r["scene_uid"] == A:
+            for k in study_wide:
+                r[k] = "123.4"
+    write_rows(meas_csv, meas_rows)
+    chk("Abercrombie / density columns changed: same fingerprint",
+        OV.fingerprint(A, MARKER), fp0)
+    rc, out = run_06i(OV)
+    chk("...nothing redrawn", mtimes(a_now), [past] * len(a_now))
+    m_a1 = [r for r in meas_rows if r["scene_uid"] == A and r["roi_index"] == "1"][0]
+    saved_np = m_a1["n_positive"]
+    m_a1["n_positive"] = str(int(saved_np) + 1)
+    write_rows(meas_csv, meas_rows)
+    chk("n_positive changed: a new fingerprint", OV.fingerprint(A, MARKER) != fp0, True)
+    m_a1["n_positive"] = saved_np
+    m_a1["frac_positive"] = "0.5"
+    write_rows(meas_csv, meas_rows)
+    chk("frac_positive changed: a new fingerprint", OV.fingerprint(A, MARKER) != fp0, True)
+    rc, out = run_06i(OV)
+    chk("...and section A is redrawn", all(t != past for t in mtimes(a_now)), True)
+    write_rows(meas_csv, meas_orig)
+    run_06a()
+    rc, out = run_06i(OV)
+
+    print()
+    print("--- a marker segmented on its own channel: no % positive anywhere ---")
+    rows = read_rows(nuc_csv)
+    orig = [dict(r) for r in rows]
+    for r in rows:
+        if r["scene_uid"] == A:
+            r["segmented_on"] = MARKER
+    write_rows(nuc_csv, rows)
+    run_06a()
+    meas = read_rows(meas_csv)
+    m_rois = [r for r in meas if r["scene_uid"] == A and r["roi_kind"] == "roi"]
+    chk("06a withholds frac_positive for A's ROIs", [r["frac_positive"] for r in m_rois],
+        ["", ""])
+    chk("...and says why", all(r["denominator_withheld_reason"] for r in m_rois), True)
+    rc, out = run_06i(OV)
+    chk("drawn: nothing failed", "not drawn:" in out, False)
+    index = {r["path"]: r for r in read_rows(OV.INDEX_CSV)}
+    srow = index.get(os.path.relpath(sc_a, out_dir).replace(os.sep, "/"), {})
+    crow = index.get(os.path.relpath(roi1, out_dir).replace(os.sep, "/"), {})
+    chk("the crop's index row: no pct", crow.get("pct_positive"), "")
+    chk("the scene's index row: no pct either", srow.get("pct_positive"), "")
+    n_pos = m_rois[0]["n_positive"]
+    cut_now = m_rois[0]["section_positivity_cut"]
+    s_lines = [f"{MARKER} | fish AB12 | slide 2 | scene {A} | whole scene",
+               f"2 ROIs: 3 counted, {n_pos} positive (n/a), cut {cut_now} | not counted: "
+               f"1 outside ROI, 1 artifact, 1 off tissue | 1 censored",
+               f"ROI 01 Dm: 3 counted, {n_pos} positive (n/a)",
+               "ROI 03 Vd: 0 counted, 0 positive (n/a)"]
+    s_st = strip(sw, s_lines, True, 0.65, 500)
+    chk("the scene strip's totals say n/a",
+        bool(np.array_equal(png(sc_a)[:s_st.shape[0]], s_st)), True)
+    write_rows(nuc_csv, orig)
+    run_06a()
+    rc, out = run_06i(OV)
+
+    print()
+    print("--- no cut: every counted nucleus not called, censored included ---")
+    rows = read_rows(nuc_csv)
+    orig = [dict(r) for r in rows]
+    pb_rows = [r for r in rows if r["scene_uid"] == B and r["roi_index"] == "1"]
+    chk("section B's roi01 has one nucleus", len(pb_rows), 1)
+    pb_rows[0]["censored"] = "1"
+    write_rows(nuc_csv, rows)
+    run_06a()
+    mb1 = [r for r in read_rows(meas_csv) if r["scene_uid"] == B and r["roi_index"] == "1"][0]
+    chk("06a: no cut, no n_positive, 1 censored",
+        [mb1[k] for k in ("section_positivity_cut", "n_positive", "n_censored")], ["", "", "1"])
+    rc, out = run_06i(OV)
+    chk("drawn: nothing failed", "not drawn:" in out, False)
+    brow = [r for r in read_rows(OV.INDEX_CSV) if r["scene_uid"] == B
+            and r["roi_index"] == "1"][0]
+    chk("...index n_censored == 06a's", brow["n_censored"], "1")
+    chk("...strip says no cut", "no cut: too few background nuclei" in OV.crop_lines(brow)[1],
+        True)
+    ab = png(b_roi1)[-H:]
+    sb = png(sc_b)[-sh:][Y0 - sy:Y0 - sy + H, 10 - sx:10 - sx + W]
+    inner = (P[0] + 2, P[1] + 2)
+    for name, a in (("crop", ab), ("scene", sb)):
+        px = a[inner].tolist()
+        chk(f"{name}: the censored nucleus is not filled (grey inside)",
+            px[0] == px[1] == px[2], True)
+        chk(f"{name}: ...its edge is cyan: not called", a[edge_px(P)].tolist(),
+            list(COLOURS["negative"]))
+    write_rows(nuc_csv, orig)
+    run_06a()
+    rc, out = run_06i(OV)
+
+    print()
+    print("--- no scene rectangle: the crops are drawn, the scene is not ---")
+    OV.G5.use_marker(MARKER)
+    geo = read_rows(OV.G5.GEOM_CSV)
+    geo_orig = [dict(g) for g in geo]
+    for g in geo:
+        if g["scene_uid"] == A:
+            for k in ("scene_x", "scene_y", "scene_w", "scene_h"):
+                g[k] = ""
+    write_rows(OV.G5.GEOM_CSV, geo)
+    a_now = a_pictures()
+    a_crops = [p for p in a_now if "_scene" not in p]
+    for p in a_now:
+        os.utime(p, (past, past))
+    rc, out = run_06i(OV)
+    chk("exit 0", rc, 0)
+    chk("section A's crops are drawn", bool(a_crops) and all(t != past for t in mtimes(a_crops)),
+        True)
+    chk("...its scene picture is kept, not redrawn", mtimes([sc_a]), [past])
+    chk("...and so is its index row",
+        any(r["path"].endswith(os.path.basename(sc_a)) for r in read_rows(OV.INDEX_CSV)), True)
+    fails = read_rows(OV.FAILURES_CSV)
+    chk("failures.csv: section A, the scene rectangle named",
+        [(f["scene_uid"], "scene rectangle" in f["reason"]) for f in fails], [(A, True)])
+    chk("'1 not drawn:'", "1 not drawn:" in out, True)
+    write_rows(OV.G5.GEOM_CSV, geo_orig)
+    rc, out = run_06i(OV)
+    chk("rectangle back: nothing failed", "not drawn:" in out, False)
 
     print()
     print("--- --no-crops, --no-scenes, --animal ---")

@@ -300,9 +300,13 @@ PLAIN = {
                           "magenta and negative ones outlined cyan. Yellow means outside the "
                           "ROI, orange an artifact, blue off the tissue, and a white outline a "
                           "positive nucleus with clipped pixels. You get one picture of each "
-                          "whole scene and one of each ROI. They are full resolution, so they "
-                          "are large. Needs the per-ROI dataset first. Nothing is measured "
-                          "from them.",
+                          "whole scene and one of each ROI, at full resolution. The first run "
+                          "re-runs StarDist once for every section measured before outlines "
+                          "were saved, which takes about as long as detection did; after that, "
+                          "redraws are fast. Each whole-scene picture is large, roughly 100 to "
+                          "500 MB, so turn on Skip the whole-scene pictures (--no-scenes) to "
+                          "draw only the ROI crops. Needs the per-ROI dataset first. Nothing "
+                          "is measured from them.",
     "pair": "Works out which {m0} scan and which {m1} scan show the same physical section.",
     "channel_identity": "Suggests which dye carries which marker from how the signal looks. "
                         "It only reports; it changes no setting.",

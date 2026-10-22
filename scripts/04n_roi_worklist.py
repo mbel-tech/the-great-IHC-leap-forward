@@ -97,6 +97,34 @@ def index_csv():
     return NAMES.read("index", MARKER)
 
 
+MANIFEST_CSV = os.path.join(OUT_ROOT, "manifest", "manifest_scenes.csv")
+
+
+def multiplex_rows():
+    """The analysis set of a multiplex study, shaped like 04m's rows.
+
+    04m is paired-only - it joins a section's two passes, and a multiplex scan
+    has no partner - so there is no `sections_dataset.csv` to read. The same
+    set is the sections the marker's final reformat kept (its index) that 04j
+    left in the analysis set. No partner, so every row is `paired` and the
+    partner columns stay blank.
+    """
+    for path, made_by in ((index_csv(), "04a (reformat, final)"),
+                          (NAMES.read("analysis_set", MARKER), "04j (censor clipped)"),
+                          (MANIFEST_CSV, "00 (manifest)")):
+        if not os.path.exists(path):
+            raise SystemExit(f"{path} not found - run {made_by} first")
+    with open(index_csv(), newline="", encoding="utf-8") as fh:
+        kept = {r["id"] for r in csv.DictReader(fh) if r["kind"] == "section"}
+    with open(NAMES.read("analysis_set", MARKER), newline="", encoding="utf-8") as fh:
+        keep = {r["scene_uid"] for r in csv.DictReader(fh) if r["in_analysis_set"] == "1"}
+    with open(MANIFEST_CSV, newline="", encoding="utf-8") as fh:
+        scenes = [r for r in csv.DictReader(fh) if r["scene_uid"] in kept & keep]
+    return [{"scene_uid": r["scene_uid"], "animal": r["animal"],
+             "section_order": r["section_order"], "paired": "1",
+             "pair_confidence": ""} for r in scenes]
+
+
 OUT_CSV = os.path.join(REFORMAT_DIR, "roi_worklist.csv")
 COLUMNS = ["rank", "tier", "tier_reason", "scene_uid", "partner_scene_uid",
            "animal", "section_order", "rotation_unchecked", "pair_confidence",
@@ -168,7 +196,19 @@ def main():
     args = ap.parse_args()
     min_sections = args.min_sections
 
+    if PARTNER is None:
+        rows = multiplex_rows()
+        col_uid = col_focus = col_pieces = col_largest = None
+    else:
+        rows, (col_uid, col_focus, col_pieces, col_largest) = paired_rows()
+    _write(rows, col_uid, col_focus, col_pieces, col_largest, args, min_sections)
+
+
+def paired_rows():
+    """04m's analysis-set rows, and its partner columns resolved by name."""
     dataset = dataset_csv()
+    if not os.path.exists(dataset):
+        raise SystemExit(f"{dataset} not found - run 04m_sections_dataset.py first")
     with open(dataset, newline="", encoding="utf-8") as fh:
         rd = csv.DictReader(fh)
         fields = list(rd.fieldnames or [])
@@ -198,7 +238,11 @@ def main():
     if missing:
         raise SystemExit(f"{len(missing)} analysis-set sections have no "
                          f"{MARKER} image: {missing[:5]}")
+    return rows, (col_uid, col_focus, col_pieces, col_largest)
 
+
+def _write(rows, col_uid, col_focus, col_pieces, col_largest, args, min_sections):
+    """Tier, order and write the queue. A column of None is blank in every row."""
     per_animal_total = defaultdict(int)
     for r in rows:
         per_animal_total[r["animal"]] += 1
@@ -235,6 +279,8 @@ def main():
         # present in the header. The blank this can still return is a blank
         # CELL, which is a real answer; a missing column is no longer one of
         # the ways to reach it.
+        if k is None:                   # multiplex: there is no partner column
+            return ""
         v = r.get(k, "").strip()
         return v if v not in ("", "nan") else ""
 
@@ -246,7 +292,7 @@ def main():
         if args.tier and tier != args.tier:
             continue
         rows.append(dict(zip(COLUMNS, [
-            len(rows) + 1, tier, reason[tier], r["scene_uid"], r[col_uid],
+            len(rows) + 1, tier, reason[tier], r["scene_uid"], num(r, col_uid),
             r["animal"], r["section_order"],
             1 if r["paired"] == "0" else 0,
             r["pair_confidence"], num(r, "pair_align_iou"),

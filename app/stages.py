@@ -630,7 +630,10 @@ STAGES = [
     Stage("worklist", "04n  Order the ROI queue", "Normalisation and curation",
           script="04n_roi_worklist.py",
           outputs=[REF + "roi_worklist.csv"],
-          needs=["reformat_perk_final"],
+          # Paired, it reads 04m's table; multiplex has no 04m (no partner
+          # pass) and reads the reformat index and the analysis set instead,
+          # so that need does not apply there and holds nothing.
+          needs=["reformat_perk_final", "sections_dataset"],
           blurb="Orders curation so any prefix is a usable dataset: every animal "
                 "advanced to the same fraction, spread across each brain."),
 

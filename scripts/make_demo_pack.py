@@ -18,20 +18,39 @@ the tutorial study once in the app:
 
     python scripts/make_demo_pack.py check --pack PACK --source-out SRC_OUT --trial-out TRIAL
 
-        Compares each practice section's reformatted images in the trial run
-        with the source study's. Only when every one is byte-identical does it
+        Compares each practice section's reformatted greyscale picture in the
+        trial run with the source study's. Only when every one matches does it
         write the answer key (the source study's curation of those sections,
         under their new ids): otherwise the expert's outlines would sit in the
         wrong place on the learner's sections. Exit 2 and no answer key when
         they differ.
 
+        With --regions and --plates, the answer key comes from a curator export
+        (roi_regions_*.csv and the roi_plates_*.csv beside it) instead of the
+        saved curation: the export is where drawn outlines survive. Its
+        outlines are kept in the export's 256 px frame.
+
+    python scripts/make_demo_pack.py calibrate --pack PACK --source-out SRC_OUT \
+        --overrides SRC_OUT/reformatted/perk_overrides.csv --channel AF568
+
+        Carries the source study's display ranges and tile-correction fields,
+        and the hand rotations of the cut sections, into PACK/output/. Three
+        sections are too few to sample brightness from, and without the
+        rotations the sections reformat in another frame than the expert drew
+        on. The tutorial study starts with these files in its output folder.
+
     python scripts/make_demo_pack.py ready --pack PACK --trial-out TRIAL
 
         Copies the slow stages' results from the trial run into PACK/ready/.
+
+    python scripts/make_demo_pack.py one-marker --pack PACK --channel AF568 --nuclear DAPI
+
+        Makes the pack's study a one-scan, one-marker study: for a demo cut from
+        one pass of a paired study, whose other marker is on another slide.
+        The channel table follows the cut slide's own channel order.
 """
 
 import argparse
-import hashlib
 import json
 import os
 import re
@@ -168,31 +187,45 @@ def write_workbook(path, slide_name, groups):
     wb.save(path)
 
 
-def _digests(out_root, uid):
-    """{relative path: sha256} of every file under reformatted/ named after this section."""
-    found = {}
+MATCH = 0.98     # correlation a practice section's two pictures must reach
+
+
+def _section_picture(out_root, uid):
+    """The section's 256 px greyscale frame: (folder, path), or (None, None).
+
+    Paired studies keep each marker's frames in sections_<marker>/, multiplex
+    ones in sections/; the colour composites and thumbnails are not frames.
+    """
     base = os.path.join(out_root, "reformatted")
-    for dirpath, _dirs, files in os.walk(base):
-        for f in files:
-            if os.path.splitext(f)[0] == uid:
-                full = os.path.join(dirpath, f)
-                with open(full, "rb") as fh:
-                    found[os.path.relpath(dirpath, base)] = hashlib.sha256(fh.read()).hexdigest()
-    return found
+    if not os.path.isdir(base):
+        return None, None
+    for name in sorted(os.listdir(base)):
+        if name.startswith("sections") and not name.endswith(("_rgb", "_thumb")):
+            path = os.path.join(base, name, uid + ".png")
+            if os.path.isfile(path):
+                return name, path
+    return None, None
 
 
 def frames_match(source_out, trial_out, old_uid, new):
-    """(ok, why): the trial's reformatted images of `new` equal the source's of `old_uid`."""
-    src, trial = _digests(source_out, old_uid), _digests(trial_out, new)
+    """(ok, why): the trial's reformatted frame of `new` is the source's of `old_uid`."""
+    import numpy as np
+    from PIL import Image
+    _, src = _section_picture(source_out, old_uid)
+    _, trial = _section_picture(trial_out, new)
     if not src:
-        return False, f"the source study has no reformatted images of {old_uid}"
+        return False, f"the source study has no reformatted picture of {old_uid}"
     if not trial:
-        return False, f"the trial run has no reformatted images of {new}; run Prepare first"
-    for folder, digest in src.items():
-        if folder in trial and trial[folder] != digest:
-            return False, f"{folder}/{new} differs from the source's {old_uid}"
-    if not set(src) & set(trial):
-        return False, f"no folder holds both {old_uid} and {new}"
+        return False, f"the trial run has no reformatted picture of {new}; run Prepare first"
+    a = np.asarray(Image.open(src).convert("L"), float)
+    b = np.asarray(Image.open(trial).convert("L"), float)
+    if a.shape != b.shape:
+        return False, f"{new} is {b.shape[1]}x{b.shape[0]} px, the source's {a.shape[1]}x{a.shape[0]}"
+    if np.array_equal(a, b):
+        return True, ""
+    r = float(np.corrcoef(a.ravel(), b.ravel())[0, 1]) if a.std() and b.std() else 0.0
+    if r < MATCH:
+        return False, f"{new} differs from the source's {old_uid} (correlation {r:.2f})"
     return True, ""
 
 
@@ -206,20 +239,173 @@ def cmd_check(a):
             print(f"section {old} does not reformat to the same frame ({why}); "
                   "the answer key would be misplaced, so none was written.")
             return 2
-    cur_path = a.source_curation or os.path.join(a.source_out, "curation", ANSWER_KEY + ".json")
-    with open(cur_path, encoding="utf-8") as fh:
-        cur = json.load(fh)
+    if a.regions or a.plates:
+        if not (a.regions and a.plates):
+            print("--regions and --plates go together (the two files of one export).")
+            return 2
+        cur = curation_from_export(a.regions, a.plates)
+        source = os.path.basename(a.regions)
+    else:
+        cur_path = a.source_curation or os.path.join(a.source_out, "curation",
+                                                     ANSWER_KEY + ".json")
+        with open(cur_path, encoding="utf-8") as fh:
+            cur = json.load(fh)
+        source = os.path.basename(cur_path)
     key = {new: cur[old] for old, new in renamed.items() if old in cur}
     missing = [old for old in renamed if old not in cur]
     if missing:
-        print(f"the source curation has no entry for {missing[0]}; no answer key written.")
+        print(f"the source has no entry for {missing[0]}; no answer key written.")
         return 2
     os.makedirs(os.path.join(a.pack, "answer"), exist_ok=True)
     tmp = os.path.join(a.pack, "answer", ANSWER_KEY + ".json.part")
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(key, fh)
     os.replace(tmp, tmp[:-5])
-    print(f"frames match; answer key written for {len(key)} sections")
+    meta["answer_from"] = source
+    _write_json(os.path.join(a.pack, "pack.json"), meta)
+    print(f"frames match; answer key written for {len(key)} sections from {source}")
+    return 0
+
+
+def _write_json(path, data):
+    with open(path + ".part", "w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=2)
+    os.replace(path + ".part", path)
+
+
+def curation_from_export(regions, plates):
+    """Curator state for the sections an export names, in the export's 256 px frame.
+
+    Only what the tutorial reads: the matched plate and the drawn outlines
+    (`polys`, as 04l keeps them and 04q_import_curation rebuilds them). With
+    the export's own scale the outlines stay as exported, and `frame` says so,
+    so the tutorial can bring a learner's outlines (drawn on the 768 px
+    composite) to the same size. Not 04q itself: it reads the study's
+    settings when it is imported, and this runs outside any study.
+    """
+    import csv
+
+    def rows(path):
+        with open(path, encoding="utf-8-sig", newline="") as fh:
+            return list(csv.DictReader(fh))
+
+    def cell(r, k):
+        return (r.get(k) or "").strip()
+
+    state = {}
+    for r in rows(plates):
+        uid = cell(r, "scene_uid")
+        if uid:
+            idx = cell(r, "plate_index")
+            state[uid] = {"plate": int(float(idx)) if idx else 0,
+                          "plate_id": cell(r, "plate_id"), "pairs": [], "polys": [],
+                          "frame": 256}
+    for r in rows(regions):
+        uid = cell(r, "scene_uid")
+        if cell(r, "roi_shape") != "polygon" or uid not in state:
+            continue
+        v = []
+        for vtx in cell(r, "sec_poly").split(";"):
+            xy = vtx.split()
+            if len(xy) == 2:
+                v += [_num(xy[0]), _num(xy[1])]
+        if len(v) < 6:
+            continue
+        pt, rn = cell(r, "part"), cell(r, "roi_n")
+        state[uid]["polys"].append({"v": v, "region": cell(r, "region"),
+                                    "part": int(float(pt)) if pt else 1,
+                                    "roi": int(float(rn)) if rn else 0})
+    return state
+
+
+def _num(text):
+    x = float(text)
+    return int(x) if x.is_integer() else x
+
+
+def cmd_one_marker(a):
+    slides = os.path.join(a.pack, "slides")
+    czis = sorted(f for f in os.listdir(slides) if f.lower().endswith(".czi"))
+    if not czis:
+        print(f"no slide in {slides}")
+        return 2
+    names = [c["name"] for c in czi_meta.summarise(read_xml(os.path.join(slides, czis[0])))
+             ["channels"]]
+    channels = []
+    for i, name in enumerate(names):
+        role = ("nuclear" if name == a.nuclear else "marker" if name == a.channel else "ignore")
+        channels.append({"name": name, "role": role, "czi_name": name, "index": i})
+    if a.channel not in names or a.nuclear not in names:
+        print(f"the slide's channels are {names}; it has no {a.channel if a.channel not in names else a.nuclear}.")
+        return 2
+    path = os.path.join(a.pack, "study", "study.json")
+    with open(path, encoding="utf-8") as fh:
+        cfg = json.load(fh)
+    acq = cfg.setdefault("acquisition", {})
+    acq.update(layout="multiplex", channels=channels, markers=[])
+    acq.pop("marker_segmentation", None)
+    _write_json(path, cfg)
+    print(f"study is one scan per section: {[(c['name'], c['role']) for c in channels]}")
+    return 0
+
+
+def cmd_calibrate(a):
+    import csv
+    import ls_paths as LP
+    with open(os.path.join(a.pack, "pack.json"), encoding="utf-8") as fh:
+        meta = json.load(fh)
+    with open(os.path.join(a.pack, "study", "study.json"), encoding="utf-8") as fh:
+        cfg = json.load(fh)
+    scene_map = {old: new for new, old in enumerate(meta["source_scenes"])}
+    out = os.path.join(a.pack, "output")
+    carried = []
+    for rel in [os.path.join("qc", "display_ranges.json")] + [
+            os.path.join("qc", "flatfield", f) for f in
+            sorted(os.listdir(os.path.join(a.source_out, "qc", "flatfield"))
+                   if os.path.isdir(os.path.join(a.source_out, "qc", "flatfield")) else [])
+            if re.fullmatch(r"tilefield_c\d+\.npy", f)]:
+        src = os.path.join(a.source_out, rel)
+        if not os.path.isfile(src):
+            print(f"the source study has no {rel}; nothing carried.")
+            return 2
+        os.makedirs(os.path.dirname(os.path.join(out, rel)), exist_ok=True)
+        shutil.copyfile(src, os.path.join(out, rel))
+        carried.append(rel.replace(os.sep, "/"))
+    if not any("tilefield" in c for c in carried):
+        print("the source study has no tile-correction fields (qc/flatfield); carrying ranges only.")
+
+    # The cut scenes' hand rotations, under their new ids. Every cut scene gets
+    # a row: an override file that exists is the complete record, so the demo
+    # study's own exclusion proposals cannot drop a section the tutorial needs.
+    prefix = re.fullmatch(r"(.*_sc)\d+", next(iter(meta["practice_from"]))).group(1)
+    width = len(next(iter(meta["practice_from"]))) - len(prefix)
+    with open(a.overrides, newline="", encoding="utf-8") as fh:
+        rows = list(csv.DictReader(fh))
+    uid_col = next((c for c in ("perk_scene_uid", "scene_uid") if rows and c in rows[0]), None)
+    if uid_col is None:
+        print(f"{a.overrides} has no scene_uid column; is it a rotation override file?")
+        return 2
+    found = {r[uid_col]: r for r in rows}
+    overrides = []
+    for old_n, new_n in sorted(scene_map.items(), key=lambda kv: kv[1]):
+        src = found.get(f"{prefix}{old_n:0{width}d}") or {}
+        overrides.append({"scene_uid": f"{prefix}{new_n:0{width}d}",
+                          "extra_rotation": src.get("extra_rotation") or "0",
+                          "flip": src.get("flip") or "0", "excluded": "0",
+                          "decision": "", "reason": ""})
+    rel = os.path.normpath(LP.for_config(dict(cfg, out_root="")).path("overrides", a.channel))
+    target = os.path.join(out, rel)
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    with open(target, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=list(overrides[0]))
+        w.writeheader()
+        w.writerows(overrides)
+    carried.append(rel.replace(os.sep, "/"))
+    meta["output_from_source"] = carried
+    _write_json(os.path.join(a.pack, "pack.json"), meta)
+    turned = [f"{o['scene_uid']} {float(o['extra_rotation']):g} deg" for o in overrides
+              if float(o["extra_rotation"] or 0) or o["flip"] == "1"]
+    print(f"carried {len(carried)} file(s) into {out}; rotations: {', '.join(turned) or 'none'}")
     return 0
 
 
@@ -247,6 +433,8 @@ def cmd_ready(a):
                 continue
             target = os.path.join(dest, rel)
             if os.path.isdir(p):
+                if not any(fs for _d, _s, fs in os.walk(p)):
+                    continue        # an empty folder is not a result
                 shutil.copytree(p, target, dirs_exist_ok=True)
             else:
                 os.makedirs(os.path.dirname(target), exist_ok=True)
@@ -272,11 +460,24 @@ def main(argv=None):
     k.add_argument("--source-out", required=True)
     k.add_argument("--trial-out", required=True)
     k.add_argument("--source-curation", default="")
+    k.add_argument("--regions", default="", help="an export's roi_regions_*.csv")
+    k.add_argument("--plates", default="", help="the roi_plates_*.csv beside it")
     r = sub.add_parser("ready")
     r.add_argument("--pack", required=True)
     r.add_argument("--trial-out", required=True)
+    c = sub.add_parser("calibrate")
+    c.add_argument("--pack", required=True)
+    c.add_argument("--source-out", required=True)
+    c.add_argument("--overrides", required=True,
+                   help="the source study's rotation override file for the cut pass")
+    c.add_argument("--channel", required=True, help="the slide channel that holds the marker")
+    o = sub.add_parser("one-marker")
+    o.add_argument("--pack", required=True)
+    o.add_argument("--channel", required=True, help="the slide channel that holds the marker")
+    o.add_argument("--nuclear", default="DAPI")
     a = ap.parse_args(argv)
-    return {"cut": cmd_cut, "check": cmd_check, "ready": cmd_ready}[a.cmd](a)
+    return {"cut": cmd_cut, "check": cmd_check, "ready": cmd_ready,
+            "one-marker": cmd_one_marker, "calibrate": cmd_calibrate}[a.cmd](a)
 
 
 if __name__ == "__main__":

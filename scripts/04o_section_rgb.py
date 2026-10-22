@@ -858,6 +858,13 @@ def main():
         uid_col = worklist_uid_column(args.marker, fields)
         uids = [u for u in ((w.get(uid_col) or "").strip() for w in want) if u]
 
+    if not uids:
+        # An empty list is a study where every section was excluded upstream;
+        # "wrote 0 composites" would read as a stage that worked.
+        raise SystemExit(f"no {args.marker} sections to composite: "
+                         f"{'focus.csv' if args.include_excluded else 'the index' if args.all else 'the ROI worklist'} "
+                         f"lists none. Check the exclusion step's results first.")
+
     # The index is the definition of "survived", so it is also the definition of
     # "was masked on the way in" - 04a writes an index row for exactly the
     # sections it reformatted under the analysis flags.

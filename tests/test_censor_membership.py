@@ -130,6 +130,25 @@ with temp_study() as study:
     chk("every scene but the excluded one",
         [u for u, _, _ in J.sections_to_check(rows, marker)], uids[1:])
 
+print("--- nothing left to check stops the stage, writing nothing ---")
+with temp_study(**PAIRED) as study:
+    J = load_stage("04j_censor_clipped.py", name="lsstage_04j_empty")
+    os.makedirs(os.path.dirname(J.QC_CSV), exist_ok=True)
+    with open(J.QC_CSV, "w", encoding="utf-8") as fh:
+        fh.write("scene_uid,animal,section_order,marker_channel\n")
+    saved, sys.argv = sys.argv, ["04j_censor_clipped.py", "--marker", "AF568"]
+    raised = ""
+    try:
+        J.main()
+    except BaseException as exc:                    # noqa: BLE001
+        raised = f"{type(exc).__name__}: {exc}"
+    finally:
+        sys.argv = saved
+    chk("an empty set stops with a message, not a ZeroDivisionError",
+        (raised.split(":")[0], "sections to check: the exclusion step left none" in raised), ("SystemExit", True))
+    chk("...and no analysis set is written to read as done",
+        os.path.exists(J.analysis_set_path("AF568")), False)
+
 print()
 print("FAILURES" if fails else "ALL PASS")
 sys.exit(1 if fails else 0)

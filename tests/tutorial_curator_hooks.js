@@ -85,6 +85,14 @@ vm.runInContext('tutorialShowKey("s1", [{v: [0,0, 10,0, 10,10]}])', sandbox);
 chk("injecting twice does not draw the key twice",
     calls.filter(c => c[0] === "setLineDash").length, 1);
 
+// The key is stored at 256 px; the page shows the 768 px picture.
+vm.runInContext('var secImg = {naturalWidth: 768}; active = "s1"', sandbox);
+calls.length = 0;
+vm.runInContext('tutorialShowKey("s1", [{v: [0,0, 10,0, 10,10]}], 256)', sandbox);
+chk("a key saved at another size is drawn at the picture's size",
+    calls.filter(c => c[0] === "lineTo").map(c => c[1]), [[30, 0], [30, 30]]);
+vm.runInContext("tutorialClearKey()", sandbox);
+
 // A page that is not the curator (a "Not built yet" placeholder) has no drawSec.
 const bare = { addEventListener: () => {}, document: sandbox.document, Math, JSON };
 bare.window = bare;

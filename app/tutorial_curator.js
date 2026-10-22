@@ -7,7 +7,8 @@
 //
 //   tutorialPoint(selector, text)   outline an element and show a line beside it
 //   tutorialClear()                 remove that
-//   tutorialShowKey(uid, polys)     draw the expert's outlines (dashed) on that section
+//   tutorialShowKey(uid, polys, frame)  draw the expert's outlines (dashed) on that section;
+//                                   `frame` is the picture width they were saved at
 //   tutorialClearKey()              stop drawing them
 (function(){
   if (window.__tutorialHooks) return;
@@ -62,10 +63,13 @@
     x.save();
     x.setTransform(V.k, 0, 0, V.k, -V.ox * V.k, -V.oy * V.k);
     x.setLineDash([8 * u, 6 * u]);
+    // Saved at one picture size, shown on whichever the page loaded (256 or 768).
+    const w = (typeof secImg !== "undefined" && secImg && secImg.naturalWidth) || 0;
+    const s = keyed.frame && w ? w / keyed.frame : 1;
     keyed.polys.forEach(pg => {
       x.beginPath();
       for (let i = 0; i < pg.v.length; i += 2) {
-        const p = img2can(pg.v[i], pg.v[i + 1], g);
+        const p = img2can(pg.v[i] * s, pg.v[i + 1] * s, g);
         i ? x.lineTo(p[0], p[1]) : x.moveTo(p[0], p[1]);
       }
       x.closePath();
@@ -75,8 +79,8 @@
     x.restore();
     return out;
   };
-  window.tutorialShowKey = function(uid, polys){
-    keyed = {uid: uid, polys: polys || []};
+  window.tutorialShowKey = function(uid, polys, frame){
+    keyed = {uid: uid, polys: polys || [], frame: frame || 0};
     drawSec();
   };
   window.tutorialClearKey = function(){ keyed = null; drawSec(); };

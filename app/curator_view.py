@@ -207,8 +207,9 @@ class CuratorView(QWidget):
             self._tut_point = ""
             self._run_tutorial("tutorialClear();")
 
-    def show_key(self, uid, polys):
-        self._tut_key = f"tutorialShowKey({json.dumps(uid)}, {json.dumps(polys)});"
+    def show_key(self, uid, polys, frame=0):
+        self._tut_key = (f"tutorialShowKey({json.dumps(uid)}, {json.dumps(polys)}, "
+                         f"{json.dumps(frame or 0)});")
         self._run_tutorial()
 
     def clear_key(self):

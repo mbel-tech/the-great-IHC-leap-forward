@@ -53,6 +53,13 @@ Writes `results/roi_nuclei.csv`, one row per nucleus. That is the artefact that
 matters - with per-nucleus intensities on disk the positivity cut becomes a
 decision about a table rather than a reason to re-read 130 CZI scenes.
 
+Beside it, `detection_outlines/<marker>/<uid>.npz`: every segmented box's label
+image, keyed `roi<NN>` by the same roi_index the rows carry. The table keeps a
+centroid per nucleus, not its shape, and 06i_detection_overlays.py draws
+shapes - without these it would run StarDist over every box again to show
+what was counted here. A box that found nothing is saved all zero; one never
+segmented has no key. Nothing downstream counts from them.
+
 Under the `threshold` backend, and only there, an ROI whose frame breaks that
 backend's background assumption is written to
 `qc/roi_background_assumption.csv` and counted at the end of the run. The
@@ -76,6 +83,9 @@ Run:  python 05c_detect_rois.py
       python 05c_detect_rois.py --qc            # also write overlay crops to
                                                 # qc/roi_detections/ - green =
                                                 # counted, red = outside the disc
+      Every run also writes the outlines above, one .npz per section it
+      measures, to detection_outlines/<marker>/; --force replaces only the
+      sections it redoes.
 """
 
 import argparse
@@ -112,6 +122,13 @@ REFORMAT_DIR = G5.REFORMAT_DIR
 RESULTS = os.path.join(OUT_ROOT, "results")
 NUCLEI_CSV = os.path.join(RESULTS, "roi_nuclei.csv")
 QC_DIR = os.path.join(OUT_ROOT, "qc", "roi_detections")
+
+#: Every segmented box's label image, one .npz per (marker, section) - see
+#: save_outlines. roi_nuclei.csv keeps a centroid per nucleus, not its shape,
+#: and 06i_detection_overlays.py draws shapes: without these it would have to
+#: run StarDist over every box a second time to draw what this stage counted.
+#: Written before the section's rows and dropped with them by --force.
+OUTLINE_DIR = os.path.join(OUT_ROOT, "detection_outlines")
 
 #: The ROIs whose frames broke the threshold backend's background assumption,
 #: one row each, with the numbers behind the flag - see
@@ -501,6 +518,128 @@ def section_range(doc, boxes, marker, scene):
             plane_index_for(marker), scene=scene).astype(np.float32))
     lo, hi = SG.percentile_range(crops)
     return lo, hi, len(crops)
+
+
+def segment_box(doc, b, scene, model, min_area_px, section_norm, partners=()):
+    """Read one box and segment it, exactly as the measurement loop does.
+
+    Returns {labels, seg_img, dapi, mark, planes, report, seg_on, backend,
+    shaped}, or None where the loop skips the box before segmenting it: under
+    8 px a side, a shared-range marker whose section has no range in
+    `section_norm`, or planes that do not come back one 2-D shape.
+
+    Its own function so 06i_detection_overlays.py can re-segment a box whose
+    outlines were never saved and get the very labels this stage counted -
+    the same read, the same plane, the same thresholds - rather than a second
+    copy of this block drifting from the first. Everything it uses is passed
+    in, so it runs without main().
+    """
+    x0, y0 = int(b["czi_x0"]), int(b["czi_y0"])
+    bw, bh = int(b["czi_w"]), int(b["czi_h"])
+    if bw < 8 or bh < 8:
+        return None
+    marker = b["marker"]
+    if needs_shared_norm(marker) and marker not in section_norm:
+        return None
+    # One read call, so every plane of this ROI comes off the same scene
+    # rectangle. A partner's plane is only in here when this run owns that
+    # pair; for every study that exists it is not.
+    want = {"dapi": NUCLEAR_C, "mark": plane_index_for(marker)}
+    for other in partners:
+        want["coloc_" + other] = plane_index_for(other)
+    planes = CR.read_planes(doc, _Rect(x0, y0, bw, bh), want, scene=scene)
+    dapi = planes["dapi"].astype(np.float32)
+    mark = planes["mark"].astype(np.float32)
+    if dapi.ndim != 2 or dapi.shape != mark.shape:
+        return None
+    # WHICH PLANE IS SEGMENTED is the study's declaration, and under
+    # `segment: own` it is the marker's OWN channel - which is the plane
+    # already read as `mark`, because the channel a marker is measured on and
+    # the channel it segments itself on are the same channel by definition.
+    # No second read: this is the one place a "segment on X, measure Y" study
+    # would need one, and no such study exists.
+    #
+    # The tiling that makes StarDist tractable moved to
+    # ls_segment.stardist_labels with the finding that justifies it; it is not
+    # a tuning knob and does not belong at a call site.
+    seg_img = mark if _segments_own(marker) else dapi
+    seg_backend = backend_for(marker)
+    report = {}
+    labels = SG.segment(seg_img, seg_backend, model=model,
+                        k=MAD_K, min_area_px=min_area_px,
+                        report=report,
+                        norm=section_norm.get(marker),
+                        **_thresholds(marker))
+    return {"labels": labels, "seg_img": seg_img, "dapi": dapi, "mark": mark,
+            "planes": planes, "report": report,
+            "seg_on": segment_plane_for(marker), "backend": seg_backend,
+            "shaped": int(nucleus_shaped_for(marker))}
+
+
+def roi_inside(b):
+    """`inside(gx, gy)`: is a grid-index point inside box `b`'s ROI shape?
+
+    Which nuclei are actually IN the ROI. The shape is drawn on the 256 grid
+    and is something else in CZI px - a circle becomes an ellipse, a polygon a
+    differently-proportioned polygon - so membership is decided by mapping the
+    centroid BACK to the grid and testing it there, never against a radius in
+    CZI px.
+
+    That is why a drawn region needs no new machinery: the test changes from
+    "inside this circle" to "inside this ring", and everything either side of
+    it stays as it was.
+
+    The shape is moved into grid-index coordinates first, because `gx, gy` are
+    grid indices and the curator stored pixel edges - see 05a's
+    CURATOR_PX_OFFSET. Its own function so 06i draws a nucleus as counted by
+    the same rule that counted it.
+    """
+    sx, sy = G5.curator_to_grid(float(b["sec_x"]), float(b["sec_y"]))
+    sr = float(b["sec_r"] or 0)
+    poly = G5.parse_poly(b.get("sec_poly", ""))
+    if poly is not None:
+        poly = np.column_stack(G5.curator_to_grid(poly[:, 0], poly[:, 1]))
+        return lambda gx, gy: point_in_poly(gx, gy, poly)
+    return lambda gx, gy: (gx - sx) ** 2 + (gy - sy) ** 2 <= sr * sr
+
+
+def outline_path(marker, uid):
+    """Where one section's nucleus outlines are kept - see OUTLINE_DIR."""
+    return os.path.join(OUTLINE_DIR, marker, uid + ".npz")
+
+
+def save_outlines(marker, uid, boxes):
+    """Write a section's label images: `boxes` is {roi_index: (labels, x0, y0)}.
+
+    Keys `roi<NN>` (uint32 labels) and `roi<NN>_origin` (int64 [czi_x0,
+    czi_y0]) per box, NN being the rows' roi_index, plus `settings`, the
+    StarDist thresholds as JSON. A box whose labels are all zero is saved all
+    zero, so "measured, found nothing" stays different from "not measured"
+    (no key). Through a .part file and one replace, so a run killed mid-write
+    leaves the old file or none, never half of one.
+    """
+    path = outline_path(marker, uid)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    arrays = {"settings": np.array(json.dumps(stardist_settings(marker),
+                                              sort_keys=True))}
+    for bi, (labels, x0, y0) in sorted(boxes.items()):
+        arrays[f"roi{bi:02d}"] = np.asarray(labels).astype(np.uint32)
+        arrays[f"roi{bi:02d}_origin"] = np.array([x0, y0], dtype=np.int64)
+    tmp = path + ".part"
+    # A file object, not a name: np.savez would append ".npz" to a name that
+    # does not end in it.
+    with open(tmp, "wb") as fh:
+        np.savez_compressed(fh, **arrays)
+    os.replace(tmp, path)
+
+
+def forget_outlines(marker, uids):
+    """Delete the saved outlines of sections whose rows are being replaced."""
+    for uid in uids:
+        try:
+            os.remove(outline_path(marker, uid))
+        except FileNotFoundError:
+            pass
 
 COLUMNS = ["scene_uid", "animal", "marker", "roi_kind", "region", "seed_n",
            "roi_index", "nucleus_id",
@@ -1525,6 +1664,11 @@ def main():
         print(f"  {why}: dropped {dropped} {args.marker} rows over {len(redo)} "
               f"sections, kept {kept}")
         forget_done(DONE_LOG, args.marker, redo)
+    # The outlines go with the rows, by the same rule and at the same moment -
+    # and on every run, not only a rewrite, because a section in `redo` that
+    # is then skipped (its tissue mask gone) writes no new file, and an old
+    # one left there would be outlines of a measurement no longer in the CSV.
+    forget_outlines(args.marker, redo)
     if settings is not None:
         record_settings(args.marker, settings)
     if coloc_present and rewrite:
@@ -1659,6 +1803,7 @@ def main():
         bg_rows = []
         norm_rows = []
         section_norm = {}
+        outlines = {}
         # Keeping decoded tiles: neighbouring ROIs, the second read a shared
         # range takes, and the background discs all land on the same few tiles.
         with CR.open_czi(path, int(float(g.get("scene_w") or 0)) or None,
@@ -1684,49 +1829,21 @@ def main():
                 norm_rows.append([uid, mk, segment_plane_for(mk), repr(lo),
                                   repr(hi), n_crops])
             for bi, b in enumerate(by_sec[uid], 1):
-                x0, y0 = int(b["czi_x0"]), int(b["czi_y0"])
-                bw, bh = int(b["czi_w"]), int(b["czi_h"])
-                if bw < 8 or bh < 8:
-                    continue
                 marker = b["marker"]
-                if needs_shared_norm(marker) and marker not in section_norm:
-                    continue
                 partners = coloc_by_marker.get(marker, ())
-                # One read call, so every plane of this ROI comes off the same
-                # scene rectangle. A partner's plane is only in here when this
-                # run owns that pair; for every study that exists it is not.
-                want = {"dapi": NUCLEAR_C, "mark": plane_index_for(marker)}
-                for other in partners:
-                    want["coloc_" + other] = plane_index_for(other)
-                planes = CR.read_planes(
-                    doc, _Rect(x0, y0, bw, bh), want,
-                    scene=int(g["scene_index"]))
-                dapi = planes["dapi"].astype(np.float32)
-                mark = planes["mark"].astype(np.float32)
-                if dapi.ndim != 2 or dapi.shape != mark.shape:
+                seg = segment_box(doc, b, int(g["scene_index"]), model,
+                                  min_area_px, section_norm, partners)
+                if seg is None:
                     continue
-                # WHICH PLANE IS SEGMENTED is the study's declaration, and
-                # under `segment: own` it is the marker's OWN channel - which
-                # is the plane already read as `mark`, because the channel a
-                # marker is measured on and the channel it segments itself on
-                # are the same channel by definition. No second read: this is
-                # the one place a "segment on X, measure Y" study would need
-                # one, and no such study exists.
-                #
-                # The tiling that makes StarDist tractable moved to
-                # ls_segment.stardist_labels with the finding that justifies
-                # it; it is not a tuning knob and does not belong at a call
-                # site.
-                seg_img = mark if _segments_own(marker) else dapi
-                seg_on = segment_plane_for(marker)
-                seg_backend = backend_for(marker)
-                seg_shaped = int(nucleus_shaped_for(marker))
-                report = {}
-                labels = SG.segment(seg_img, seg_backend, model=model,
-                                    k=MAD_K, min_area_px=min_area_px,
-                                    report=report,
-                                    norm=section_norm.get(marker),
-                                    **_thresholds(marker))
+                x0, y0 = int(b["czi_x0"]), int(b["czi_y0"])
+                labels, seg_img = seg["labels"], seg["seg_img"]
+                dapi, mark, planes = seg["dapi"], seg["mark"], seg["planes"]
+                report, seg_on = seg["report"], seg["seg_on"]
+                seg_backend, seg_shaped = seg["backend"], seg["shaped"]
+                # Kept before the `continue` below, so an ROI StarDist found
+                # nothing in is saved all zero: "measured, empty", which 06i
+                # must be able to tell from a box that was never segmented.
+                outlines[bi] = (labels, x0, y0)
                 # BEFORE the `continue`, which is the whole point of it being
                 # here: the frames this fires on are usually the ones that
                 # report no objects, an ROI with no objects writes no rows, and
@@ -1739,27 +1856,8 @@ def main():
                 if labels.max() == 0:
                     continue
 
-                # Which nuclei are actually IN the ROI. The shape is drawn on
-                # the 256 grid and is something else here - a circle becomes an
-                # ellipse, a polygon a differently-proportioned polygon - so
-                # membership is decided by mapping the centroid BACK to the grid
-                # and testing it there, never against a radius in CZI px.
-                #
-                # That is why a drawn region needs no new machinery: the test
-                # changes from "inside this circle" to "inside this ring", and
-                # everything either side of it stays as it was.
-                #
-                # The shape is moved into grid-index coordinates first, because
-                # `gx, gy` below are grid indices and the curator stored pixel
-                # edges - see 05a's CURATOR_PX_OFFSET.
-                sx, sy = G5.curator_to_grid(float(b["sec_x"]), float(b["sec_y"]))
-                sr = float(b["sec_r"] or 0)
-                poly = G5.parse_poly(b.get("sec_poly", ""))
-                if poly is not None:
-                    poly = np.column_stack(G5.curator_to_grid(poly[:, 0], poly[:, 1]))
-                inside = ((lambda gx, gy: point_in_poly(gx, gy, poly))
-                          if poly is not None else
-                          (lambda gx, gy: (gx - sx) ** 2 + (gy - sy) ** 2 <= sr * sr))
+                # Membership is decided on the 256 grid - see roi_inside.
+                inside = roi_inside(b)
                 props = regionprops(labels, intensity_image=mark)
                 dprops = {p.label: p for p in regionprops(labels, intensity_image=dapi)}
                 kept = set()
@@ -1847,9 +1945,11 @@ def main():
 
                 if args.qc:
                     write_overlay(uid, bi, b, seg_img, labels, kept)
-        # The geometry BEFORE the nuclei, so a run that stops between the two
-        # leaves a record with no nuclei - a section that is not done and is
-        # redone, record and all - never nuclei with no record.
+        # The outlines first of all, then the geometry BEFORE the nuclei, so a
+        # run that stops between any two leaves outlines or a record with no
+        # nuclei - a section that is not done and is redone, outlines, record
+        # and all - never nuclei with no record or no outlines.
+        save_outlines(args.marker, uid, outlines)
         gw.writerows(geometry_rows(uid, by_sec[uid]))
         gfh.flush()
         w.writerows(rows)

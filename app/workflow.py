@@ -921,9 +921,19 @@ def display_title(stage, study=None, technical=False):
     if not technical:
         name = BASIC_TITLES.get(stage.sid, name)
     if study is not None and study.markers:
-        name = name.replace("pERK", "{m0}").replace("PCNA", "{m1}")
+        # With one marker the "PCNA" stages that still run work on that marker:
+        # there is no marker 2 to name.
+        second = "{m0}" if len(study.markers) == 1 and applies(stage, study)[0] else "{m1}"
+        name = name.replace("pERK", "{m0}").replace("PCNA", second)
         name = study.words(name)
     return name
+
+
+#: Second-marker stages that, in a one-marker study, write exactly what their
+#: first-marker twin writes: there is one pass, so both are unsuffixed. Run,
+#: they only repeat the twin's work (and the twin then overwrites theirs).
+ONE_MARKER_TWINS = {"artifact_pcna": "artifact_perk",
+                    "reformat_pcna_final": "reformat_perk_final"}
 
 
 def plain(stage, study=None):
@@ -948,6 +958,11 @@ def applies(stage, study):
             n = len(study.markers)
             return False, (f"Not used in this study: it is for marker {need}, and this "
                            f"study has {'one marker' if n == 1 else f'{n} markers'}.")
+        twin = ONE_MARKER_TWINS.get(stage.sid)
+        if twin and len(study.markers) == 1:
+            return False, ("Not used in this study: with one marker, \"%s\" does the "
+                           "same work." % split_title(S.BY_ID[twin].title)[1]
+                           .replace("pERK", study.markers[0]))
     return True, ""
 
 

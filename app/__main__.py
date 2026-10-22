@@ -85,6 +85,10 @@ def _report(exc_type, exc, tb):
 
 def main():
     sys.excepthook = _report
+    # No window, so no Qt: it runs where there is no display.
+    if "--run" in sys.argv:
+        import headless
+        return headless.main(sys.argv)
     try:
         from PySide6.QtWidgets import QApplication
     except ImportError as e:

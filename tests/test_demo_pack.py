@@ -95,8 +95,11 @@ from PIL import Image                                           # noqa: E402
 
 
 def frame(path, seed, shape=(256, 256)):
+    """A section on a black ground, off-centre so a turn moves it."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    Image.fromarray(np.random.default_rng(seed).integers(0, 255, shape, dtype=np.uint8)).save(path)
+    img = np.zeros(shape, np.uint8)
+    img[20:120, 30:200] = np.random.default_rng(seed).integers(50, 255, (100, 170), dtype=np.uint8)
+    Image.fromarray(img).save(path)
 
 
 src_out, trial = os.path.join(TMP, "src_out"), os.path.join(TMP, "trial")
@@ -122,6 +125,10 @@ moved = os.path.join(trial, "reformatted", "sections", "LS22_s01a_sc01.png")
 Image.fromarray(np.rot90(np.asarray(Image.open(moved)))).save(moved)
 rc = MP.main(["check", "--pack", PACK, "--source-out", src_out, "--trial-out", trial])
 chk("a section that reformats turned fails", rc, 2)
+dim = os.path.join(trial, "reformatted", "sections", "LS22_s01a_sc00.png")
+Image.fromarray((np.asarray(Image.open(dim)) * 0.6).astype(np.uint8)).save(dim)
+chk("...but one only graded darker has its tissue in the same place",
+    MP.frames_match(src_out, trial, "LS22_s01a_sc01", "LS22_s01a_sc00"), (True, ""))
 chk("...and writes no answer key", os.path.exists(os.path.join(PACK, "answer")), False)
 
 print("--- the answer key from an export ---")
@@ -192,6 +199,18 @@ chk("every cut scene has a rotation row, under its new id, in the one-scan study
 chk("the pack lists what it carries", json.load(open(os.path.join(PACK, "pack.json")))
     ["output_from_source"], ["qc/display_ranges.json", "qc/flatfield/tilefield_c0.npy",
                              "qc/flatfield/tilefield_c1.npy", "reformatted/rotation_overrides.csv"])
+print("--- align: the trial's angle made the source's ---")
+with open(os.path.join(src_out, "reformatted", "reformat_index_AF568.csv"), "w") as fh:
+    fh.write("kind,id,angle\nsection,LS22_s01a_sc01,11.5\nsection,LS22_s01a_sc02,227.1\n")
+with open(os.path.join(trial, "reformatted", "reformat_index.csv"), "w") as fh:
+    fh.write("kind,id,angle\nsection,LS22_s01a_sc00,188.5\nsection,LS22_s01a_sc01,226.5\n")
+rc = MP.main(["align", "--pack", PACK, "--source-out", src_out, "--trial-out", trial])
+chk("align runs", rc, 0)
+for where_, root_ in (("pack", pout), ("trial", trial)):
+    rows = list(csv.DictReader(open(os.path.join(root_, "reformatted", "rotation_overrides.csv"))))
+    chk(f"the section that turned the other way is turned back, in the {where_}",
+        [(r["scene_uid"], round(float(r["extra_rotation"]), 1)) for r in rows],
+        [("LS22_s01a_sc00", 261.0), ("LS22_s01a_sc01", 293.1)])
 import tutorial_pack as TP                                      # noqa: E402
 HOME = os.path.join(TMP, "home")
 study_file = TP.install(TP.open_pack(PACK), HOME)

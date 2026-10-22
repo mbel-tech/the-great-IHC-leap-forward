@@ -19,7 +19,8 @@ the tutorial study once in the app:
     python scripts/make_demo_pack.py check --pack PACK --source-out SRC_OUT --trial-out TRIAL
 
         Compares each practice section's reformatted greyscale picture in the
-        trial run with the source study's. Only when every one matches does it
+        trial run with the source study's: the tissue must overlap by 0.9 (IoU).
+        Only when every one matches does it
         write the answer key (the source study's curation of those sections,
         under their new ids): otherwise the expert's outlines would sit in the
         wrong place on the learner's sections. Exit 2 and no answer key when
@@ -38,6 +39,15 @@ the tutorial study once in the app:
         sections are too few to sample brightness from, and without the
         rotations the sections reformat in another frame than the expert drew
         on. The tutorial study starts with these files in its output folder.
+
+    python scripts/make_demo_pack.py align --pack PACK --source-out SRC_OUT --trial-out TRIAL
+
+        After a trial run, sets each cut section's rotation so its final angle
+        is the source's. The automatic angle can pick the other end of a
+        section's long axis on the demo study (a nearly symmetric section
+        turns 180 degrees), and the hand rotation alone cannot know that.
+        Writes the pack's and the trial's rotation file; re-run the trial's
+        reformat stages, then check.
 
     python scripts/make_demo_pack.py ready --pack PACK --trial-out TRIAL
 
@@ -187,7 +197,8 @@ def write_workbook(path, slide_name, groups):
     wb.save(path)
 
 
-MATCH = 0.98     # correlation a practice section's two pictures must reach
+MATCH = 0.9      # overlap (IoU) a practice section's two tissue masks must reach
+TISSUE = 8       # grey level above which a frame pixel is tissue (the ground is black)
 
 
 def _section_picture(out_root, uid):
@@ -221,11 +232,14 @@ def frames_match(source_out, trial_out, old_uid, new):
     b = np.asarray(Image.open(trial).convert("L"), float)
     if a.shape != b.shape:
         return False, f"{new} is {b.shape[1]}x{b.shape[0]} px, the source's {a.shape[1]}x{a.shape[0]}"
-    if np.array_equal(a, b):
-        return True, ""
-    r = float(np.corrcoef(a.ravel(), b.ravel())[0, 1]) if a.std() and b.std() else 0.0
-    if r < MATCH:
-        return False, f"{new} differs from the source's {old_uid} (correlation {r:.2f})"
+    # Where the outlines land is a question of geometry, not brightness: the
+    # demo study renders from a cut slide and may grade a little differently,
+    # but its tissue must sit where the source's did.
+    ta, tb = a > TISSUE, b > TISSUE
+    iou = float((ta & tb).sum()) / max(1, int((ta | tb).sum()))
+    if iou < MATCH:
+        return False, (f"{new}'s tissue overlaps the source's {old_uid} by {iou:.2f} "
+                       f"(needs {MATCH}); see `align`")
     return True, ""
 
 
@@ -409,6 +423,65 @@ def cmd_calibrate(a):
     return 0
 
 
+def _index_angles(out_root):
+    """{section id: final angle} from every reformat index under reformatted/."""
+    import csv
+    base, found = os.path.join(out_root, "reformatted"), {}
+    for name in sorted(os.listdir(base)) if os.path.isdir(base) else []:
+        if re.fullmatch(r"reformat_index(_.+)?\.csv", name):
+            with open(os.path.join(base, name), newline="", encoding="utf-8") as fh:
+                for r in csv.DictReader(fh):
+                    if r.get("kind") == "section" and r.get("angle"):
+                        found.setdefault(r["id"], float(r["angle"]))
+    return found
+
+
+def cmd_align(a):
+    import csv
+    with open(os.path.join(a.pack, "pack.json"), encoding="utf-8") as fh:
+        meta = json.load(fh)
+    rel = next((r for r in meta.get("output_from_source", []) if "overrides" in r), None)
+    if not rel:
+        print("the pack carries no rotation file; run calibrate first.")
+        return 2
+    src_angle, trial_angle = _index_angles(a.source_out), _index_angles(a.trial_out)
+    old_of = {new: old for old, new in _cut_uids(meta).items()}
+    pack_file = os.path.join(a.pack, "output", *rel.split("/"))
+    with open(pack_file, newline="", encoding="utf-8") as fh:
+        rows = list(csv.DictReader(fh))
+    turned = []
+    for r in rows:
+        new, old = r["scene_uid"], old_of.get(r["scene_uid"])
+        if old not in src_angle or new not in trial_angle:
+            print(f"no reformat angle for {old if old not in src_angle else new}; "
+                  "run the trial's Prepare first.")
+            return 2
+        delta = (src_angle[old] - trial_angle[new] + 180.0) % 360.0 - 180.0
+        if abs(delta) >= 0.5:
+            r["extra_rotation"] = f"{(float(r['extra_rotation'] or 0) + delta) % 360.0:g}"
+            turned.append(f"{new} {delta:+.1f} deg")
+    for path in (pack_file, os.path.join(a.trial_out, *rel.split("/"))):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", newline="", encoding="utf-8") as fh:
+            w = csv.DictWriter(fh, fieldnames=list(rows[0]))
+            w.writeheader()
+            w.writerows(rows)
+    if turned:
+        print(f"turned {', '.join(turned)}; re-run the trial's reformat stages, then check.")
+    else:
+        print("every section already has the source's angle.")
+    return 0
+
+
+def _cut_uids(meta):
+    """{source uid: demo uid} for every cut scene."""
+    first = next(iter(meta["practice_from"]))
+    prefix = re.fullmatch(r"(.*_sc)\d+", first).group(1)
+    width = len(first) - len(prefix)
+    return {f"{prefix}{old:0{width}d}": f"{prefix}{new:0{width}d}"
+            for new, old in enumerate(meta["source_scenes"])}
+
+
 def cmd_ready(a):
     import ls_paths as LP
     import stages as S
@@ -471,13 +544,18 @@ def main(argv=None):
     c.add_argument("--overrides", required=True,
                    help="the source study's rotation override file for the cut pass")
     c.add_argument("--channel", required=True, help="the slide channel that holds the marker")
+    g = sub.add_parser("align")
+    g.add_argument("--pack", required=True)
+    g.add_argument("--source-out", required=True)
+    g.add_argument("--trial-out", required=True)
     o = sub.add_parser("one-marker")
     o.add_argument("--pack", required=True)
     o.add_argument("--channel", required=True, help="the slide channel that holds the marker")
     o.add_argument("--nuclear", default="DAPI")
     a = ap.parse_args(argv)
     return {"cut": cmd_cut, "check": cmd_check, "ready": cmd_ready,
-            "one-marker": cmd_one_marker, "calibrate": cmd_calibrate}[a.cmd](a)
+            "one-marker": cmd_one_marker, "calibrate": cmd_calibrate,
+            "align": cmd_align}[a.cmd](a)
 
 
 if __name__ == "__main__":

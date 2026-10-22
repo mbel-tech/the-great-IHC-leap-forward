@@ -9,6 +9,11 @@ Native pixels only: nothing here resamples. Every function works on the array
 it is given at that array's own resolution.
 """
 
+import os
+import re
+import struct
+import zlib
+
 import numpy as np
 
 #: Draw order of the legend; also the full set of values kind_of can return.
@@ -141,3 +146,199 @@ def shape_mask_outline(h, w, inside):
     ys, xs = np.mgrid[0:h, 0:w]
     mask = np.asarray(inside(xs.astype(float), ys.astype(float)), bool)
     return _edge(mask) & mask
+
+
+LEGEND_LABELS = {
+    "positive": "positive",
+    "censored": "censored (clipped)",
+    "negative": "negative",
+    "outside": "outside ROI",
+    "artifact": "artifact",
+    "off_tissue": "off tissue",
+}
+
+
+def overlay_dir(out_root, marker, animal):
+    """Folder holding one animal's overlay pictures for one marker."""
+    return os.path.join(out_root, "detection_overlays", marker, animal)
+
+
+def overlay_name(marker, uid, picture, roi_index=None, region=""):
+    """File name of one overlay picture.
+
+    `picture` is "scene", "roi" or "background"; roi_index numbers the ROI (or
+    the background patch). Anything in the region that is not a letter, digit,
+    dot or hyphen becomes "_" so the name is safe on every file system.
+    """
+    if picture == "scene":
+        return f"{marker}_{uid}_scene.png"
+    if picture == "background":
+        return f"{marker}_{uid}_bg{int(roi_index):02d}.png"
+    if picture != "roi":
+        raise ValueError(f"unknown picture kind {picture!r}")
+    safe = re.sub(r"[^A-Za-z0-9.\-]+", "_", region or "").strip("_")
+    return f"{marker}_{uid}_roi{int(roi_index):02d}" + (f"_{safe}" if safe else "") + ".png"
+
+
+def _wrap(font, text, width):
+    """Split `text` into lines no wider than `width`, breaking at " | " first,
+    then at spaces, then (a single over-long word) between characters."""
+    def fits(t):
+        return font.getlength(t) <= width
+
+    def pack(pieces, sep):
+        out, cur = [], ""
+        for piece in pieces:
+            trial = piece if not cur else cur + sep + piece
+            if cur and not fits(trial):
+                out.append(cur)
+                cur = piece
+            else:
+                cur = trial
+        if cur:
+            out.append(cur)
+        return out
+
+    lines = []
+    for chunk in pack(text.split(" | "), " | "):
+        if fits(chunk):
+            lines.append(chunk)
+            continue
+        for sub in pack(chunk.split(" "), " "):
+            while not fits(sub) and len(sub) > 1:
+                n = len(sub) - 1
+                while n > 1 and not fits(sub[:n]):
+                    n -= 1
+                lines.append(sub[:n])
+                sub = sub[n:]
+            lines.append(sub)
+    return lines or [""]
+
+
+def strip(width, lines, legend, um_px, bar_um):
+    """Black strip with white text: `lines`, then optionally the colour legend,
+    then a scale bar of bar_um micrometres. Returns uint8 RGB (h, width, 3).
+
+    Lines wider than `width` are wrapped, never cut: later stages put long
+    summaries here. PIL is imported here, not at module level, so importing
+    ls_overlay (06a does) needs no Pillow.
+    """
+    from PIL import Image, ImageDraw, ImageFont
+    size = max(14, width // 90)
+    font = ImageFont.load_default(size=size)
+    pad = size // 2
+    row_h = int(size * 1.4)
+    room = max(width - 2 * pad, 1)
+
+    text_rows = [ln for raw in lines for ln in _wrap(font, str(raw), room)]
+    sw = size  # swatch edge
+    items = []  # (x, y-row, kind) legend entries, flowed onto rows
+    legend_rows = 0
+    if legend:
+        x, legend_rows = 0, 1
+        for kind in KINDS:
+            w = sw + pad // 2 + font.getlength(LEGEND_LABELS[kind]) + size
+            if x and x + w > room:
+                x, legend_rows = 0, legend_rows + 1
+            items.append((x, legend_rows - 1, kind))
+            x += int(w)
+    bar_px = max(1, round(bar_um / um_px))
+    bar_px = min(bar_px, room)
+
+    height = pad * 2 + row_h * (len(text_rows) + legend_rows + 1)
+    img = Image.new("RGB", (width, height), (0, 0, 0))
+    d = ImageDraw.Draw(img)
+    y = pad
+    for ln in text_rows:
+        d.text((pad, y), ln, font=font, fill=(255, 255, 255))
+        y += row_h
+    for x, r, kind in items:
+        top = y + r * row_h + (row_h - sw) // 2
+        x0 = pad + x
+        fill = FILL_COLOURS.get(kind)
+        d.rectangle([x0, top, x0 + sw - 1, top + sw - 1],
+                    fill=fill, outline=COLOURS[kind])
+        d.text((x0 + sw + pad // 2, y + r * row_h), LEGEND_LABELS[kind],
+               font=font, fill=(255, 255, 255))
+    y += legend_rows * row_h
+    bar_t = 4
+    by = y + (row_h - bar_t) // 2
+    d.rectangle([pad, by, pad + bar_px - 1, by + bar_t - 1], fill=(255, 255, 255))
+    d.text((pad + bar_px + size, y), f"{bar_um} \u00b5m", font=font, fill=(255, 255, 255))
+    return np.asarray(img, np.uint8).copy()
+
+
+class PngRows:
+    """Write an 8-bit RGB PNG a block of rows at a time.
+
+    Overlays can be far larger than is comfortable to hold (a whole scene at
+    native pixels), so rows are compressed as they arrive and IDAT chunks are
+    flushed once ~1 MiB has built up. Output goes to `path + ".part"` and is
+    renamed only on a complete close, so a crash never leaves a truncated PNG
+    under the real name. Usable as a context manager: an exception inside the
+    `with` removes the .part and propagates.
+    """
+
+    CHUNK = 1 << 20
+
+    def __init__(self, path, width, height):
+        self.path, self.width, self.height = path, int(width), int(height)
+        self.rows = 0
+        self._z = zlib.compressobj(6)
+        self._buf = bytearray()
+        self._part = path + ".part"
+        self._f = open(self._part, "wb")
+        self._f.write(b"\x89PNG\r\n\x1a\n")
+        self._chunk(b"IHDR", struct.pack(">IIBBBBB", self.width, self.height, 8, 2, 0, 0, 0))
+
+    def _chunk(self, tag, data):
+        self._f.write(struct.pack(">I", len(data)) + tag + data
+                      + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF))
+
+    def _flush(self, final=False):
+        while len(self._buf) >= self.CHUNK or (final and self._buf):
+            self._chunk(b"IDAT", bytes(self._buf[:self.CHUNK]))
+            del self._buf[:self.CHUNK]
+
+    def write(self, rows):
+        a = np.asarray(rows)
+        if a.dtype != np.uint8 or a.ndim != 3 or a.shape[1:] != (self.width, 3):
+            raise ValueError(f"rows must be uint8 (k, {self.width}, 3), "
+                             f"got {a.dtype} {a.shape}")
+        if self.rows + a.shape[0] > self.height:
+            raise ValueError(f"{self.rows + a.shape[0]} rows written, height is {self.height}")
+        raw = np.zeros((a.shape[0], 1 + self.width * 3), np.uint8)  # filter byte 0
+        raw[:, 1:] = a.reshape(a.shape[0], -1)
+        self._buf += self._z.compress(raw.tobytes())
+        self.rows += a.shape[0]
+        self._flush()
+
+    def abort(self):
+        """Close and delete the .part without producing a PNG."""
+        if not self._f.closed:
+            self._f.close()
+        if os.path.exists(self._part):
+            os.remove(self._part)
+
+    def close(self):
+        if self._f.closed:
+            return
+        if self.rows != self.height:
+            got = self.rows
+            self.abort()
+            raise ValueError(f"{got} rows written, height is {self.height}")
+        self._buf += self._z.flush()
+        self._flush(final=True)
+        self._chunk(b"IEND", b"")
+        self._f.close()
+        os.replace(self._part, self.path)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if exc_type is not None:
+            self.abort()
+            return False
+        self.close()
+        return False

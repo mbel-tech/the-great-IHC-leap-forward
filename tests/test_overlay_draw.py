@@ -105,5 +105,117 @@ chk("outline non-empty", bool(ol.any()), True)
 chk("outline inside mask", bool((ol & ~mask).any()), False)
 chk("deep interior not outline", bool(ol[20, 20] or ol[15:26, 15:26].any()), False)
 
+# --- text strip, file names, streaming PNG --------------------------------
+import tempfile
+
+chk("name roi", LO.overlay_name("pERK", "LS22_s01a_sc06", "roi", 3, "Dm"),
+    "pERK_LS22_s01a_sc06_roi03_Dm.png")
+chk("name roi, region sanitised",
+    LO.overlay_name("pERK", "LS22_s01a_sc06", "roi", 3, "OB/Tel x"),
+    "pERK_LS22_s01a_sc06_roi03_OB_Tel_x.png")
+chk("name background", LO.overlay_name("pERK", "LS22_s01a_sc06", "background", 1),
+    "pERK_LS22_s01a_sc06_bg01.png")
+chk("name scene", LO.overlay_name("pERK", "LS22_s01a_sc06", "scene"),
+    "pERK_LS22_s01a_sc06_scene.png")
+chk("overlay_dir", LO.overlay_dir("/o", "pERK", "LS22"),
+    os.path.join("/o", "detection_overlays", "pERK", "LS22"))
+
+
+def max_white_runs(img):
+    runs = set()
+    white = (img == 255).all(axis=2)
+    for r in white:
+        n = 0
+        for v in r:
+            if v:
+                n += 1
+            elif n:
+                runs.add(n)
+                n = 0
+        if n:
+            runs.add(n)
+    return runs
+
+
+st = LO.strip(800, ["a", "b"], True, 0.65, 50)
+chk("strip width", st.shape[1], 800)
+chk("strip height > 0", st.shape[0] > 0, True)
+chk("strip dtype/channels", (st.dtype.name, st.shape[2]), ("uint8", 3))
+chk("strip scale bar run of 77", 77 in max_white_runs(st), True)
+flat = {tuple(p) for p in st.reshape(-1, 3)}
+chk("strip has every kind colour", all(c in flat for c in LO.COLOURS.values()), True)
+LO.strip(800, ["scale 0.65 \u00b5m/px"], False, 0.65, 50)
+chk("strip with micro sign, no legend ok", True, True)
+
+long_line = " | ".join(f"field{i}: value {i}" for i in range(40))
+narrow = LO.strip(300, [long_line], True, 0.65, 50)
+chk("long line wraps to taller strip", narrow.shape[0] > LO.strip(300, ["x"], True, 0.65, 50).shape[0], True)
+chk("narrow strip width kept", narrow.shape[1], 300)
+
+with tempfile.TemporaryDirectory() as td:
+    from PIL import Image
+    rng = np.random.default_rng(0)
+    im = rng.integers(0, 256, (37, 53, 3), dtype=np.uint8)
+    path = os.path.join(td, "a.png")
+    pw = LO.PngRows(path, 53, 37)
+    for r0 in range(0, 37, 10):
+        pw.write(im[r0:r0 + 10])
+    pw.close()
+    chk("PngRows round-trip", bool((np.asarray(Image.open(path)) == im).all()), True)
+    chk("PngRows no .part left", os.path.exists(path + ".part"), False)
+
+    path = os.path.join(td, "b.png")
+    pw = LO.PngRows(path, 53, 37)
+    pw.write(im[:10])
+    try:
+        pw.close()
+        got = "no error"
+    except ValueError:
+        got = "ValueError"
+    chk("PngRows short close raises", got, "ValueError")
+    chk("PngRows short: no png, no part",
+        (os.path.exists(path), os.path.exists(path + ".part")), (False, False))
+
+    path = os.path.join(td, "c.png")
+    try:
+        with LO.PngRows(path, 53, 37) as pw:
+            pw.write(im[:5])
+            raise RuntimeError("boom")
+    except RuntimeError:
+        got = "RuntimeError"
+    chk("PngRows with: exception propagates, part removed",
+        (got, os.path.exists(path), os.path.exists(path + ".part")),
+        ("RuntimeError", False, False))
+
+    path = os.path.join(td, "d.png")
+    with LO.PngRows(path, 53, 37) as pw:
+        pw.write(im)
+    chk("PngRows with: ok", os.path.exists(path), True)
+
+    pw = LO.PngRows(os.path.join(td, "e.png"), 53, 37)
+    bad = []
+    for blk in (im.astype(np.int32)[:2], im[:2, :52], im[0]):
+        try:
+            pw.write(blk)
+            bad.append("accepted")
+        except ValueError:
+            bad.append("ValueError")
+    chk("PngRows rejects bad blocks", bad, ["ValueError"] * 3)
+    try:
+        pw.write(np.zeros((38, 53, 3), np.uint8))
+        got = "accepted"
+    except ValueError:
+        got = "ValueError"
+    chk("PngRows rejects too many rows", got, "ValueError")
+    pw.abort()
+    chk("abort leaves nothing", os.listdir(td).count("e.png.part"), 0)
+
+    big = rng.integers(0, 256, (600, 700, 3), dtype=np.uint8)  # > 1 MiB raw, random
+    path = os.path.join(td, "f.png")
+    with LO.PngRows(path, 700, 600) as pw:
+        for r0 in range(0, 600, 64):
+            pw.write(big[r0:r0 + 64])
+    chk("PngRows multi-IDAT round-trip", bool((np.asarray(Image.open(path)) == big).all()), True)
+
 print("\n" + ("ALL PASS" if not fails else f"{fails} FAILED"))
 raise SystemExit(1 if fails else 0)

@@ -117,6 +117,22 @@ with tempfile.TemporaryDirectory() as tmp:
         "no roi_regions.csv found" in (res.error or ""), True)
     chk("main() returning 0 is a success", r.run(Zero()).ok, True)
 
+    # cli_only may be a callable, asked each time (05c: whether this
+    # interpreter can import StarDist). A function is truthy, so reading the
+    # attribute as the answer refused 05c everywhere, StarDist or not, with
+    # "is not run by the app: <function detect_cli_reason ...>".
+    class Detectable(Zero):
+        cli_only = staticmethod(lambda: None)
+
+    class NotHere(Zero):
+        cli_only = staticmethod(lambda: "needs StarDist")
+
+    Detectable.cli_reason = NotHere.cli_reason = lambda self: self.cli_only()
+    chk("a callable cli_only that answers None runs the stage", r.run(Detectable()).ok, True)
+    res = r.run(NotHere())
+    chk("...one that gives a reason refuses it", res.ok, False)
+    chk("...in its own words", "needs StarDist" in (res.error or ""), True)
+
 
 # ------------------------------------------------- switching study, mid-session
 # ls_config caches the parsed config and lives in sys.modules, which the runner

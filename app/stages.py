@@ -814,6 +814,25 @@ STAGES = [
           blurb="Rebuilds both spreadsheets and re-draws the figures every hour "
                 "while detection runs, then stops when every section is measured."),
 
+    Stage("detection_overlays", "06i  Detection overlays, for checking", "Beyond blinding",
+          script="06i_detection_overlays.py", reader="pylibCZIrw",
+          # No --marker: the script draws every marker that has measured
+          # sections, so one button covers the whole study.
+          outputs=["detection_overlays/index.csv"],
+          needs=["roi_dataset"],
+          made_from=["detect", "roi_dataset"],
+          blurb="Pictures of every nucleus 05c found, over the marker channel in "
+                "grey: positives filled magenta, negatives outlined cyan, nuclei "
+                "outside the ROI yellow, artifact orange, off tissue blue, censored "
+                "positives outlined white. One whole-scene picture and one crop per "
+                "ROI and background disc, at full resolution, so they are large. "
+                "Counts drawn are 06a's; a section that disagrees is not drawn. "
+                "The first run re-runs StarDist once for every section measured "
+                "before outlines were saved, about as long as detection; later "
+                "runs are fast. Scene pictures are roughly 100-500 MB each; "
+                "--no-scenes draws only the crops. "
+                "Needs 06a's output; run on request only."),
+
     # ---- Repair older outputs ----------------------------------------------
     # Not part of a run. Each brings a file written by an older version of a
     # stage up to what that stage writes today.

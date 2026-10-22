@@ -78,11 +78,21 @@ if _HERE not in sys.path:
 # the whole process. Imported, not re-implemented: this block used to be four
 # lines copy-pasted into every stage.
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
+import ls_overlay as LO  # noqa: E402
 OUT_ROOT = G5.OUT_ROOT
 RESULTS = os.path.join(OUT_ROOT, "results")
 NUCLEI_CSV = os.path.join(RESULTS, "roi_nuclei.csv")
 MEAS_CSV = os.path.join(RESULTS, "roi_measurements.csv")
 SPEC_CSV = os.path.join(RESULTS, "detector_specificity.csv")
+#: The cut each section was counted against, at full precision (repr, so it
+#: reads back as the same float). roi_measurements.csv carries it rounded to
+#: 0.1 for reading; a nucleus whose median sits on that rounded value may be
+#: on either side of the real one, and 06i_detection_overlays.py colours each
+#: nucleus by the cut it was counted by. A file of its own rather than a
+#: column, so the spreadsheets and R scripts reading roi_measurements.csv see
+#: the table they always have.
+CUTS_CSV = os.path.join(RESULTS, "positivity_cuts.csv")
+CUTS_COLUMNS = ["scene_uid", "marker", "cut"]
 #: What 05c recorded about the shape each ROI was measured on (05c's
 #: GEOMETRY_CSV), and where this stage lists the sections whose shape has
 #: changed since. See check_geometry.
@@ -607,7 +617,7 @@ def main(argv=None):
             continue
         cut = cuts[uid]
         for v, d, c, o in zip(disc.v, disc.d, disc.cen, disc.own):
-            if o and (c or v > cut):
+            if o and LO.is_positive(v, c, cut):
                 diam_by[(mk, disc.region)].append(d)
                 pos_by_marker[mk].append(d)
     hs = {k: st.mean(v) for k, v in diam_by.items() if v}
@@ -658,7 +668,7 @@ def main(argv=None):
                 # both halves outright - censoring "MUST NOT be excluded from
                 # detection or from positivity" and MUST be excluded from any
                 # intensity statistic. Do not "fix" this to drop them.
-                n_pos = (sum(1 for v, c in zip(here.v, here.cen) if c or v > cut)
+                n_pos = (sum(1 for v, c in zip(here.v, here.cen) if LO.is_positive(v, c, cut))
                          if here else 0) if cut is not None else ""
                 h = hs.get((b["marker"], b["region"]),
                            h_by_marker.get(b["marker"], h_all))
@@ -768,6 +778,21 @@ def main(argv=None):
             })
 
     real = [r for r in rows if r["roi_kind"] == "roi"]
+    # One row per (section, marker) that was counted against a cut, from the
+    # emitted rows, so it describes exactly the sections roi_measurements.csv
+    # does. Header only when no section has a cut; gone with the rest below
+    # when there is nothing at all.
+    exact = sorted({(r["scene_uid"], r["marker"]) for r in rows
+                    if r["scene_uid"] in cuts})
+    # Beside whichever roi_measurements.csv is written, so the two always
+    # describe the same run.
+    cuts_csv = os.path.join(os.path.dirname(MEAS_CSV), os.path.basename(CUTS_CSV))
+    if rows:
+        IO.atomic_write_csv(cuts_csv,
+                            [{"scene_uid": u, "marker": m, "cut": repr(cuts[u])}
+                             for u, m in exact], CUTS_COLUMNS)
+    elif os.path.exists(cuts_csv):
+        os.remove(cuts_csv)
     for path, data in ((MEAS_CSV, rows), (SPEC_CSV, spec)):
         if not data:
             # An EMPTY result must not leave the previous run's file standing.

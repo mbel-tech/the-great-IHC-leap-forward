@@ -328,6 +328,7 @@ the full guide; this is the shape of it.
 | 6b | `06b_join_sampling.py` | Joins the sampling workbook — **the unblinding step** |
 | 6c / 6d | `06c_excel_dataset.py`, `06d_excel_by_slide.py` | The spreadsheets, per sample and per slide |
 | 6e | `06e_refresh_loop.py` | Rebuilds 6a→6d hourly while 5c is still running, once per measured marker |
+| 6i | `06i_detection_overlays.py` | Pictures of every nucleus found, positives filled in, for checking the counts; on request only |
 
 **The R figure steps are switched off for now** (`R_FIGURES = False` in `app/stages.py`, at the
 operator's request): 6e builds the datasets and spreadsheets only, and the app's screens no

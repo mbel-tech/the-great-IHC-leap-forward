@@ -3,7 +3,7 @@
 numpy>=2.0
 scipy>=1.14
 pandas>=2.0
-pillow>=10.0
+pillow>=10.1
 matplotlib>=3.9
 tifffile>=2025.1.1
 scikit-image>=0.24    # 05c/ls_segment threshold backends and 04g

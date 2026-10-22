@@ -78,6 +78,7 @@ if _HERE not in sys.path:
 # the whole process. Imported, not re-implemented: this block used to be four
 # lines copy-pasted into every stage.
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
+import ls_overlay as LO  # noqa: E402
 OUT_ROOT = G5.OUT_ROOT
 RESULTS = os.path.join(OUT_ROOT, "results")
 NUCLEI_CSV = os.path.join(RESULTS, "roi_nuclei.csv")
@@ -607,7 +608,7 @@ def main(argv=None):
             continue
         cut = cuts[uid]
         for v, d, c, o in zip(disc.v, disc.d, disc.cen, disc.own):
-            if o and (c or v > cut):
+            if o and LO.is_positive(v, c, cut):
                 diam_by[(mk, disc.region)].append(d)
                 pos_by_marker[mk].append(d)
     hs = {k: st.mean(v) for k, v in diam_by.items() if v}
@@ -658,7 +659,7 @@ def main(argv=None):
                 # both halves outright - censoring "MUST NOT be excluded from
                 # detection or from positivity" and MUST be excluded from any
                 # intensity statistic. Do not "fix" this to drop them.
-                n_pos = (sum(1 for v, c in zip(here.v, here.cen) if c or v > cut)
+                n_pos = (sum(1 for v, c in zip(here.v, here.cen) if LO.is_positive(v, c, cut))
                          if here else 0) if cut is not None else ""
                 h = hs.get((b["marker"], b["region"]),
                            h_by_marker.get(b["marker"], h_all))

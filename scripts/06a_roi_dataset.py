@@ -129,26 +129,10 @@ BASE_PX_UM = CONFIG["pixel_size_um"]
 STAT = "marker_median"
 
 
-def mad(xs):
-    m = st.median(xs)
-    return st.median([abs(x - m) for x in xs])
-
-
-def reads_nucleus_shaped(value):
-    """How a `nucleus_shaped` cell reads, INCLUDING when there is no cell.
-
-    THE LS COMPATIBILITY RULE, and it is the reason this is a function rather
-    than `== "1"` inline. A roi_nuclei.csv written before 2026-09-08 has no
-    such column, and every object in it came from the nuclear channel
-    segmented by StarDist, because that was the only route 05c had. Its
-    silence is therefore not "unknown" - it is True, and any other reading
-    would withhold the Abercrombie correction from 961,233 rows that are
-    nuclei. 05c backfills the column with exactly this reading when it resumes
-    onto such a file.
-    """
-    if value is None or value == "":
-        return True
-    return str(value).strip().lower() not in ("0", "false", "no")
+#: The cut's arithmetic and the reading of `nucleus_shaped` live in ls_overlay,
+#: which 05c draws its crops by: one rule for what is counted and what is drawn.
+mad = LO.mad
+reads_nucleus_shaped = LO.reads_nucleus_shaped
 
 
 def abercrombie_reason(segmented_on, nucleus_shaped, enabled=True):
@@ -595,13 +579,14 @@ def main(argv=None):
           f"-> {n_kept} nuclei quantified")
 
     # ---- the per-section cut, from that section's own background discs
+    # (ls_overlay.section_cut: median + 3 * 1.4826 * MAD, none under 5 values.)
     cuts, bgstat = {}, {}
     for uid, bg in bg_by.items():
-        if len(bg) < 5:
+        got = LO.background_stats(bg)
+        if got is None:
             continue
-        m, s = st.median(bg), mad(bg) * 1.4826
-        cuts[uid] = m + 3.0 * s
-        bgstat[uid] = (m, s, len(bg))
+        cuts[uid] = LO.section_cut(bg)
+        bgstat[uid] = got
 
     # ---- h for Abercrombie, measured per region and marker
     #
@@ -707,9 +692,8 @@ def main(argv=None):
                     "roi_area_mm2": round(area / 1e6, 6),
                     "n_nuclei": n_nuc,
                     "n_positive": n_pos,
-                    "frac_positive": (round(n_pos / n_nuc, 4)
-                                      if (cut is not None and n_nuc
-                                          and not no_denom) else ""),
+                    "frac_positive": LO.frac_positive(n_pos, n_nuc, cut,
+                                                      no_denom),
                     "profile_density_per_mm2": round(n_nuc / (area / 1e6), 1) if area else "",
                     "abercrombie_factor": round(ab, 4),
                     # EVERY row carries this key, blank included. There is no

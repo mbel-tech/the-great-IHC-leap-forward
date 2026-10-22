@@ -1649,8 +1649,10 @@ The run ends with "N not drawn".
 It needs 06a first, and refuses to run if 06a's tables are missing or older than the nuclei
 table. It is made on request only: Run all remaining skips it. Pictures are at full resolution,
 and the scene pictures are very large, so use **Skip the whole-scene pictures** (`--no-scenes`)
-or **Only the first N scenes** (`--limit`) for a trial. The desktop button draws the first
-marker; for another, or for chosen animals, use `--marker` and `--animal` on the command line.
+or **Only the first N scenes** (`--limit`) for a trial. The desktop button draws every marker
+that has measured sections, in the study's order, and the run ends with one "N not drawn" line over
+all of them. To draw one marker, or chosen animals only, use the command line:
+`python scripts/06i_detection_overlays.py --marker AF488 --animal LS22 LS23`.
 
 ## Repairing older outputs
 

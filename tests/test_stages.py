@@ -321,6 +321,7 @@ _do = S.BY_ID.get("detection_overlays")
 chk("detection_overlays is a stage", _do is not None)
 if _do is not None:
     chk("...that runs 06i", _do.script, "06i_detection_overlays.py")
+    chk("...takes no --marker, so one button draws every marker", _do.argv, [])
     chk("...needs the per-ROI dataset", _do.needs, ["roi_dataset"])
     chk("...in the Beyond blinding band", _do.group, "Beyond blinding")
     chk("...reads pixels with pylibCZIrw", _do.reader, "pylibCZIrw")

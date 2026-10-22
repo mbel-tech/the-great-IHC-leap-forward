@@ -813,9 +813,8 @@ STAGES = [
 
     Stage("detection_overlays", "06i  Detection overlays, for checking", "Beyond blinding",
           script="06i_detection_overlays.py", reader="pylibCZIrw",
-          # The first marker; the script's own default, written out so the
-          # sidebar shows it. The others are drawn with --marker on the command line.
-          argv=["--marker", "{marker0}"],
+          # No --marker: the script draws every marker that has measured
+          # sections, so one button covers the whole study.
           outputs=["detection_overlays/index.csv"],
           needs=["roi_dataset"],
           made_from=["detect", "roi_dataset"],

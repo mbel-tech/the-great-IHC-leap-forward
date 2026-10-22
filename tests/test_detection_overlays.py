@@ -836,6 +836,73 @@ with temp_study(acquisition=PAIRED) as study:
     rc, out = run_06i(OV, "--animal", "XX99", "--force")
     chk("--animal XX99 --force: 0 sections", "0 sections" in out, True)
 
+    print("--- two markers measured: every marker is drawn without --marker ---")
+    MARKER2 = "AF488"
+    C2 = "AB12_2a-s0"
+    SC2 = 8
+    sec2 = [dict(box(C2, 10), marker=MARKER2),
+            dict(box(C2, 80, kind="background"), marker=MARKER2)]
+    PLANES[(SC2, 0, 10)] = dapi([P], 7)
+    PLANES[(SC2, 1, 10)] = mark({P: 2000.0}, 7)
+    PLANES[(SC2, 0, 80)] = dapi(BG[:2], 8)
+    PLANES[(SC2, 1, 80)] = mark({}, 8)
+    D5.G5.use_marker(MARKER2)
+    os.makedirs(os.path.dirname(D5.G5.GEOM_CSV), exist_ok=True)
+    write_rows(D5.G5.GEOM_CSV, [{
+        "scene_uid": C2, "animal": "AB12", "marker": MARKER2,
+        "czi_file": "AB12_2a.czi", "scene_index": str(SC2),
+        "m00": "1", "m01": "0", "m02": "0", "m10": "0", "m11": "1", "m12": "0",
+        "scene_x": str(SCENE_RECT[0]), "scene_y": str(SCENE_RECT[1]),
+        "scene_w": str(SCENE_RECT[2]), "scene_h": str(SCENE_RECT[3])}])
+    write_rows(D5.G5.BOX_CSV, sec2)
+    np.save(os.path.join(D5.REFORMAT_DIR, "sections", f"{C2}_mask.npy"),
+            np.ones((256, 256), dtype=bool))
+    saved = (pyczi.open_czi, D5.load_model, sys.argv)
+    pyczi.open_czi = FakeOpenCzi(FakeCzi(PLANES))
+    D5.load_model = lambda: FakeModel()
+    sys.argv = ["05c_detect_rois.py", "--marker", MARKER2, "--order", "uid"]
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc2 = D5.main()
+    finally:
+        pyczi.open_czi, D5.load_model, sys.argv = saved
+    chk("05c measured the second marker", rc2, 0)
+    run_06a()
+    shutil.rmtree(out_dir, ignore_errors=True)
+
+    def run_all_markers(*extra):
+        saved = (pyczi.open_czi, OV.D5.load_model, sys.argv)
+        pyczi.open_czi = FakeOpenCzi(FakeCzi(PLANES))
+        OV.D5.load_model = lambda: MODEL
+        sys.argv = ["06i_detection_overlays.py"] + list(extra)
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf):
+                rc = OV.main()
+        finally:
+            pyczi.open_czi, OV.D5.load_model, sys.argv = saved
+        print("     | " + buf.getvalue().strip().replace("\n", "\n     | "))
+        return rc, buf.getvalue()
+
+    f1 = os.path.join(out_dir, MARKER, "AB12")
+    f2 = os.path.join(out_dir, MARKER2, "AB12")
+    rc, out = run_all_markers("--no-scenes")
+    chk("no --marker: exit 0", rc, 0)
+    chk("...pictures for the first marker", len(pngs_in(f1)) > 0, True)
+    chk("...and for the second, in its own folder", len(pngs_in(f2)) > 0, True)
+    chk("...second marker's pictures are named for it",
+        all(f.startswith(MARKER2 + "_") for f in pngs_in(f2)), True)
+    idx = read_rows(os.path.join(out_dir, "index.csv"))
+    chk("...one shared index names both markers",
+        sorted({r["marker"] for r in idx}), sorted([MARKER, MARKER2]))
+    shutil.rmtree(out_dir)
+    rc, out = run_all_markers("--no-scenes", "--marker", MARKER2)
+    chk("--marker limits the run to one marker",
+        (len(pngs_in(f1)), len(pngs_in(f2)) > 0), (0, True))
+    chk("...and the index holds only that marker",
+        sorted({r["marker"] for r in read_rows(os.path.join(out_dir, "index.csv"))}),
+        [MARKER2])
+
 print()
 print("ALL PASS" if not failures else f"{len(failures)} FAILED")
 sys.exit(1 if failures else 0)

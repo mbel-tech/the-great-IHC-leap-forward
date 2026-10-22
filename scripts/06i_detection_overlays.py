@@ -68,6 +68,10 @@ run order - drawn on request.
 `--no-scenes` / `--no-crops` skip one kind of picture: it is neither drawn
 nor removed, and the other kind is redrawn only when out of date.
 
+Without --marker every marker with measured sections is drawn, in the study's
+order, and the run ends with one "<N> not drawn:" line over all of them. The
+index and failures tables are shared; each row names its marker.
+
 Run:  python 06i_detection_overlays.py
       python 06i_detection_overlays.py --marker AF488 --animal LS22 LS23
       python 06i_detection_overlays.py --limit 3 --force
@@ -818,9 +822,9 @@ def refusal():
 
 def main():
     ap = argparse.ArgumentParser()
-    _default = G5.MARKERS[0] if G5.MARKERS else None
-    ap.add_argument("--marker", choices=G5.MARKERS, default=_default,
-                    help=f"which marker's sections to draw (default {_default})")
+    ap.add_argument("--marker", choices=G5.MARKERS,
+                    help="draw only this marker (default: every marker that "
+                         "has measured sections, in the study's order)")
     ap.add_argument("--animal", nargs="+", metavar="A",
                     help="only these fish")
     ap.add_argument("--no-scenes", action="store_true",
@@ -836,11 +840,32 @@ def main():
     if why:
         print("!! REFUSED: " + why)
         return 2
-    marker = args.marker
-    G5.use_marker(marker)
-    if not os.path.exists(G5.BOX_CSV):
-        print(f"no {G5.BOX_CSV} - run 05a_roi_geometry.py --marker {marker} first")
+    markers = [args.marker] if args.marker else list(G5.MARKERS)
+    total_fails, drawn_any = 0, False
+    for marker in markers:
+        G5.use_marker(marker)
+        if not os.path.exists(G5.BOX_CSV):
+            if args.marker:
+                print(f"no {G5.BOX_CSV} - run 05a_roi_geometry.py "
+                      f"--marker {marker} first")
+                return 1
+            print(f"marker: {marker}  skipped (no {os.path.basename(G5.BOX_CSV)})")
+            continue
+        rc, n_fail = _draw_marker(args, marker)
+        if rc:
+            return rc
+        total_fails += n_fail
+        drawn_any = True
+    if not drawn_any:
+        print("no marker has boxes - run 05a_roi_geometry.py first")
         return 1
+    if total_fails:
+        print(f"{total_fails} not drawn: see {FAILURES_CSV}")
+    return 0
+
+
+def _draw_marker(args, marker):
+    """Draw one marker's measured sections: (exit code, sections not drawn)."""
     print(f"marker: {marker}  ({os.path.basename(G5.BOX_CSV)})")
     by_sec = {}
     for b in G5.load_csv(G5.BOX_CSV):
@@ -1006,9 +1031,7 @@ def main():
     if n_small:
         print(f"{n_small} boxes under 8 px not drawn (05c does not segment "
               f"them; 06a counts them as 0)")
-    if fails:
-        print(f"{len(fails)} not drawn: see {FAILURES_CSV}")
-    return 0
+    return 0, len(fails)
 
 
 if __name__ == "__main__":

@@ -542,9 +542,8 @@ OPTIONS = {
     "scene_renders": [
         _force("pictures"), _limit("scenes"),
     ],
-    # --marker is fixed to the first marker by the stage table, and --animal is
-    # a list of names, which the options form has no field for: both stay on
-    # the command line.
+    # --animal is a list of names, which the options form has no field for, and
+    # --marker (one marker only) is rarely wanted: both stay on the command line.
     "detection_overlays": [
         _force("pictures"), _limit("scenes"),
         Opt("--no-scenes", "bool", "Skip the whole-scene pictures",

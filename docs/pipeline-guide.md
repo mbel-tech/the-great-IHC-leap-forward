@@ -1412,6 +1412,12 @@ geometry it was measured on. A resume decides from that log:
 The shape each region was measured on is also written to `results/roi_measured_geometry.csv`, which
 is what lets 06a catch a region that has moved.
 
+As each section is finished, its detection overlay crops (one picture per region and background
+disc, see [06i](#stage-detection_overlays)) are drawn from the pixels just read, on a separate
+thread, so detection does not wait for them. A picture that cannot be written is reported and
+skipped; it never changes a count. **Do not draw detection overlays** (`--no-overlays`) turns
+this off.
+
 > **In the code** — `scripts/05c_detect_rois.py`
 >
 > ```python
@@ -1645,6 +1651,19 @@ Pictures go under `detection_overlays/<marker>/<animal>/`, one folder per animal
 - `<marker>_<scene_uid>_bg<NN>.png`: one crop per background disc.
 
 Each has a black strip above the image with the counts, the colour key and a scale bar.
+
+The ROI and background-disc crops now appear during detection: 05c draws each section's crops as
+soon as that section is measured, from the pixels it has just read, while StarDist moves on to the
+next section, and lists them in `detection_overlays/index_05c.csv`. They are drawn by the same code
+and the same rule for the cut as here, so they are the pictures this step would draw. A crop that
+cannot be written is noted in that list and on screen; it never stops detection or changes a
+count. **Do not draw detection overlays** (`--no-overlays`) on 05c skips them.
+
+The **Draw detection overlays** button on Results then draws the whole-scene pictures, several at
+once (**Scene pictures drawn at once**, `--workers`; by default half the cores, at most 4, each
+started only when there is memory free for it), and fills any gaps. It keeps a crop 05c drew when
+nothing it was drawn from has changed and its counts and cut still equal the per-ROI dataset's, and
+redraws it otherwise, for example after a background disc was edited or 06a's cut moved.
 `detection_overlays/index.csv` lists every picture with the counts drawn. `failures.csv` lists
 sections that were not drawn and why: a picture that disagrees with 06a's counts is not drawn.
 The run ends with "N not drawn".
@@ -1652,7 +1671,7 @@ The run ends with "N not drawn".
 It needs 06a first, and refuses to run if 06a's tables are missing or older than the nuclei
 table. It is made on request only: Run all remaining skips it.
 
-The first run is slow. Older versions of the detection step did not save the nucleus outlines,
+For sections detected before 05c drew crops, the first run is slow. Older versions of the detection step did not save the nucleus outlines,
 so for every section measured before outlines were saved the first run re-runs StarDist once,
 which takes about as long as detection itself did. The outlines are saved as it goes, and after that redraws are fast:
 a rerun draws only what changed. Pictures are at full resolution, and each whole-scene picture is

@@ -1,7 +1,9 @@
 """Detection-overlay drawing: what colour a nucleus is, and how it is painted.
 
-Shared by the stage that writes overlay pictures and by 06a, so the rule that
-decides "positive" lives in one place. Pure numpy; PIL is imported lazily by
+Shared by the stages that draw overlay pictures (05c as it measures, 06i on
+request) and by 06a, so the rule that decides "positive" - and the per-section
+cut it is judged against (section_cut) - lives in one place, as do a crop's
+pixels (crop_image) and words (crop_lines). Pure numpy; PIL is imported lazily by
 anything that writes a file, so importing this module (06a does) adds no hard
 dependency and never reads the study config.
 

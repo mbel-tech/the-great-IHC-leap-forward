@@ -551,6 +551,18 @@ chk("a plate set that does not ship is still built",
 chk("the Wullimann plates ship too",
     W.applies(S.BY_ID["atlas_wullimann_plates"], study(dict(CFG, atlas_source="wullimann1996")))[0],
     False)
+one = study(dict(CFG, acquisition=dict(CFG.get("acquisition", {}), markers=["AF568"])))
+chk("a one-marker study does not use the second marker's stages",
+    [W.applies(S.BY_ID[sid], one)[0] for sid in ("censor_pcna", "rgb_pcna", "censor_perk")],
+    [False, False, True])
+chk("...and says why",
+    "one marker" in W.applies(S.BY_ID["censor_pcna"], one)[1], True)
+chk("...nor does Prepare plan one or wait on it",
+    [sid for sid in W.run_plan("prepare", one)[0] if sid in ("censor_pcna", "rgb_pcna")]
+    + [w for w in W.run_plan("prepare", one)[1].values() if w in ("censor_pcna", "rgb_pcna")],
+    [])
+chk("a two-marker study still uses them",
+    W.applies(S.BY_ID["censor_pcna"], study())[0], True)
 if _bundle is not None:
     os.environ["LS_ATLAS_BUNDLE"] = _bundle
 chk("stages run outside the app are left out", "fiji_export" in W.run_plan("instrument", s0)[0], False)

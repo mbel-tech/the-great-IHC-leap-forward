@@ -1,7 +1,9 @@
 """Detection-overlay drawing: what colour a nucleus is, and how it is painted.
 
-Shared by the stage that writes overlay pictures and by 06a, so the rule that
-decides "positive" lives in one place. Pure numpy; PIL is imported lazily by
+Shared by the stages that draw overlay pictures (05c as it measures, 06i on
+request) and by 06a, so the rule that decides "positive" - and the per-section
+cut it is judged against (section_cut) - lives in one place, as do a crop's
+pixels (crop_image) and words (crop_lines). Pure numpy; PIL is imported lazily by
 anything that writes a file, so importing this module (06a does) adds no hard
 dependency and never reads the study config.
 
@@ -9,8 +11,11 @@ Native pixels only: nothing here resamples. Every function works on the array
 it is given at that array's own resolution.
 """
 
+import hashlib
+import json
 import os
 import re
+import statistics
 import struct
 import zlib
 
@@ -75,6 +80,177 @@ def kind_of(row, cut):
     if is_positive(median, False, cut):
         return "positive"
     return "negative"
+
+
+# ---- the per-section cut ----------------------------------------------------
+#
+# 06a counts by it and 05c draws by it, so it is written once, here. The
+# arithmetic is 06a's to the operation (spread first, then times 3): a cut
+# that differed in its last bit would call a nucleus sitting on it differently.
+
+#: Fewest background nuclei a section needs for a cut; with fewer it has none.
+CUT_MIN_NUCLEI = 5
+#: The cut is this many spreads above the background median...
+CUT_K = 3.0
+#: ...and a spread is the MAD scaled to a normal SD.
+MAD_SCALE = 1.4826
+
+
+def mad(xs):
+    m = statistics.median(xs)
+    return statistics.median([abs(x - m) for x in xs])
+
+
+def background_stats(values):
+    """(median, spread, n) of a section's background medians, or None when
+    there are fewer than CUT_MIN_NUCLEI. spread = MAD * 1.4826."""
+    if len(values) < CUT_MIN_NUCLEI:
+        return None
+    return statistics.median(values), mad(values) * MAD_SCALE, len(values)
+
+
+def section_cut(values):
+    """median + 3 * 1.4826 * MAD of `values` (background_stats), or None."""
+    got = background_stats(values)
+    if got is None:
+        return None
+    m, s, _ = got
+    return m + CUT_K * s
+
+
+def section_values(rows):
+    """The values a section's cut is taken from, in row order: marker_median
+    of each background-disc row that is not censored, not on an artifact and
+    not off the tissue - 06a's reading of each flag ("1" is set; an absent
+    off_tissue column is not)."""
+    out = []
+    for r in rows:
+        if r.get("artifact") == "1" or r.get("off_tissue") == "1":
+            continue
+        if r.get("roi_kind") == "background" and r.get("censored") != "1":
+            out.append(float(r["marker_median"]))
+    return out
+
+
+def reads_nucleus_shaped(value):
+    """How a `nucleus_shaped` cell reads, INCLUDING when there is no cell.
+
+    THE LS COMPATIBILITY RULE, and it is the reason this is a function rather
+    than `== "1"` inline. A roi_nuclei.csv written before 2026-09-08 has no
+    such column, and every object in it came from the nuclear channel
+    segmented by StarDist, because that was the only route 05c had. Its
+    silence is therefore not "unknown" - it is True, and any other reading
+    would withhold the Abercrombie correction from 961,233 rows that are
+    nuclei. 05c backfills the column with exactly this reading when it resumes
+    onto such a file.
+    """
+    if value is None or value == "":
+        return True
+    return str(value).strip().lower() not in ("0", "false", "no")
+
+
+def own_channel(row):
+    """Whether a roi_nuclei.csv row is a nucleus found on its marker's own
+    channel - 06a's test for withholding the fraction positive."""
+    return (bool(row.get("segmented_on")) and row["segmented_on"] == row.get("marker")
+            and reads_nucleus_shaped(row.get("nucleus_shaped")))
+
+
+def frac_positive(n_pos, n_nuc, cut, withheld):
+    """06a's frac_positive: n_pos / n_nuc to 4 places, or "" with no cut, no
+    nuclei, or a withheld denominator (`withheld` truthy)."""
+    if cut is not None and n_nuc and not withheld:
+        return round(n_pos / n_nuc, 4)
+    return ""
+
+
+def pct_of(frac):
+    """A fraction as the % a picture prints (one decimal), "" for ""."""
+    return round(float(frac) * 100, 1) if frac != "" else ""
+
+
+def classify(ids, rows, cut):
+    """(kinds, counts) of one box's labelled objects.
+
+    `ids` are its label ids, `rows` {label id: roi_nuclei.csv row as strings}
+    of the ones counted in the ROI (absent: outside the shape), `cut` the exact
+    cut or None. counts has n_counted, n_positive ("" with no cut),
+    n_outside, n_artifact, n_off_tissue and n_censored - censored is counted
+    off the rows, not the kinds: with no cut a censored nucleus is drawn not
+    called (negative), yet 06a still reports it in n_censored. kind_of's
+    ValueError (a median that is not a number) propagates.
+    """
+    kinds = {}
+    for lid in ids:
+        kinds[lid] = kind_of(rows.get(lid), cut)
+    n = {k: sum(1 for v in kinds.values() if v == k) for k in KINDS}
+    n_cen = sum(1 for lid, k in kinds.items()
+                if k in ("positive", "censored", "negative")
+                and rows[lid].get("censored") == "1")
+    return kinds, {"n_counted": n["positive"] + n["censored"] + n["negative"],
+                   "n_positive": (n["positive"] + n["censored"]
+                                  if cut is not None else ""),
+                   "n_outside": n["outside"], "n_artifact": n["artifact"],
+                   "n_off_tissue": n["off_tissue"], "n_censored": n_cen}
+
+
+# ---- the overlay index, and the words on a crop -------------------------------
+
+#: Columns of detection_overlays/index.csv (06i's): one row per picture.
+INDEX_KEYS = ["path", "marker", "animal", "slide", "scene_uid", "picture",
+              "roi_index", "region", "n_counted", "n_positive", "pct_positive",
+              "cut", "n_outside", "n_artifact", "n_off_tissue", "n_censored",
+              "um_per_px", "outlines", "drawn_at", "fingerprint"]
+
+
+def crop_lines(rec):
+    """The strip's two text lines for a crop, from its index row."""
+    kind = "background" if rec["picture"] == "background" else "roi"
+    region = "" if rec["region"] == "__background__" else rec["region"]
+    one = (f"{rec['marker']} | fish {rec['animal']} | slide {rec['slide']} | "
+           f"scene {rec['scene_uid']} | ROI {int(rec['roi_index']):02d} {kind}"
+           + (f" {region}" if region else ""))
+    return [one, counts_line(rec)]
+
+
+def counts_line(rec):
+    """Counts, cut and exclusions of an index row: line 2 of a strip."""
+    if rec["cut"] == "":
+        counted = f"{rec['n_counted']} counted, no cut: too few background nuclei"
+    else:
+        pct = f"{rec['pct_positive']}%" if rec["pct_positive"] != "" else "n/a"
+        counted = (f"{rec['n_counted']} counted, {rec['n_positive']} positive "
+                   f"({pct}), cut {rec['cut']}")
+    return (f"{counted} | not counted: {rec['n_outside']} outside ROI, "
+            f"{rec['n_artifact']} artifact, {rec['n_off_tissue']} off tissue | "
+            f"{rec['n_censored']} censored")
+
+
+def data_fingerprint(rows, exact_cut, boxes, geometry, npz_path, animal, slide):
+    """sha1 of what a section's crops are drawn from, as 05c knows it.
+
+    Its roi_nuclei.csv rows (lists of the cells as the file holds them, in
+    file order), its exact cut (None for none), its box rows, its geometry
+    row, the bytes of its outline file, its fish and slide. 05c stamps the
+    crops it draws with it; 06i computes it again from the files and keeps a
+    05c crop only when the two agree. No word of 06a's tables is in it - 05c
+    has none - so 06i checks those itself.
+    """
+    h = hashlib.sha1()
+    for r in rows:
+        h.update(("\x1f".join(r) + "\n").encode("utf-8"))
+    h.update(b"\x1ecut\x1e" + repr(exact_cut).encode("utf-8"))
+    h.update(b"\x1eboxes\x1e" + json.dumps([sorted(b.items()) for b in boxes])
+             .encode("utf-8"))
+    h.update(b"\x1egeometry\x1e" + json.dumps(sorted((geometry or {}).items()))
+             .encode("utf-8"))
+    h.update(b"\x1eid\x1e" + json.dumps([animal, slide]).encode("utf-8"))
+    h.update(b"\x1enpz\x1e")
+    if os.path.exists(npz_path):
+        with open(npz_path, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                h.update(chunk)
+    return h.hexdigest()
 
 
 def stretch(sample):
@@ -157,16 +333,29 @@ def paint_codes(rgb, code, edge):
         rgb[edge & (code == i)] = COLOURS[kind]
 
 
+#: Rows of a shape mask evaluated at once (shape_mask_outline).
+MASK_BLOCK_ROWS = 128
+
+
 def shape_mask_outline(h, w, inside):
     """1-px outline of the ROI shape, as a bool (h, w) array.
 
-    `inside(xs, ys)` gets float arrays of pixel indices (xs = column, ys = row,
-    both shaped (h, w); the index IS the pixel's coordinate, no +0.5) and
-    returns a bool array. The outline is the mask's own boundary pixels, by the
-    same 4-neighbour rule as `edges`, so it lies inside the shape.
+    `inside(xs, ys)` gets float pixel indices (xs = column, ys = row; the
+    index IS the pixel's coordinate, no +0.5) and returns a bool array. It is
+    called on blocks of MASK_BLOCK_ROWS rows, with xs shaped (1, w) and ys
+    (k, 1), so it must broadcast; each pixel's value is computed by the same
+    operations as over full (h, w) grids, so the mask is bit-identical to
+    that - without four full-size coordinate arrays, which cost most of the
+    time on a 2000 x 2000 crop. The outline is the mask's own boundary
+    pixels, by the same 4-neighbour rule as `edges`, so it lies inside the
+    shape.
     """
-    ys, xs = np.mgrid[0:h, 0:w]
-    mask = np.asarray(inside(xs.astype(float), ys.astype(float)), bool)
+    mask = np.zeros((h, w), bool)
+    xs = np.arange(w, dtype=float)[None, :]
+    for r0 in range(0, h, MASK_BLOCK_ROWS):
+        r1 = min(r0 + MASK_BLOCK_ROWS, h)
+        ys = np.arange(r0, r1, dtype=float)[:, None]
+        mask[r0:r1] = np.broadcast_to(np.asarray(inside(xs, ys), bool), (r1 - r0, w))
     return _edge(mask) & mask
 
 
@@ -313,6 +502,29 @@ def strip(width, lines, legend, um_px, bar_um):
         d.rectangle([pad, by, pad + bar_px - 1, by + bar_t - 1], fill=(255, 255, 255))
         d.text((pad + bar_px + size, y), bar_label(um), font=font, fill=(255, 255, 255))
     return np.asarray(img, np.uint8).copy()
+
+
+def crop_image(plane, labels, kinds, outline, lo, hi, lines, um_px, bar_um):
+    """One crop as uint8 RGB: the marker in grey (lo..hi), the nuclei painted
+    by kind, the shape `outline` in white, and the strip of `lines`, the
+    legend and a bar_um bar stacked above - never over - the image. The image
+    area is `plane`'s own shape: nothing resampled. 05c and 06i both draw
+    every crop through here."""
+    rgb = np.repeat(grey(plane, lo, hi)[:, :, None], 3, axis=2)
+    paint(rgb, labels, kinds)
+    rgb[outline] = SHAPE_COLOUR
+    return np.vstack([strip(rgb.shape[1], lines, True, um_px, bar_um), rgb])
+
+
+def save_png(path, image):
+    """Write uint8 RGB `image` to `path` as PNG, atomically, making its folder.
+    PIL and ls_io are imported here, as strip imports PIL: 06a imports this
+    module and needs neither."""
+    from PIL import Image
+    import ls_io
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with ls_io.atomic_save(path) as tmp:
+        Image.fromarray(image).save(tmp, format="PNG")
 
 
 class PngRows:

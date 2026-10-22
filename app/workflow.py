@@ -300,9 +300,12 @@ PLAIN = {
                           "magenta and negative ones outlined cyan. Yellow means outside the "
                           "ROI, orange an artifact, blue off the tissue, and a white outline a "
                           "positive nucleus with clipped pixels. You get one picture of each "
-                          "whole scene and one of each ROI, at full resolution. The first run "
-                          "re-runs StarDist once for every section measured before outlines "
-                          "were saved, which takes about as long as detection did; after that, "
+                          "whole scene and one of each ROI, at full resolution. Detection "
+                          "already draws the ROI pictures as it goes, so this mostly draws the "
+                          "whole-scene pictures, several at once, and fills any gaps; an ROI "
+                          "picture is redrawn only if its numbers changed since. For sections "
+                          "measured before outlines were saved, the first run re-runs StarDist "
+                          "once, which takes about as long as detection did; after that, "
                           "redraws are fast. Each whole-scene picture is large, roughly 100 to "
                           "500 MB, so turn on Skip the whole-scene pictures (--no-scenes) to "
                           "draw only the ROI crops. Needs the per-ROI dataset first. Nothing "
@@ -370,6 +373,8 @@ PLAIN = {
     "sections, then picks the nucleus-detection setting that suits it. One setting for "
     "the whole study; you can override it in Set up.",
     "detect": "Finds every nucleus inside your regions and measures the marker in each. "
+              "As each section is done it also draws that section's detection overlay "
+              "pictures, one per region, for checking the counts by eye. "
               "Takes hours; can be stopped and resumed.",
     "recensor": "Recomputes the saturation flag on an older results file.",
     "off_tissue": "Flags nuclei outside the tissue on an older results file.",
@@ -559,6 +564,11 @@ OPTIONS = {
             "ROI and background-disc crops."),
         Opt("--no-crops", "bool", "Skip the ROI pictures",
             "Turn this on to draw only the whole-scene pictures."),
+        Opt("--workers", "int", "Scene pictures drawn at once",
+            "How many whole-scene pictures are drawn side by side. Each starts only "
+            "when there is memory free for it. The pictures are the same however "
+            "many. 0 means half the computer's cores, at most 4.",
+            default=0, cli_default=0, minimum=0, maximum=16, zero="automatic"),
     ],
     "contactsheets": [
         Opt("--kind", "choice", "Which picture",
@@ -683,6 +693,11 @@ OPTIONS = {
         Opt("--qc", "bool", "Save check pictures",
             "One picture per region with the found nuclei outlined: green counted, red "
             "found but outside the region."),
+        Opt("--no-overlays", "bool", "Do not draw detection overlays",
+            "Normally each region's detection overlay (the picture Draw detection "
+            "overlays on Results makes) is drawn as soon as its section is measured, "
+            "while the next section is being detected. Turn this on to skip them; the "
+            "counts are the same either way."),
         _force("sections"),
         _limit(),
     ],

@@ -173,7 +173,7 @@ chk("...but listed on the Results screen",
 chk("...with plain words", bool(W.PLAIN.get("detection_overlays", "").strip()))
 chk("...whose options are real flags of the script",
     [o.flag for o in W.options_for("detection_overlays")],
-    ["--force", "--limit", "--no-scenes", "--no-crops"])
+    ["--force", "--limit", "--no-scenes", "--no-crops", "--workers"])
 chk("skipped overlay scenes are counted",
     W.shortfall("detection_overlays", "  3 not drawn: see x\n"), "3 scenes not drawn")
 chk("the overlay pictures open their folder",

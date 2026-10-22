@@ -291,6 +291,10 @@ def detect_cli_reason(frozen=None, has_stardist=None):
 # Numbered scripts that are deliberately not stages. A script missing from
 # both this and STAGES fails tests/test_stages.py.
 NOT_LISTED = {
+    "06i_detection_overlays.py": "TEMPORARY: the detection-overlay stage is "
+                                 "being built; the app's Results button that "
+                                 "runs it lands with it (plan Task 6), which "
+                                 "removes this entry.",
     "01_overviews.groovy": "retired: the Python port (01_overviews.py) replaced it "
                            "in 2026-08; kept for the record only.",
     "01a_flatfield.groovy": "retired Fiji flat-field; superseded by 01f/01h.",

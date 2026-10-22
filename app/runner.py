@@ -257,9 +257,12 @@ class Runner:
         several of them rewrite the same index files, so two at once would be a
         race with the user's data on the losing side.
         """
-        if stage.cli_only:
+        # A callable is asked (05c: can this interpreter import StarDist?); the
+        # function itself is truthy, and read as the answer it refused 05c always.
+        why = stage.cli_only() if callable(stage.cli_only) else stage.cli_only
+        if why:
             return StageResult(stage.sid, False, 0.0, "",
-                               f"{stage.title} is not run by the app: {stage.cli_only}")
+                               f"{stage.title} is not run by the app: {why}")
         if not stage.script:
             return StageResult(stage.sid, False, 0.0, "",
                                f"{stage.title} has no script to run")

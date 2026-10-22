@@ -82,8 +82,10 @@ For each scene that has nucleus rows, per marker:
    nuclei that set the cut can be checked too.
 4. **Base image.** The marker channel, read from the CZI at native 0.65 µm
    pixels, in grey. Brightness is stretched for viewing only (1st to 99.8th
-   percentile of the scene, the same stretch for the scene picture and all its
-   crops so they are comparable). Nothing is downscaled.
+   percentile of the pixels in that scene's detection boxes, the same stretch
+   for the scene picture and all its crops so they are comparable; taken from
+   the boxes so the glass and PAP-pen ring cannot set it and crops-only runs
+   need no full-scene read). Nothing is downscaled.
 5. **Pictures.**
    - Whole scene: the scene's full rectangle at native pixels, read in bands
      the way 01l/04o do so memory stays bounded. Every ROI and background disc

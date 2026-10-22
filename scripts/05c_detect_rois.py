@@ -565,11 +565,19 @@ def segment_box(doc, b, scene, model, min_area_px, section_norm, partners=()):
     seg_img = mark if _segments_own(marker) else dapi
     seg_backend = backend_for(marker)
     report = {}
-    labels = SG.segment(seg_img, seg_backend, model=model,
-                        k=MAD_K, min_area_px=min_area_px,
-                        report=report,
-                        norm=section_norm.get(marker),
-                        **_thresholds(marker))
+    try:
+        labels = SG.segment(seg_img, seg_backend, model=model,
+                            k=MAD_K, min_area_px=min_area_px,
+                            report=report,
+                            norm=section_norm.get(marker),
+                            **_thresholds(marker))
+    except SG.SegmentError as exc:
+        # A flat crop (the plane at the 16-bit ceiling, or empty) is refused
+        # before StarDist, whose NMS aborted the whole run on one. The box is
+        # not segmented - like one under 8 px - rather than "measured, empty".
+        print(f"  {b['scene_uid']} {b.get('roi_kind', 'roi')} {b.get('region', '')}: "
+              f"not segmented - {exc}")
+        return None
     return {"labels": labels, "seg_img": seg_img, "dapi": dapi, "mark": mark,
             "planes": planes, "report": report,
             "seg_on": segment_plane_for(marker), "backend": seg_backend,

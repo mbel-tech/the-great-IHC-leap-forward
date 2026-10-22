@@ -278,6 +278,20 @@ with temp_study(acquisition=PAIRED) as study:
     chk("a box under 8 px is not segmented",
         D5.segment_box(FakeCzi(PLANES), box(A, MARKER, 190, w=4), 6,
                        FakeModel(), D5.min_area_px_for(), {}), None)
+    # Contagion's ND12_s01a_sc15: DAPI at the ceiling with a few pixels just
+    # under it. StarDist's NMS aborted the whole 05c process on that crop.
+    near = np.full((H, W), 65535.0)
+    near[0, :2] = 65522.0                   # under 1% of it: p1 is the ceiling
+    sat ={**PLANES, (0, 220): near, (1, 220): mark}
+    import contextlib, io                                   # noqa: E401
+    said, sat_model = io.StringIO(), FakeModel()
+    with contextlib.redirect_stdout(said):
+        got = D5.segment_box(FakeCzi(sat), box(A, MARKER, 220), 6,
+                             sat_model, D5.min_area_px_for(), {})
+    chk("a near-saturated crop is not segmented", got, None)
+    chk("...it never reaches the model", sat_model.calls, [])
+    chk("...and the run says which box and why",
+        "not segmented" in said.getvalue() and A in said.getvalue(), True)
     npz.close()
 
     print()

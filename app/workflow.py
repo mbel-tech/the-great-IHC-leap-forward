@@ -943,7 +943,27 @@ def applies(stage, study):
         if stage.sid in ATLAS_BUILD and plates_ship(study):
             return False, ("Not needed: this atlas's plates come ready-made with the app. "
                            "Turn on Set up > Atlas > Rebuild atlas plates to make them again.")
+        need = marker_slots(stage)
+        if study.markers and need > len(study.markers):
+            n = len(study.markers)
+            return False, (f"Not used in this study: it is for marker {need}, and this "
+                           f"study has {'one marker' if n == 1 else f'{n} markers'}.")
     return True, ""
+
+
+def marker_slots(stage):
+    """How many markers the stage needs the study to declare: 1 + its highest index.
+
+    Read from the `{markerN}` tokens in its argv and the markers its outputs
+    belong to. A stage written for the second marker run in a one-marker study
+    would reach its script as a literal `--marker {marker1}` (fill_markers
+    leaves a token past the end as written), which argparse rejects with
+    status 2 before the stage does anything.
+    """
+    idx = [int(m) for a in stage.argv for m in S.MARKER_TOKEN.findall(a)]
+    idx += [e.marker for e in stage.outputs
+            if isinstance(e, S.Art) and e.marker is not None]
+    return max(idx) + 1 if idx else 0
 
 
 #: 05a's copy of the export it read, `reformatted/roi_regions_used_<marker>.csv`

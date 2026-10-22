@@ -337,6 +337,19 @@ def stardist_labels(image, model, n_tiles=None, norm=None, prob_thresh=None,
     are passed to the model only when set.
     """
     a = np.asarray(image)
+    if norm is None and a.size:
+        # A crop whose percentiles meet but whose pixels do not (a plane at the
+        # 16-bit ceiling with a few just under it) stretches those few to
+        # (x - lo) / 1e-20, about -1e21, and StarDist's NMS ABORTS the process
+        # on that - a C-level abort no except can catch, taking every section
+        # after it down too. Refused here, where it can be reported. An exactly
+        # constant crop stretches to zeros, which StarDist handles: left alone.
+        lo, hi = np.percentile(a, (1, 99.8))
+        if not hi > lo and np.ptp(a) > 0:
+            raise SegmentError(
+                f"this crop has no intensity range of its own (1st and 99.8th "
+                f"percentiles both {lo:g}, a few pixels off it): stretched, "
+                f"those would reach about 1e21, so it is not segmented.")
     if n_tiles is None:
         n_tiles = tiles_for(a)
     x = stardist_input(a, norm)

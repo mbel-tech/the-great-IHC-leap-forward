@@ -294,6 +294,27 @@ try:
     SG.segment(img, "stardist", model=FakeModel(), norm=(0.0, 10000.0))
     chk("segment() passes it through to stardist",
         float(_seen["x"].max()), float(np.float32(9999.0 / 10000.0)))
+    # A crop with no spread of its own - a DAPI plane at the 16-bit ceiling,
+    # as on Contagion's ND12_s01a_sc15 - stretches to (x - lo) / 1e-20.
+    # StarDist's NMS then aborted the PROCESS (a C-level abort, no traceback),
+    # killing 05c and every section after it. Refused before the model sees it.
+    # What crashed was a crop with no range AND some pixels off it (min 65522,
+    # max 65535, 1st and 99.8th percentiles both 65535): those few stretch to
+    # -1.3e21. An exactly constant crop stretches to all zeros, which StarDist
+    # handles - "measured, empty" - and is left alone.
+    _seen.clear()
+    near = np.full((60, 60), 65535.0)
+    near[0, :5] = 65522.0
+    try:
+        SG.stardist_labels(near, FakeModel())
+        chk("a saturated crop with a few pixels off the ceiling is refused", False, True)
+    except SG.SegmentError as exc:
+        chk("a saturated crop with a few pixels off the ceiling is refused",
+            "range" in str(exc), True)
+    chk("...and never reaches the model", "x" in _seen, False)
+    SG.stardist_labels(np.full((60, 60), 300.0), FakeModel())
+    chk("an exactly constant crop still does, stretched to zeros",
+        float(np.abs(_seen["x"]).max()), 0.0)
     for bad in [(5.0, 5.0), (9.0, 1.0), (float("nan"), 1.0), (0.0, float("inf"))]:
         try:
             SG.stardist_labels(img, FakeModel(), norm=bad)

@@ -591,9 +591,13 @@ with temp_study(acquisition=PAIRED) as study:
         real_init(self, *a, **kw)
         drawers.append(self)
 
+    in_hand = threading.Event()
+
     def slow_draw(*a, **kw):
-        # The first crop of A waits until Ctrl+C has been taken: the
-        # interrupt lands while the drawing thread is mid-section.
+        # The first crop of A says it is in hand, then waits until Ctrl+C
+        # has been taken: the interrupt lands while the drawing thread is
+        # mid-section, whatever the scheduling.
+        in_hand.set()
         drawers[0].stop.wait(10)
         return real_draw(*a, **kw)
 
@@ -602,7 +606,8 @@ with temp_study(acquisition=PAIRED) as study:
 
         def predict_instances(self, img, **kw):
             InterruptingModel.calls += 1
-            if InterruptingModel.calls > 3:     # B's first box: Ctrl+C
+            if InterruptingModel.calls > 3:     # B's first box: Ctrl+C,
+                in_hand.wait(10)                # once A's first crop is in hand
                 raise KeyboardInterrupt
             return super().predict_instances(img, **kw)
 

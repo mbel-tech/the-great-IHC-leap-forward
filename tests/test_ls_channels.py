@@ -292,6 +292,23 @@ chk("...as is Hoechst", bool(CH.validate({"markers": ["Hoechst 33342", "AF568"]}
 chk("a marker whose name merely contains the letters is not",
     CH.validate({"markers": ["DAPIx1", "AF488"]}, "paired")[0], [])
 
+print("--- the manifest names a multiplex scan's marker as the study does ---")
+# New study renames a multiplex marker (AF568 -> pERK) and every stage then
+# asks for scenes of `pERK`; a manifest that wrote the scan's own AF568 matched
+# none of them, and 01k refused the whole study.
+renamed = {"acquisition": {"layout": "multiplex", "channels": BLOCK}}
+chk("a renamed marker is named as the study names it",
+    CH.study_marker_name(renamed, "AF568"), "pERK")
+chk("...the second marker by its own czi_name",
+    CH.study_marker_name(renamed, "AF647"), "GFAP")
+chk("a scan channel the table does not declare keeps its own name",
+    CH.study_marker_name(renamed, "AF488"), "AF488")
+chk("a paired study keeps the scan's name (pairing matches by it)",
+    CH.study_marker_name({"acquisition": {"layout": "paired", "markers": ["AF568"],
+                                          "channels": BLOCK}}, "AF568"), "AF568")
+chk("no config is not an error", CH.study_marker_name(None, "AF568"), "AF568")
+chk("no channel is not an error", CH.study_marker_name(renamed, None), None)
+
 print()
 print("ALL PASS" if not failures else f"{len(failures)} FAILED")
 sys.exit(1 if failures else 0)

@@ -134,6 +134,31 @@ def marker_names(cfg):
     return [c.name for c in markers(parse(table))]
 
 
+def study_marker_name(cfg, czi_name):
+    """What the study calls the marker a scan names `czi_name`, for the manifest.
+
+    Every stage selects scenes by comparing the manifest's `marker_channel` with
+    `marker_names()`, so the two must speak the same name. A multiplex study
+    renames its markers in the channel table (`czi_name: AF568` called `pERK`),
+    and a manifest that kept the scan's AF568 matched nothing: 01 wrote no
+    clipping masks and 01k refused the study. A paired marker keeps the scan's
+    name - that is what pairing matches by - so a paired study is left alone,
+    as is a channel the table does not declare.
+    """
+    if not czi_name:
+        return czi_name
+    acq = cfg.get("acquisition") if isinstance(cfg, dict) else None
+    if not isinstance(acq, dict) or acq.get("layout") == LAYOUT_PAIRED:
+        return czi_name
+    table = acq.get("channels")
+    if not isinstance(table, (list, tuple)) or not all(isinstance(e, dict) for e in table):
+        return czi_name
+    for c in markers(parse(table)):
+        if c.czi_name == czi_name:
+            return c.name
+    return czi_name
+
+
 def manifest_marker_problem(cfg, scene_rows):
     """Why a paired study's markers do not name its scans, or None when they do.
 

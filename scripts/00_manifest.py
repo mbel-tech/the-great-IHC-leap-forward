@@ -562,6 +562,8 @@ def main():
 
             channel_names = [c["name"] for c in info["channels"]]
             marker = channel_names[1] if len(channel_names) > 1 else None
+            # As the study names it: every stage matches scenes on this name.
+            marker = CH.study_marker_name(CONFIG, marker)
             marker_exposure = info["channels"][1]["exposure_ms"] if len(info["channels"]) > 1 else None
 
             row = {

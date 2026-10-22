@@ -921,9 +921,19 @@ def display_title(stage, study=None, technical=False):
     if not technical:
         name = BASIC_TITLES.get(stage.sid, name)
     if study is not None and study.markers:
-        name = name.replace("pERK", "{m0}").replace("PCNA", "{m1}")
+        # With one marker the "PCNA" stages that still run work on that marker:
+        # there is no marker 2 to name.
+        second = "{m0}" if len(study.markers) == 1 and applies(stage, study)[0] else "{m1}"
+        name = name.replace("pERK", "{m0}").replace("PCNA", second)
         name = study.words(name)
     return name
+
+
+#: Second-marker stages that, in a one-marker study, write exactly what their
+#: first-marker twin writes: there is one pass, so both are unsuffixed. Run,
+#: they only repeat the twin's work (and the twin then overwrites theirs).
+ONE_MARKER_TWINS = {"artifact_pcna": "artifact_perk",
+                    "reformat_pcna_final": "reformat_perk_final"}
 
 
 def plain(stage, study=None):
@@ -948,6 +958,11 @@ def applies(stage, study):
             n = len(study.markers)
             return False, (f"Not used in this study: it is for marker {need}, and this "
                            f"study has {'one marker' if n == 1 else f'{n} markers'}.")
+        twin = ONE_MARKER_TWINS.get(stage.sid)
+        if twin and len(study.markers) == 1:
+            return False, ("Not used in this study: with one marker, \"%s\" does the "
+                           "same work." % split_title(S.BY_ID[twin].title)[1]
+                           .replace("pERK", study.markers[0]))
     return True, ""
 
 
@@ -1214,14 +1229,24 @@ def incomplete(stage, study):
     """'640 of 1,980 sections' when a stage's outputs exist but cover only part
     of what it measures, else None.
 
-    Only 05c today: roi_nuclei.csv exists after its first section, and it resumes
+    Any stage whose newest recorded run failed is incomplete too, outputs or
+    not: some outputs are written by another stage as well (01 writes 01k's
+    saturation table and mask folder), so a stage that refused the study read
+    as done and Run all remaining went on past it.
+
+    By section, only 05c today: roi_nuclei.csv exists after its first section, and it resumes
     by section. Measured is what its done log (05c DONE_LOG) holds for marker 0,
     the marker the app runs it for; the total is the sections of 05a's boxes,
     the curated sections it will measure. A log with no `marker,*` line predates
     the log, and 05c trusts such rows, so nothing is counted against them.
     """
-    if stage.sid != "detect" or not study.markers or not stage.done(study.out_root,
-                                                                    study.names):
+    if stage.sid != "detect":
+        rec = last_run((study.cfg or {}).get("project"), stage.sid)
+        if (rec is not None and not rec.get("ok")
+                and stage.done(study.out_root, study.names)):
+            return "its last run failed"
+        return None
+    if not study.markers or not stage.done(study.out_root, study.names):
         return None
     boxes = _first("roi_geometry", "roi_boxes", study)
     want = _column(boxes, "scene_uid") if boxes else None

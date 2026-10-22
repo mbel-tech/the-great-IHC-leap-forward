@@ -226,6 +226,11 @@ def install(pack, home, fresh=False):
     slides, out = os.path.join(home, "slides"), os.path.join(home, "output")
     shutil.copytree(os.path.join(pack.root, "slides"), slides)
     os.makedirs(out, exist_ok=True)
+    # What the pack carries from its source study (display ranges, tile fields,
+    # the cut sections' hand rotations) starts the study's output folder.
+    seed = os.path.join(pack.root, "output")
+    if os.path.isdir(seed):
+        shutil.copytree(seed, out, dirs_exist_ok=True)
     with open(os.path.join(pack.root, "study", "study.json"), encoding="utf-8") as fh:
         cfg = json.load(fh)
     cfg.pop("curation", None)

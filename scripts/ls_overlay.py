@@ -333,16 +333,29 @@ def paint_codes(rgb, code, edge):
         rgb[edge & (code == i)] = COLOURS[kind]
 
 
+#: Rows of a shape mask evaluated at once (shape_mask_outline).
+MASK_BLOCK_ROWS = 128
+
+
 def shape_mask_outline(h, w, inside):
     """1-px outline of the ROI shape, as a bool (h, w) array.
 
-    `inside(xs, ys)` gets float arrays of pixel indices (xs = column, ys = row,
-    both shaped (h, w); the index IS the pixel's coordinate, no +0.5) and
-    returns a bool array. The outline is the mask's own boundary pixels, by the
-    same 4-neighbour rule as `edges`, so it lies inside the shape.
+    `inside(xs, ys)` gets float pixel indices (xs = column, ys = row; the
+    index IS the pixel's coordinate, no +0.5) and returns a bool array. It is
+    called on blocks of MASK_BLOCK_ROWS rows, with xs shaped (1, w) and ys
+    (k, 1), so it must broadcast; each pixel's value is computed by the same
+    operations as over full (h, w) grids, so the mask is bit-identical to
+    that - without four full-size coordinate arrays, which cost most of the
+    time on a 2000 x 2000 crop. The outline is the mask's own boundary
+    pixels, by the same 4-neighbour rule as `edges`, so it lies inside the
+    shape.
     """
-    ys, xs = np.mgrid[0:h, 0:w]
-    mask = np.asarray(inside(xs.astype(float), ys.astype(float)), bool)
+    mask = np.zeros((h, w), bool)
+    xs = np.arange(w, dtype=float)[None, :]
+    for r0 in range(0, h, MASK_BLOCK_ROWS):
+        r1 = min(r0 + MASK_BLOCK_ROWS, h)
+        ys = np.arange(r0, r1, dtype=float)[:, None]
+        mask[r0:r1] = np.broadcast_to(np.asarray(inside(xs, ys), bool), (r1 - r0, w))
     return _edge(mask) & mask
 
 

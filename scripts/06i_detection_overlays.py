@@ -91,12 +91,14 @@ would draw. Any other crop is drawn here as before; `--force` redraws them all.
 So the Results button mostly draws the whole-scene pictures and fills gaps.
 
 Whole-scene pictures are drawn `--workers` at a time (default: half the cores,
-at most 4, as 01l). Each starts only when there is memory for it - 01l's
-MemoryGate, with scene_memory's estimate of one band, the tile cache and the
-section's box arrays - and a scene that cannot have it is listed as not drawn.
-Sections are prepared, and their results written to index.csv and
-failures.csv, on the main thread in order, so any number of workers writes
-exactly what one writes.
+at most 4, as 01l), and the crops still to draw with them. Each section's
+drawing starts only when there is memory for it - 01l's MemoryGate, with
+job_memory's estimate: the section's box arrays, plus one band and the tile
+cache for a scene, plus the largest crop's working arrays for crops - and a
+section that cannot have it is listed as not drawn (a scene alone is dropped
+first when the crops still fit). Sections are prepared, and their results
+written to index.csv and failures.csv, on the main thread in order, so any
+number of workers writes exactly what one writes.
 
 What it costs. The first run re-runs StarDist once for every section measured
 before 05c saved outlines (every section detected by an older 05c): about as
@@ -198,6 +200,10 @@ BAND_BYTES_PER_PX = 24
 #: Bytes held per pixel of every box for as long as its scene is drawn: its
 #: label image (uint32), its marker plane, its shape outline. Rounded up.
 BOX_BYTES_PER_PX = 12
+#: Bytes per pixel of the crop being drawn, beyond its box's own: the grey
+#: float32, the RGB image and its PIL copy, kind codes, outlines and shape
+#: mask, and the PNG rows. Rounded up.
+CROP_BYTES_PER_PX = 16
 
 
 class NotDrawn(Exception):
@@ -924,14 +930,19 @@ def main():
     return 0
 
 
-def scene_memory(g, boxes):
-    """Bytes held while one scene picture is drawn: a band of it in flight,
-    the CZI's cache of decoded tiles across its width, and every box's label
-    image, plane and shape outline - the prepared section the job holds."""
-    _, _, sw, _ = scene_rect(g)
-    box_px = sum(max(int(b["czi_w"]), 0) * max(int(b["czi_h"]), 0) for b in boxes)
-    return (BAND_ROWS * sw * BAND_BYTES_PER_PX + CR.tile_cache_bytes(sw)
-            + box_px * BOX_BYTES_PER_PX)
+def job_memory(g, boxes, scene, crops):
+    """Bytes held while a section's pictures are drawn: every box's label
+    image, plane and shape outline (the prepared section the job holds);
+    for the scene, a band of it in flight and the CZI's cache of decoded
+    tiles across its width; for the crops, the largest crop's transients."""
+    px = [max(int(b["czi_w"]), 0) * max(int(b["czi_h"]), 0) for b in boxes]
+    need = sum(px) * BOX_BYTES_PER_PX
+    if scene:
+        _, _, sw, _ = scene_rect(g)
+        need += BAND_ROWS * sw * BAND_BYTES_PER_PX + CR.tile_cache_bytes(sw)
+    if crops and px:
+        need += max(px) * CROP_BYTES_PER_PX
+    return need
 
 
 class _NoGate:
@@ -1031,7 +1042,7 @@ def _draw_marker(args, marker):
 
     from pylibCZIrw import czi as pyczi
     workers = max(1, args.workers or DEFAULT_WORKERS)
-    gate = memory_gate() if not args.no_scenes else _NoGate()
+    gate = memory_gate()
     tally = {"drawn": 0, "same": 0, "pictures": 0, "small": 0, "adopted": 0}
 
     def draw_job(uid, g, czi, boxes, prep, srec, lines, kinds_drawn, adopted,
@@ -1198,21 +1209,31 @@ def _draw_marker(args, marker):
                         item["keys"] = {int(r["roi_index"]) for r in adopted.values()}
                     item["n_adopted"] = len(adopted)
                     srec = lines = None
-                    need = 0
                     if "scene" in kinds_drawn:
                         srec, lines = scene_record(prep, uid, marker, boxes,
                                                    ident, fp, meas_by.get(uid, {}))
-                        need = scene_memory(g, boxes)
+                    # Every job that draws is gated on memory - crops as well
+                    # as scenes, so a crops-only run with several workers
+                    # cannot pile up prepared sections either.
+                    need = 0
+                    if prep is not None:
+                        scene = "scene" in kinds_drawn
+                        need = job_memory(g, boxes, scene, crops_left)
                         room = gate.acquire(need)
-                        if room is not None:
+                        if room is not None and scene and crops_left:
                             why = (f"the scene picture needs about {need / 1e9:.1f} GB "
                                    f"and only {room / 1e9:.1f} GB can be had (memory "
                                    f"and page file) - close other programs")
-                            need = 0
-                            if "roi" not in kinds_drawn:
-                                raise NotDrawn(why)
                             item["scene_why"] = f"scene picture not drawn: {why}"
                             kinds_drawn -= set(SCENE_PICTURES)
+                            need = job_memory(g, boxes, False, True)
+                            room = gate.acquire(need)
+                        if room is not None:
+                            what = ("the scene picture needs" if "scene" in kinds_drawn
+                                    else "the crops need")
+                            raise NotDrawn(f"{what} about {need / 1e9:.1f} GB and only "
+                                           f"{room / 1e9:.1f} GB can be had (memory and "
+                                           f"page file) - close other programs")
                     item["future"] = pool.submit(
                         draw_job, uid, g, path, boxes, prep, srec, lines,
                         set(kinds_drawn), adopted, ident, fp, need)

@@ -64,12 +64,13 @@ segmented has no key. Nothing downstream counts from them.
 Once a section's rows, outlines and done-log line are on disk, its ROI and
 background-disc crops are drawn from the marker planes this stage already read
 (no second read of those pixels; only a box too small to segment is read, for
-the shared brightness stretch) into `detection_overlays/<marker>/<animal>/`,
+the shared brightness stretch, and only after the section is logged done) into `detection_overlays/<marker>/<animal>/`,
 exactly as 06i_detection_overlays.py draws them: the same functions, the
 section's own cut by ls_overlay.section_cut (06a's rule), the same counts and
 words. Encoding and writing run on one background thread, so StarDist goes on
-with the next section; at most CROP_QUEUE sections wait for it, and the run
-waits for the last before it ends. What was drawn is listed in
+with the next section; at most CROP_QUEUE section waits for it, and the run
+waits for the last before it ends - except on Ctrl+C, which drops what is not
+yet drawn (the section being drawn stops after its current crop). What was drawn is listed in
 `detection_overlays/index_05c.csv` - this stage's own list, never 06i's
 index.csv - each row stamped with a fingerprint of what the crop was drawn
 from; 06i keeps a crop as it is when that fingerprint and its counts and cut
@@ -118,7 +119,9 @@ import io
 import os
 import sys
 from collections import deque
+import threading
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeout
 
 import numpy as np
 
@@ -691,29 +694,49 @@ INDEX_05C = os.path.join(OVERLAY_DIR, "index_05c.csv")
 INDEX_05C_KEYS = LO.INDEX_KEYS + ["data_fingerprint", "error"]
 MANIFEST_SCENES_CSV = os.path.join(OUT_ROOT, "manifest", "manifest_scenes.csv")
 CROP_BAR_UM = 50
-#: Sections handed to the drawing thread and not yet finished, at most. Each
-#: holds its boxes' planes and label images, so the queue is what bounds the
-#: memory drawing adds; past it, detection waits for the drawing.
-CROP_QUEUE = 2
+#: Sections handed to the drawing thread and not yet finished, at most: one
+#: being drawn while the next is segmented. Each holds its boxes' planes and
+#: label images; a deeper queue would only hold more of them, since drawing
+#: one section takes about as long as detecting one. Past it, detection waits
+#: for the drawing - and only then.
+CROP_QUEUE = 1
 
 
 def _poly_inside(gx, gy, v):
     """point_in_poly over arrays: the same even-odd test, the same
     comparisons, so a pixel is inside here exactly when a nucleus at that
     point would be counted. An edge with yi == yj never satisfies
-    `(yi > y) != (yj > y)`, so it is skipped rather than divided by."""
-    gx = np.asarray(gx, float)
-    gy = np.asarray(gy, float)
-    inside = np.zeros(np.broadcast(gx, gy).shape, bool)
+    `(yi > y) != (yj > y)`, so it is skipped rather than divided by.
+
+    An edge flips only points whose gy lies in [min(yi, yj), max(yi, yj)), so
+    on a 2-D grid it is evaluated only over the rows whose gy reach that
+    span - the rows outside it would give False by the very same comparisons
+    - and the result is bit-identical to evaluating every edge everywhere,
+    at a fraction of the cost (the 2-4 edges a row crosses, not all of them).
+    """
+    gx, gy = np.broadcast_arrays(np.asarray(gx, float), np.asarray(gy, float))
+    inside = np.zeros(gx.shape, bool)
+    rows = gy.ndim == 2 and gy.shape[0] > 1 and gy.size > 0
+    if rows:
+        row_lo, row_hi = gy.min(axis=1), gy.max(axis=1)
     n = len(v)
     j = n - 1
     for i in range(n):
         xi, yi = float(v[i][0]), float(v[i][1])
         xj, yj = float(v[j][0]), float(v[j][1])
-        if yi != yj:
-            cross = (yi > gy) != (yj > gy)
-            inside ^= cross & (gx < (xj - xi) * (gy - yi) / (yj - yi) + xi)
         j = i
+        if yi == yj:
+            continue
+        sl = slice(None)
+        if rows:
+            lo, hi = min(yi, yj), max(yi, yj)
+            hit = np.flatnonzero((row_hi >= lo) & (row_lo < hi))
+            if hit.size == 0:
+                continue
+            sl = slice(int(hit[0]), int(hit[-1]) + 1)
+        sgx, sgy = gx[sl], gy[sl]
+        cross = (yi > sgy) != (yj > sgy)
+        inside[sl] ^= cross & (sgx < (xj - xi) * (sgy - yi) / (yj - yi) + xi)
     return inside
 
 
@@ -856,11 +879,23 @@ class CropDrawer:
         self.index = read_crop_index()
         self.pool = ThreadPoolExecutor(1)
         self.pending = deque()
+        # Crops drawn / not drawn (each has an error row); and whether
+        # something went wrong that no error row records (the index itself
+        # not written), so the summary points at the lines printed instead.
         self.n_drawn = self.n_failed = 0
+        self.unlisted = False
+        # Set on Ctrl+C: the section being drawn stops after the crop in hand.
+        self.stop = threading.Event()
 
     def submit(self, uid, g, boxes, rows, outlines, marks, Minv):
         while len(self.pending) >= CROP_QUEUE:
-            self.pending.popleft().result()
+            try:
+                # In steps, so Ctrl+C reaches the main thread while it waits
+                # (on Windows an untimed wait would hold it).
+                self.pending[0].result(timeout=1)
+            except FuturesTimeout:
+                continue
+            self.pending.popleft()
         # The rows as roi_nuclei.csv holds them, cell for cell: the cut and
         # the fingerprint are taken from the text 06a and 06i will read.
         buf = io.StringIO(newline="")
@@ -869,16 +904,33 @@ class CropDrawer:
         self.pending.append(self.pool.submit(
             self._draw, uid, g, boxes, text, outlines, marks, Minv))
 
-    def close(self):
-        while self.pending:
-            self.pending.popleft().result()
-        self.pool.shutdown(wait=True)
+    def close(self, cancel=False):
+        """Wait for the drawing to finish. With `cancel` (Ctrl+C), sections
+        not yet started are dropped and the one being drawn stops after its
+        current crop; what was drawn is still listed. Never touches rows."""
+        if cancel:
+            self.stop.set()
+            for f in self.pending:
+                f.cancel()
+        self.pool.shutdown(wait=True, cancel_futures=cancel)
+        self.pending.clear()
+
+    def summary(self):
+        """The run's closing line about the crops."""
+        line = f"{self.n_drawn} crops -> {OVERLAY_DIR}"
+        if self.n_failed:
+            line += f"; {self.n_failed} not drawn"
+        if self.unlisted:
+            line += " (see the lines above)"
+        elif self.n_failed:
+            line += f" (see {INDEX_05C})"
+        return line
 
     def _draw(self, uid, g, boxes, text, outlines, marks, Minv):
         try:
             self._draw_section(uid, g, boxes, text, outlines, marks, Minv)
         except Exception as exc:  # noqa: BLE001 - a picture never stops detection
-            self.n_failed += 1
+            self.unlisted = True
             print(f"\n  !! {uid}: crops not drawn - {type(exc).__name__}: {exc}")
 
     def _draw_section(self, uid, g, boxes, text, outlines, marks, Minv):
@@ -901,6 +953,8 @@ class CropDrawer:
         except Exception as exc:  # noqa: BLE001 - every crop gets the reason
             why = f"{type(exc).__name__}: {exc}"
         for bi, (labels, x0, y0) in sorted(outlines.items()):
+            if self.stop.is_set():
+                break
             b = boxes[bi - 1]
             if why:
                 rec = crop_record(uid, marker, bi, b, ident, {}, "saved", "", now)
@@ -929,9 +983,14 @@ class CropDrawer:
                   if r.get("marker") == marker and r.get("scene_uid") == uid]:
             del self.index[k]
         self.index.update(recs)
-        os.makedirs(OVERLAY_DIR, exist_ok=True)
-        IO.atomic_write_csv(INDEX_05C, [self.index[k] for k in sorted(self.index)],
-                            INDEX_05C_KEYS)
+        try:
+            os.makedirs(OVERLAY_DIR, exist_ok=True)
+            IO.atomic_write_csv(INDEX_05C, [self.index[k] for k in sorted(self.index)],
+                                INDEX_05C_KEYS)
+        except Exception as exc:  # noqa: BLE001 - said here; not a crop failure
+            self.unlisted = True
+            print(f"\n  !! {uid}: {os.path.basename(INDEX_05C)} not written - "
+                  f"{type(exc).__name__}: {exc}")
 
 COLUMNS = ["scene_uid", "animal", "marker", "roi_kind", "region", "seed_n",
            "roi_index", "nucleus_id",
@@ -2079,260 +2138,280 @@ def main():
     # go unlisted. A section listed but not reached has no rows yet and is
     # redone - and re-recorded - by the resume.
     record_no_artifact(NO_ARTIFACT_CSV, args.marker, redo, no_artifact)
-    for n, uid in enumerate(todo, 1):
-        g = geom[uid]
-        M = np.array([[float(g["m00"]), float(g["m01"]), float(g["m02"])],
-                      [float(g["m10"]), float(g["m11"]), float(g["m12"])]])
-        Minv = G5.invert_affine(M)              # CZI px -> 256 grid
-        # The .npy says WHETHER this section is masked - 04a writes it only
-        # when --mask-artifacts was on and the mask was not rejected on review
-        # - and 04g's own mask says WHERE. The grid copy is the fallback only.
-        art = mask_at(uid, "artifact")
-        art_ov = overview_artifact(uid, g) if art is not None else None
-        if art is not None and art_ov is None:
-            art_on_grid.append(uid)
-        ceiling = ceilings.get(g["czi_file"], DEFAULT_CEILING)
-        # The DAPI tissue silhouette 04a_reformat.py carried into this same 256
-        # frame - the tissue definition every other stage and the curator use.
-        # Without it there is no way to tell a nucleus on the section from one
-        # on the glass, so a section with no mask is skipped rather than
-        # measured: silently calling every nucleus on-tissue is the failure this
-        # check exists to stop.
-        tis = mask_at(uid, "mask")
-        if tis is None:
-            no_tissue_mask.append(uid)
-            continue
-        # The grid copy decides only when 04a's overview-frame silhouette is
-        # missing (a study reformatted before 04a wrote it) or not this frame.
-        tis_ov = overview_tissue(uid, g)
-        if tis_ov is None:
-            tis_on_grid.append(uid)
-        path = os.path.join(CONFIG["source_dir"], g["czi_file"])
-        rows = []
-        coloc_rows = []
-        bg_rows = []
-        norm_rows = []
-        section_norm = {}
-        outlines = {}
-        # Each box's marker plane as read, for the crops (CropDrawer).
-        marks = {}
-        # Keeping decoded tiles: neighbouring ROIs, the second read a shared
-        # range takes, and the background discs all land on the same few tiles.
-        with CR.open_czi(path, int(float(g.get("scene_w") or 0)) or None,
-                         pyczi=pyczi) as doc:
-            # ONE INTENSITY RANGE PER SECTION for a marker segmented on its own
-            # channel, taken from every crop of it - ROIs and background discs
-            # alike - before any of them is segmented. That is a second read
-            # of those crops, paid only by such a marker: the reads are local
-            # and small beside a StarDist call of seconds, and the alternative
-            # is holding every crop in memory at once.
-            for mk in sorted({b["marker"] for b in by_sec[uid]
-                              if needs_shared_norm(b["marker"])}):
-                try:
-                    lo, hi, n_crops = section_range(
-                        doc, by_sec[uid], mk, int(g["scene_index"]))
-                except SG.SegmentError as exc:
-                    # A section whose marker plane is flat or empty has no
-                    # range to share. Skipped with the reason, never measured
-                    # on a range made up for it.
-                    no_norm.append((uid, mk, str(exc)))
-                    continue
-                section_norm[mk] = (lo, hi)
-                norm_rows.append([uid, mk, segment_plane_for(mk), repr(lo),
-                                  repr(hi), n_crops])
-            for bi, b in enumerate(by_sec[uid], 1):
-                marker = b["marker"]
-                partners = coloc_by_marker.get(marker, ())
-                seg = segment_box(doc, b, int(g["scene_index"]), model,
-                                  min_area_px, section_norm, partners)
-                if seg is None:
-                    continue
-                x0, y0 = int(b["czi_x0"]), int(b["czi_y0"])
-                labels, seg_img = seg["labels"], seg["seg_img"]
-                dapi, mark, planes = seg["dapi"], seg["mark"], seg["planes"]
-                report, seg_on = seg["report"], seg["seg_on"]
-                seg_backend, seg_shaped = seg["backend"], seg["shaped"]
-                # Kept before the `continue` below, so an ROI StarDist found
-                # nothing in is saved all zero: "measured, empty", which 06i
-                # must be able to tell from a box that was never segmented.
-                outlines[bi] = (labels, x0, y0)
-                if drawer is not None:
-                    marks[bi] = planes["mark"]
-                # BEFORE the `continue`, which is the whole point of it being
-                # here: the frames this fires on are usually the ones that
-                # report no objects, an ROI with no objects writes no rows, and
-                # so a background estimate that failed reached 06a as n = 0 and
-                # a density of 0.0 with nothing anywhere to say so. `report` is
-                # empty under StarDist, which estimates no background.
-                if report.get("failed"):
-                    bg_rows.append(bg_row(uid, bi, marker, seg_on, seg_backend,
-                                          labels, report))
-                if labels.max() == 0:
-                    continue
-
-                # Membership is decided on the 256 grid - see roi_inside.
-                inside = roi_inside(b)
-                props = regionprops(labels, intensity_image=mark)
-                dprops = {p.label: p for p in regionprops(labels, intensity_image=dapi)}
-                kept = set()
-                for p in props:
-                    cy, cx = p.centroid
-                    gx, gy = G5.apply_affine(Minv, x0 + cx, y0 + cy)
-                    if not inside(gx, gy):
+    # The drawing thread is wound down whichever way the loop ends: on
+    # Ctrl+C the sections not yet drawn are dropped, not drawn behind the
+    # user's back. Rows and the done log are written per section above,
+    # before any drawing, so neither depends on this.
+    interrupted = False
+    try:
+        for n, uid in enumerate(todo, 1):
+            g = geom[uid]
+            M = np.array([[float(g["m00"]), float(g["m01"]), float(g["m02"])],
+                          [float(g["m10"]), float(g["m11"]), float(g["m12"])]])
+            Minv = G5.invert_affine(M)              # CZI px -> 256 grid
+            # The .npy says WHETHER this section is masked - 04a writes it only
+            # when --mask-artifacts was on and the mask was not rejected on review
+            # - and 04g's own mask says WHERE. The grid copy is the fallback only.
+            art = mask_at(uid, "artifact")
+            art_ov = overview_artifact(uid, g) if art is not None else None
+            if art is not None and art_ov is None:
+                art_on_grid.append(uid)
+            ceiling = ceilings.get(g["czi_file"], DEFAULT_CEILING)
+            # The DAPI tissue silhouette 04a_reformat.py carried into this same 256
+            # frame - the tissue definition every other stage and the curator use.
+            # Without it there is no way to tell a nucleus on the section from one
+            # on the glass, so a section with no mask is skipped rather than
+            # measured: silently calling every nucleus on-tissue is the failure this
+            # check exists to stop.
+            tis = mask_at(uid, "mask")
+            if tis is None:
+                no_tissue_mask.append(uid)
+                continue
+            # The grid copy decides only when 04a's overview-frame silhouette is
+            # missing (a study reformatted before 04a wrote it) or not this frame.
+            tis_ov = overview_tissue(uid, g)
+            if tis_ov is None:
+                tis_on_grid.append(uid)
+            path = os.path.join(CONFIG["source_dir"], g["czi_file"])
+            rows = []
+            coloc_rows = []
+            bg_rows = []
+            norm_rows = []
+            section_norm = {}
+            outlines = {}
+            # Each box's marker plane as read, for the crops (CropDrawer).
+            marks = {}
+            # Keeping decoded tiles: neighbouring ROIs, the second read a shared
+            # range takes, and the background discs all land on the same few tiles.
+            with CR.open_czi(path, int(float(g.get("scene_w") or 0)) or None,
+                             pyczi=pyczi) as doc:
+                # ONE INTENSITY RANGE PER SECTION for a marker segmented on its own
+                # channel, taken from every crop of it - ROIs and background discs
+                # alike - before any of them is segmented. That is a second read
+                # of those crops, paid only by such a marker: the reads are local
+                # and small beside a StarDist call of seconds, and the alternative
+                # is holding every crop in memory at once.
+                for mk in sorted({b["marker"] for b in by_sec[uid]
+                                  if needs_shared_norm(b["marker"])}):
+                    try:
+                        lo, hi, n_crops = section_range(
+                            doc, by_sec[uid], mk, int(g["scene_index"]))
+                    except SG.SegmentError as exc:
+                        # A section whose marker plane is flat or empty has no
+                        # range to share. Skipped with the reason, never measured
+                        # on a range made up for it.
+                        no_norm.append((uid, mk, str(exc)))
                         continue
-                    kept.add(p.label)
-                    vals = p.image_intensity[p.image]
-                    ix, iy = int(round(gx)), int(round(gy))
-                    inb = lambda m: (m is not None and 0 <= iy < m.shape[0]
-                                     and 0 <= ix < m.shape[1] and bool(m[iy, ix]))
-                    # Outside the silhouette, or off the frame entirely, means
-                    # the nucleus is not on the section - glass, mounting
-                    # medium, or a neighbouring scene. `inb` is False for an
-                    # out-of-bounds index, so both cases land here. Recorded
-                    # rather than dropped, the way `artifact` is: 06a decides,
-                    # and the QC overlay can still show what was found.
+                    section_norm[mk] = (lo, hi)
+                    norm_rows.append([uid, mk, segment_plane_for(mk), repr(lo),
+                                      repr(hi), n_crops])
+                for bi, b in enumerate(by_sec[uid], 1):
+                    marker = b["marker"]
+                    partners = coloc_by_marker.get(marker, ())
+                    seg = segment_box(doc, b, int(g["scene_index"]), model,
+                                      min_area_px, section_norm, partners)
+                    if seg is None:
+                        continue
+                    x0, y0 = int(b["czi_x0"]), int(b["czi_y0"])
+                    labels, seg_img = seg["labels"], seg["seg_img"]
+                    dapi, mark, planes = seg["dapi"], seg["mark"], seg["planes"]
+                    report, seg_on = seg["report"], seg["seg_on"]
+                    seg_backend, seg_shaped = seg["backend"], seg["shaped"]
+                    # Kept before the `continue` below, so an ROI StarDist found
+                    # nothing in is saved all zero: "measured, empty", which 06i
+                    # must be able to tell from a box that was never segmented.
+                    outlines[bi] = (labels, x0, y0)
+                    if drawer is not None:
+                        marks[bi] = planes["mark"]
+                    # BEFORE the `continue`, which is the whole point of it being
+                    # here: the frames this fires on are usually the ones that
+                    # report no objects, an ROI with no objects writes no rows, and
+                    # so a background estimate that failed reached 06a as n = 0 and
+                    # a density of 0.0 with nothing anywhere to say so. `report` is
+                    # empty under StarDist, which estimates no background.
+                    if report.get("failed"):
+                        bg_rows.append(bg_row(uid, bi, marker, seg_on, seg_backend,
+                                              labels, report))
+                    if labels.max() == 0:
+                        continue
+
+                    # Membership is decided on the 256 grid - see roi_inside.
+                    inside = roi_inside(b)
+                    props = regionprops(labels, intensity_image=mark)
+                    dprops = {p.label: p for p in regionprops(labels, intensity_image=dapi)}
+                    kept = set()
+                    for p in props:
+                        cy, cx = p.centroid
+                        gx, gy = G5.apply_affine(Minv, x0 + cx, y0 + cy)
+                        if not inside(gx, gy):
+                            continue
+                        kept.add(p.label)
+                        vals = p.image_intensity[p.image]
+                        ix, iy = int(round(gx)), int(round(gy))
+                        inb = lambda m: (m is not None and 0 <= iy < m.shape[0]
+                                         and 0 <= ix < m.shape[1] and bool(m[iy, ix]))
+                        # Outside the silhouette, or off the frame entirely, means
+                        # the nucleus is not on the section - glass, mounting
+                        # medium, or a neighbouring scene. `inb` is False for an
+                        # out-of-bounds index, so both cases land here. Recorded
+                        # rather than dropped, the way `artifact` is: 06a decides,
+                        # and the QC overlay can still show what was found.
+                        #
+                        # Both tests read the overview-frame mask at the centroid's
+                        # native position when there is one, and the 256 copy only
+                        # when there is not: a per-nucleus flag is not decided on
+                        # a 30 um cell when a 5.2 um mask of the same thing exists.
+                        off_tis = int(not (overview_hit(tis_ov, x0 + cx, y0 + cy)
+                                           if tis_ov is not None else inb(tis)))
+                        is_art = (overview_hit(art_ov, x0 + cx, y0 + cy)
+                                  if art_ov is not None else inb(art))
+                        rows.append([
+                            uid, b["animal"], b["marker"], b["roi_kind"], b["region"],
+                            b["seed_n"], bi, p.label,
+                            round(x0 + cx, 1), round(y0 + cy, 1),
+                            round(float(gx), 2), round(float(gy), 2),
+                            round(p.area * px_area, 2),
+                            round(2 * np.sqrt(p.area * px_area / np.pi), 2),
+                            round(float(dprops[p.label].image_intensity[
+                                dprops[p.label].image].mean()), 1),
+                            round(float(vals.mean()), 1),
+                            round(float(np.median(vals)), 1),
+                            round(float(np.percentile(vals, 90)), 1),
+                            int(clipped(vals, ceiling)), int(is_art), off_tis,
+                            seg_on, seg_backend, seg_shaped])
+
+                    # CO-LOCALISATION, while both label images exist for this ROI.
                     #
-                    # Both tests read the overview-frame mask at the centroid's
-                    # native position when there is one, and the 256 copy only
-                    # when there is not: a per-nucleus flag is not decided on
-                    # a 30 um cell when a 5.2 um mask of the same thing exists.
-                    off_tis = int(not (overview_hit(tis_ov, x0 + cx, y0 + cy)
-                                       if tis_ov is not None else inb(tis)))
-                    is_art = (overview_hit(art_ov, x0 + cx, y0 + cy)
-                              if art_ov is not None else inb(art))
-                    rows.append([
-                        uid, b["animal"], b["marker"], b["roi_kind"], b["region"],
-                        b["seed_n"], bi, p.label,
-                        round(x0 + cx, 1), round(y0 + cy, 1),
-                        round(float(gx), 2), round(float(gy), 2),
-                        round(p.area * px_area, 2),
-                        round(2 * np.sqrt(p.area * px_area / np.pi), 2),
-                        round(float(dprops[p.label].image_intensity[
-                            dprops[p.label].image].mean()), 1),
-                        round(float(vals.mean()), 1),
-                        round(float(np.median(vals)), 1),
-                        round(float(np.percentile(vals, 90)), 1),
-                        int(clipped(vals, ceiling)), int(is_art), off_tis,
-                        seg_on, seg_backend, seg_shaped])
+                    # Both sides are cut down to the objects that are IN the ROI
+                    # first, because a row of this table points at two rows of
+                    # roi_nuclei.csv and an object outside the shape has none.
+                    #
+                    # THE ROI IS ASSUMED TO BE THE SAME ROI for both markers. Under
+                    # multiplex the two markers are one scan of one section, so the
+                    # box at index `bi` is the same region for both - but each
+                    # marker has its OWN roi_boxes file, exported separately, and
+                    # nothing here checks that the two exports agree. A multiplex
+                    # study whose markers were curated to different boxes would
+                    # join `object_b` to the partner's own run under a roi_index
+                    # that means something else there. That is the first thing to
+                    # check when a real multiplex study arrives.
+                    for other in partners:
+                        o_img = planes["coloc_" + other].astype(np.float32)
+                        if o_img.shape != labels.shape:
+                            continue
+                        o_backend = backend_for(other)
+                        o_report = {}
+                        o_labels = SG.segment(o_img, o_backend, model=model,
+                                              k=MAD_K, min_area_px=min_area_px,
+                                              report=o_report,
+                                              **_thresholds(other))
+                        # The partner's plane is segmented in this run, so its
+                        # frames are this run's to report on too.
+                        if o_report.get("failed"):
+                            bg_rows.append(bg_row(uid, bi, other,
+                                                  segment_plane_for(other),
+                                                  o_backend, o_labels, o_report))
+                        if o_labels.max() == 0:
+                            continue
+                        o_kept = objects_inside(o_labels, inside, Minv, x0, y0)
+                        for rel in CO.pairs(only(labels, kept),
+                                            only(o_labels, o_kept)):
+                            coloc_rows.append([
+                                uid, bi, marker, rel["object_a"],
+                                other, rel["object_b"],
+                                int(rel["a_centroid_in_b"]),
+                                int(rel["b_centroid_in_a"])])
 
-                # CO-LOCALISATION, while both label images exist for this ROI.
-                #
-                # Both sides are cut down to the objects that are IN the ROI
-                # first, because a row of this table points at two rows of
-                # roi_nuclei.csv and an object outside the shape has none.
-                #
-                # THE ROI IS ASSUMED TO BE THE SAME ROI for both markers. Under
-                # multiplex the two markers are one scan of one section, so the
-                # box at index `bi` is the same region for both - but each
-                # marker has its OWN roi_boxes file, exported separately, and
-                # nothing here checks that the two exports agree. A multiplex
-                # study whose markers were curated to different boxes would
-                # join `object_b` to the partner's own run under a roi_index
-                # that means something else there. That is the first thing to
-                # check when a real multiplex study arrives.
-                for other in partners:
-                    o_img = planes["coloc_" + other].astype(np.float32)
-                    if o_img.shape != labels.shape:
-                        continue
-                    o_backend = backend_for(other)
-                    o_report = {}
-                    o_labels = SG.segment(o_img, o_backend, model=model,
-                                          k=MAD_K, min_area_px=min_area_px,
-                                          report=o_report,
-                                          **_thresholds(other))
-                    # The partner's plane is segmented in this run, so its
-                    # frames are this run's to report on too.
-                    if o_report.get("failed"):
-                        bg_rows.append(bg_row(uid, bi, other,
-                                              segment_plane_for(other),
-                                              o_backend, o_labels, o_report))
-                    if o_labels.max() == 0:
-                        continue
-                    o_kept = objects_inside(o_labels, inside, Minv, x0, y0)
-                    for rel in CO.pairs(only(labels, kept),
-                                        only(o_labels, o_kept)):
-                        coloc_rows.append([
-                            uid, bi, marker, rel["object_a"],
-                            other, rel["object_b"],
-                            int(rel["a_centroid_in_b"]),
-                            int(rel["b_centroid_in_a"])])
-
-                if args.qc:
-                    write_overlay(uid, bi, b, seg_img, labels, kept)
+                    if args.qc:
+                        write_overlay(uid, bi, b, seg_img, labels, kept)
+            # The outlines first of all, then the geometry BEFORE the nuclei, so a
+            # run that stops between any two leaves outlines or a record with no
+            # nuclei - a section that is not done and is redone, outlines, record
+            # and all - never nuclei with no record or no outlines.
+            save_outlines(args.marker, uid, outlines)
+            gw.writerows(geometry_rows(uid, by_sec[uid]))
+            gfh.flush()
+            w.writerows(rows)
+            fh.flush()
+            # On disk before the section is logged as whole - see DONE_LOG.
+            os.fsync(fh.fileno())
+            # A section with rows is done. So is one MEASURED and found empty -
+            # it writes no rows, and without the entry the resume took it for
+            # unmeasured and measured it again every run, and 06a, which reads
+            # the log to tell "looked, found nothing" from "never looked", left it
+            # out instead of reporting zeros. One skipped for want of a shared
+            # range was not measured and is not logged: it is redone, and 06a
+            # does not count it. (Its geometry row alone says nothing: one is
+            # written for a section cut off before this line, too.)
+            if rows or not any(u == uid for u, _, _ in no_norm):
+                record_done(dfh, args.marker, uid, box_fingerprint(by_sec[uid], g))
+            if norm_rows:
+                if nfh is None:
+                    os.makedirs(RESULTS, exist_ok=True)
+                    nfh = open(NORM_CSV, "a" if norm_exists else "w", newline="",
+                               encoding="utf-8")
+                    nw = csv.writer(nfh)
+                    if not norm_exists:
+                        nw.writerow(NORM_COLUMNS)
+                nw.writerows(norm_rows)
+                nfh.flush()
+            if bg_rows:
+                if bfh is None:
+                    os.makedirs(os.path.dirname(BACKGROUND_CSV), exist_ok=True)
+                    bfh = open(BACKGROUND_CSV, "a" if bg_exists else "w",
+                               newline="", encoding="utf-8")
+                    bgw = csv.writer(bfh)
+                    if not bg_exists:
+                        bgw.writerow(BACKGROUND_COLUMNS)
+                bgw.writerows(bg_rows)
+                bfh.flush()
+                total_bg += len(bg_rows)
+            if cw is not None:
+                # Flushed with the measurements, section by section, so a run that
+                # stops half way leaves the two files describing the same sections.
+                cw.writerows(coloc_rows)
+                cfh.flush()
+                total_rel += len(coloc_rows)
             # The crops share one brightness stretch over every box of the
             # section, as 06i's do - the boxes too small to segment included,
-            # whose few pixels are read here (they were never read above).
-            # A read that fails costs this section its crops, nothing else.
+            # whose few pixels are read here (never read above). Here, after the
+            # section is on disk and logged, so the read cannot delay or lose it;
+            # one that fails costs this section its crops, nothing else.
             if drawer is not None and outlines:
+                short = [(bi, b) for bi, b in enumerate(by_sec[uid], 1)
+                         if bi not in marks and int(b["czi_w"]) >= 1
+                         and int(b["czi_h"]) >= 1]
+                if short:
+                    try:
+                        with CR.open_czi(path, None, pyczi=pyczi) as doc:
+                            for bi, b in short:
+                                marks[bi] = CR.read_plane(
+                                    doc, _Rect(int(b["czi_x0"]), int(b["czi_y0"]),
+                                               int(b["czi_w"]), int(b["czi_h"])),
+                                    plane_index_for(b["marker"]),
+                                    scene=int(g["scene_index"]))
+                    except Exception as exc:  # noqa: BLE001 - never stops detection
+                        print(f"\n  !! {uid}: crops not drawn - {type(exc).__name__}: {exc}")
+                        marks = None
+            # Last, once the section is on disk and logged: drawing it can only
+            # wait for the thread, never change what was written.
+            if drawer is not None and outlines and marks is not None:
                 try:
-                    for bi, b in enumerate(by_sec[uid], 1):
-                        bw, bh = int(b["czi_w"]), int(b["czi_h"])
-                        if bi not in marks and bw >= 1 and bh >= 1:
-                            marks[bi] = CR.read_plane(
-                                doc, _Rect(int(b["czi_x0"]), int(b["czi_y0"]), bw, bh),
-                                plane_index_for(b["marker"]),
-                                scene=int(g["scene_index"]))
+                    drawer.submit(uid, g, by_sec[uid], rows, outlines, marks, Minv)
                 except Exception as exc:  # noqa: BLE001 - never stops detection
                     print(f"\n  !! {uid}: crops not drawn - {type(exc).__name__}: {exc}")
-                    marks = None
-        # The outlines first of all, then the geometry BEFORE the nuclei, so a
-        # run that stops between any two leaves outlines or a record with no
-        # nuclei - a section that is not done and is redone, outlines, record
-        # and all - never nuclei with no record or no outlines.
-        save_outlines(args.marker, uid, outlines)
-        gw.writerows(geometry_rows(uid, by_sec[uid]))
-        gfh.flush()
-        w.writerows(rows)
-        fh.flush()
-        # On disk before the section is logged as whole - see DONE_LOG.
-        os.fsync(fh.fileno())
-        # A section with rows is done. So is one MEASURED and found empty -
-        # it writes no rows, and without the entry the resume took it for
-        # unmeasured and measured it again every run, and 06a, which reads
-        # the log to tell "looked, found nothing" from "never looked", left it
-        # out instead of reporting zeros. One skipped for want of a shared
-        # range was not measured and is not logged: it is redone, and 06a
-        # does not count it. (Its geometry row alone says nothing: one is
-        # written for a section cut off before this line, too.)
-        if rows or not any(u == uid for u, _, _ in no_norm):
-            record_done(dfh, args.marker, uid, box_fingerprint(by_sec[uid], g))
-        if norm_rows:
-            if nfh is None:
-                os.makedirs(RESULTS, exist_ok=True)
-                nfh = open(NORM_CSV, "a" if norm_exists else "w", newline="",
-                           encoding="utf-8")
-                nw = csv.writer(nfh)
-                if not norm_exists:
-                    nw.writerow(NORM_COLUMNS)
-            nw.writerows(norm_rows)
-            nfh.flush()
-        if bg_rows:
-            if bfh is None:
-                os.makedirs(os.path.dirname(BACKGROUND_CSV), exist_ok=True)
-                bfh = open(BACKGROUND_CSV, "a" if bg_exists else "w",
-                           newline="", encoding="utf-8")
-                bgw = csv.writer(bfh)
-                if not bg_exists:
-                    bgw.writerow(BACKGROUND_COLUMNS)
-            bgw.writerows(bg_rows)
-            bfh.flush()
-            total_bg += len(bg_rows)
-        if cw is not None:
-            # Flushed with the measurements, section by section, so a run that
-            # stops half way leaves the two files describing the same sections.
-            cw.writerows(coloc_rows)
-            cfh.flush()
-            total_rel += len(coloc_rows)
-        # Last, once the section is on disk and logged: drawing it can only
-        # wait for the thread, never change what was written.
-        if drawer is not None and outlines and marks is not None:
-            try:
-                drawer.submit(uid, g, by_sec[uid], rows, outlines, marks, Minv)
-            except Exception as exc:  # noqa: BLE001 - never stops detection
-                print(f"\n  !! {uid}: crops not drawn - {type(exc).__name__}: {exc}")
-        total_nuc += len(rows)
-        print(f"\r  {n}/{len(todo)}  {uid}  {len(rows)} nuclei  "
-              f"({total_nuc} total)          ", end="")
+            total_nuc += len(rows)
+            print(f"\r  {n}/{len(todo)}  {uid}  {len(rows)} nuclei  "
+                  f"({total_nuc} total)          ", end="")
+    except KeyboardInterrupt:
+        interrupted = True
+        raise
+    finally:
+        if drawer is not None and interrupted:
+            drawer.close(cancel=True)
+        elif drawer is not None:
+            # The normal end, or a crash: what is queued is drawn first.
+            drawer.close()
     fh.close()
     gfh.close()
     dfh.close()
@@ -2344,10 +2423,7 @@ def main():
         nfh.close()
     print(f"\n{total_nuc} nuclei -> {NUCLEI_CSV}")
     if drawer is not None:
-        drawer.close()
-        print(f"{drawer.n_drawn} crops -> {OVERLAY_DIR}"
-              + (f"; {drawer.n_failed} not drawn (see {INDEX_05C})"
-                 if drawer.n_failed else ""))
+        print(drawer.summary())
     if no_norm:
         print(f"!! {len(no_norm)} section/marker pairs SKIPPED for want of an "
               f"intensity range to share between their crops: "

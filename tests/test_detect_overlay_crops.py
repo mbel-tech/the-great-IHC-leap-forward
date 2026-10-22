@@ -491,6 +491,223 @@ with temp_study(acquisition=PAIRED) as study:
         OV.DEFAULT_WORKERS, max(1, min(4, (os.cpu_count() or 2) // 2)))
 
     print()
+    print("--- the drawing queue: one section drawing, at most one waiting ---")
+    chk("CROP_QUEUE == 1", D5.CROP_QUEUE, 1)
+
+    print()
+    print("--- 06i --no-scenes: crop jobs are memory-gated too ---")
+
+    class RecordingGate:
+        def __init__(self, refuse=False):
+            self.needs, self.refuse, self.released = [], refuse, []
+
+        def acquire(self, need):
+            self.needs.append(need)
+            return 10 ** 6 if self.refuse else None
+
+        def release(self, need):
+            self.released.append(need)
+
+    real_gate = OV.memory_gate
+    rg = RecordingGate()
+    OV.memory_gate = lambda: rg
+    try:
+        rc, out = run_06i(OV, "--no-scenes", "--force", "--workers", "2")
+    finally:
+        OV.memory_gate = real_gate
+    chk("--no-scenes --force: one gate request per section, each > 0",
+        (len(rg.needs), all(n > 0 for n in rg.needs)), (2, True))
+    chk("...each released", sorted(rg.released), sorted(rg.needs))
+    rg = RecordingGate(refuse=True)
+    OV.memory_gate = lambda: rg
+    age(paths.values())
+    try:
+        rc, out = run_06i(OV, "--no-scenes", "--force", "--workers", "2")
+    finally:
+        OV.memory_gate = real_gate
+    chk("refused memory: both sections not drawn, pictures kept",
+        ("2 not drawn:" in out, aged(paths.values())), (True, [True] * 5))
+    chk("...failures.csv says why",
+        all("memory" in f["reason"] for f in read_rows(OV.FAILURES_CSV)), True)
+    rc, out = run_06i(OV, "--no-scenes")
+
+    print()
+    print("--- index_05c.csv cannot be written: said once, not counted as a crop ---")
+    real_write = D5.IO.atomic_write_csv
+
+    def failing_write(path, *a, **kw):
+        if os.path.abspath(path) == os.path.abspath(idx05):
+            raise OSError(28, "No space left on device")
+        return real_write(path, *a, **kw)
+
+    D5.IO.atomic_write_csv = failing_write
+    try:
+        rc, out = run_05c(D5, "--force")
+    finally:
+        D5.IO.atomic_write_csv = real_write
+    chk("05c exit 0", rc, 0)
+    chk("every crop drawn", [f for f in pngs_in(folder) if "_scene" not in f],
+        sorted(names.values()))
+    chk("the summary does not count them as failed",
+        "5 crops ->" in out and "not drawn (see" not in out, True)
+    chk("...and points at the lines above, not at the file that failed",
+        "see the lines above" in out and "index_05c.csv not written" in out, True)
+
+    print()
+    print("--- the extra read of a box too small to segment waits for the done log ---")
+    seen = {}
+
+    class Watching(FakeCzi):
+        def read(self, **kw):
+            x, w = int(kw["roi"][0]), int(kw["roi"][2])
+            if w == 4:                         # B's box 3, never segmented
+                logged = D5.read_done_log(D5.DONE_LOG, MARKER) or set()
+                seen["B logged when read"] = B in logged
+                seen["rows on disk when read"] = B in open(nuc_csv).read()
+            return super().read(**kw)
+
+    saved = (pyczi.open_czi, D5.load_model, sys.argv)
+    pyczi.open_czi = FakeOpenCzi(Watching(PLANES))
+    D5.load_model = lambda: FakeModel()
+    sys.argv = ["05c_detect_rois.py", "--marker", MARKER, "--order", "uid", "--force"]
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = D5.main()
+    finally:
+        pyczi.open_czi, D5.load_model, sys.argv = saved
+    chk("the tiny box was read, after B's rows and done-log line",
+        seen, {"B logged when read": True, "rows on disk when read": True})
+
+    print()
+    print("--- Ctrl+C: rows and done log kept, queued drawing cancelled ---")
+    import threading
+    import time
+    shutil.rmtree(ov_dir)
+    ref_rows_a = [r for r in read_rows(nuc_csv) if r["scene_uid"] == A]
+    drawers = []
+    real_init, real_draw = D5.CropDrawer.__init__, D5.draw_crop
+
+    def spy_init(self, *a, **kw):
+        real_init(self, *a, **kw)
+        drawers.append(self)
+
+    def slow_draw(*a, **kw):
+        # The first crop of A waits until Ctrl+C has been taken: the
+        # interrupt lands while the drawing thread is mid-section.
+        drawers[0].stop.wait(10)
+        return real_draw(*a, **kw)
+
+    class InterruptingModel(FakeModel):
+        calls = 0
+
+        def predict_instances(self, img, **kw):
+            InterruptingModel.calls += 1
+            if InterruptingModel.calls > 3:     # B's first box: Ctrl+C
+                raise KeyboardInterrupt
+            return super().predict_instances(img, **kw)
+
+    before_threads = threading.active_count()
+    D5.CropDrawer.__init__, D5.draw_crop = spy_init, slow_draw
+    saved = (pyczi.open_czi, D5.load_model, sys.argv)
+    pyczi.open_czi = FakeOpenCzi(FakeCzi(PLANES))
+    D5.load_model = lambda: InterruptingModel()
+    sys.argv = ["05c_detect_rois.py", "--marker", MARKER, "--order", "uid", "--force"]
+    t0 = time.time()
+    got = None
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            D5.main()
+    except KeyboardInterrupt:
+        got = "KeyboardInterrupt"
+    finally:
+        pyczi.open_czi, D5.load_model, sys.argv = saved
+        D5.CropDrawer.__init__, D5.draw_crop = real_init, real_draw
+    chk("Ctrl+C reaches the caller", got, "KeyboardInterrupt")
+    chk("...promptly (the drawing did not hold it)", time.time() - t0 < 8, True)
+    chk("A's rows are on disk, as without pictures",
+        [r for r in read_rows(nuc_csv) if r["scene_uid"] == A] == ref_rows_a, True)
+    chk("...A logged done, B not",
+        sorted(D5.read_done_log(D5.DONE_LOG, MARKER) or set()), [A])
+    chk("the drawing thread stopped after the crop in hand",
+        (len(pngs_in(folder)), len(read_rows(idx05))), (1, 1))
+    chk("...and is gone", threading.active_count(), before_threads)
+    rc, out = run_05c(D5, "--force")
+    chk("a resume after Ctrl+C draws every crop again",
+        pngs_in(folder), sorted(names.values()))
+
+    print()
+    print("--- the ROI shape outline: faster, bit-identical to the full evaluation ---")
+
+    def old_poly_inside(gx, gy, v):
+        gx = np.asarray(gx, float)
+        gy = np.asarray(gy, float)
+        inside = np.zeros(np.broadcast(gx, gy).shape, bool)
+        n = len(v)
+        j = n - 1
+        for i in range(n):
+            xi, yi = float(v[i][0]), float(v[i][1])
+            xj, yj = float(v[j][0]), float(v[j][1])
+            if yi != yj:
+                cross = (yi > gy) != (yj > gy)
+                inside ^= cross & (gx < (xj - xi) * (gy - yi) / (yj - yi) + xi)
+            j = i
+        return inside
+
+    def old_outline(b, Minv, x0, y0, h, w):
+        poly = D5.G5.parse_poly(b.get("sec_poly", ""))
+        if poly is None:
+            ins = D5.roi_inside(b)
+        else:
+            poly = np.column_stack(D5.G5.curator_to_grid(poly[:, 0], poly[:, 1]))
+            ins = lambda gx, gy: old_poly_inside(gx, gy, poly)   # noqa: E731
+        ys, xs = np.mgrid[0:h, 0:w]
+        gx, gy = D5.G5.apply_affine(Minv, x0 + xs.astype(float), y0 + ys.astype(float))
+        mask = np.asarray(ins(gx, gy), bool)
+        return LO._edge(mask) & mask
+
+    rng = np.random.default_rng(42)
+    same, cases = [], 0
+    for case in range(60):
+        h, w = int(rng.integers(1, 420)), int(rng.integers(1, 420))
+        x0, y0 = int(rng.integers(0, 5000)), int(rng.integers(0, 5000))
+        th, sc = rng.uniform(0, 2 * np.pi), rng.uniform(0.01, 1.5)
+        shear = rng.uniform(-0.2, 0.2) if case % 3 else 0.0
+        A2 = sc * np.array([[np.cos(th), -np.sin(th) + shear], [np.sin(th), np.cos(th)]])
+        if case % 5 == 0:
+            A2 = np.eye(2) * [1.0, 1.0][0]        # identity: pixel-aligned ties
+        Minv = np.hstack([A2, rng.uniform(-50, 50, (2, 1))])
+        cgx, cgy = D5.G5.apply_affine(Minv, x0 + w / 2, y0 + h / 2)
+        span = float(np.hypot(*(A2 @ [w, h]))) / 2 + 1
+        b = {"sec_x": str(cgx + 0.5), "sec_y": str(cgy + 0.5),
+             "sec_r": str(round(span * rng.uniform(0.2, 1.0), 3)), "sec_poly": ""}
+        if case % 2:
+            n = int(rng.integers(3, 80))
+            ang = np.sort(rng.uniform(0, 2 * np.pi, n))
+            rad = span * rng.uniform(0.1, 1.1, n)
+            vx, vy = cgx + 0.5 + rad * np.cos(ang), cgy + 0.5 + rad * np.sin(ang)
+            if case % 5 == 1:                  # integer vertices, flat edges
+                vx, vy = np.round(vx), np.round(vy)
+                vy[1::4] = vy[0::4][:len(vy[1::4])]
+            b["sec_poly"] = ";".join(f"{x!r} {y!r}" for x, y in zip(vx, vy))
+        cases += 1
+        same.append(bool(np.array_equal(D5.shape_outline(b, Minv, x0, y0, h, w),
+                                        old_outline(b, Minv, x0, y0, h, w))))
+    chk(f"{cases} random discs/polygons/affines: identical outlines",
+        same, [True] * cases)
+    S = 2000
+    Mi = np.array([[1.0, 0, 0], [0, 1.0, 0]])
+    disc = {"sec_x": "1000.5", "sec_y": "1000.5", "sec_r": "900", "sec_poly": ""}
+    poly40 = dict(disc, sec_poly=";".join(
+        f"{1000 + 900 * np.cos(t):.1f} {1000 + 900 * np.sin(t):.1f}"
+        for t in np.linspace(0, 2 * np.pi, 40, endpoint=False)))
+    for name, bb, limit in (("disc", disc, 0.4), ("40-gon", poly40, 0.6)):
+        t0 = time.perf_counter()
+        D5.shape_outline(bb, Mi, 0, 0, S, S)
+        dt = time.perf_counter() - t0
+        print(f"     {name} outline 2000x2000: {dt:.3f} s")
+        chk(f"{name} outline of a 2000x2000 crop under {limit} s", dt < limit, True)
+
+    print()
     print("--- the app offers both switches ---")
     sys.path.insert(0, os.path.join(REPO, "app"))
     import workflow as WF                                    # noqa: E402

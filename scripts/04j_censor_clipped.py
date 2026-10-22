@@ -424,6 +424,11 @@ def main():
               f"and none could be built from the DAPI overview); their verdict was")
         print(f"     decided on the FRAME fraction (gate = frame). First few: {no_tissue[:5]}")
 
+    if not rows:
+        # Nothing reached this stage - usually 04f proposed every section as
+        # no tissue. Writing an empty analysis set would read as done.
+        raise SystemExit(f"no {label} sections to check: the exclusion step left none. "
+                         f"Look at reformatted/exclusion_candidates.csv and the overviews.")
     guard_partial(out_csv, rows, args.allow_partial)
     IO.atomic_write_csv(out_csv, rows, ANALYSIS_KEYS)
 

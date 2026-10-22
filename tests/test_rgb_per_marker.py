@@ -229,5 +229,18 @@ with temp_study(acquisition=PAIRED) as study:
          ("sections_rgb", "sections_rgb_thumb")])
 
 print()
+print("--- nothing to composite is a failure, not a quiet zero ---")
+with temp_study(acquisition=MULTIPLEX) as study:
+    O = load_stage("04o_section_rgb.py", name="lsstage_04o_empty")
+    out = study.out_root
+    # Every section excluded upstream: the index holds no section rows.
+    write_csv(os.path.join(out, "reformatted", "reformat_index.csv"),
+              ["id", "kind", "animal"], [])
+    write_csv(os.path.join(out, "qc", "focus.csv"),
+              ["scene_uid", "marker_channel", "animal"], [])
+    raised = run_04o(O, "Mk1")
+    chk("an empty index stops the stage", raised.startswith("SystemExit"), True)
+    chk("...saying there is nothing to composite", "no Mk1 sections to composite" in raised, True)
+
 print("ALL PASS" if not failures else f"{len(failures)} FAILED")
 sys.exit(1 if failures else 0)

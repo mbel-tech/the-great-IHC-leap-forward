@@ -67,7 +67,10 @@ except ImportError as exc:                                   # noqa: BLE001
 
 
 class FakeCzi:
-    """A plane per (scene, channel, box x0), and a record of every read."""
+    """A plane per (scene, channel, box x0), and a record of every read.
+
+    A read that is not one box's (the whole-scene picture's bands) is cut
+    from that scene's canvas, which holds every box's plane at its place."""
 
     def __init__(self, planes):
         self.planes = planes
@@ -75,8 +78,13 @@ class FakeCzi:
 
     def read(self, **kw):
         self.calls.append(kw)
-        return self.planes[(int(kw["scene"]), int(kw["plane"]["C"]),
-                            int(kw["roi"][0]))].copy()
+        s, c = int(kw["scene"]), int(kw["plane"]["C"])
+        x, y, w, h = (int(v) for v in kw["roi"])
+        got = self.planes.get((s, c, x))
+        if got is not None and got.shape == (h, w):
+            return got.copy()
+        sx, sy, _, _ = SCENE_RECT
+        return canvas(s, c)[y - sy:y - sy + h, x - sx:x - sx + w].copy()
 
 
 class BrokenCzi(FakeCzi):
@@ -174,6 +182,27 @@ PLANES = {
 }
 
 
+#: The scenes' rectangle in CZI px (x, y, w, h): every box inside it, the
+#: first box near enough its top-left corner that its tag is clipped.
+SCENE_RECT = (5, 10, 220, 80)
+#: Rows / columns (scene px) of scene 6 that were never scanned: they read 0.
+UNSCANNED = (slice(72, 80), slice(0, 40))
+
+
+def canvas(scene, channel):
+    """The whole scene rectangle of one channel: noise, every box's plane at
+    its place, and an unscanned corner of 0s in scene 6."""
+    sx, sy, sw, sh = SCENE_RECT
+    a = np.random.default_rng(100 + scene).normal(170, 3, (sh, sw))
+    if scene == 6:
+        a[UNSCANNED] = 0
+    for (s, c, x), plane in PLANES.items():
+        if (s, c) == (scene, channel):
+            h, w = plane.shape
+            a[Y0 - sy:Y0 - sy + h, x - sx:x - sx + w] = plane
+    return a
+
+
 def read_rows(path):
     if not os.path.exists(path):
         return []
@@ -193,7 +222,10 @@ def drive_05c(D5):
     geoms = [{"scene_uid": u, "animal": "AB12", "marker": MARKER,
               "czi_file": "AB12_1a.czi", "scene_index": str(SCENE[u]),
               "m00": "1", "m01": "0", "m02": "0",
-              "m10": "0", "m11": "1", "m12": "0"} for u in SECTIONS]
+              "m10": "0", "m11": "1", "m12": "0",
+              "scene_x": str(SCENE_RECT[0]), "scene_y": str(SCENE_RECT[1]),
+              "scene_w": str(SCENE_RECT[2]), "scene_h": str(SCENE_RECT[3])}
+             for u in SECTIONS]
     os.makedirs(os.path.dirname(D5.G5.GEOM_CSV), exist_ok=True)
     write_rows(D5.G5.GEOM_CSV, geoms)
     write_rows(D5.G5.BOX_CSV, [b for u in SECTIONS for b in SECTIONS[u]])
@@ -350,7 +382,11 @@ with temp_study(acquisition=PAIRED) as study:
     b_roi1 = os.path.join(folder, overlay_name(MARKER, B, "roi", 1, "Dm"))
     for p in (roi1, bg2, roi3, b_roi1):
         chk(f"{os.path.basename(p)} exists", os.path.exists(p), True)
-    chk("no scene pictures yet", [f for f in os.listdir(folder) if "_scene" in f], [])
+    sc_a = os.path.join(folder, overlay_name(MARKER, A, "scene"))
+    sc_b = os.path.join(folder, overlay_name(MARKER, B, "scene"))
+    chk("a scene picture per section",
+        [f for f in os.listdir(folder) if "_scene" in f],
+        sorted(os.path.basename(p) for p in (sc_a, sc_b)))
 
     img = png(roi1)
     index = {r["path"]: r for r in read_rows(OV.INDEX_CSV)}
@@ -412,6 +448,85 @@ with temp_study(acquisition=PAIRED) as study:
     chk("a box under 8 px is summed up, not drawn",
         "1 boxes under 8 px not drawn" in out, True)
     chk("...no crop for it", [f for f in os.listdir(folder) if f"_{B}_roi03" in f], [])
+
+    print()
+    print("--- the whole-scene picture ---")
+    sx, sy, sw, sh = SCENE_RECT
+    srow = index.get(os.path.relpath(sc_a, out_dir).replace(os.sep, "/"), {})
+    chk("index.csv has a row for section A's scene", bool(srow), True)
+    chk("...picture scene, no roi_index, no region",
+        [srow.get(k) for k in ("picture", "roi_index", "region")], ["scene", "", ""])
+    chk("...counts: totals over the ROIs (not the background disc)",
+        [srow.get(k) for k in ("n_counted", "n_positive", "pct_positive", "n_outside",
+                               "n_artifact", "n_off_tissue", "n_censored")],
+        ["3", "2", "66.7", "1", "1", "1", "1"])
+    chk("...cut == section_positivity_cut", srow.get("cut"), m1["section_positivity_cut"])
+    chk("...same fingerprint as the crops", srow.get("fingerprint"), irow.get("fingerprint"))
+    cut_a = m1["section_positivity_cut"]
+    s_lines = [f"{MARKER} | fish AB12 | slide 1 | scene {A} | whole scene",
+               f"2 ROIs: 3 counted, 2 positive (66.7%), cut {cut_a} | not counted: "
+               f"1 outside ROI, 1 artifact, 1 off tissue | 1 censored",
+               "ROI 01 Dm: 3 counted, 2 positive (66.7%)",
+               "ROI 03 Vd: 0 counted, 0 positive (n/a)"]
+    s_img = png(sc_a)
+    s_st = strip(sw, s_lines, True, 0.65, 500)
+    chk("scene height == strip + scene rect height", s_img.shape[0], s_st.shape[0] + sh)
+    chk("scene width == scene rect width", s_img.shape[1], sw)
+    chk("the strip: identity, totals, a line per ROI, legend, 500 um bar",
+        bool(np.array_equal(s_img[:s_st.shape[0]], s_st)), True)
+    s_area = s_img[s_st.shape[0]:]
+    for p, x in ((roi1, 10), (bg2, 80), (roi3, 150)):
+        chk(f"the scene's {os.path.basename(p)[len(MARKER) + len(A) + 2:]} region "
+            f"== the crop's image",
+            bool(np.array_equal(s_area[Y0 - sy:Y0 - sy + H, x - sx:x - sx + W],
+                                png(p)[-H:])), True)
+    chk("section B's scene holds its roi01 crop too",
+        bool(np.array_equal(png(sc_b)[-sh:][Y0 - sy:Y0 - sy + H, 10 - sx:10 - sx + W],
+                            png(b_roi1)[-H:])), True)
+    covered = np.zeros((sh, sw), bool)
+    for x in (10, 80, 150):
+        covered[Y0 - sy:Y0 - sy + H, x - sx:x - sx + W] = True
+    for bi, x in ((1, 10), (2, 80), (3, 150)):
+        t = OV.tag(bi)
+        th, tw = t.shape[:2]
+        top, left = Y0 - sy - th, x - sx - tw
+        r0, c0 = max(top, 0), max(left, 0)
+        chk(f"tag {bi:02d} sits just above-left of its box, clipped",
+            bool(np.array_equal(s_area[r0:Y0 - sy, c0:x - sx],
+                                t[r0 - top:, c0 - left:])), True)
+        covered[r0:Y0 - sy, c0:x - sx] = True
+    chk("tag 01 really is clipped (the test means something)",
+        Y0 - sy - OV.tag(1).shape[0] < 0 and 10 - sx - OV.tag(1).shape[1] < 0, True)
+    chk("a tag is white text on black",
+        sorted({tuple(v) for v in OV.tag(2).reshape(-1, 3)} & {(0, 0, 0), (255, 255, 255)}),
+        [(0, 0, 0), (255, 255, 255)])
+    g_all = grey(canvas(6, 1), lo, hi)
+    chk("everywhere else: grey(marker), nothing blanked, no marks",
+        bool(np.array_equal(s_area[~covered], np.repeat(g_all[~covered][:, None], 3, 1))),
+        True)
+    chk("an unscanned corner reads 0: black", s_area[UNSCANNED].max(), 0)
+    brow = index.get(os.path.relpath(sc_b, out_dir).replace(os.sep, "/"), {})
+    chk("section B's scene row: no cut, blank n_positive and pct",
+        [brow.get(k) for k in ("cut", "n_positive", "pct_positive")], ["", "", ""])
+
+    print()
+    print("--- the scene is written in bands; the band size changes nothing ---")
+    band_saved = OV.BAND_ROWS
+    chk("BAND_ROWS is 1024", band_saved, 1024)
+    doc7 = FakeCzi(PLANES)
+    OV.BAND_ROWS = 7
+    rc, out = run_06i(OV, "--force", "--no-crops", opener=FakeOpenCzi(doc7))
+    chk("7-row bands: exit 0", rc, 0)
+    banded = {p: png(p) for p in (sc_a, sc_b)}
+    reads = [c["roi"] for c in doc7.calls if int(c["roi"][0]) == sx]
+    chk("...read 7 rows at a time, the whole width",
+        sorted({(w, h) for _, _, w, h in reads}), [(sw, sh % 7), (sw, 7)])
+    chk("...12 bands per scene", len(reads), 2 * -(-sh // 7))
+    OV.BAND_ROWS = 10_000
+    rc, out = run_06i(OV, "--force", "--no-crops")
+    OV.BAND_ROWS = band_saved
+    chk("one 10,000-row band: the same pixels",
+        all(np.array_equal(png(p), a) for p, a in banded.items()), True)
 
     print()
     print("--- review focus: an empty ROI, a section with no cut ---")
@@ -584,17 +699,42 @@ with temp_study(acquisition=PAIRED) as study:
         area[edge_px(N)].tolist(), list(COLOURS["positive"]))
 
     print()
-    print("--- --no-crops draws no crops; --animal limits ---")
+    print("--- --no-crops, --no-scenes, --animal ---")
     shutil.rmtree(out_dir)
     rc, out = run_06i(OV, "--no-crops")
     chk("--no-crops: exit 0", rc, 0)
-    chk("--no-crops: no crop written",
-        pngs_in(folder), [])
+    chk("--no-crops: only the scene pictures",
+        pngs_in(folder), sorted(os.path.basename(p) for p in (sc_a, sc_b)))
+    for p in (sc_a, sc_b):
+        os.utime(p, (past, past))
     rc, out = run_06i(OV, "--animal", "XX99")
     chk("--animal XX99: nothing drawn",
-        pngs_in(folder), [])
+        pngs_in(folder), sorted(os.path.basename(p) for p in (sc_a, sc_b)))
     rc, out = run_06i(OV, "--animal", "AB12", "--no-scenes")
     chk("--animal AB12 --no-scenes: crops drawn", os.path.exists(b_roi1), True)
+    chk("...the scene pictures neither redrawn nor removed",
+        [os.path.getmtime(p) for p in (sc_a, sc_b)], [past, past])
+    crops_now = [os.path.join(folder, f) for f in pngs_in(folder) if "_scene" not in f]
+    for p in crops_now:
+        os.utime(p, (past, past))
+    rc, out = run_06i(OV, "--no-crops")
+    chk("--no-crops: the crops neither redrawn nor removed",
+        [os.path.getmtime(p) for p in crops_now], [past] * len(crops_now))
+    shutil.rmtree(out_dir)
+    rc, out = run_06i(OV, "--no-scenes")
+    chk("--no-scenes: no _scene.png",
+        [f for f in pngs_in(folder) if "_scene" in f], [])
+    chk("...the crops are drawn", os.path.exists(roi1), True)
+    crops_now = [os.path.join(folder, f) for f in pngs_in(folder)]
+    for p in crops_now:
+        os.utime(p, (past, past))
+    rc, out = run_06i(OV)
+    chk("then a full run: the scene pictures are drawn",
+        [os.path.exists(p) for p in (sc_a, sc_b)], [True, True])
+    chk("...and the up-to-date crops are not redrawn",
+        [os.path.getmtime(p) for p in crops_now], [past] * len(crops_now))
+    rc, out = run_06i(OV, "--animal", "XX99", "--force")
+    chk("--animal XX99 --force: 0 sections", "0 sections" in out, True)
 
 print()
 print("ALL PASS" if not failures else f"{len(failures)} FAILED")

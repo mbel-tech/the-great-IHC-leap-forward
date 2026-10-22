@@ -9,6 +9,7 @@ marker channel in grey, so the counts can be looked at.
 For each section 05c measured (the marker's done log, or rows in
 roi_nuclei.csv) it writes, under `<out_root>/detection_overlays/<marker>/<animal>/`:
 
+  <marker>_<scene_uid>_scene.png              the whole scene
   <marker>_<scene_uid>_roi<NN>_<region>.png   one crop per ROI
   <marker>_<scene_uid>_bg<NN>.png             one crop per background disc
 
@@ -27,6 +28,14 @@ positivity rule are ls_overlay's, which 06a counts by:
 and the ROI shape itself as a 1-px white line. Brightness is a viewing stretch
 only: 1st..99.8th percentile over every box of the section, the same for all of
 a section's pictures so they compare.
+
+The scene picture is the scene's whole rectangle as scanned, native pixels,
+nothing blanked (a tile never scanned reads 0: black), with every box's
+nuclei and shape drawn exactly as in its crop and a small white-on-black tag
+with the box's number just above-left of it - the one thing drawn over
+image pixels. Its strip gives the totals over the section's ROIs (background
+discs are not ROIs) and a line per ROI, with a 500 um bar. It is far too big
+to hold, so it is read, drawn and written BAND_ROWS rows at a time.
 
 A picture that disagrees with the numbers is worse than none
 ------------------------------------------------------------
@@ -56,8 +65,8 @@ Needs 06a: refused (exit 2) when roi_measurements.csv is missing or older than
 roi_nuclei.csv, since the cut and the counts printed come from it. Not in the
 run order - drawn on request.
 
-Whole-scene pictures (`--no-scenes` to skip) are not drawn yet; the flag is
-accepted so the app's options do not change when they are.
+`--no-scenes` / `--no-crops` skip one kind of picture: it is neither drawn
+nor removed, and the other kind is redrawn only when out of date.
 
 Run:  python 06i_detection_overlays.py
       python 06i_detection_overlays.py --marker AF488 --animal LS22 LS23
@@ -113,8 +122,15 @@ FAILURE_KEYS = ["marker", "animal", "slide", "scene_uid", "reason"]
 
 UM_PX = float(D5.BASE_PX_UM)
 CROP_BAR_UM = 50
-#: The picture kinds a crop run writes. Task-5's whole-scene picture adds "scene".
+SCENE_BAR_UM = 500
+#: The picture kinds a crop run writes; a scene run writes SCENE_PICTURES.
 CROP_PICTURES = ("roi", "background")
+SCENE_PICTURES = ("scene",)
+#: Native rows of the scene read, drawn and written at a time (as 04o reads
+#: in bands): one band of a scene is held, never the whole picture.
+BAND_ROWS = 1024
+#: Text height of a box's number tag on the scene picture, native px (~10 um).
+TAG_PX = 16
 #: Sections whose roi_nuclei.csv rows are held at once. The file is millions
 #: of rows once a second marker is in it (see 06a's _Disc), so it is scanned
 #: once per batch rather than held whole.
@@ -400,16 +416,36 @@ def crop_lines(rec):
     one = (f"{rec['marker']} | fish {rec['animal']} | slide {rec['slide']} | "
            f"scene {rec['scene_uid']} | ROI {int(rec['roi_index']):02d} {kind}"
            + (f" {region}" if region else ""))
+    return [one, _counts_line(rec)]
+
+
+def _counts_line(rec):
+    """Counts, cut and exclusions of an index row: line 2 of a strip."""
     if rec["cut"] == "":
         counted = f"{rec['n_counted']} counted, no cut: too few background nuclei"
     else:
         pct = f"{rec['pct_positive']}%" if rec["pct_positive"] != "" else "n/a"
         counted = (f"{rec['n_counted']} counted, {rec['n_positive']} positive "
                    f"({pct}), cut {rec['cut']}")
-    two = (f"{counted} | not counted: {rec['n_outside']} outside ROI, "
-           f"{rec['n_artifact']} artifact, {rec['n_off_tissue']} off tissue | "
-           f"{rec['n_censored']} censored")
-    return [one, two]
+    return (f"{counted} | not counted: {rec['n_outside']} outside ROI, "
+            f"{rec['n_artifact']} artifact, {rec['n_off_tissue']} off tissue | "
+            f"{rec['n_censored']} censored")
+
+
+def scene_lines(rec, roi_recs):
+    """The scene strip's lines: identity, the totals (index row `rec`), then
+    one line per ROI from `roi_recs` (its index-row-like counts)."""
+    one = (f"{rec['marker']} | fish {rec['animal']} | slide {rec['slide']} | "
+           f"scene {rec['scene_uid']} | whole scene")
+    out = [one, f"{len(roi_recs)} ROIs: " + _counts_line(rec)]
+    for r in roi_recs:
+        head = f"ROI {int(r['roi_index']):02d} {r['region']}: {r['n_counted']} counted"
+        if rec["cut"] == "":
+            out.append(f"{head}, no cut")
+            continue
+        pct = f"{r['pct_positive']}%" if r["pct_positive"] != "" else "n/a"
+        out.append(f"{head}, {r['n_positive']} positive ({pct})")
+    return out
 
 
 def draw_crop(path, plane, labels, kinds, outline, lo, hi, lines):
@@ -422,6 +458,170 @@ def draw_crop(path, plane, labels, kinds, outline, lo, hi, lines):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with IO.atomic_save(path) as tmp:
         Image.fromarray(np.vstack([top, rgb])).save(tmp, format="PNG")
+
+
+def tag(n):
+    """Box number `n` as "NN", white on black: a small uint8 RGB array."""
+    from PIL import Image, ImageDraw, ImageFont
+    font = ImageFont.load_default(size=TAG_PX)
+    text = f"{int(n):02d}"
+    left, top, right, bottom = font.getbbox(text)
+    pad = 2
+    img = Image.new("RGB", (right - left + 2 * pad, bottom - top + 2 * pad),
+                    (0, 0, 0))
+    ImageDraw.Draw(img).text((pad - left, pad - top), text, font=font,
+                             fill=(255, 255, 255))
+    return np.asarray(img, np.uint8).copy()
+
+
+def _meet(top, left, h, w, r0, n, width):
+    """Where an h x w array placed at (top, left) of the picture meets the
+    band of rows r0..r0+n: (band rows, band cols, array rows, array cols)
+    slices, or None. Columns are clipped to the picture's width."""
+    a0, a1 = max(top, r0), min(top + h, r0 + n)
+    c0, c1 = max(left, 0), min(left + w, width)
+    if a0 >= a1 or c0 >= c1:
+        return None
+    return (slice(a0 - r0, a1 - r0), slice(c0, c1),
+            slice(a0 - top, a1 - top), slice(c0 - left, c1 - left))
+
+
+def scene_rect(g):
+    """(x, y, w, h) of the scene, CZI px, from its geometry row (05a's)."""
+    try:
+        x, y, w, h = (int(float(g[k])) for k in
+                      ("scene_x", "scene_y", "scene_w", "scene_h"))
+    except (KeyError, TypeError, ValueError):
+        raise NotDrawn(f"no scene rectangle in "
+                       f"{os.path.basename(G5.GEOM_CSV)} - re-run "
+                       f"05a_roi_geometry.py") from None
+    if w < 1 or h < 1:
+        raise NotDrawn(f"the scene rectangle is {w}x{h}")
+    return x, y, w, h
+
+
+def draw_scene(doc, g, marker, boxes, outlines, kinds_by_roi, lo, hi, path,
+               lines):
+    """The whole scene at native px, written band by band to `path`.
+
+    The strip (`lines`, the legend, a 500 um bar) goes first. Then each band
+    of BAND_ROWS rows is read (the marker plane, the scene named), put in
+    grey with the section's stretch, and every box meeting it drawn as its
+    crop is: the nuclei painted, the shape outlined; then each box's number
+    tag on top. Per box, the shape outline and the tag are made once and the
+    rows in the band sliced from them, so what is held is one band plus
+    box-sized arrays. Painting is given the label rows one above and one
+    below the band (within the box), so an outline on a band's edge is
+    found exactly as in the crop: the picture does not depend on BAND_ROWS.
+    """
+    sx, sy, sw, sh = scene_rect(g)
+    scene = int(g["scene_index"])
+    _, Minv = affine_of(g)
+    channel = D5.plane_index_for(marker)
+    top_strip = LO.strip(sw, lines, True, UM_PX, SCENE_BAR_UM)
+
+    marks = []      # (top, left, h, w, labels or None, kinds, shape outline)
+    tags = []       # (top, left, tag array)
+    for bi, b in enumerate(boxes, 1):
+        x0, y0 = int(b["czi_x0"]), int(b["czi_y0"])
+        w, h = int(b["czi_w"]), int(b["czi_h"])
+        if w < 1 or h < 1:
+            continue
+        inside = grid_inside(b)
+
+        def in_px(xs, ys, x0=x0, y0=y0, inside=inside):
+            gx, gy = G5.apply_affine(Minv, x0 + xs, y0 + ys)
+            return inside(gx, gy)
+
+        labels = outlines[bi][0] if bi in outlines else None
+        marks.append((y0 - sy, x0 - sx, h, w, labels, kinds_by_roi.get(bi, {}),
+                      LO.shape_mask_outline(h, w, in_px)))
+        t = tag(bi)
+        tags.append((y0 - sy - t.shape[0], x0 - sx - t.shape[1], t))
+
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with LO.PngRows(path, sw, top_strip.shape[0] + sh) as png:
+        png.write(top_strip)
+        del top_strip
+        for r0 in range(0, sh, BAND_ROWS):
+            n = min(BAND_ROWS, sh - r0)
+            plane = CR.read_plane(doc, D5._Rect(sx, sy + r0, sw, n), channel,
+                                  scene=scene)
+            if plane.shape != (n, sw):
+                raise NotDrawn(f"rows {r0}..{r0 + n} of the scene read "
+                               f"{plane.shape}, not {(n, sw)}")
+            band = np.repeat(LO.grey(plane, lo, hi)[:, :, None], 3, axis=2)
+            del plane
+            for top, left, h, w, labels, kinds, _ in marks:
+                at = _meet(top, left, h, w, r0, n, sw)
+                if labels is None or at is None:
+                    continue
+                br, bc, ar, ac = at
+                m0 = max(ar.start - 1, 0)
+                m1 = min(ar.stop + 1, h)
+                rows = slice(ar.start - m0, ar.stop - m0)
+                work = np.zeros((m1 - m0, w, 3), np.uint8)
+                work[rows, ac] = band[br, bc]
+                LO.paint(work, labels[m0:m1], kinds)
+                band[br, bc] = work[rows, ac]
+            for top, left, h, w, _, _, shape in marks:
+                at = _meet(top, left, h, w, r0, n, sw)
+                if at is not None:
+                    br, bc, ar, ac = at
+                    band[br, bc][shape[ar, ac]] = LO.SHAPE_COLOUR
+            for top, left, t in tags:
+                at = _meet(top, left, t.shape[0], t.shape[1], r0, n, sw)
+                if at is not None:
+                    br, bc, ar, ac = at
+                    band[br, bc] = t[ar, ac]
+            png.write(band)
+            del band
+
+
+def scene_record(prep, uid, marker, boxes, ident, fp, meas):
+    """(index row, strip lines) of a section's scene picture.
+
+    Totals are over its ROIs - roi_kind "roi", not background discs - from
+    the counts drawn; a box too small for 05c to segment has no outlines and
+    adds 06a's row for it (0). `meas` is {roi_index: roi_measurements row}.
+    """
+    roi_recs = []
+    for bi, b in enumerate(boxes, 1):
+        if b["roi_kind"] == "background":
+            continue
+        c = prep["counts_by_roi"].get(bi)
+        if c is None:
+            m = meas.get(bi, {})
+            frac = m.get("frac_positive", "")
+            c = {"n_counted": _num(m.get("n_nuclei", 0)) or 0,
+                 "n_positive": (_num(m.get("n_positive", 0)) or 0
+                                if ident["cut"] != "" else ""),
+                 "pct_positive": (round(float(frac) * 100, 1)
+                                  if frac != "" else ""),
+                 "n_outside": 0, "n_artifact": 0, "n_off_tissue": 0,
+                 "n_censored": _num(m.get("n_censored", 0)) or 0}
+        roi_recs.append(dict(c, roi_index=bi, region=b["region"]))
+    tot = {k: sum(int(r[k]) for r in roi_recs)
+           for k in ("n_counted", "n_outside", "n_artifact", "n_off_tissue",
+                     "n_censored")}
+    if ident["cut"] == "":
+        tot["n_positive"] = tot["pct_positive"] = ""
+    else:
+        tot["n_positive"] = sum(int(r["n_positive"]) for r in roi_recs)
+        tot["pct_positive"] = (round(100 * tot["n_positive"] / tot["n_counted"], 1)
+                               if tot["n_counted"] else "")
+    path = os.path.join(LO.overlay_dir(OUT_ROOT, marker, ident["animal"]),
+                        LO.overlay_name(marker, uid, "scene"))
+    rec = {"path": _rel(path), "marker": marker, "animal": ident["animal"],
+           "slide": ident["slide"], "scene_uid": uid, "picture": "scene",
+           "roi_index": "", "region": "", "cut": ident["cut"],
+           "um_per_px": UM_PX, "outlines": prep["how"],
+           "drawn_at": datetime.datetime.now().isoformat(timespec="seconds"),
+           "fingerprint": fp}
+    rec.update(tot)
+    rec = {k: ("" if rec[k] is None else str(rec[k])) for k in INDEX_KEYS}
+    roi_recs = [{k: str(v) for k, v in r.items()} for r in roi_recs]
+    return rec, scene_lines(rec, roi_recs)
 
 
 def _num(v):
@@ -598,7 +798,7 @@ def main():
     ap.add_argument("--animal", nargs="+", metavar="A",
                     help="only these fish")
     ap.add_argument("--no-scenes", action="store_true",
-                    help="skip the whole-scene pictures (not drawn yet)")
+                    help="skip the whole-scene pictures")
     ap.add_argument("--no-crops", action="store_true",
                     help="skip the ROI and background-disc crops")
     ap.add_argument("--limit", type=int, help="only the first N sections")
@@ -641,7 +841,8 @@ def main():
         if r.get("marker") == marker:
             meas_by.setdefault(r["scene_uid"], {})[int(r["roi_index"])] = r
     slides = _slides()
-    kinds_drawn = set(CROP_PICTURES) if not args.no_crops else set()
+    groups = ([CROP_PICTURES] if not args.no_crops else []) \
+        + ([SCENE_PICTURES] if not args.no_scenes else [])
 
     os.makedirs(OUT_DIR, exist_ok=True)
     index = {r["path"]: r for r in _read_csv(INDEX_CSV)}
@@ -690,18 +891,25 @@ def main():
                 exact_cuts.get((uid, marker)),
                 list(meas_by.get(uid, {}).values()))
             fp = fingerprint(uid, marker, raw, ident["cut"], boxes, context)
-            mine = [r for r in index.values() if r.get("marker") == marker
-                    and r.get("scene_uid") == uid
-                    and r.get("picture") in kinds_drawn]
-            if (not args.force and kinds_drawn and mine
-                    and all(r.get("fingerprint") == fp
-                            and os.path.exists(_abs(r["path"])) for r in mine)):
-                n_same += 1
-                looked.add(uid)
-                continue
-            if not kinds_drawn:
+
+            def current(kinds):
+                mine = [r for r in index.values() if r.get("marker") == marker
+                        and r.get("scene_uid") == uid
+                        and r.get("picture") in kinds]
+                return bool(mine) and all(
+                    r.get("fingerprint") == fp and os.path.exists(_abs(r["path"]))
+                    for r in mine)
+
+            if not groups:
                 continue
             looked.add(uid)
+            # Each kind asked for is redrawn only when it is out of date, so
+            # turning scenes back on does not redraw the crops.
+            todo_kinds = [k for k in groups if args.force or not current(k)]
+            if not todo_kinds:
+                n_same += 1
+                continue
+            kinds_drawn = {p for k in todo_kinds for p in k}
             try:
                 g = geom.get(uid)
                 if g is None:
@@ -714,18 +922,26 @@ def main():
                     raise NotDrawn("positivity_cuts.csv and "
                                    "roi_measurements.csv disagree on the cut - "
                                    "re-run 06a_roi_dataset.py")
+                if "scene" in kinds_drawn:
+                    scene_rect(g)       # refused before anything is read
                 path = os.path.join(CONFIG["source_dir"], g["czi_file"])
+                recs = []
                 with CR.open_czi(path, int(float(g.get("scene_w") or 0)) or None,
                                  pyczi=pyczi) as doc:
                     prep = prepare_scene(doc, uid, marker, boxes, g, raw, header,
                                          cut, meas_by.get(uid, {}), get_model)
-                if prep["how"] == "re-segmented":
-                    fp = fingerprint(uid, marker, raw, ident["cut"], boxes,
-                                     context)
-                # Task 5: draw_scene(doc, g, marker, boxes, prep["outlines"],
-                # prep["kinds_by_roi"], prep["lo"], prep["hi"], path) slots in
-                # here, unless --no-scenes.
-                recs = draw_crops(prep, uid, marker, boxes, ident, fp)
+                    if prep["how"] == "re-segmented":
+                        fp = fingerprint(uid, marker, raw, ident["cut"], boxes,
+                                         context)
+                    if "scene" in kinds_drawn:
+                        rec, lines = scene_record(prep, uid, marker, boxes,
+                                                  ident, fp, meas_by.get(uid, {}))
+                        draw_scene(doc, g, marker, boxes, prep["outlines"],
+                                   prep["kinds_by_roi"], prep["lo"], prep["hi"],
+                                   _abs(rec["path"]), lines)
+                        recs.append(rec)
+                if "roi" in kinds_drawn:
+                    recs += draw_crops(prep, uid, marker, boxes, ident, fp)
             except Disagrees as exc:
                 reason, stale = str(exc), True
             except NotDrawn as exc:
@@ -744,12 +960,15 @@ def main():
                                if bi not in prep["outlines"]
                                and min(int(b["czi_w"]), int(b["czi_h"])) < 8)
                 save_tables()
-                print(f"  {uid}: {len(recs)} crops ({prep['how']} outlines)")
+                n_crops = sum(1 for r in recs if r["picture"] != "scene")
+                print(f"  {uid}: {n_crops} crops"
+                      + (" + scene" if "scene" in kinds_drawn else "")
+                      + f" ({prep['how']} outlines)")
                 continue
             # Pictures that would disagree with the numbers now go; any other
             # failure leaves the ones already drawn, index rows and all.
             if stale:
-                drop_pictures(uid, set(CROP_PICTURES) | {"scene"})
+                drop_pictures(uid, set(CROP_PICTURES) | set(SCENE_PICTURES))
             fails.append({"marker": marker, "animal": ident["animal"],
                           "slide": ident["slide"], "scene_uid": uid,
                           "reason": reason})

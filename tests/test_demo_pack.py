@@ -144,7 +144,7 @@ chk("the pack says where its answer key came from", meta.get("answer_from"),
     "roi_regions_07.09.2026_11.27.csv")
 
 print("--- one marker ---")
-rc = MP.main(["one-marker", "--pack", PACK, "--marker", "AF568", "--nuclear", "DAPI"])
+rc = MP.main(["one-marker", "--pack", PACK, "--channel", "AF568", "--nuclear", "DAPI"])
 chk("one-marker runs", rc, 0)
 study = json.load(open(os.path.join(PACK, "study", "study.json")))
 chk("the study is one scan per section with the slide's two channels",

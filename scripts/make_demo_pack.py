@@ -34,7 +34,7 @@ the tutorial study once in the app:
 
         Copies the slow stages' results from the trial run into PACK/ready/.
 
-    python scripts/make_demo_pack.py one-marker --pack PACK --marker AF568 --nuclear DAPI
+    python scripts/make_demo_pack.py one-marker --pack PACK --channel AF568 --nuclear DAPI
 
         Makes the pack's study a one-scan, one-marker study: for a demo cut from
         one pass of a paired study, whose other marker is on another slide.
@@ -311,10 +311,10 @@ def cmd_one_marker(a):
              ["channels"]]
     channels = []
     for i, name in enumerate(names):
-        role = ("nuclear" if name == a.nuclear else "marker" if name == a.marker else "ignore")
+        role = ("nuclear" if name == a.nuclear else "marker" if name == a.channel else "ignore")
         channels.append({"name": name, "role": role, "czi_name": name, "index": i})
-    if a.marker not in names or a.nuclear not in names:
-        print(f"the slide's channels are {names}; it has no {a.marker if a.marker not in names else a.nuclear}.")
+    if a.channel not in names or a.nuclear not in names:
+        print(f"the slide's channels are {names}; it has no {a.channel if a.channel not in names else a.nuclear}.")
         return 2
     path = os.path.join(a.pack, "study", "study.json")
     with open(path, encoding="utf-8") as fh:
@@ -383,7 +383,7 @@ def main(argv=None):
     r.add_argument("--trial-out", required=True)
     o = sub.add_parser("one-marker")
     o.add_argument("--pack", required=True)
-    o.add_argument("--marker", required=True)
+    o.add_argument("--channel", required=True, help="the slide channel that holds the marker")
     o.add_argument("--nuclear", default="DAPI")
     a = ap.parse_args(argv)
     return {"cut": cmd_cut, "check": cmd_check, "ready": cmd_ready,

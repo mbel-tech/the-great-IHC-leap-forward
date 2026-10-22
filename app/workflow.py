@@ -1214,14 +1214,24 @@ def incomplete(stage, study):
     """'640 of 1,980 sections' when a stage's outputs exist but cover only part
     of what it measures, else None.
 
-    Only 05c today: roi_nuclei.csv exists after its first section, and it resumes
+    Any stage whose newest recorded run failed is incomplete too, outputs or
+    not: some outputs are written by another stage as well (01 writes 01k's
+    saturation table and mask folder), so a stage that refused the study read
+    as done and Run all remaining went on past it.
+
+    By section, only 05c today: roi_nuclei.csv exists after its first section, and it resumes
     by section. Measured is what its done log (05c DONE_LOG) holds for marker 0,
     the marker the app runs it for; the total is the sections of 05a's boxes,
     the curated sections it will measure. A log with no `marker,*` line predates
     the log, and 05c trusts such rows, so nothing is counted against them.
     """
-    if stage.sid != "detect" or not study.markers or not stage.done(study.out_root,
-                                                                    study.names):
+    if stage.sid != "detect":
+        rec = last_run((study.cfg or {}).get("project"), stage.sid)
+        if (rec is not None and not rec.get("ok")
+                and stage.done(study.out_root, study.names)):
+            return "its last run failed"
+        return None
+    if not study.markers or not stage.done(study.out_root, study.names):
         return None
     boxes = _first("roi_geometry", "roi_boxes", study)
     want = _column(boxes, "scene_uid") if boxes else None

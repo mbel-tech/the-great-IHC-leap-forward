@@ -831,7 +831,7 @@ def main():
                     help="skip the whole-scene pictures")
     ap.add_argument("--no-crops", action="store_true",
                     help="skip the ROI and background-disc crops")
-    ap.add_argument("--limit", type=int, help="only the first N sections")
+    ap.add_argument("--limit", type=int, help="only the first N sections of each marker")
     ap.add_argument("--force", action="store_true",
                     help="redraw sections whose inputs have not changed")
     args = ap.parse_args()
@@ -849,7 +849,8 @@ def main():
                 print(f"no {G5.BOX_CSV} - run 05a_roi_geometry.py "
                       f"--marker {marker} first")
                 return 1
-            print(f"marker: {marker}  skipped (no {os.path.basename(G5.BOX_CSV)})")
+            print(f"marker: {marker}  skipped (no {os.path.basename(G5.BOX_CSV)}; run 05a "
+                  f"--marker {marker})")
             continue
         rc, n_fail = _draw_marker(args, marker)
         if rc:

@@ -247,8 +247,9 @@ SCREENS = {s.sid: s for s in STEPS + EXTRA}
 REPAIRS = {"recensor", "off_tissue", "seg_provenance"}
 
 #: Pictures for looking at that nothing downstream reads. Rendering every scene
-#: (or drawing every nucleus over it) takes long, so they get their own Run button instead of joining Run all
-#: remaining, and they do not count towards a screen's progress.
+#: (or drawing every nucleus over it) takes long, so they get their own Run
+#: button instead of joining Run all remaining, and they do not count towards
+#: a screen's progress.
 VIEW_ONLY = {"scene_renders", "detection_overlays"}
 
 #: Never planned by Run all remaining.
@@ -294,8 +295,8 @@ PLAIN = {
                      "the stain alone in grey. Nothing is measured from them. For a much "
                      "faster run, Set up > Pictures can draw them from the preview copy "
                      "Zeiss stored in each scan file instead.",
-    "detection_overlays": "Draws every nucleus the detector found on top of the {m0} picture, "
-                          "so you can check the counts by eye. Positive nuclei are filled "
+    "detection_overlays": "Draws every nucleus the detector found on top of its marker picture, "
+                          "for every marker, so you can check the counts by eye. Positive nuclei are filled "
                           "magenta and negative ones outlined cyan. Yellow means outside the "
                           "ROI, orange an artifact, blue off the tissue, and a white outline a "
                           "positive nucleus with clipped pixels. You get one picture of each "
@@ -545,7 +546,10 @@ OPTIONS = {
     # --animal is a list of names, which the options form has no field for, and
     # --marker (one marker only) is rarely wanted: both stay on the command line.
     "detection_overlays": [
-        _force("pictures"), _limit("scenes"),
+        _force("pictures"),
+        Opt("--limit", "int", "Only the first N scenes of each marker",
+            "For a quick trial run. Applies to each marker separately. 0 means all "
+            "scenes.", default=0, cli_default=0, minimum=0, zero="all"),
         Opt("--no-scenes", "bool", "Skip the whole-scene pictures",
             "The scene pictures are the largest files. Turn this on to draw only the "
             "ROI and background-disc crops."),

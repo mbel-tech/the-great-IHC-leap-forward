@@ -164,6 +164,21 @@ chk("a full run has no shortfall", W.shortfall("scene_renders", "wrote 40 scenes
 chk("other stages are not read for it", W.shortfall("manifest", _out), None)
 chk("colour pictures not built are counted",
     W.shortfall("rgb_perk", "wrote 9 composites\n  2 not built:\n"), "2 pictures not built")
+print("--- 06i detection overlays: a Results button, on request only ---")
+chk("overlays are a stage", "detection_overlays" in S.BY_ID)
+chk("...run by hand, never by Run all remaining", "detection_overlays" in W.BY_HAND)
+chk("...a view-only stage", "detection_overlays" in W.VIEW_ONLY)
+chk("...but listed on the Results screen",
+    "detection_overlays" in W.SCREENS["results"].stage_ids(), True)
+chk("...with plain words", bool(W.PLAIN.get("detection_overlays", "").strip()))
+chk("...whose options are real flags of the script",
+    [o.flag for o in W.options_for("detection_overlays")],
+    ["--force", "--limit", "--no-scenes", "--no-crops"])
+chk("skipped overlay scenes are counted",
+    W.shortfall("detection_overlays", "  3 not drawn: see x\n"), "3 scenes not drawn")
+chk("the overlay pictures open their folder",
+    W.output_folder("detection_overlays", {"out_root": "/s"}),
+    ("Open pictures", os.path.join("/s", "detection_overlays")))
 chk("the artifact masks always include excluded sections (no option to break it)",
     [o.flag for o in W.options_for("artifact_pcna")], ["--limit"])
 chk("the scene pictures folder follows Set up",
@@ -629,6 +644,8 @@ chk("Next up says what the Slides card still needs, in its own words",
     "Atlas needs Atlas PDF." % NAME_IT)
 d, t = W.progress("prepare", s0)
 chk("progress counts only stages the app runs here", (d <= t, t > 10), (True, True))
+chk("06i left out of the Results run plan",
+    "detection_overlays" in W.run_plan("results", s0)[0], False)
 chk("Run all remaining never unblinds",
     [s for s in W.run_plan("results", s0)[0] + W.run_plan("all", s0)[0]
      if S.BY_ID[s].unblinds], [])

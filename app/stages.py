@@ -291,10 +291,6 @@ def detect_cli_reason(frozen=None, has_stardist=None):
 # Numbered scripts that are deliberately not stages. A script missing from
 # both this and STAGES fails tests/test_stages.py.
 NOT_LISTED = {
-    "06i_detection_overlays.py": "TEMPORARY: the detection-overlay stage is "
-                                 "being built; the app's Results button that "
-                                 "runs it lands with it (plan Task 6), which "
-                                 "removes this entry.",
     "01_overviews.groovy": "retired: the Python port (01_overviews.py) replaced it "
                            "in 2026-08; kept for the record only.",
     "01a_flatfield.groovy": "retired Fiji flat-field; superseded by 01f/01h.",
@@ -814,6 +810,22 @@ STAGES = [
                    "the app's runner open for hours. Run: refresh_loop.bat",
           blurb="Rebuilds both spreadsheets and re-draws the figures every hour "
                 "while detection runs, then stops when every section is measured."),
+
+    Stage("detection_overlays", "06i  Detection overlays, for checking", "Beyond blinding",
+          script="06i_detection_overlays.py", reader="pylibCZIrw",
+          # The first marker; the script's own default, written out so the
+          # sidebar shows it. The others are drawn with --marker on the command line.
+          argv=["--marker", "{marker0}"],
+          outputs=["detection_overlays/index.csv"],
+          needs=["roi_dataset"],
+          made_from=["detect", "roi_dataset"],
+          blurb="Pictures of every nucleus 05c found, over the marker channel in "
+                "grey: positives filled magenta, negatives outlined cyan, nuclei "
+                "outside the ROI yellow, artifact orange, off tissue blue, censored "
+                "positives outlined white. One whole-scene picture and one crop per "
+                "ROI and background disc, at full resolution, so they are large. "
+                "Counts drawn are 06a's; a section that disagrees is not drawn. "
+                "Needs 06a's output; run on request only."),
 
     # ---- Repair older outputs ----------------------------------------------
     # Not part of a run. Each brings a file written by an older version of a

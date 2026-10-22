@@ -316,6 +316,16 @@ for ran, other in (("artifact_before", "artifact_after"),
         chk(f"running {ran} leaves {other} not done",
             S.BY_ID[other].done(tmp, names), False)
 
+print("--- 06i detection overlays ---")
+_do = S.BY_ID.get("detection_overlays")
+chk("detection_overlays is a stage", _do is not None)
+if _do is not None:
+    chk("...that runs 06i", _do.script, "06i_detection_overlays.py")
+    chk("...needs the per-ROI dataset", _do.needs, ["roi_dataset"])
+    chk("...in the Beyond blinding band", _do.group, "Beyond blinding")
+    chk("...reads pixels with pylibCZIrw", _do.reader, "pylibCZIrw")
+chk("06i is no longer parked in NOT_LISTED", "06i_detection_overlays.py" in S.NOT_LISTED, False)
+
 print()
 print("ALL PASS" if not failures else f"{len(failures)} FAILED")
 sys.exit(1 if failures else 0)

@@ -200,6 +200,8 @@ RESULTS = Screen(
          "The tables you analyse" + (" and the figures drawn from them."
                                      if S.R_FIGURES else "."),
          ["build_results", "excel_sample", "excel_slide", "refresh_loop"]),
+        ("Check detection", "Pictures of every nucleus found, positives filled in.",
+         ["detection_overlays"]),
     ],
     role="Press Run on Join the experiment once you are sure the regions are "
          "final, then build the spreadsheets.",
@@ -245,9 +247,9 @@ SCREENS = {s.sid: s for s in STEPS + EXTRA}
 REPAIRS = {"recensor", "off_tissue", "seg_provenance"}
 
 #: Pictures for looking at that nothing downstream reads. Rendering every scene
-#: takes long, so they get their own Run button instead of joining Run all
+#: (or drawing every nucleus over it) takes long, so they get their own Run button instead of joining Run all
 #: remaining, and they do not count towards a screen's progress.
-VIEW_ONLY = {"scene_renders"}
+VIEW_ONLY = {"scene_renders", "detection_overlays"}
 
 #: Never planned by Run all remaining.
 BY_HAND = REPAIRS | VIEW_ONLY
@@ -292,6 +294,14 @@ PLAIN = {
                      "the stain alone in grey. Nothing is measured from them. For a much "
                      "faster run, Set up > Pictures can draw them from the preview copy "
                      "Zeiss stored in each scan file instead.",
+    "detection_overlays": "Draws every nucleus the detector found on top of the {m0} picture, "
+                          "so you can check the counts by eye. Positive nuclei are filled "
+                          "magenta and negative ones outlined cyan. Yellow means outside the "
+                          "ROI, orange an artifact, blue off the tissue, and a white outline a "
+                          "positive nucleus with clipped pixels. You get one picture of each "
+                          "whole scene and one of each ROI. They are full resolution, so they "
+                          "are large. Needs the per-ROI dataset first. Nothing is measured "
+                          "from them.",
     "pair": "Works out which {m0} scan and which {m1} scan show the same physical section.",
     "channel_identity": "Suggests which dye carries which marker from how the signal looks. "
                         "It only reports; it changes no setting.",
@@ -531,6 +541,17 @@ OPTIONS = {
     # Folder, resolution and brightness are study settings (Set up > Pictures).
     "scene_renders": [
         _force("pictures"), _limit("scenes"),
+    ],
+    # --marker is fixed to the first marker by the stage table, and --animal is
+    # a list of names, which the options form has no field for: both stay on
+    # the command line.
+    "detection_overlays": [
+        _force("pictures"), _limit("scenes"),
+        Opt("--no-scenes", "bool", "Skip the whole-scene pictures",
+            "The scene pictures are the largest files. Turn this on to draw only the "
+            "ROI and background-disc crops."),
+        Opt("--no-crops", "bool", "Skip the ROI pictures",
+            "Turn this on to draw only the whole-scene pictures."),
     ],
     "contactsheets": [
         Opt("--kind", "choice", "Which picture",
@@ -1447,6 +1468,8 @@ def curators(study):
 SHORTFALL = {
     "scene_renders": (re.compile(r"^\s*(\d+) not drawn:", re.M), "scene", "not drawn"),
     # 04o: a section whose CZI or scene is missing, or with no tissue mask.
+    # 06i: a section whose outlines do not agree with 06a's counts is not drawn.
+    "detection_overlays": (re.compile(r"^\s*(\d+) not drawn:", re.M), "scene", "not drawn"),
     "rgb_perk": (re.compile(r"^\s*(\d+) not built:", re.M), "picture", "not built"),
     "rgb_pcna": (re.compile(r"^\s*(\d+) not built:", re.M), "picture", "not built"),
 }
@@ -1456,6 +1479,8 @@ SHORTFALL = {
 #: that folder is. The scene pictures may sit outside the study (Set up says).
 FOLDERS = {
     "scene_renders": ("Open pictures", lambda cfg: _scene_dir(cfg)),
+    "detection_overlays": ("Open pictures",
+                           lambda cfg: os.path.join(cfg["out_root"], "detection_overlays")),
     "overviews": ("Open pictures", lambda cfg: os.path.join(cfg["out_root"], "overviews")),
     "contactsheets": ("Open sheets", lambda cfg: os.path.join(cfg["out_root"], "contactsheets")),
     "build_results": ("Open results", lambda cfg: os.path.join(cfg["out_root"], "results")),

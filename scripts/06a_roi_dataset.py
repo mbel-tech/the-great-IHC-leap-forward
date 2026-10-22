@@ -84,6 +84,15 @@ RESULTS = os.path.join(OUT_ROOT, "results")
 NUCLEI_CSV = os.path.join(RESULTS, "roi_nuclei.csv")
 MEAS_CSV = os.path.join(RESULTS, "roi_measurements.csv")
 SPEC_CSV = os.path.join(RESULTS, "detector_specificity.csv")
+#: The cut each section was counted against, at full precision (repr, so it
+#: reads back as the same float). roi_measurements.csv carries it rounded to
+#: 0.1 for reading; a nucleus whose median sits on that rounded value may be
+#: on either side of the real one, and 06i_detection_overlays.py colours each
+#: nucleus by the cut it was counted by. A file of its own rather than a
+#: column, so the spreadsheets and R scripts reading roi_measurements.csv see
+#: the table they always have.
+CUTS_CSV = os.path.join(RESULTS, "positivity_cuts.csv")
+CUTS_COLUMNS = ["scene_uid", "marker", "cut"]
 #: What 05c recorded about the shape each ROI was measured on (05c's
 #: GEOMETRY_CSV), and where this stage lists the sections whose shape has
 #: changed since. See check_geometry.
@@ -769,6 +778,21 @@ def main(argv=None):
             })
 
     real = [r for r in rows if r["roi_kind"] == "roi"]
+    # One row per (section, marker) that was counted against a cut, from the
+    # emitted rows, so it describes exactly the sections roi_measurements.csv
+    # does. Header only when no section has a cut; gone with the rest below
+    # when there is nothing at all.
+    exact = sorted({(r["scene_uid"], r["marker"]) for r in rows
+                    if r["scene_uid"] in cuts})
+    # Beside whichever roi_measurements.csv is written, so the two always
+    # describe the same run.
+    cuts_csv = os.path.join(os.path.dirname(MEAS_CSV), os.path.basename(CUTS_CSV))
+    if rows:
+        IO.atomic_write_csv(cuts_csv,
+                            [{"scene_uid": u, "marker": m, "cut": repr(cuts[u])}
+                             for u, m in exact], CUTS_COLUMNS)
+    elif os.path.exists(cuts_csv):
+        os.remove(cuts_csv)
     for path, data in ((MEAS_CSV, rows), (SPEC_CSV, spec)):
         if not data:
             # An EMPTY result must not leave the previous run's file standing.

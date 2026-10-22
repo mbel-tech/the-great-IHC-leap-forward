@@ -96,6 +96,10 @@ OUT_ROOT = D5.OUT_ROOT
 RESULTS = D5.RESULTS
 NUCLEI_CSV = D5.NUCLEI_CSV
 MEAS_CSV = os.path.join(RESULTS, "roi_measurements.csv")
+#: 06a's cut per (section, marker) at full precision. roi_measurements.csv
+#: rounds it to 0.1, and a median on the rounded value can sit either side of
+#: the real one; nuclei are coloured by the cut they were counted by.
+CUTS_CSV = os.path.join(RESULTS, "positivity_cuts.csv")
 MANIFEST_CSV = os.path.join(OUT_ROOT, "manifest", "manifest_scenes.csv")
 OUT_DIR = os.path.join(OUT_ROOT, "detection_overlays")
 INDEX_CSV = os.path.join(OUT_DIR, "index.csv")
@@ -121,7 +125,17 @@ CENTROID_TOL = 0.5
 
 
 class NotDrawn(Exception):
-    """A section that is not drawn; the message is failures.csv's reason."""
+    """A section that is not drawn; the message is failures.csv's reason.
+
+    Its earlier pictures are kept: the section could not be drawn NOW (a read
+    failed, settings changed, 06a needs re-running), which says nothing
+    against what was drawn before."""
+
+
+class Disagrees(NotDrawn):
+    """Not drawn because the outlines or counts no longer agree with the
+    numbers. Earlier pictures of the section go too: they would show
+    nuclei, or counts, that the spreadsheet no longer has."""
 
 
 # ---- geometry ---------------------------------------------------------------
@@ -272,13 +286,14 @@ def match(outlines, rows_by_roi, inside_by_roi, Minv):
     return None
 
 
-def fingerprint(uid, marker, rows=None, cut=None, boxes=None):
+def fingerprint(uid, marker, rows=None, cut=None, boxes=None, context=None):
     """sha1 of what a section's pictures are drawn from.
 
-    Its roi_nuclei.csv rows (raw cells, in file order), its cut, its box rows
-    and the bytes of its outline file. Each is read from disk when not given;
-    main() passes what it has already read, so the big CSV is not rescanned
-    per section."""
+    Its roi_nuclei.csv rows (raw cells, in file order), its cut, its box rows,
+    the bytes of its outline file, and `context`: everything else that
+    changes a pixel or a word of a picture (scene_context). Each is read from
+    disk when not given; main() passes what it has already read, so the big
+    CSV is not rescanned per section."""
     if rows is None:
         rows = _scan_rows({uid}, marker)[1].get(uid, [])
     if cut is None:
@@ -286,11 +301,22 @@ def fingerprint(uid, marker, rows=None, cut=None, boxes=None):
     if boxes is None:
         G5.use_marker(marker)
         boxes = [b for b in G5.load_csv(G5.BOX_CSV) if b["scene_uid"] == uid]
+    if context is None:
+        G5.use_marker(marker)
+        geom = {g["scene_uid"]: g for g in G5.load_csv(G5.GEOM_CSV)} \
+            if os.path.exists(G5.GEOM_CSV) else {}
+        context = scene_context(
+            geom.get(uid), boxes[0].get("animal", "") if boxes else "",
+            _slides().get(uid, ""), _exact_cuts().get((uid, marker)),
+            [r for r in _read_measurements()
+             if r["scene_uid"] == uid and r.get("marker") == marker])
     h = hashlib.sha1()
     for r in rows:
         h.update(("\x1f".join(r) + "\n").encode("utf-8"))
     h.update(b"\x1ecut\x1e" + str(cut).encode("utf-8"))
     h.update(b"\x1eboxes\x1e" + json.dumps([sorted(b.items()) for b in boxes])
+             .encode("utf-8"))
+    h.update(b"\x1econtext\x1e" + json.dumps(context, sort_keys=True)
              .encode("utf-8"))
     h.update(b"\x1enpz\x1e")
     path = D5.outline_path(marker, uid)
@@ -299,6 +325,24 @@ def fingerprint(uid, marker, rows=None, cut=None, boxes=None):
             for chunk in iter(lambda: fh.read(1 << 20), b""):
                 h.update(chunk)
     return h.hexdigest()
+
+
+def scene_context(g, animal, slide, exact_cut, meas_rows):
+    """What a section's pictures depend on besides rows, boxes and outlines:
+    the affine that places the ROI shape, the identity on line 1, the exact
+    cut nuclei are coloured by, and 06a's rows (counts, pct, region) that the
+    strip prints."""
+    return {"geometry": sorted((g or {}).items()), "animal": animal,
+            "slide": slide, "exact_cut": repr(exact_cut),
+            "measurements": [sorted(r.items()) for r in
+                             sorted(meas_rows, key=lambda r: int(r["roi_index"]))]}
+
+
+def _exact_cuts():
+    """{(uid, marker): cut} from 06a's positivity_cuts.csv, as floats."""
+    with open(CUTS_CSV, newline="", encoding="utf-8") as fh:
+        return {(r["scene_uid"], r["marker"]): float(r["cut"])
+                for r in csv.DictReader(fh)}
 
 
 def _scan_rows(uids, marker):
@@ -387,12 +431,13 @@ def _num(v):
         return v
 
 
-def prepare_scene(doc, uid, marker, boxes, g, raw, header, cut_text, meas_by,
+def prepare_scene(doc, uid, marker, boxes, g, raw, header, cut, meas_by,
                   get_model):
     """Everything a section's pictures need, computed once.
 
     Returns {outlines, how, kinds_by_roi, counts_by_roi, planes, lo, hi, Minv,
-    inside_by_roi}; raises NotDrawn with failures.csv's reason. Task 5's
+    inside_by_roi}; raises NotDrawn with failures.csv's reason. `cut` is the
+    exact cut from positivity_cuts.csv, or None for a section with none. Task 5's
     whole-scene picture is drawn from the same dict as the crops.
     """
     scene = int(g["scene_index"])
@@ -406,14 +451,14 @@ def prepare_scene(doc, uid, marker, boxes, g, raw, header, cut_text, meas_by,
     inside_by_roi = {bi: D5.roi_inside(b) for bi, b in enumerate(boxes, 1)}
     for bi, (labels, x0, y0) in outlines.items():
         if bi > len(boxes):
-            raise NotDrawn(f"roi{bi:02d}: outlines for a box the section "
+            raise Disagrees(f"roi{bi:02d}: outlines for a box the section "
                            f"does not have ({len(boxes)} boxes)")
         b = boxes[bi - 1]
         if (x0, y0) != (int(b["czi_x0"]), int(b["czi_y0"])):
-            raise NotDrawn(f"roi{bi:02d}: outlines were made at ({x0}, {y0}), "
+            raise Disagrees(f"roi{bi:02d}: outlines were made at ({x0}, {y0}), "
                            f"the box is now at ({b['czi_x0']}, {b['czi_y0']})")
         if labels.shape != (int(b["czi_h"]), int(b["czi_w"])):
-            raise NotDrawn(f"roi{bi:02d}: outlines are {labels.shape}, the box "
+            raise Disagrees(f"roi{bi:02d}: outlines are {labels.shape}, the box "
                            f"is {b['czi_h']}x{b['czi_w']}")
     rows_by_roi = {}
     for r in raw:
@@ -421,14 +466,13 @@ def prepare_scene(doc, uid, marker, boxes, g, raw, header, cut_text, meas_by,
         ids = rows_by_roi.setdefault(int(row["roi_index"]), {})
         nid = int(row["nucleus_id"])
         if nid in ids:
-            raise NotDrawn(f"roi{int(row['roi_index']):02d}: nucleus_id {nid} "
+            raise Disagrees(f"roi{int(row['roi_index']):02d}: nucleus_id {nid} "
                            f"is in roi_nuclei.csv twice")
         ids[nid] = row
     why = match(outlines, rows_by_roi, inside_by_roi, Minv)
     if why:
-        raise NotDrawn(why)
+        raise Disagrees(why)
 
-    cut = float(cut_text) if cut_text != "" else None
     kinds_by_roi, counts_by_roi = {}, {}
     for bi, (labels, x0, y0) in sorted(outlines.items()):
         rows = rows_by_roi.get(bi, {})
@@ -446,13 +490,13 @@ def prepare_scene(doc, uid, marker, boxes, g, raw, header, cut_text, meas_by,
                   "n_off_tissue": n["off_tissue"], "n_censored": n["censored"]}
         m = meas_by.get(bi)
         if m is None:
-            raise NotDrawn(f"roi{bi:02d}: no row in roi_measurements.csv - "
+            raise Disagrees(f"roi{bi:02d}: no row in roi_measurements.csv - "
                            f"re-run 06a_roi_dataset.py")
         for mine, theirs in (("n_counted", "n_nuclei"),
                              ("n_positive", "n_positive"),
                              ("n_censored", "n_censored")):
             if str(counts[mine]) != str(_num(m.get(theirs, ""))):
-                raise NotDrawn(f"roi{bi:02d}: {counts[mine]} {mine[2:]} drawn, "
+                raise Disagrees(f"roi{bi:02d}: {counts[mine]} {mine[2:]} drawn, "
                                f"{m.get(theirs, '')!r} in roi_measurements.csv")
         frac = m.get("frac_positive", "")
         counts["pct_positive"] = round(float(frac) * 100, 1) if frac != "" else ""
@@ -534,13 +578,15 @@ def refusal():
     if not os.path.exists(NUCLEI_CSV):
         return (f"no {NUCLEI_CSV} - run 05c_detect_rois.py, then "
                 f"06a_roi_dataset.py, first")
-    if not os.path.exists(MEAS_CSV):
-        return (f"no {MEAS_CSV} - run 06a_roi_dataset.py first: the cut and "
-                f"the counts on every picture come from it")
-    if os.path.getmtime(MEAS_CSV) < os.path.getmtime(NUCLEI_CSV):
-        return (f"{os.path.basename(MEAS_CSV)} is older than "
-                f"{os.path.basename(NUCLEI_CSV)} - re-run 06a_roi_dataset.py so "
-                f"the counts drawn are the counts of these nuclei")
+    for path in (MEAS_CSV, CUTS_CSV):
+        if not os.path.exists(path):
+            return (f"no {path} - re-run 06a_roi_dataset.py: the cut and the "
+                    f"counts on every picture come from it")
+        if os.path.getmtime(path) < os.path.getmtime(NUCLEI_CSV):
+            return (f"{os.path.basename(path)} is older than "
+                    f"{os.path.basename(NUCLEI_CSV)} - re-run "
+                    f"06a_roi_dataset.py so the counts drawn are the counts of "
+                    f"these nuclei")
     return None
 
 
@@ -589,6 +635,7 @@ def main():
 
     meas = _read_measurements()
     cuts = _cuts(meas)
+    exact_cuts = _exact_cuts()
     meas_by = {}
     for r in meas:
         if r.get("marker") == marker:
@@ -627,7 +674,7 @@ def main():
             del index[k]
 
     from pylibCZIrw import czi as pyczi
-    n_drawn = n_same = n_pictures = 0
+    n_drawn = n_same = n_pictures = n_small = 0
     print(f"{len(todo)} sections")
     for start in range(0, len(todo), BATCH):
         batch = todo[start:start + BATCH]
@@ -638,7 +685,11 @@ def main():
             ident = {"animal": boxes[0].get("animal", ""),
                      "slide": slides.get(uid, ""),
                      "cut": cuts.get((uid, marker), "")}
-            fp = fingerprint(uid, marker, raw, ident["cut"], boxes)
+            context = scene_context(
+                geom.get(uid), ident["animal"], ident["slide"],
+                exact_cuts.get((uid, marker)),
+                list(meas_by.get(uid, {}).values()))
+            fp = fingerprint(uid, marker, raw, ident["cut"], boxes, context)
             mine = [r for r in index.values() if r.get("marker") == marker
                     and r.get("scene_uid") == uid
                     and r.get("picture") in kinds_drawn]
@@ -658,34 +709,47 @@ def main():
                 if (uid, marker) not in cuts:
                     raise NotDrawn("no rows in roi_measurements.csv - re-run "
                                    "06a_roi_dataset.py")
+                cut = exact_cuts.get((uid, marker))
+                if (cut is None) != (ident["cut"] == ""):
+                    raise NotDrawn("positivity_cuts.csv and "
+                                   "roi_measurements.csv disagree on the cut - "
+                                   "re-run 06a_roi_dataset.py")
                 path = os.path.join(CONFIG["source_dir"], g["czi_file"])
                 with CR.open_czi(path, int(float(g.get("scene_w") or 0)) or None,
                                  pyczi=pyczi) as doc:
                     prep = prepare_scene(doc, uid, marker, boxes, g, raw, header,
-                                         ident["cut"], meas_by.get(uid, {}),
-                                         get_model)
+                                         cut, meas_by.get(uid, {}), get_model)
                 if prep["how"] == "re-segmented":
-                    fp = fingerprint(uid, marker, raw, ident["cut"], boxes)
+                    fp = fingerprint(uid, marker, raw, ident["cut"], boxes,
+                                     context)
                 # Task 5: draw_scene(doc, g, marker, boxes, prep["outlines"],
                 # prep["kinds_by_roi"], prep["lo"], prep["hi"], path) slots in
                 # here, unless --no-scenes.
                 recs = draw_crops(prep, uid, marker, boxes, ident, fp)
+            except Disagrees as exc:
+                reason, stale = str(exc), True
             except NotDrawn as exc:
-                reason = str(exc)
+                reason, stale = str(exc), False
             except Exception as exc:  # noqa: BLE001 - one section, not the run
-                reason = f"{type(exc).__name__}: {exc}"
+                # A read that failed - the drive unplugged, a file moved -
+                # says nothing against the pictures already drawn.
+                reason, stale = f"{type(exc).__name__}: {exc}", False
             else:
                 drop_pictures(uid, kinds_drawn, keep={r["path"] for r in recs})
                 for r in recs:
                     index[r["path"]] = r
                 n_drawn += 1
                 n_pictures += len(recs)
+                n_small += sum(1 for bi, b in enumerate(boxes, 1)
+                               if bi not in prep["outlines"]
+                               and min(int(b["czi_w"]), int(b["czi_h"])) < 8)
                 save_tables()
                 print(f"  {uid}: {len(recs)} crops ({prep['how']} outlines)")
                 continue
-            # Not drawn: and no picture of it left standing either, since one
-            # from an earlier run would disagree with the numbers now.
-            drop_pictures(uid, set(CROP_PICTURES) | {"scene"})
+            # Pictures that would disagree with the numbers now go; any other
+            # failure leaves the ones already drawn, index rows and all.
+            if stale:
+                drop_pictures(uid, set(CROP_PICTURES) | {"scene"})
             fails.append({"marker": marker, "animal": ident["animal"],
                           "slide": ident["slide"], "scene_uid": uid,
                           "reason": reason})
@@ -694,6 +758,9 @@ def main():
     save_tables()
     print(f"{n_pictures} pictures over {n_drawn} sections -> {OUT_DIR}"
           + (f"; {n_same} unchanged since drawn" if n_same else ""))
+    if n_small:
+        print(f"{n_small} boxes under 8 px not drawn (05c does not segment "
+              f"them; 06a counts them as 0)")
     if fails:
         print(f"{len(fails)} not drawn: see {FAILURES_CSV}")
     return 0

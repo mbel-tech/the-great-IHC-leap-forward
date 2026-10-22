@@ -79,6 +79,24 @@ class FakeCzi:
                             int(kw["roi"][0]))].copy()
 
 
+class BrokenCzi(FakeCzi):
+    """Reads of one scene fail as an unplugged drive does."""
+
+    def __init__(self, planes, scene):
+        super().__init__(planes)
+        self.scene = scene
+
+    def read(self, **kw):
+        if int(kw["scene"]) == self.scene:
+            raise OSError(5, "Input/output error")
+        return super().read(**kw)
+
+
+class Unopenable:
+    def __call__(self, path, *a, **kw):
+        raise FileNotFoundError(2, "No such file or directory", path)
+
+
 class FakeOpenCzi:
     def __init__(self, doc):
         self.doc = doc
@@ -144,13 +162,15 @@ def box(uid, x, kind="roi", region="Dm"):
 
 
 SECTIONS = {A: [box(A, 10), box(A, 80, kind="background"), box(A, 150, region="Vd")],
-            B: [box(B, 10), box(B, 80, kind="background")]}
+            B: [box(B, 10), box(B, 80, kind="background"),
+                dict(box(B, 190), czi_w="4")]}       # too small to segment
 PLANES = {
     (6, 0, 10): dapi(ROI1, 1), (6, 1, 10): mark(ROI1, 1),
     (6, 0, 80): dapi(BG, 2), (6, 1, 80): mark({s: None for s in BG}, 2),
     (6, 0, 150): np.full((H, W), 300.0), (6, 1, 150): mark({}, 3),
     (7, 0, 10): dapi([P], 4), (7, 1, 10): mark({P: 2000.0}, 4),
     (7, 0, 80): dapi(BG[:2], 5), (7, 1, 80): mark({}, 5),
+    (7, 1, 190): mark({}, 6)[:, :4],
 }
 
 
@@ -204,9 +224,9 @@ def run_06a():
 MODEL = FakeModel()
 
 
-def run_06i(OV, *extra):
+def run_06i(OV, *extra, opener=None):
     saved = (pyczi.open_czi, OV.D5.load_model, sys.argv)
-    pyczi.open_czi = FakeOpenCzi(FakeCzi(PLANES))
+    pyczi.open_czi = opener or FakeOpenCzi(FakeCzi(PLANES))
     OV.D5.load_model = lambda: MODEL
     sys.argv = ["06i_detection_overlays.py", "--marker", MARKER] + list(extra)
     buf = io.StringIO()
@@ -271,8 +291,31 @@ with temp_study(acquisition=PAIRED) as study:
     chk("roi_measurements.csv older than roi_nuclei.csv: exit 2", rc, 2)
     chk("...the message names 06a", "06a" in out, True)
     chk("...no output folder", os.path.exists(out_dir), False)
+    cuts_csv = os.path.join(study.out_root, "results", "positivity_cuts.csv")
+    os.remove(cuts_csv)
+    rc, out = run_06i(OV)
+    chk("no positivity_cuts.csv: exit 2", rc, 2)
+    chk("...the message names 06a", "06a" in out, True)
+    chk("...no output folder", os.path.exists(out_dir), False)
+    run_06a()
+    os.utime(cuts_csv, (1_000_000_000, 1_000_000_000))
+    rc, out = run_06i(OV)
+    chk("positivity_cuts.csv older than roi_nuclei.csv: exit 2", rc, 2)
+    chk("...no output folder", os.path.exists(out_dir), False)
     run_06a()
     meas = read_rows(meas_csv)
+
+    print()
+    print("--- 06a publishes the exact cut ---")
+    cuts = read_rows(cuts_csv)
+    chk("positivity_cuts.csv: one row, for the section with a cut",
+        [(r["scene_uid"], r["marker"]) for r in cuts], [(A, MARKER)])
+    chk("...header", list(cuts[0]) if cuts else None, ["scene_uid", "marker", "cut"])
+    exact = float(cuts[0]["cut"]) if cuts else None
+    chk("...written with repr: it round-trips", repr(exact) == cuts[0]["cut"], True)
+    chk("...and rounds to roi_measurements' cut",
+        f"{round(exact, 1)}", [r["section_positivity_cut"] for r in meas
+                               if r["scene_uid"] == A][0])
 
     print()
     print("--- the polygon test is vectorised and agrees with 05c's ---")
@@ -295,7 +338,7 @@ with temp_study(acquisition=PAIRED) as study:
     rc, out = run_06i(OV)
     chk("exit 0", rc, 0)
     chk("saved outlines used: the model was not run", MODEL.calls, 0)
-    chk("nothing not drawn", "not drawn" in out, False)
+    chk("nothing not drawn", "not drawn:" in out, False)
     folder = os.path.join(out_dir, MARKER, "AB12")
     from ls_overlay import (overlay_dir, overlay_name, grey, stretch, strip,
                             shape_mask_outline, COLOURS, FILL_ALPHA, SHAPE_COLOUR)
@@ -366,6 +409,9 @@ with temp_study(acquisition=PAIRED) as study:
         ["1", "1", "1", "1"])
     chk("index outlines == saved", irow.get("outlines"), "saved")
     chk("index um_per_px", float(irow.get("um_per_px", 0)), 0.65)
+    chk("a box under 8 px is summed up, not drawn",
+        "1 boxes under 8 px not drawn" in out, True)
+    chk("...no crop for it", [f for f in os.listdir(folder) if f"_{B}_roi03" in f], [])
 
     print()
     print("--- review focus: an empty ROI, a section with no cut ---")
@@ -379,7 +425,7 @@ with temp_study(acquisition=PAIRED) as study:
     rowsb = [r for r in index.values() if r["scene_uid"] == B and r["roi_index"] == "1"]
     lb = OV.crop_lines(rowsb[0])
     chk("section B (2 background nuclei) has no cut in 06a",
-        [r["section_positivity_cut"] for r in meas if r["scene_uid"] == B], ["", ""])
+        [r["section_positivity_cut"] for r in meas if r["scene_uid"] == B], ["", "", ""])
     chk("...its strip says 'no cut: too few background nuclei'",
         "no cut: too few background nuclei" in lb[1], True)
     chk("...and its index cut is blank", rowsb[0]["cut"], "")
@@ -413,6 +459,48 @@ with temp_study(acquisition=PAIRED) as study:
     chk("identical pixels", all(np.array_equal(png(p), a) for p, a in a_imgs.items()), True)
 
     print()
+    print("--- a transient read error keeps the pictures, even under --force ---")
+    index_before = open(OV.INDEX_CSV, encoding="utf-8").read()
+    for p in pngs:
+        os.utime(p, (past, past))
+    rc, out = run_06i(OV, "--force", opener=FakeOpenCzi(BrokenCzi(PLANES, 6)))
+    chk("exit 0", rc, 0)
+    chk("'1 not drawn:'", "1 not drawn:" in out, True)
+    fails = read_rows(OV.FAILURES_CSV)
+    chk("failures.csv names section A",
+        [(f["scene_uid"], "Input/output error" in f["reason"]) for f in fails], [(A, True)])
+    chk("section A's pictures are untouched",
+        [os.path.getmtime(p) for p in pngs if f"_{A}_" in p],
+        [past] * len([p for p in pngs if f"_{A}_" in p]))
+    chk("...and its index rows",
+        sorted(r["path"] for r in read_rows(OV.INDEX_CSV) if r["scene_uid"] == A),
+        sorted(r["path"] for r in csv.DictReader(io.StringIO(index_before))
+               if r["scene_uid"] == A))
+    rc, out = run_06i(OV, "--force", opener=Unopenable())
+    chk("an unopenable CZI: '2 not drawn:'", "2 not drawn:" in out, True)
+    chk("...every picture still there", all(os.path.exists(p) for p in pngs), True)
+    chk("...index unchanged", sorted(r["path"] for r in read_rows(OV.INDEX_CSV)),
+        sorted(r["path"] for r in csv.DictReader(io.StringIO(index_before))))
+    rc, out = run_06i(OV)
+    chk("reachable again: nothing failed", "not drawn:" in out, False)
+
+    print()
+    print("--- the fingerprint covers the strip's identity ---")
+    write_rows(os.path.join(study.out_root, "manifest", "manifest_scenes.csv"),
+               [{"scene_uid": A, "animal": "AB12", "slide": "2"},
+                {"scene_uid": B, "animal": "AB12", "slide": "1"}])
+    a_png = [p for p in pngs if f"_{A}_" in p]
+    b_png = [p for p in pngs if f"_{B}_" in p]
+    for p in pngs:
+        os.utime(p, (past, past))
+    rc, out = run_06i(OV)
+    chk("a new slide number redraws section A",
+        all(os.path.getmtime(p) != past for p in a_png), True)
+    chk("...and not section B", [os.path.getmtime(p) for p in b_png], [past] * len(b_png))
+    chk("...whose index row says slide 2",
+        sorted({r["slide"] for r in read_rows(OV.INDEX_CSV) if r["scene_uid"] == A}), ["2"])
+
+    print()
     print("--- outlines that disagree with roi_nuclei.csv: not drawn ---")
     rows = read_rows(nuc_csv)
     orig = [dict(r) for r in rows]
@@ -437,7 +525,7 @@ with temp_study(acquisition=PAIRED) as study:
     write_rows(nuc_csv, orig)
     run_06a()
     rc, out = run_06i(OV)
-    chk("restored: drawn again, nothing failed", "not drawn" in out, False)
+    chk("restored: drawn again, nothing failed", "not drawn:" in out, False)
     chk("...failures.csv is header only", read_rows(OV.FAILURES_CSV), [])
     chk("...section A's crop is back", os.path.exists(roi1), True)
 
@@ -462,6 +550,38 @@ with temp_study(acquisition=PAIRED) as study:
         os.path.exists(D5.outline_path(MARKER, A)), False)
     with open(D5.SETTINGS_JSON, "w", encoding="utf-8") as fh:
         fh.write(saved_rec)
+
+    print()
+    print("--- a median on the rounded cut: coloured by the exact one ---")
+    # Background medians chosen so the cut is 200 + 3*1.4826*0.11 = 200.489...,
+    # written 200.5; a nucleus at 200.5 is above the real cut and not above
+    # the written one. 06a counts it positive, and so must the picture.
+    rows = read_rows(nuc_csv)
+    bg_rows = [r for r in rows if r["scene_uid"] == A and r["roi_index"] == "2"]
+    for r, v in zip(bg_rows, ("199.8", "199.89", "200.0", "200.0", "200.11", "200.2")):
+        r["marker_median"] = v
+    at(A, 1, N)["marker_median"] = "200.5"
+    nrow = [r for r in rows if r["scene_uid"] == A and r["roi_index"] == "1"
+            and abs(float(r["czi_x"]) - (10 + N[1] + 2.5)) < 0.6
+            and abs(float(r["czi_y"]) - (Y0 + N[0] + 2.5)) < 0.6][0]
+    nrow["marker_median"] = "200.5"
+    write_rows(nuc_csv, rows)
+    run_06a()
+    meas = read_rows(meas_csv)
+    exact = float(read_rows(cuts_csv)[0]["cut"])
+    m1 = [r for r in meas if r["scene_uid"] == A and r["roi_index"] == "1"][0]
+    chk("the written cut is 200.5", m1["section_positivity_cut"], "200.5")
+    chk("...the exact one just below it", 200.48 < exact < 200.5, True)
+    chk("06a counts the nucleus at 200.5 positive", m1["n_positive"], "3")
+    rc, out = run_06i(OV, "--force")
+    chk("drawn: nothing failed", "not drawn:" in out, False)
+    irow = [r for r in read_rows(OV.INDEX_CSV) if r["scene_uid"] == A
+            and r["roi_index"] == "1"][0]
+    chk("index n_positive == roi_measurements", irow["n_positive"], m1["n_positive"])
+    chk("index cut is the written one", irow["cut"], "200.5")
+    area = png(roi1)[-H:]
+    chk("the nucleus at 200.5 is drawn positive",
+        area[edge_px(N)].tolist(), list(COLOURS["positive"]))
 
     print()
     print("--- --no-crops draws no crops; --animal limits ---")

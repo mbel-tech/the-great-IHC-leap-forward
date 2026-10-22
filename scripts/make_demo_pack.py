@@ -25,9 +25,20 @@ the tutorial study once in the app:
         wrong place on the learner's sections. Exit 2 and no answer key when
         they differ.
 
+        With --regions and --plates, the answer key comes from a curator export
+        (roi_regions_*.csv and the roi_plates_*.csv beside it) instead of the
+        saved curation: the export is where drawn outlines survive. Its
+        outlines are kept in the export's 256 px frame.
+
     python scripts/make_demo_pack.py ready --pack PACK --trial-out TRIAL
 
         Copies the slow stages' results from the trial run into PACK/ready/.
+
+    python scripts/make_demo_pack.py one-marker --pack PACK --marker AF568 --nuclear DAPI
+
+        Makes the pack's study a one-scan, one-marker study: for a demo cut from
+        one pass of a paired study, whose other marker is on another slide.
+        The channel table follows the cut slide's own channel order.
 """
 
 import argparse
@@ -206,20 +217,113 @@ def cmd_check(a):
             print(f"section {old} does not reformat to the same frame ({why}); "
                   "the answer key would be misplaced, so none was written.")
             return 2
-    cur_path = a.source_curation or os.path.join(a.source_out, "curation", ANSWER_KEY + ".json")
-    with open(cur_path, encoding="utf-8") as fh:
-        cur = json.load(fh)
+    if a.regions or a.plates:
+        if not (a.regions and a.plates):
+            print("--regions and --plates go together (the two files of one export).")
+            return 2
+        cur = curation_from_export(a.regions, a.plates)
+        source = os.path.basename(a.regions)
+    else:
+        cur_path = a.source_curation or os.path.join(a.source_out, "curation",
+                                                     ANSWER_KEY + ".json")
+        with open(cur_path, encoding="utf-8") as fh:
+            cur = json.load(fh)
+        source = os.path.basename(cur_path)
     key = {new: cur[old] for old, new in renamed.items() if old in cur}
     missing = [old for old in renamed if old not in cur]
     if missing:
-        print(f"the source curation has no entry for {missing[0]}; no answer key written.")
+        print(f"the source has no entry for {missing[0]}; no answer key written.")
         return 2
     os.makedirs(os.path.join(a.pack, "answer"), exist_ok=True)
     tmp = os.path.join(a.pack, "answer", ANSWER_KEY + ".json.part")
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(key, fh)
     os.replace(tmp, tmp[:-5])
-    print(f"frames match; answer key written for {len(key)} sections")
+    meta["answer_from"] = source
+    _write_json(os.path.join(a.pack, "pack.json"), meta)
+    print(f"frames match; answer key written for {len(key)} sections from {source}")
+    return 0
+
+
+def _write_json(path, data):
+    with open(path + ".part", "w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=2)
+    os.replace(path + ".part", path)
+
+
+def curation_from_export(regions, plates):
+    """Curator state for the sections an export names, in the export's 256 px frame.
+
+    Only what the tutorial reads: the matched plate and the drawn outlines
+    (`polys`, as 04l keeps them and 04q_import_curation rebuilds them). With
+    the export's own scale the outlines stay as exported, and `frame` says so,
+    so the tutorial can bring a learner's outlines (drawn on the 768 px
+    composite) to the same size. Not 04q itself: it reads the study's
+    settings when it is imported, and this runs outside any study.
+    """
+    import csv
+
+    def rows(path):
+        with open(path, encoding="utf-8-sig", newline="") as fh:
+            return list(csv.DictReader(fh))
+
+    def cell(r, k):
+        return (r.get(k) or "").strip()
+
+    state = {}
+    for r in rows(plates):
+        uid = cell(r, "scene_uid")
+        if uid:
+            idx = cell(r, "plate_index")
+            state[uid] = {"plate": int(float(idx)) if idx else 0,
+                          "plate_id": cell(r, "plate_id"), "pairs": [], "polys": [],
+                          "frame": 256}
+    for r in rows(regions):
+        uid = cell(r, "scene_uid")
+        if cell(r, "roi_shape") != "polygon" or uid not in state:
+            continue
+        v = []
+        for vtx in cell(r, "sec_poly").split(";"):
+            xy = vtx.split()
+            if len(xy) == 2:
+                v += [_num(xy[0]), _num(xy[1])]
+        if len(v) < 6:
+            continue
+        pt, rn = cell(r, "part"), cell(r, "roi_n")
+        state[uid]["polys"].append({"v": v, "region": cell(r, "region"),
+                                    "part": int(float(pt)) if pt else 1,
+                                    "roi": int(float(rn)) if rn else 0})
+    return state
+
+
+def _num(text):
+    x = float(text)
+    return int(x) if x.is_integer() else x
+
+
+def cmd_one_marker(a):
+    slides = os.path.join(a.pack, "slides")
+    czis = sorted(f for f in os.listdir(slides) if f.lower().endswith(".czi"))
+    if not czis:
+        print(f"no slide in {slides}")
+        return 2
+    names = [c["name"] for c in czi_meta.summarise(read_xml(os.path.join(slides, czis[0])))
+             ["channels"]]
+    channels = []
+    for i, name in enumerate(names):
+        role = ("nuclear" if name == a.nuclear else "marker" if name == a.marker else "ignore")
+        channels.append({"name": name, "role": role, "czi_name": name, "index": i})
+    if a.marker not in names or a.nuclear not in names:
+        print(f"the slide's channels are {names}; it has no {a.marker if a.marker not in names else a.nuclear}.")
+        return 2
+    path = os.path.join(a.pack, "study", "study.json")
+    with open(path, encoding="utf-8") as fh:
+        cfg = json.load(fh)
+    acq = cfg.setdefault("acquisition", {})
+    acq.update(layout="multiplex", channels=channels, markers=[])
+    acq.pop("marker_segmentation", None)
+    _write_json(path, cfg)
+    print(f"study is one scan per section: {[(c['name'], c['role']) for c in channels]}")
     return 0
 
 
@@ -272,11 +376,18 @@ def main(argv=None):
     k.add_argument("--source-out", required=True)
     k.add_argument("--trial-out", required=True)
     k.add_argument("--source-curation", default="")
+    k.add_argument("--regions", default="", help="an export's roi_regions_*.csv")
+    k.add_argument("--plates", default="", help="the roi_plates_*.csv beside it")
     r = sub.add_parser("ready")
     r.add_argument("--pack", required=True)
     r.add_argument("--trial-out", required=True)
+    o = sub.add_parser("one-marker")
+    o.add_argument("--pack", required=True)
+    o.add_argument("--marker", required=True)
+    o.add_argument("--nuclear", default="DAPI")
     a = ap.parse_args(argv)
-    return {"cut": cmd_cut, "check": cmd_check, "ready": cmd_ready}[a.cmd](a)
+    return {"cut": cmd_cut, "check": cmd_check, "ready": cmd_ready,
+            "one-marker": cmd_one_marker}[a.cmd](a)
 
 
 if __name__ == "__main__":

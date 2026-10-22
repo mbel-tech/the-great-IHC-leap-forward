@@ -1,7 +1,10 @@
 """The tutorial's curation check: a learner's region outlines against an expert's.
 
 Both sides are ROI-curator state, {section uid: {"polys": [{"v": [x0, y0, x1,
-y1, ...], "roi": n, "region": name, ...}], ...}}, in the section's own pixels.
+y1, ...], "roi": n, "region": name, ...}], "frame": w, ...}}, in the pixels of
+the section picture they were drawn on: `frame` is that picture's width (256,
+or 768 for a colour composite; no frame means 256, as in the curator). Both
+sides are brought to 256 before they are compared.
 ROIs are matched by number on the same section; an ROI drawn in several parts
 is the union of its parts. Overlap is intersection over union, worked out by
 filling both outlines on the section's pixel grid (no geometry library).
@@ -13,6 +16,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 GOOD = 0.5
+SEC_GRID = 256
 
 
 @dataclass(frozen=True)
@@ -53,13 +57,15 @@ def iou(a, b):
 
 
 def _by_roi(state, section):
+    entry = (state or {}).get(section) or {}
+    k = SEC_GRID / float(entry.get("frame") or SEC_GRID)
     out = {}
-    for p in ((state or {}).get(section) or {}).get("polys") or []:
+    for p in entry.get("polys") or []:
         roi = p.get("roi")
         if roi is None:
             continue
         verts, region = out.setdefault(int(roi), ([], p.get("region") or ""))
-        verts.append(list(p.get("v") or []))
+        verts.append([c * k for c in (p.get("v") or [])])
     return out
 
 

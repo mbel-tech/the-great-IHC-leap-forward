@@ -75,6 +75,13 @@ chk("an ROI in two parts matches it whole",
     [x.kind for x in TC.compare(halves, key, SECS) if x.roi == 4], ["good"])
 chk("sorted by section then ROI", kinds(TC.compare(key, key, SECS)),
     [("s1", 4, "good"), ("s1", 5, "good"), ("s2", 1, "good")])
+big = {u: {"frame": 768, "polys": [dict(p, v=[c * 3 for c in p["v"]]) for p in e["polys"]]}
+       for u, e in key.items()}
+canon = {u: dict(e, frame=256) for u, e in key.items()}
+chk("outlines saved on the 768 px picture match the same outlines at 256",
+    {x.kind for x in TC.compare(big, canon, SECS)}, {"good"})
+chk("...and a record with no frame counts as 256",
+    {x.kind for x in TC.compare(big, key, SECS)}, {"good"})
 chk("a section entry with no polys key", len(TC.compare({"s1": {"plate": 3}}, key, SECS)), 3)
 
 print("--- words ---")

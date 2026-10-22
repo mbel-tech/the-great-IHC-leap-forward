@@ -114,6 +114,46 @@ rc = MP.main(["check", "--pack", PACK, "--source-out", src_out, "--trial-out", t
 chk("a section that reformats differently fails", rc, 2)
 chk("...and writes no answer key", os.path.exists(os.path.join(PACK, "answer")), False)
 
+print("--- the answer key from an export ---")
+open(os.path.join(trial, "reformatted", "sections_AF568", "LS22_s01a_sc01.png"), "wb").write(b"section 1")
+regions = os.path.join(TMP, "roi_regions_07.09.2026_11.27.csv")
+plates = os.path.join(TMP, "roi_plates_07.09.2026_11.27.csv")
+with open(plates, "w", encoding="utf-8") as fh:
+    fh.write("scene_uid,marker,plate_set,plate_id,plate_index,status,favorite,view_rotation_deg,excluded\n"
+             "LS22_s01a_sc01,AF568,plates_final,plate_013,13,ok,1,12.0,0\n"
+             "LS22_s01a_sc02,AF568,plates_final,plate_014,14,ok,0,0.0,0\n"
+             "LS22_s01a_sc03,AF568,plates_final,plate_015,15,ok,0,0.0,0\n")
+with open(regions, "w", encoding="utf-8") as fh:
+    fh.write("scene_uid,marker,roi_kind,region,sec_x,sec_y,sec_r,roi_shape,part,sec_poly,roi_n,landmarks_at_draw\n"
+             "LS22_s01a_sc01,AF568,roi,Dl,,,,polygon,1,10 10;50 10;50 50,1,0\n"
+             "LS22_s01a_sc01,AF568,background,__background__,90,90,8,disc,,,,\n"
+             "LS22_s01a_sc02,AF568,roi,Dm,,,,polygon,1,20 20;60 20;60 60,2,\n"
+             "LS22_s01a_sc03,AF568,roi,Vv,,,,polygon,1,1 1;9 1;9 9,3,\n")
+rc = MP.main(["check", "--pack", PACK, "--source-out", src_out, "--trial-out", trial,
+              "--regions", regions, "--plates", plates])
+chk("an export can be the answer key", rc, 0)
+key = json.load(open(os.path.join(PACK, "answer", "ls_roi_curator_v1.json")))
+chk("...holding the practice sections under their new ids", sorted(key),
+    ["LS22_s01a_sc00", "LS22_s01a_sc01"])
+chk("...with the drawn outlines, at the export's 256 px", (key["LS22_s01a_sc00"]["frame"],
+    key["LS22_s01a_sc00"]["polys"][0]["v"], key["LS22_s01a_sc00"]["polys"][0]["region"]),
+    (256, [10, 10, 50, 10, 50, 50], "Dl"))
+chk("...and the plate the expert matched", key["LS22_s01a_sc00"].get("plate_id"), "plate_013")
+meta = json.load(open(os.path.join(PACK, "pack.json")))
+chk("the pack says where its answer key came from", meta.get("answer_from"),
+    "roi_regions_07.09.2026_11.27.csv")
+
+print("--- one marker ---")
+rc = MP.main(["one-marker", "--pack", PACK, "--marker", "AF568", "--nuclear", "DAPI"])
+chk("one-marker runs", rc, 0)
+study = json.load(open(os.path.join(PACK, "study", "study.json")))
+chk("the study is one scan per section with the slide's two channels",
+    (study["acquisition"]["layout"],
+     [(c["name"], c["role"], c["index"]) for c in study["acquisition"]["channels"]]),
+    ("multiplex", [("DAPI", "nuclear", 0), ("AF568", "marker", 1)]))
+import ls_config as LC                                          # noqa: E402
+chk("...and passes the settings check", [e for e in LC.validate(study)[0] if "acquisition" in e], [])
+
 shutil.rmtree(TMP, True)
 print(f"\n{len(failures)} failure(s)")
 sys.exit(1 if failures else 0)

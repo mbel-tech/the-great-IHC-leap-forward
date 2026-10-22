@@ -331,7 +331,7 @@ class TutorialController(QObject):
         first = off[0].section if off else (self.pack.practice_sections or [""])[0]
         polys = ((key.get(first) or {}).get("polys")) or []
         if first:
-            self.w.curator.show_key(first, polys)
+            self.w.curator.show_key(first, polys, (key.get(first) or {}).get("frame") or 0)
         self._show_check(off, first)
 
     def _show_check(self, off, section):

@@ -385,7 +385,7 @@ with temp_study(acquisition=PAIRED) as study:
     sc_a = os.path.join(folder, overlay_name(MARKER, A, "scene"))
     sc_b = os.path.join(folder, overlay_name(MARKER, B, "scene"))
     chk("a scene picture per section",
-        [f for f in os.listdir(folder) if "_scene" in f],
+        sorted(f for f in os.listdir(folder) if "_scene" in f),
         sorted(os.path.basename(p) for p in (sc_a, sc_b)))
 
     img = png(roi1)

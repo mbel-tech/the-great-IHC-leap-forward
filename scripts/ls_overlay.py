@@ -43,6 +43,11 @@ def kind_of(row, cut):
     Artifact is checked before off_tissue, as 06a does, so a nucleus with both
     flags is drawn as artifact. With no cut (`cut is None`) a counted,
     uncensored nucleus cannot be judged and is drawn negative.
+
+    A counted, uncensored row whose marker_median is empty or not a number
+    cannot be judged either; 06a would crash on float(""), so this raises a
+    ValueError naming the scene and nucleus rather than guess. (Flagged rows
+    and the no-cut case never read the median, so they are unaffected.)
     """
     if row is None:
         return "outside"
@@ -52,7 +57,16 @@ def kind_of(row, cut):
         return "off_tissue"
     if row.get("censored") == "1":
         return "censored"
-    if cut is not None and is_positive(float(row["marker_median"]), False, cut):
+    if cut is None:
+        return "negative"
+    try:
+        median = float(row["marker_median"])
+    except (KeyError, ValueError):
+        where = ", ".join(f"{k}={row[k]}" for k in ("scene_uid", "roi_index", "label", "nucleus_id")
+                          if k in row) or "no id in row"
+        raise ValueError(f"marker_median is {row.get('marker_median')!r}, not a number "
+                         f"({where})") from None
+    if is_positive(median, False, cut):
         return "positive"
     return "negative"
 
@@ -92,18 +106,28 @@ def paint(rgb, labels, kinds):
 
     `kinds` maps label id -> a KINDS value; labels not in it are left alone.
     Fills first so a neighbour's fill never covers another nucleus's outline.
+
+    One lookup table (label id -> kind code, 0 = not drawn) is indexed with
+    `labels` once, then each kind is painted in a single pass: at most
+    len(KINDS) full-image operations however many nuclei there are. A mask per
+    label would cost labels x H x W, minutes on a real crop.
     """
-    edge = edges(labels)
+    top = int(labels.max()) if labels.size else 0
+    lut = np.zeros(top + 1, np.uint8)
     for lid, kind in kinds.items():
-        m = labels == lid
-        if not m.any():
-            continue
+        if 0 < lid <= top:
+            lut[lid] = KINDS.index(kind) + 1
+    code = lut[np.clip(labels, 0, top)]
+    code[labels <= 0] = 0
+    edge = edges(labels)
+    for i, kind in enumerate(KINDS, start=1):
         fill = FILL_COLOURS.get(kind)
-        if fill is not None:
+        m = code == i
+        if fill is not None and m.any():
             mix = (1 - FILL_ALPHA) * rgb[m].astype(float) + FILL_ALPHA * np.array(fill, float)
             rgb[m] = np.rint(mix).astype(np.uint8)
-    for lid, kind in kinds.items():
-        rgb[edge & (labels == lid)] = COLOURS[kind]
+    for i, kind in enumerate(KINDS, start=1):
+        rgb[edge & (code == i)] = COLOURS[kind]
 
 
 def shape_mask_outline(h, w, inside):

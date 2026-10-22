@@ -47,6 +47,15 @@ chk("no cut, counted -> negative", LO.kind_of(row(50), None), "negative")
 chk("old csv without off_tissue column",
     LO.kind_of({"marker_median": "5", "censored": "0", "artifact": "0"}, 4), "positive")
 
+chk("artifact beats censored", LO.kind_of(row(1, cen=1, art=1), 40), "artifact")
+try:
+    LO.kind_of({**row(""), "scene_uid": "S1"}, 40)
+    got = "no error"
+except ValueError as ex:
+    got = "S1" in str(ex)
+chk("empty median raises ValueError naming scene", got, True)
+chk("empty median, flagged row, no error", LO.kind_of(row("", cen=1), 40), "censored")
+
 lab = np.zeros((20, 20), np.int32)
 lab[2:8, 2:8] = 1
 lab[10:16, 10:16] = 2
@@ -66,6 +75,21 @@ rgb = np.full((20, 20, 3), 100, np.uint8)
 LO.paint(rgb, lab, {1: "censored"})
 chk("censored edge white", {tuple(p) for p in rgb[LO.edges(lab) & (lab == 1)]}, {(255, 255, 255)})
 chk("censored fill as positive", {tuple(p) for p in rgb[(lab == 1) & ~LO.edges(lab)]}, {fill})
+
+import time
+
+big = np.zeros((2000, 2000), np.int32)
+n = 0
+for r0 in range(0, 2000, 44):
+    for c0 in range(0, 2000, 44):
+        n += 1
+        big[r0:r0 + 40, c0:c0 + 40] = n
+bkinds = {i: LO.KINDS[i % len(LO.KINDS)] for i in range(1, n + 1)}
+bimg = np.full((2000, 2000, 3), 100, np.uint8)
+t0 = time.time()
+LO.paint(bimg, big, bkinds)
+dt = time.time() - t0
+chk(f"paint 2000x2000, {n} labels under 2 s ({dt:.2f}s)", dt < 2.0, True)
 
 g = LO.grey(np.array([[0.0, 10.0, 20.0, 30.0]]), 10.0, 20.0)
 chk("grey maps lo/hi and clips", g.tolist(), [[0, 0, 255, 255]])

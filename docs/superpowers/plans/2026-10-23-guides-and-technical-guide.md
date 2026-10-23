@@ -27,6 +27,7 @@ It ships as three PRs, one after another, from the branch `claude/project-thread
 - **Scope:** every file in `scripts/` gets a full entry. Every file the pipeline reads or writes gets every column or key, with type, units and meaning.
 - **Never claim a count:** measured numbers stay in `pipeline-methods.md`, which `check_methods_claims.py` verifies.
 - **Wording:** plain words, in the app's on-screen labels exactly as written in `app/workflow.py`.
+- **PR #128:** keep its wording that colleagues get the lab-only demo pack through a private OneDrive link from the user. If #128 merges first, rebase onto it.
 
 ## Review Focus
 

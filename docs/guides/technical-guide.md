@@ -709,7 +709,7 @@ The full table, generated from the code:
 
 <!-- tables:stages -->
 | Id | Title | Group | Script | Needs | Leaves behind | Reader | Decides | In the app |
-|---|---|---|---|---|---|---|---|---|
+|------------|------------|---------|---------------|------------|---------------------|---------|------|------|
 | `manifest` | 00 Read slide headers | Ingest and QC | `00_manifest.py` |  | `manifest/manifest_files.csv`, `manifest/manifest_scenes.csv` | none |  | yes |
 | `verify` | 00b Verify extraction | Ingest and QC | `00b_verify_extraction.py` | manifest | `qc/extraction_status.csv` | none |  | yes |
 | `czi_selftest` | 00d CZI self-test | Ingest and QC | `00d_czi_selftest.py` |  | `qc/czi_selftest.csv` | pylibCZIrw |  | yes |
@@ -1898,7 +1898,7 @@ straight from `sys.argv`) without running it. A script with no options says "(no
 
 <!-- tables:options -->
 | Script | Option | Default | What it does |
-|---|---|---|---|
+|------------|------------|---------|---------------------------|
 | `00_manifest.py` | `--accept-suggestions` | off | read straight off the command line |
 | `00b_verify_extraction.py` | `--crc` | off | read straight off the command line |
 | `00b_verify_extraction.py` | `--watch` | off | read straight off the command line |
@@ -1920,7 +1920,7 @@ straight from `sys.argv`) without running it. A script with no options says "(no
 | `01f_tilefield.py` | `mode` |  | Choices: ['build', 'verify']. |
 | `01f_tilefield.py` | `paths` |  |  |
 | `01g_saturation_map.py` | `--figures` | `8` |  |
-| `01g_saturation_map.py` | `--marker` | `_default` | f"which marker's sections to measure (default {_default})" Choices: MARKERS. |
+| `01g_saturation_map.py` | `--marker` | `_default` | which marker's sections to measure (default <_default>) Choices: MARKERS. |
 | `01g_saturation_map.py` | `--proxy` | off | measure clipping with the OLD 8-bit >=254 proxy instead of the raw masks, writing saturation_<marker>_proxy.csv. For reproducing the pre-fix census with current code. |
 | `01h_tilefield_raw.py` | `--files` | `16` |  |
 | `01h_tilefield_raw.py` | `--tiles` | `60` |  |
@@ -1931,14 +1931,14 @@ straight from `sys.argv`) without running it. A script with no options says "(no
 | `01k_saturation_raw.py` | `--force` | off |  |
 | `01k_saturation_raw.py` | `--native-sample` | `30` | sections to also read at zoom=1.0; 0 to skip |
 | `01k_saturation_raw.py` | `--no-merge` | off |  |
-| `01l_scene_renders.py` | `--um-px` | `DEFAULT_UM_PX` | f"picture resolution in um per pixel (default from config " f"scene_render.um_per_px: {DEFAULT_UM_PX}; " f"finest {MIN_UM_PX}). Rounded to whole native " f"{NATIVE_UM} um pixels" |
-| `01l_scene_renders.py` | `--range` | `DEFAULT_RANGE` | "dataset: 01's frozen brightness range, so pictures compare. " "section: each scene stretched to its own tissue " f"(default from config scene_render.range: {DEFAULT_RANGE})" Choices: ['dataset', 'section']. |
-| `01l_scene_renders.py` | `--out-dir` | `None` | "where the pictures go (default from config " f"scene_render.out_dir: {OUT_DIR})" |
-| `01l_scene_renders.py` | `--source` | `DEFAULT_SOURCE` | "scan: average the scan's own pixels (exact, the default). " "zeiss_preview: Zeiss's stored smaller copy, much faster, " "values differ slightly. Pictures only; nothing measured " f"reads them (default from config scene_render.source: " f"{DEFAULT_SOURCE})" Choices: SOURCES. |
+| `01l_scene_renders.py` | `--um-px` | `DEFAULT_UM_PX` | picture resolution in um per pixel (default from config scene_render.um_per_px: <DEFAULT_UM_PX>; finest <MIN_UM_PX>). Rounded to whole native <NATIVE_UM> um pixels |
+| `01l_scene_renders.py` | `--range` | `DEFAULT_RANGE` | dataset: 01's frozen brightness range, so pictures compare. section: each scene stretched to its own tissue (default from config scene_render.range: <DEFAULT_RANGE>) Choices: ['dataset', 'section']. |
+| `01l_scene_renders.py` | `--out-dir` | `None` | where the pictures go (default from config scene_render.out_dir: <OUT_DIR>) |
+| `01l_scene_renders.py` | `--source` | `DEFAULT_SOURCE` | scan: average the scan's own pixels (exact, the default). zeiss_preview: Zeiss's stored smaller copy, much faster, values differ slightly. Pictures only; nothing measured reads them (default from config scene_render.source: <DEFAULT_SOURCE>) Choices: ('scan', 'zeiss_preview'). |
 | `01l_scene_renders.py` | `--marker` | `None` | only the scans of this marker (default: every marker) Choices: MARKERS or None. |
 | `01l_scene_renders.py` | `--keep-background` | off | draw the whole scene rectangle, glass and pen ring included (default blanks everything outside the section, as the curator does) |
 | `01l_scene_renders.py` | `--force` | off | redraw pictures that already exist (default skips them) |
-| `01l_scene_renders.py` | `--workers` | `DEFAULT_WORKERS` | "CZIs drawn at once, while free RAM allows (default half " f"the cores, at most 4: {DEFAULT_WORKERS} here)" |
+| `01l_scene_renders.py` | `--workers` | `DEFAULT_WORKERS` | CZIs drawn at once, while free RAM allows (default half the cores, at most 4: <DEFAULT_WORKERS> here) |
 | `01l_scene_renders.py` | `--limit` | `0` | stop after trying N scenes, drawn or not (0 = all) |
 | `02_pair_passes.py` | (none) |  |  |
 | `04a2_atlas_remerge.py` | `--dpi` | `300` |  |
@@ -1948,14 +1948,14 @@ straight from `sys.argv`) without running it. A script with no options says "(no
 | `04a4_plate_rebuild.py` | `--dpi` | `300` |  |
 | `04a_atlas_extract.py` | (none) |  |  |
 | `04a_reformat.py` | `--preview` | `8` |  |
-| `04a_reformat.py` | `--marker` | `_default` | f"which marker to process (default {_default})" Choices: MARKERS. |
+| `04a_reformat.py` | `--marker` | `_default` | which marker to process (default <_default>) Choices: MARKERS. |
 | `04a_reformat.py` | `--censor` | off | carry 04j clipped-pixel censor masks through the geometry |
 | `04a_reformat.py` | `--mask-artifacts` | off | blank 04g artifact pixels in the reformatted output |
 | `04a_reformat.py` | `--apply-overrides` | off | apply the curation: rotation_overrides.csv when it exists, else 04f's proposals, then section_review.csv |
 | `04a_reformat.py` | `--render-excluded` | off | also render excluded sections, so they can be LOOKED at in the ROI curator's Review mode. They are never added to the index, so nothing downstream can pick them up. |
 | `04a_reformat.py` | `--only` |  | re-render just these scene_uids (comma-separated, or @file for one per line) and write NO index. Every uid must be an excluded one: a partial run cannot produce a complete index, and re-rendering an INDEXED section without rewriting the index would leave the analysis pointing at an image that no longer matches its row. Repairs the look-at-only PNGs, nothing else |
 | `04b_atlas_match.py` | `--animal` | `None` | restrict to one animal |
-| `04b_atlas_match.py` | `--marker` | `_default` | f"channel whose DAPI is used (default {_default})" Choices: MARKERS. |
+| `04b_atlas_match.py` | `--marker` | `_default` | channel whose DAPI is used (default <_default>) Choices: MARKERS. |
 | `04c_atlas_match.py` | `--animal` | `None` |  |
 | `04c_atlas_match.py` | `--variants` | `10` |  |
 | `04e_register_elastix.py` | `--limit` | `0` |  |
@@ -1968,18 +1968,18 @@ straight from `sys.argv`) without running it. A script with no options says "(no
 | `04f_exclusion_candidates.py` | `--montage` | `32` |  |
 | `04g_artifact_mask.py` | `--preview` | `0` | render N overlays and stop |
 | `04g_artifact_mask.py` | `--limit` | `0` |  |
-| `04g_artifact_mask.py` | `--marker` | `_default` | f"which marker to process (default {_default})" Choices: MARKERS. |
+| `04g_artifact_mask.py` | `--marker` | `_default` | which marker to process (default <_default>) Choices: MARKERS. |
 | `04g_artifact_mask.py` | `--include-excluded` | off | mask every scanned section of the marker, from focus.csv, excluded ones included, so they can be reviewed with a mask like every other section. Needs no reformat first. Excluded ones are marked excluded=1 in the summary. |
 | `04i_propagate_to_perk.py` | `--limit` | `0` |  |
-| `04j_censor_clipped.py` | `--tolerance` | `TOLERANCE` | section is set aside at or above this clipped fraction |
+| `04j_censor_clipped.py` | `--tolerance` | `0.01` | section is set aside at or above this clipped fraction |
 | `04j_censor_clipped.py` | `--allow-partial` | off | write the analysis set even if it has unmeasured sections and the file on disk is complete |
-| `04j_censor_clipped.py` | `--marker` | `_default` | f"which marker to process (default {_default})" Choices: MARKERS. |
+| `04j_censor_clipped.py` | `--marker` | `_default` | which marker to process (default <_default>) Choices: MARKERS. |
 | `04k_level_curator.py` | `--animal` | `None` |  |
 | `04k_level_curator.py` | `--out` | `CURATOR_HTML` | where to write the page (default: the live curator under out_root). tests/run.sh points this at tests/build/ so a test run never rewrites the page being curated in |
 | `04l_roi_curator.py` | `--animal` | `None` |  |
-| `04l_roi_curator.py` | `--marker` | `_default` | "which channel the page OPENS on. Both are always loaded - " "the selector next to the sample selector switches - so this " "chooses the starting view, not what is in the page. " f"Opens on {_default}." Choices: MARKERS. |
-| `04l_roi_curator.py` | `--analysis-set` | off | f"narrow the {_first} side to " f"{_aset}. Clipped-pixel " f"censoring is measured on that marker's own scans, " f"so it defines a subset for it alone; {_rest}" |
-| `04l_roi_curator.py` | `--worklist` | `None` | f"order the {_first} side by 04n_roi_worklist.py, so stopping " "part way still leaves every animal and every level covered. " f"Keyed on {_first} uids, so {_rest}" |
+| `04l_roi_curator.py` | `--marker` | `_default` | which channel the page OPENS on. Both are always loaded - the selector next to the sample selector switches - so this chooses the starting view, not what is in the page. Opens on <_default>. Choices: MARKERS. |
+| `04l_roi_curator.py` | `--analysis-set` | off | narrow the <_first> side to <_aset>. Clipped-pixel censoring is measured on that marker's own scans, so it defines a subset for it alone; <_rest> |
+| `04l_roi_curator.py` | `--worklist` | `None` | order the <_first> side by 04n_roi_worklist.py, so stopping part way still leaves every animal and every level covered. Keyed on <_first> uids, so <_rest> |
 | `04l_roi_curator.py` | `--tier` | `None` | with --worklist: only this tier (e.g. core) |
 | `04l_roi_curator.py` | `--no-seed` | off | do not carry the app's curation into the page. The page normally embeds whatever is in out_root/curation so a browser copy opens with the same work; this leaves it empty instead |
 | `04l_roi_curator.py` | `--rgb` | off | show the two-colour composites from 04o_section_rgb.py (DAPI blue + marker) instead of the greyscale DAPI the geometry was computed on. Same frame either way. |
@@ -1988,18 +1988,18 @@ straight from `sys.argv`) without running it. A script with no options says "(no
 | `04l_roi_curator.py` | `--out` | `CURATOR_HTML` | where to write the page (default: the live curator under out_root). tests/run.sh points this at tests/build/ so a test run never rewrites the page being curated in |
 | `04m_sections_dataset.py` | (none) |  |  |
 | `04n_roi_worklist.py` | `--tier` | `None` | only write this tier (core / unpaired_unchecked / animal_underpowered) |
-| `04n_roi_worklist.py` | `--min-sections` | `MIN_SECTIONS_PER_ANIMAL` | "animals with fewer than N measurable sections are held out " f"of core (default {MIN_SECTIONS_PER_ANIMAL}). Pass 0 to keep " "every animal, which puts its sections in the main queue " "interleaved rather than appended at the end" |
-| `04o_section_rgb.py` | `--marker` | `_default` | f"which marker to process (default {_default})" Choices: MARKERS. |
+| `04n_roi_worklist.py` | `--min-sections` | `10` | animals with fewer than N measurable sections are held out of core (default 10). Pass 0 to keep every animal, which puts its sections in the main queue interleaved rather than appended at the end |
+| `04o_section_rgb.py` | `--marker` | `_default` | which marker to process (default <_default>) Choices: MARKERS. |
 | `04o_section_rgb.py` | `--tier` | `None` | only this worklist tier |
 | `04o_section_rgb.py` | `--scale` | `3` | render at N x the canonical 256 grid (default 3 = 768). Sampling only - the mask, angle and frame are decided at WORK_SIZE and do not change, so a landmark still means the same thing once divided by N |
 | `04o_section_rgb.py` | `--all` | off | build every section in this marker's own reformat index instead of the pERK worklist. The worklist is keyed on pERK and reaches PCNA only through the pairing, so it cannot define the PCNA job - this can |
 | `04o_section_rgb.py` | `--include-excluded` | off | build every SCANNED section for this marker, not just the ones that survived. The excluded ones already have a greyscale image from 04a --render-excluded and are shown in Review mode; without this they are the only grey cells in a colour grid. Adds no index row, so nothing downstream picks them up |
 | `04o_section_rgb.py` | `--force` | off | rebuild composites that already exist (default is to skip them, so topping a set up costs only the missing ones) |
-| `04o_section_rgb.py` | `--source` | `RENDER_SOURCE` | "where the pixels come from (default from config " f"curation_render.source: {RENDER_SOURCE}). czi renders " "from the scan's own 16-bit planes in one resampling; " "overview is the old 8-bit 5.2 um/px route" Choices: ['czi', 'overview']. |
-| `04o_section_rgb.py` | `--um-px` | `RENDER_UM_PX` | "resolution of a czi render (default from config " f"curation_render.um_per_px: {RENDER_UM_PX}); at least " f"{MIN_RENDER_UM_PX}" |
+| `04o_section_rgb.py` | `--source` | `RENDER_SOURCE` | where the pixels come from (default from config curation_render.source: <RENDER_SOURCE>). czi renders from the scan's own 16-bit planes in one resampling; overview is the old 8-bit 5.2 um/px route Choices: ['czi', 'overview']. |
+| `04o_section_rgb.py` | `--um-px` | `RENDER_UM_PX` | resolution of a czi render (default from config curation_render.um_per_px: <RENDER_UM_PX>); at least 1.3 |
 | `04o_section_rgb.py` | `--verify` | off | check the blue plane still equals the existing greyscale section |
-| `04o_section_rgb.py` | `--thumbs` | off | f"also write the {RF.GRID}px review-grid thumbnails. With " "--all, --include-excluded or --tier it builds the " "composites first and then thumbnails them, so one run " "does both; on its own it only shrinks the composites " "already built" |
-| `04o_section_rgb.py` | `--thumb-size` | `RF.GRID` | f"thumbnail edge in pixels (default {RF.GRID})" |
+| `04o_section_rgb.py` | `--thumbs` | off | also write the <RF.GRID>px review-grid thumbnails. With --all, --include-excluded or --tier it builds the composites first and then thumbnails them, so one run does both; on its own it only shrinks the composites already built |
+| `04o_section_rgb.py` | `--thumb-size` | `RF.GRID` | thumbnail edge in pixels (default <RF.GRID>) |
 | `04p_section_provenance.py` | `--tissue-masks` | off | build a tissue mask per section in the OVERVIEW frame (tissue/<uid>_tissue.png). Slow - it opens every DAPI overview - and only needed once. |
 | `04p_section_provenance.py` | `--force` | off | rebuild tissue masks that already exist |
 | `04q_import_curation.py` | `--plates` |  | roi_plates.csv |
@@ -2036,7 +2036,7 @@ straight from `sys.argv`) without running it. A script with no options says "(no
 | `05c_detect_rois.py` | `--limit` |  | only the first N sections |
 | `05c_detect_rois.py` | `--order` | `balanced` | balanced alternates treatment and control, one section at a time, so a partial run is still a comparison; uid is plain scene_uid order Choices: ('balanced', 'uid'). |
 | `05c_detect_rois.py` | `--qc` | off | write one overlay PNG per ROI to qc/roi_detections: DAPI with nucleus boundaries, green counted, red found but outside the disc |
-| `05c_detect_rois.py` | `--marker` | `_default` | f"which marker's boxes to measure (default {_default}). " "Appends to the same roi_nuclei.csv - the markers " "have disjoint sections." Choices: G5.MARKERS. |
+| `05c_detect_rois.py` | `--marker` | `_default` | which marker's boxes to measure (default <_default>). Appends to the same roi_nuclei.csv - the markers have disjoint sections. Choices: G5.MARKERS. |
 | `05c_detect_rois.py` | `--force` | off | redo finished sections |
 | `05c_detect_rois.py` | `--no-overlays` | off | do not draw the ROI and background-disc crops into detection_overlays/ as sections are measured (06i can draw them later) |
 | `06a_roi_dataset.py` | (none) |  |  |
@@ -2063,7 +2063,7 @@ straight from `sys.argv`) without running it. A script with no options says "(no
 | `06i_detection_overlays.py` | `--no-crops` | off | skip the ROI and background-disc crops |
 | `06i_detection_overlays.py` | `--limit` |  | only the first N sections of each marker |
 | `06i_detection_overlays.py` | `--force` | off | redraw sections whose inputs have not changed (and the crops 05c drew) |
-| `06i_detection_overlays.py` | `--workers` | `0` | f"whole-scene pictures drawn at once, each only when " f"there is memory for it (default 0: half the cores, " f"at most 4 - {DEFAULT_WORKERS} here)" |
+| `06i_detection_overlays.py` | `--workers` | `0` | whole-scene pictures drawn at once, each only when there is memory for it (default 0: half the cores, at most 4 - <DEFAULT_WORKERS> here) |
 | `atlas_pdf.py` | (none) |  |  |
 | `atlas_polygons.py` | (none) |  |  |
 | `atlas_registry.py` | (none) |  |  |
@@ -2360,7 +2360,7 @@ One row per CZI file: what the header says about the scan. Read by every stage t
 - **Read by:** 01_overviews.py, 01a_flatfield.groovy, 01h_tilefield_raw.py, 01l_scene_renders.py, 05c_detect_rois.py
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `file` | text |  | The CZI file name. |
 | `source` | path |  | Where the file was found: the source folder or a zip. |
 | `container` | text |  | The zip that holds it, or empty for a loose file. |
@@ -2399,7 +2399,7 @@ One row per scene, which is one section: where it sits on the slide and its plac
 - **Read by:** 01_overviews.groovy, 01_overviews.py, 01b_pick_sections.py, 01l_scene_renders.py, 02_pair_passes.py, 04m_sections_dataset.py, 04n_roi_worklist.py, 04o_section_rgb.py, 04p_section_provenance.py, 05a_roi_geometry.py, 05c_detect_rois.py
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
 | `file` | text |  | The CZI file name. |
 | `animal` | text |  | The animal id parsed from the file name. |
@@ -2426,7 +2426,7 @@ One row per file: the grid of sections 00 rebuilt from the scene positions, and 
 - **Read by:** a person
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `file` | text |  | The CZI file name. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `slide` | text |  | The slide id parsed from the file name. |
@@ -2448,7 +2448,7 @@ Row counts set by hand for slides whose grid 00 cannot rebuild alone.
 - **Read by:** ls_bundle.py
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `file` | text |  | The CZI file name. |
 | `n_rows` | int |  | The number of rows of sections on that slide. |
 
@@ -2460,7 +2460,7 @@ The rows of slide_layout_summary.csv whose `needs_review` is 1, worst spread fir
 - **Read by:** a person
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `file` | text |  | The CZI file name. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `slide` | text |  | The slide id parsed from the file name. |
@@ -2482,7 +2482,7 @@ One row per file in the transfer zips: did it arrive whole.
 - **Read by:** a person
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `file` | text |  | The CZI file name. |
 | `zip` | text |  | The zip the file came from. |
 | `expected_bytes` | int | bytes | Size recorded in the zip's directory. |
@@ -2498,7 +2498,7 @@ One row per section: how the marker signal is laid out, which tells the markers 
 - **Read by:** a person
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `marker_channel` | text |  | The marker's dye as the file names it (for example AF568). |
@@ -2514,7 +2514,7 @@ One row per file: the four assumptions every reading stage makes, and the measur
 - **Read by:** a person
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `file` | text |  | The CZI file name. |
 | `error` | text |  | The exception, if the file could not be opened or read. |
 | `violations` | text |  | Gated failures, joined with `;` (empty = passes). |
@@ -2550,7 +2550,7 @@ One row per exported section: the quality numbers every later stage reads. Measu
 - **Read by:** 00c_channel_identity.py, 01_overviews.groovy, 01d_contactsheets.py, 01g_saturation_map.py, 01i_multisection_review.py, 04a_reformat.py, 04b_atlas_match.py, 04f_exclusion_candidates.py, 04g_artifact_mask.py, 04i_propagate_to_perk.py, 04j_censor_clipped.py, 04o_section_rgb.py, 04p_section_provenance.py, 05a_roi_geometry.py
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
 | `file` | text |  | The CZI file name. |
 | `animal` | text |  | The animal id parsed from the file name. |
@@ -2583,7 +2583,7 @@ One row per section: clipping on the raw plane, and where its mask is. 04j censo
 - **Read by:** 06f_recensor_nuclei.py
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
 | `file` | text |  | The CZI file name. |
 | `animal` | text |  | The animal id parsed from the file name. |
@@ -2616,7 +2616,7 @@ Sections 01 could not export this run, and why; rewritten every run.
 - **Read by:** a person
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
 | `file` | text |  | The CZI file name. |
 | `animal` | text |  | The animal id parsed from the file name. |
@@ -2648,7 +2648,7 @@ The sections the Fiji export reads to build the tile correction.
 - **Read by:** run_all.sh
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `file` | text |  | The CZI file name. |
 | `scene` | int |  | Scene index in the CZI. |
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
@@ -2663,7 +2663,7 @@ Per scene: the exact tile grid read from the CZI's subblock directory.
 - **Read by:** a person
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `file` | text |  | The CZI file name. |
 | `scene` | int |  | Scene index. |
 | `n_tiles` | int |  | Tiles in the scene. |
@@ -2688,7 +2688,7 @@ Per section: where the clipping falls relative to the tissue, and a verdict on w
 - **Read by:** a person
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `slide` | text |  | The slide id parsed from the file name. |
@@ -2717,7 +2717,7 @@ A check of clipping at full resolution against the overview, on a sample of sect
 - **Read by:** a person
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
 | `file` | text |  | The CZI file name. |
 | `frac_at_5_20um` | float |  | Clipped share on the 5.20 µm read. |
@@ -2732,7 +2732,7 @@ Scenes whose overview holds more than one piece of tissue large enough to be a s
 - **Read by:** 01j_build_curator.py
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `slide` | text |  | The slide id parsed from the file name. |
@@ -2753,7 +2753,7 @@ One row per scene picture drawn, with the settings it was drawn under so a rerun
 - **Read by:** a person
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
 | `file` | text |  | The CZI file name. |
 | `animal` | text |  | The animal id parsed from the file name. |
@@ -2789,7 +2789,7 @@ Scenes 01l could not draw, and why.
 - **Read by:** a person
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
 | `file` | text |  | The CZI file name. |
 | `animal` | text |  | The animal id parsed from the file name. |
@@ -2829,7 +2829,7 @@ One row per physical section of a paired study: which scan of each marker shows 
 - **Read by:** 04i_propagate_to_perk.py
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `section_uid` | text |  | `<animal>_secNNN`, numbered along the brain across the whole animal. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `slide` | text |  | The slide id parsed from the file name. |
@@ -2850,7 +2850,7 @@ One row per slide: the shift between the two scans and how firmly the vote found
 - **Read by:** a person
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `animal` | text |  | The animal id parsed from the file name. |
 | `slide` | text |  | The slide id parsed from the file name. |
 | `n_<marker>` | int |  | Scenes of each marker on the slide. |
@@ -2871,7 +2871,7 @@ Where a slide was scanned more than once: which scan was used.
 - **Read by:** 01d_contactsheets.py
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `animal` | text |  | The animal id parsed from the file name. |
 | `slide` | text |  | The slide id parsed from the file name. |
 | `marker_channel` | text |  | The marker's dye as the file names it (for example AF568). |
@@ -2887,7 +2887,7 @@ Optional: which scan of a re-scanned slide to use.
 - **Read by:** 02_pair_passes.py
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `animal` | text |  | The animal id parsed from the file name. |
 | `slide` | text |  | The slide id parsed from the file name. |
 | `marker_channel` | text |  | The marker's dye as the file names it (for example AF568). |
@@ -2901,7 +2901,7 @@ The salmon atlas plates as the PDF stores them (one row per stored image). The b
 - **Read by:** 04a2_atlas_remerge.py, 04a3b_enforce_sections.py, 04a4_plate_rebuild.py, 04a_reformat.py, 04b_atlas_match.py, 04c_atlas_match.py, 04e_register_elastix.py, 04k_level_curator.py, 04l_roi_curator.py, 04w_wullimann_plates.py, 04x_wullimann_polygons.py, ls_atlas.py, ls_atlas_imagej.py, ls_atlas_import.py
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `plate_id` | text |  | The plate's id, which sorts rostral to caudal. |
 | `page` | int |  | PDF page, from 1. |
 | `index_on_page` | int |  | The image's order on its page. |
@@ -2922,7 +2922,7 @@ One row per region dot. The same columns in every plate set; the Wullimann set's
 - **Read by:** 04a2_atlas_remerge.py, 04a4_plate_rebuild.py, 04a_reformat.py, 04e_register_elastix.py, 04l_roi_curator.py, 04w_wullimann_plates.py, ls_atlas_imagej.py, ls_atlas_import.py
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `plate_id` | text |  | The plate's id, which sorts rostral to caudal. |
 | `page` | int |  | PDF page, from 1. |
 | `plate_seq` | int |  | The dot's number on its plate. |
@@ -2944,7 +2944,7 @@ Every word printed on a plate, with its position, for checking the dots against.
 - **Read by:** a person
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `plate_id` | text |  | The plate's id, which sorts rostral to caudal. |
 | `page` | int |  | PDF page, from 1. |
 | `text` | text |  | The word. |
@@ -2959,7 +2959,7 @@ Each page's colour legend: which colour names which region.
 - **Read by:** a person
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `page` | int |  | PDF page, from 1. |
 | `colour_hex` | text |  | The swatch colour. |
 | `region` | text |  | The name beside it. |
@@ -2972,7 +2972,7 @@ Plates with no region dots, so nothing can be outlined from them.
 - **Read by:** a person
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `plate_id` | text |  | The plate's id, which sorts rostral to caudal. |
 | `page` | int |  | PDF page, from 1. |
 | `image_file` | text |  | The plate picture's file name, beside the CSV. |
@@ -2986,7 +2986,7 @@ The PDF's image strips merged back into whole figures (101 strips became 47 figu
 - **Read by:** 04a3_plate_reframe.py, 04a3b_enforce_sections.py, 04a4_plate_rebuild.py
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `plate_id` | text |  | The plate's id, which sorts rostral to caudal. |
 | `page` | int |  | PDF page, from 1. |
 | `index_on_page` | int |  | Figure order on the page. |
@@ -3007,7 +3007,7 @@ One box per plate inside each merged figure, as fractions of the figure. 04a3b k
 - **Read by:** 04a3b_enforce_sections.py, 04a4_plate_rebuild.py
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `figure_id` | text |  | The merged figure's plate_id. |
 | `page` | int |  | PDF page, from 1. |
 | `box` | int |  | The box's number inside the figure, from 1. |
@@ -3026,7 +3026,7 @@ The final salmon plates: each box rendered from the PDF at full resolution. This
 - **Read by:** 04l_roi_curator.py, 04a_reformat.py, ls_atlas.py
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `plate_id` | text |  | The plate's id, which sorts rostral to caudal. |
 | `page` | int |  | PDF page, from 1. |
 | `source_figure` | text |  | The merged figure it was cut from. |
@@ -3047,7 +3047,7 @@ The Wullimann (1996) cross-sections cut out of the book's PDF. Ships in the repo
 - **Read by:** 06i_detection_overlays.py
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `file` | text |  | The CZI file name. |
 | `pdf_page` | int |  | Page in the PDF. |
 | `label` | text |  | The cross-section's printed label. |
@@ -3062,7 +3062,7 @@ Each cross-section's legend of abbreviations.
 - **Read by:** 04w_wullimann_plates.py, 04x_wullimann_polygons.py
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `cross_section` | text |  | Which cross-section. |
 | `pdf_page` | int |  | Page in the PDF. |
 | `abbreviation` | text |  | The region's abbreviation. |
@@ -3076,7 +3076,7 @@ The Wullimann plates arranged for the curator.
 - **Read by:** 04x_wullimann_polygons.py, 04l_roi_curator.py, ls_atlas.py
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `plate_id` | text |  | The plate's id, which sorts rostral to caudal. |
 | `page` | int |  | PDF page, from 1. |
 | `image_file` | text |  | The plate picture's file name, beside the CSV. |
@@ -3095,7 +3095,7 @@ One row per enclosed area of a plate drawing: its outline and the region it name
 - **Read by:** 04e_register_elastix.py, 04l_roi_curator.py, ls_atlas_imagej.py, ls_atlas_import.py
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `plate_id` | text |  | The plate's id, which sorts rostral to caudal. |
 | `roi_number` | int |  | The area's number, in reading order: down each column, columns left to right. |
 | `region` | text |  | The region abbreviation, or empty. |
@@ -3111,7 +3111,7 @@ A cache of each plate picture's hash, so the curator can tell a re-rendered plat
 - **Read by:** a person
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `image_stem` | text |  | Picture file name without its extension. |
 | `image_file` | text |  | The plate picture's file name, beside the CSV. |
 | `bytes` | int | bytes | File size. |
@@ -3126,7 +3126,7 @@ One row per section: how much of the tissue 04g masked as artifact, by kind. Und
 - **Read by:** a person
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `section_order` | int |  | Position of the section along the animal's brain, 1..N within one marker's series. |
@@ -3158,7 +3158,7 @@ One row per reformatted section: whether 04f proposes it for exclusion, and the 
 - **Read by:** 04a_reformat.py, 04m_sections_dataset.py, 04p_section_provenance.py
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `uid` | text |  | The section's scene_uid. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `section_order` | int |  | Position of the section along the animal's brain, 1..N within one marker's series. |
@@ -3179,7 +3179,7 @@ Every section and atlas plate in the standard 256 frame. A section in this file 
 - **Read by:** 04c_atlas_match.py, 04f_exclusion_candidates.py, 04i_propagate_to_perk.py, 04k_level_curator.py
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `kind` | text |  | `section` or `plate`. |
 | `id` | text |  | The section's scene_uid or the plate's plate_id. |
 | `angle` | float | degrees | Total rotation applied: automatic plus the person's correction. |
@@ -3198,7 +3198,7 @@ The canonical exclusion list, one row per excluded section; header only when not
 - **Read by:** 04i_propagate_to_perk.py
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
 | `decision` | text |  | `auto` (04f's proposal), `manual` (a person) or `restored`. |
 | `reason` | text |  | Why, in words. |
@@ -3211,7 +3211,7 @@ Sections nobody excluded that still did not come through the reformat.
 - **Read by:** a person
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
 | `reason` | text |  | Why, in words. |
 
@@ -3223,7 +3223,7 @@ Per section: the rotation and exclusion carried onto the second scan. The LS stu
 - **Read by:** ls_bundle.py
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `perk_scene_uid` | text |  | The second scan's section (the column keeps its first study's name). |
 | `pcna_scene_uid` | text |  | Its partner in the curated pass. |
 | `animal` | text |  | The animal id parsed from the file name. |
@@ -3244,7 +3244,7 @@ Review decisions made in the ROI curator; 04a merges them over the exclusion lis
 - **Read by:** 04a_reformat.py
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
 | `extra_rotation` | float | degrees | Blank: the review does not rotate. |
@@ -3271,7 +3271,7 @@ Per section: its clipped share, and whether it stays in the analysis set (under 
 - **Read by:** ls_paths.py
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `section_order` | int |  | Position of the section along the animal's brain, 1..N within one marker's series. |
@@ -3291,7 +3291,7 @@ Paired studies: every section of the measured pass with its fate, joined to its 
 - **Read by:** ls_paths.py
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `slide` | text |  | The slide id parsed from the file name. |
@@ -3330,7 +3330,7 @@ The ROI curation queue, in an order where any first part is a usable dataset.
 - **Read by:** 04l_roi_curator.py, 04o_section_rgb.py
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `rank` | int |  | Position in the queue. |
 | `tier` | text |  | `core`, `unpaired_unchecked` or `animal_underpowered`. |
 | `tier_reason` | text |  | Why that tier. |
@@ -3353,7 +3353,7 @@ Which colour composite was drawn from what, appended per run.
 - **Read by:** a person
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
 | `source` | text |  | Always `czi`. |
 | `um_per_px` | float | µm | Pixel size read at. |
@@ -3369,7 +3369,7 @@ Every scanned section, both markers, and what each stage decided about it. A joi
 - **Read by:** 04l_roi_curator.py
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
@@ -3426,7 +3426,7 @@ One row per section with any curation work: the plate it was matched to and how 
 - **Read by:** 05a_roi_geometry.py, 04q_import_curation.py, 04e_register_elastix.py
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
@@ -3455,7 +3455,7 @@ One row per landmark pair: a point on the section and the same point on the plat
 - **Read by:** 05a_roi_geometry.py, 04q_import_curation.py, 04e_register_elastix.py
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
@@ -3480,7 +3480,7 @@ One row per region outline or background disc, in the section's 256 frame. 05a c
 - **Read by:** 05a_roi_geometry.py, 04q_import_curation.py, 04e_register_elastix.py
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
@@ -3512,7 +3512,7 @@ One row per curated section: the six reformat steps 04a took, and the one affine
 - **Read by:** 06a_roi_dataset.py
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
@@ -3556,7 +3556,7 @@ One row per region or background disc: its outline carried onto the CZI, the box
 - **Read by:** a person
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
@@ -3595,7 +3595,7 @@ One row per sampled crop: the signal statistics 05b's verdict is made from (summ
 - **Read by:** a person
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `marker` | text |  | The marker's dye name, as declared in the study. |
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
@@ -3619,7 +3619,7 @@ One row per detected nucleus in every region and background disc. About 900,000 
 - **Read by:** 04p_section_provenance.py, 06a_roi_dataset.py, 06c_excel_dataset.py, 06f_recensor_nuclei.py, 06g_flag_off_tissue.py, 06h_backfill_provenance.py
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
@@ -3669,7 +3669,7 @@ For a marker counted on its own channel: the one intensity range every box of a 
 - **Read by:** a person
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
 | `segmented_on` | text |  | The plane. |
@@ -3685,7 +3685,7 @@ The shape each region was measured on, so 06a can tell when a region was moved a
 - **Read by:** 06a_roi_dataset.py
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
 | `roi_index` | int |  | Row in roi_boxes. |
@@ -3705,7 +3705,7 @@ Multiplex studies only: which object of one marker overlaps which of another.
 - **Read by:** a person
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
 | `roi_index` | int |  | The region. |
 | `marker_a` | text |  | First marker. |
@@ -3723,7 +3723,7 @@ Threshold backend only, and only when it failed: regions whose frame broke the b
 - **Read by:** a person
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
 | `roi_index` | int |  | The region. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
@@ -3742,7 +3742,7 @@ Sections measured with no artifact mask, so `artifact` is 0 there because nothin
 - **Read by:** a person
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
 
@@ -3762,7 +3762,7 @@ One row per detection picture. 05c keeps its own list, `index_05c.csv`, with the
 - **Read by:** 04v_wullimann_extract.py
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `path` | path |  | The picture. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
 | `animal` | text |  | The animal id parsed from the file name. |
@@ -3792,7 +3792,7 @@ Sections 06i could not draw, and why.
 - **Read by:** a person
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `marker` | text |  | The marker's dye name, as declared in the study. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `slide` | text |  | The slide id parsed from the file name. |
@@ -3807,7 +3807,7 @@ One row per region and background disc per section: counts, positives and densit
 - **Read by:** 06b_join_sampling.py, 06c_excel_dataset.py, 06i_detection_overlays.py
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
@@ -3845,7 +3845,7 @@ Per section: how many background-disc nuclei land above the cut. A measurement o
 - **Read by:** a person
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
@@ -3870,7 +3870,7 @@ The exact cut per section, at full precision, so 06i draws the same calls 06a co
 - **Read by:** 06i_detection_overlays.py
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
 | `cut` | float | grey value | The cut, as Python's repr of the float. |
@@ -3883,7 +3883,7 @@ Sections whose regions changed after detection; 06a refuses them until 05c measu
 - **Read by:** a person
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
 | `reason` | text |  | Why, in words. |
@@ -3896,7 +3896,7 @@ One row per animal: its row of the sampling sheet and the group it joined to. Wr
 - **Read by:** a person
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `animal` | text |  | The animal id parsed from the file name. |
 | `sheet_id` | text |  | The animal's id as the sheet writes it. |
 | `treatment` | text |  | The group: the chosen treatment columns joined with ` · `. |
@@ -3918,7 +3918,7 @@ The analysis table: sheet `by_roi`, one row per region per animal (the animal is
 - **Read by:** a person
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `n_nuclei` | int |  | Nuclei counted in that region for that animal. |
 | `ROI` | text |  | The region. |
 | `sample` | text |  | The animal. |
@@ -4001,7 +4001,7 @@ The two automatic plate matchers' proposals, kept as evidence that automatic mat
 - **Read by:** 04b_atlas_match.py
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `section_order` | int |  | Position of the section along the animal's brain, 1..N within one marker's series. |
@@ -4018,7 +4018,7 @@ The level curator's plate per section, interpolated between the sections a perso
 - **Read by:** a person
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `section_order` | int |  | Position of the section along the animal's brain, 1..N within one marker's series. |
@@ -4036,7 +4036,7 @@ How well elastix registered each section to its plate. `roi_regions_refined.csv`
 - **Read by:** a person
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
 | `plate_id` | text |  | The plate's id, which sorts rostral to caudal. |
 | `animal` | text |  | The animal id parsed from the file name. |
@@ -4053,7 +4053,7 @@ A person's count of sections in each multi-blob scene; `01i --fit` reads it back
 - **Read by:** 01i_multisection_review.py
 
 | Column | Type | Units | Meaning |
-|---|---|---|---|
+|------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
 | `n_sections` | int |  | How many sections the scene really holds. |
 <!-- /tables:files -->

@@ -46,9 +46,13 @@ def cell(text):
     return text.replace("|", "\\|")
 
 
-def table(header, rows):
+def table(header, rows, widths=None):
+    """A pipe table. `widths` are relative column widths: pandoc sizes a wide
+    table's columns by the dashes under the header, so a DOCX or PDF build
+    gives the long columns room. GitHub ignores them."""
+    widths = widths or [1] * len(header)
     out = ["| " + " | ".join(header) + " |",
-           "|" + "|".join("---" for _ in header) + "|"]
+           "|" + "|".join("-" * (3 * w) for w in widths) + "|"]
     out += ["| " + " | ".join(cell(c) for c in r) + " |" for r in rows]
     return "\n".join(out)
 
@@ -87,12 +91,49 @@ def stages_table():
                      f"`{s.script}`" if s.script else "", ", ".join(s.needs),
                      outs, s.reader, who, app])
     return table(["Id", "Title", "Group", "Script", "Needs", "Leaves behind",
-                  "Reader", "Decides", "In the app"], rows)
+                  "Reader", "Decides", "In the app"], rows,
+                 widths=[4, 4, 3, 5, 4, 7, 3, 2, 2])
 
 
 # ------------------------------------------------------------------ options
 
-def _src(text, node):
+def _constants(tree):
+    """Module-level names bound to a literal: `DEFAULT_UM_PX = 2.6`."""
+    env = {}
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)):
+            try:
+                env[node.targets[0].id] = ast.literal_eval(node.value)
+            except (ValueError, TypeError, SyntaxError):
+                pass
+    return env
+
+
+def _src(text, node, env=None):
+    """A default or a help string as a reader should see it.
+
+    A literal is itself; a name bound to a literal at module level is that
+    literal; an f-string keeps its words and shows each field as its value
+    when that is a known literal, else as `<expression>`. Anything else is
+    the source text.
+    """
+    env = env or {}
+    if isinstance(node, ast.Name) and node.id in env:
+        val = env[node.id]
+        return val if isinstance(val, str) else repr(val)
+    if isinstance(node, ast.JoinedStr):
+        out = []
+        for part in node.values:
+            if isinstance(part, ast.Constant):
+                out.append(str(part.value))
+            else:
+                inner = part.value
+                if isinstance(inner, ast.Name) and inner.id in env:
+                    out.append(str(env[inner.id]))
+                else:
+                    out.append("<%s>" % ast.get_source_segment(text, inner))
+        return "".join(out)
     seg = ast.get_source_segment(text, node)
     try:
         val = ast.literal_eval(node)
@@ -111,6 +152,7 @@ def script_options(path):
         tree = ast.parse(text)
     except SyntaxError:
         return []
+    env = _constants(tree)
     out = []
     for node in ast.walk(tree):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
@@ -121,12 +163,12 @@ def script_options(path):
         kw = {k.arg: k.value for k in node.keywords if k.arg}
         default = ""
         if "default" in kw:
-            default = _src(text, kw["default"])
+            default = _src(text, kw["default"], env)
         elif "action" in kw and _src(text, kw["action"]) == "store_true":
             default = "off"
-        hlp = _src(text, kw["help"]) if "help" in kw else ""
+        hlp = _src(text, kw["help"], env) if "help" in kw else ""
         if "choices" in kw:
-            hlp = (hlp + " " if hlp else "") + "Choices: " + _src(text, kw["choices"]) + "."
+            hlp = (hlp + " " if hlp else "") + "Choices: " + _src(text, kw["choices"], env) + "."
         out.append((node.lineno, ", ".join(flags), default, hlp))
     out.sort()
     seen = {o[1] for o in out}
@@ -146,7 +188,8 @@ def options_table():
         for flags, default, hlp in opts:
             rows.append([f"`{name}`", f"`{flags}`",
                          f"`{default}`" if default not in ("", "off") else default, hlp])
-    return table(["Script", "Option", "Default", "What it does"], rows)
+    return table(["Script", "Option", "Default", "What it does"], rows,
+                 widths=[4, 4, 3, 9])
 
 
 # -------------------------------------------------------------------- files
@@ -228,7 +271,8 @@ def files_table():
         if cols:
             head += "\n" + table(["Column", "Type", "Units", "Meaning"],
                                  [[f"`{c['name']}`", c["type"], c.get("units", ""),
-                                   c["meaning"]] for c in cols]) + "\n"
+                                   c["meaning"]] for c in cols],
+                                 widths=[4, 2, 2, 9]) + "\n"
         parts.append(head)
     return "\n".join(parts).rstrip()
 

@@ -118,6 +118,7 @@ def main():
         return _check_install()
 
     _mac_menu_name("The Great IHC Leap Forward")
+    _windows_app_id()
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     # Before any window exists, so the study picker is drawn light too.
@@ -192,6 +193,27 @@ def _mac_menu_name(name):
             return send_s(cls(b"NSString"), sel(b"stringWithUTF8String:"), text.encode())
 
         send_pp(info, sel(b"setObject:forKey:"), ns(name), ns("CFBundleName"))
+    except Exception:                                       # noqa: BLE001
+        pass
+
+
+# Shared with the Start menu and desktop shortcuts (packaging/windows/installer.iss).
+WINDOWS_APP_ID = "mbel-tech.TheGreatIHCLeapForward"
+
+
+def _windows_app_id():
+    """Show the app's own logo on the Windows taskbar, not pythonw's.
+
+    Windows groups a window under the executable that made it, which here is
+    the bundled pythonw.exe, so the taskbar would show the Python logo. An
+    explicit app id makes the window its own taskbar entry, drawn with the
+    window icon. Never fatal.
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(WINDOWS_APP_ID)
     except Exception:                                       # noqa: BLE001
         pass
 

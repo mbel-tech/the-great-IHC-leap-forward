@@ -11,7 +11,13 @@ inputs while the text colours chosen here stay dark, which leaves half the
 window unreadable.
 """
 
-from PySide6.QtGui import QColor, QFont, QPalette
+import os
+
+from PySide6.QtGui import QColor, QFont, QIcon, QPalette, QPixmap
+
+# The logo (two origami koi). icon.ico holds every size Windows asks for; the
+# installer and the Mac .app use their own copies (packaging/).
+ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 
 # ---- colour tokens (section 3.1) -------------------------------------------
 
@@ -224,3 +230,23 @@ def apply(app):
     app.setPalette(palette())
     app.setFont(font())
     app.setStyleSheet(stylesheet())
+    app.setWindowIcon(app_icon())
+
+
+def app_icon():
+    """The logo as a window icon, or an empty icon if the file is missing."""
+    path = os.path.join(ASSETS, "icon.ico" if os.name == "nt" else "logo.png")
+    return QIcon(path) if os.path.exists(path) else QIcon()
+
+
+def logo(px):
+    """The logo scaled to `px` square for a QLabel, crisp on high-DPI screens."""
+    pm = QPixmap(os.path.join(ASSETS, "logo-256.png" if px <= 128 else "logo.png"))
+    if pm.isNull():
+        return pm
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QGuiApplication
+    ratio = QGuiApplication.primaryScreen().devicePixelRatio() if QGuiApplication.primaryScreen() else 1.0
+    pm = pm.scaled(int(px * ratio), int(px * ratio), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+    pm.setDevicePixelRatio(ratio)
+    return pm

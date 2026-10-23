@@ -75,7 +75,15 @@ class StudyPicker(QDialog):
         self.buttons.rejected.connect(self.reject)
 
         lay = QVBoxLayout(self)
-        lay.addWidget(QLabel("Which study are you working on?"))
+        head = QHBoxLayout()
+        mark = QLabel()
+        mark.setPixmap(T.logo(56))
+        mark.setAccessibleName("The Great IHC Leap Forward logo")
+        head.addWidget(mark)
+        title = QLabel("<b>The Great IHC Leap Forward</b><br>"
+                       "Which study are you working on?")
+        head.addWidget(title, 1)
+        lay.addLayout(head)
         lay.addWidget(self.list, 1)
         lay.addWidget(where)
         lay.addLayout(row)

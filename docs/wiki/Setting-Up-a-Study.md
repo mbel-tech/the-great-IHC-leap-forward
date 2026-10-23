@@ -63,7 +63,7 @@ Without **Show advanced settings** this card shows only the section thickness, *
 
 ![Microscope and channels, with Find nuclei set to the marker's own channel for AF488 (PCNA)](images/03-setup-microscope.png)
 
-**Multiplex studies.** When every marker is a channel of the same scan, the table has one row per channel: its **Name** (the antibody, which becomes folder and file names and the marker column in every output), its **Role** (*nuclear* for the counterstain, *marker*, or *ignore*), the **CZI channel name** and **Plane** in the file, and where its nuclei are found. The line under the table says whether the pipeline accepts it. Each marker keeps the name you gave it in the slide list and the ROI queue.
+**Multiplex studies.** When every marker is a channel of the same scan, the table has one row per channel: its **Name** (the antibody, which becomes folder and file names and the marker column in every output), its **Role** (*nuclear* for the counterstain, *marker*, *registration*, or *ignore*), the **CZI channel name** and **Plane** in the file, and where its nuclei are found. The line under the table says whether the pipeline accepts it. Each marker keeps the name you gave it in the slide list and the ROI queue.
 
 ![Channels and markers in a multiplex study: DAPI as the counterstain, pERK and PCNA as markers, one channel ignored](images/15-multiplex-channels.png)
 

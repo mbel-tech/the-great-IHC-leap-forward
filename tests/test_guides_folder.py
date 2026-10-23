@@ -52,7 +52,9 @@ def test_guide_images_resolve():
 def test_no_stale_refs():
     out = subprocess.run(
         ["git", "grep", "-n", "-E",
-         r"docs/img/|docs/(user-guide|pipeline-guide|pipeline-methods)\.md"],
+         r"docs/img/|docs/(user-guide|pipeline-guide|pipeline-methods)\.md"
+         # the same paths built with os.path.join("docs", ...)
+         r"""|["']docs["'], *["'](img|(user-guide|pipeline-guide|pipeline-methods)\.md)["']"""],
         cwd=REPO, capture_output=True, text=True).stdout
     stale = [ln for ln in out.splitlines() if not ln.startswith(HISTORY)]
     assert stale == [], "\n".join(stale)

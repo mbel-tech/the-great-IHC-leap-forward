@@ -1058,7 +1058,7 @@ The sections are the same either way. What changes is what stopping early is wor
 
 In a paired study the queue is built from 04m's table, so it waits for 04m. 04m is about two
 separate scans and does not apply to a multiplex study, so there the queue is built from the
-sections the final reformat kept and 04j left in the analysis set, with no partner columns. A
+sections the final reformat kept and 04j left in the analysis set, with the partner columns left blank. A
 missing input is named in the message.
 
 ## 04o  Colour composites — pERK {#stage-rgb_perk}
@@ -1396,7 +1396,7 @@ shared intensity range, recorded in `results/roi_normalisation.csv`, rather than
 background disc's noise does not look like signal. Which route each nucleus took is recorded on its
 row (`segmented_on`).
 
-Each crop is stretched between its 1st and 99.8th percentiles before StarDist sees it. A crop at the
+On the counterstain route, each crop is stretched between its own 1st and 99.8th percentiles before StarDist sees it. A crop at the
 16-bit ceiling with only a few pixels just under it has the two percentiles equal, and the stretch
 would send those pixels to about −10²¹, which makes StarDist abort the whole process with no message.
 Such a crop is refused instead: the box is reported as not segmented and detection carries on with

@@ -58,7 +58,10 @@ def _czi(path, marker):
     with open(path, "wb") as fh:
         fh.write(bytes(head) + bytes(seg) + sizes + body)
         # Sparse: the Slides table shows a believable size, the disk holds a few KB.
-        fh.truncate(int((1.9 + (sum(map(ord, os.path.basename(path))) % 15) / 10) * 1e9))
+        # NTFS does not make a file sparse unless it is flagged, so on Windows
+        # this would write gigabytes of zeros: keep the stand-ins small there.
+        if os.name != "nt":
+            fh.truncate(int((1.9 + (sum(map(ord, os.path.basename(path))) % 15) / 10) * 1e9))
 
 
 def _write(path, rows):

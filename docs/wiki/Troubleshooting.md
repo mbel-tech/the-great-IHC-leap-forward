@@ -29,7 +29,7 @@
 | The app will not start | A missing library or a broken environment | Read `lsapp-crash.log`. To keep curating meanwhile, run `serve_curators.bat` and use a browser. |
 | Unblinding says the workbook header does not match | The sampling workbook's columns differ | Fix the column names to the ones it lists |
 | A stage's row is not ticked though its files are there, and says *its last run failed* | Its last run failed | Read **Show log**, fix the cause, and run it again |
-| *no … sections to check: the exclusion step left none*, or *no … sections to composite* | Every section of that marker was set aside or excluded | Look at `reformatted/exclusion_candidates.csv` and the overviews; reinstate sections with tissue in the ROI curator's Review |
+| *no … sections to check: the exclusion step left none*, or *no … sections to composite* | Every section of that marker was proposed as having no tissue, or was excluded | Look at `reformatted/exclusion_candidates.csv` and the overviews. A whole marker with no tissue usually means a setting is wrong (the channels, or which plane is the marker); fix it in Set up and run Prepare again |
 | A stage says *Not used in this study* | The study has one marker, so the second marker's stages are left out | Nothing to do |
 | Adding a Fiji atlas is refused | An ROI is unnamed, not an area, or a plate lacks its `.zip` | The message names the file and ROI. See [Adding your own atlas](Adding-Your-Own-Atlas). |
 

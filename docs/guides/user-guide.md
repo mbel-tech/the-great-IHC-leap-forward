@@ -209,7 +209,7 @@ In a paired study the table has one row per marker with two names. **Scan channe
 
 ![Microscope and channels, with Find nuclei set to the marker's own channel for AF488 (PCNA)](img/user-guide/03-setup-microscope.png)
 
-In a **multiplex** study every marker is a channel of the same scan, so the table has one row per channel instead: its **Name** (the antibody, which becomes folder and file names and the marker column in every output), its **Role** (*nuclear* for the counterstain, *marker*, or *ignore* for a channel nothing reads), the **CZI channel name** and **Plane** it sits on in the file, and where its nuclei are found. The line under the table says whether the pipeline accepts it. Each marker keeps its own name all the way through: the slide list and the ROI queue use the name you gave it, not the scan's channel name.
+In a **multiplex** study every marker is a channel of the same scan, so the table has one row per channel instead: its **Name** (the antibody, which becomes folder and file names and the marker column in every output), its **Role** (*nuclear* for the counterstain, *marker*, *registration*, or *ignore* for a channel nothing reads), the **CZI channel name** and **Plane** it sits on in the file, and where its nuclei are found. The line under the table says whether the pipeline accepts it. Each marker keeps its own name all the way through: the slide list and the ROI queue use the name you gave it, not the scan's channel name.
 
 ![Channels and markers in a multiplex study: DAPI as the counterstain, pERK and PCNA as markers, one channel ignored](img/user-guide/15-multiplex-channels.png)
 
@@ -648,7 +648,7 @@ It makes the same plan as that screen's **Run all remaining**, with the Options 
 | A curator pane is blank in the .exe | The packaged files are incomplete | Start the app with `--self-test` and read `lsapp-selftest.log`; reinstall if it fails |
 | The app will not start | A missing library or a broken environment | Read `lsapp-crash.log`, in `%LOCALAPPDATA%\The Great IHC Leap Forward\logs` on Windows (`~/.local/state/The Great IHC Leap Forward/logs` elsewhere; the message box names it). **Help > Open the log folder** opens that folder. To keep curating meanwhile, run `serve_curators.bat` and use a browser. |
 | No new figures in results/ROI\_plots | The R figure steps are switched off for now | Run the scripts in `analysis/` by hand with `Rscript` (section 8) |
-| *no … sections to check: the exclusion step left none* (04j), or *no … sections to composite* (04o) | Every section of that marker was proposed as no tissue, or excluded | Look at `reformatted/exclusion_candidates.csv` and the overviews; reinstate the sections that have tissue in the ROI curator's Review, then run again |
+| *no … sections to check: the exclusion step left none* (04j), or *no … sections to composite* (04o) | Every section of that marker was proposed as having no tissue, or was excluded | Look at `reformatted/exclusion_candidates.csv` and the overviews. A whole marker with no tissue usually means a setting is wrong (the channels, or which plane is the marker, in Set up); fix it and run Prepare again. The ROI curator cannot be built until some sections are left. |
 | A stage says *Not used in this study* | The study has one marker, so the second marker's stages are left out | Nothing to do (section 4, *A study with one marker*) |
 | 06b says the workbook header does not match | The sampling workbook's columns differ | Fix the workbook's column names to the ones it lists |
 
@@ -682,9 +682,9 @@ It makes the same plan as that screen's **Run all remaining**, with the Options 
 | Exclusion | A decision that a section should not be used. It is a flag, not a deletion. |
 | False-positive rate | The share of background-disc nuclei above the positivity cut |
 | Favourite | A section you want in the quantified subset or the Shotgun deck |
+| Headless run | `python -m app --run prepare <study.json>` (or `measure`): a screen's Run all remaining without the window |
 | Landmark | A matching pair of points on the section and the plate, showing how well they fit |
 | Marker | The stain being measured, such as pERK or PCNA |
-| Headless run | `python -m app --run prepare <study.json>` (or `measure`): a screen's Run all remaining without the window |
 | Multiplex, paired | Multiplex: one scan holds every marker. Paired: one scan per marker, of different sections. |
 | One-marker study | A study with a single marker; the second marker's stages are left out as *Not used in this study* |
 | Overview | A small picture of one section made once, so nothing reopens the large slide file to look at it |
@@ -697,7 +697,7 @@ It makes the same plan as that screen's **Run all remaining**, with the Options 
 | scene\_uid | The ID every table uses for a section, built from animal, slide and scene, for example `LS105_s10a_sc03` |
 | Stage | One step of the pipeline, with a number such as `04g` and a script in `scripts/` |
 | StarDist | The published model that finds nuclei on DAPI, used without tuning |
-| Tutorial | A guided walk through a whole study on the lab's demo study, started from Project or Help |
 | Tile | One camera frame; the scanner stitches many into a section |
+| Tutorial | A guided walk through a whole study on the lab's demo study, started from Project or Help |
 | Unblinding | Joining animals to their treatment groups, the first stage on the Results screen |
 | Worklist | The order the ROI curator shows sections in, balanced across animals |

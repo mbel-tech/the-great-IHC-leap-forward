@@ -75,6 +75,8 @@ tests/build/
 # Generated from the .md by pandoc; the markdown is the source.
 docs/*.docx
 docs/*.pdf
+docs/guides/*.docx
+docs/guides/*.pdf
 
 # Compiled binaries (the venv itself is covered by work/ above)
 *.pyd

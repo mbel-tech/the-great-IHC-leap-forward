@@ -1,0 +1,6123 @@
+{
+ "_about": "Every file the pipeline writes or reads. Hand-kept; tests/test_technical_guide.py checks it against the code and docs/make_technical_tables.py turns it into the guide's file tables.",
+ "files": [
+  {
+   "path": "manifest/manifest_files.csv",
+   "names": [
+    "manifest_files.csv"
+   ],
+   "writer": "00_manifest.py",
+   "what": "One row per CZI file: what the header says about the scan. Read by every stage that needs a file's channels, pixel size or clip ceiling.",
+   "columns": [
+    {
+     "name": "file",
+     "type": "text",
+     "units": "",
+     "meaning": "The CZI file name."
+    },
+    {
+     "name": "source",
+     "type": "path",
+     "units": "",
+     "meaning": "Where the file was found: the source folder or a zip."
+    },
+    {
+     "name": "container",
+     "type": "text",
+     "units": "",
+     "meaning": "The zip that holds it, or empty for a loose file."
+    },
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "slide",
+     "type": "text",
+     "units": "",
+     "meaning": "The slide id parsed from the file name."
+    },
+    {
+     "name": "variant",
+     "type": "text",
+     "units": "",
+     "meaning": "Which scan of the slide, when it was scanned more than once (`a`, `b`, ...); empty for one scan."
+    },
+    {
+     "name": "name_suffix",
+     "type": "text",
+     "units": "",
+     "meaning": "Anything after the recognised parts of the file name."
+    },
+    {
+     "name": "marker_channel",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye as the file names it (for example AF568)."
+    },
+    {
+     "name": "marker_exposure_ms",
+     "type": "float",
+     "units": "ms",
+     "meaning": "Exposure of the marker channel."
+    },
+    {
+     "name": "dapi_exposure_ms",
+     "type": "float",
+     "units": "ms",
+     "meaning": "Exposure of the first (counterstain) channel."
+    },
+    {
+     "name": "acquired",
+     "type": "text",
+     "units": "",
+     "meaning": "Acquisition date and time from the header."
+    },
+    {
+     "name": "size_x",
+     "type": "int",
+     "units": "px",
+     "meaning": "Width of the whole mosaic."
+    },
+    {
+     "name": "size_y",
+     "type": "int",
+     "units": "px",
+     "meaning": "Height of the whole mosaic."
+    },
+    {
+     "name": "size_c",
+     "type": "int",
+     "units": "",
+     "meaning": "Number of channels."
+    },
+    {
+     "name": "size_s",
+     "type": "int",
+     "units": "",
+     "meaning": "Number of scenes the header declares."
+    },
+    {
+     "name": "n_tiles_m",
+     "type": "int",
+     "units": "",
+     "meaning": "Number of tiles (the M dimension)."
+    },
+    {
+     "name": "n_scenes",
+     "type": "int",
+     "units": "",
+     "meaning": "Number of scenes found in the metadata."
+    },
+    {
+     "name": "pixel_type",
+     "type": "text",
+     "units": "",
+     "meaning": "The container type, for example Gray16."
+    },
+    {
+     "name": "component_bit_count",
+     "type": "int",
+     "units": "",
+     "meaning": "Bits the sensor fills, from ComponentBitCount (16 on the LS study)."
+    },
+    {
+     "name": "clip_ceiling",
+     "type": "int",
+     "units": "",
+     "meaning": "The highest value a pixel can hold, 2^bits - 1; every clipping test reads this."
+    },
+    {
+     "name": "channel_pixel_types",
+     "type": "text",
+     "units": "",
+     "meaning": "Each channel's pixel type, joined with `|`."
+    },
+    {
+     "name": "channel_bit_counts",
+     "type": "text",
+     "units": "",
+     "meaning": "Each channel's ComponentBitCount, joined with `|`."
+    },
+    {
+     "name": "px_um",
+     "type": "float",
+     "units": "µm",
+     "meaning": "Pixel size at full resolution."
+    },
+    {
+     "name": "objective_mag",
+     "type": "float",
+     "units": "",
+     "meaning": "Objective magnification."
+    },
+    {
+     "name": "objective_na",
+     "type": "float",
+     "units": "",
+     "meaning": "Objective numerical aperture."
+    },
+    {
+     "name": "camera",
+     "type": "text",
+     "units": "",
+     "meaning": "Camera model from the header."
+    },
+    {
+     "name": "shading_reference_mode",
+     "type": "text",
+     "units": "",
+     "meaning": "The scanner's own shading correction setting."
+    },
+    {
+     "name": "online_stitching",
+     "type": "text",
+     "units": "",
+     "meaning": "Whether the scanner stitched tiles while scanning."
+    },
+    {
+     "name": "is_redundant_copy",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 for a second copy of a file already seen (same name in another zip)."
+    }
+   ]
+  },
+  {
+   "path": "manifest/manifest_scenes.csv",
+   "names": [
+    "manifest_scenes.csv"
+   ],
+   "writer": "00_manifest.py",
+   "what": "One row per scene, which is one section: where it sits on the slide and its place along the brain.",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "file",
+     "type": "text",
+     "units": "",
+     "meaning": "The CZI file name."
+    },
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "slide",
+     "type": "text",
+     "units": "",
+     "meaning": "The slide id parsed from the file name."
+    },
+    {
+     "name": "variant",
+     "type": "text",
+     "units": "",
+     "meaning": "Which scan of the slide, when it was scanned more than once (`a`, `b`, ...); empty for one scan."
+    },
+    {
+     "name": "marker_channel",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye as the file names it (for example AF568)."
+    },
+    {
+     "name": "scene_index",
+     "type": "int",
+     "units": "",
+     "meaning": "The scene's index inside the CZI, counted from 0."
+    },
+    {
+     "name": "scene_name",
+     "type": "text",
+     "units": "",
+     "meaning": "The scene's name in the header."
+    },
+    {
+     "name": "center_x_um",
+     "type": "float",
+     "units": "µm",
+     "meaning": "Scene centre on the stage, x."
+    },
+    {
+     "name": "center_y_um",
+     "type": "float",
+     "units": "µm",
+     "meaning": "Scene centre on the stage, y."
+    },
+    {
+     "name": "width_um",
+     "type": "float",
+     "units": "µm",
+     "meaning": "Scene box width."
+    },
+    {
+     "name": "height_um",
+     "type": "float",
+     "units": "µm",
+     "meaning": "Scene box height."
+    },
+    {
+     "name": "slide_row",
+     "type": "int",
+     "units": "",
+     "meaning": "Row of the slide grid the scene was placed in, from 0."
+    },
+    {
+     "name": "slide_col",
+     "type": "int",
+     "units": "",
+     "meaning": "Column of the slide grid, from 0."
+    },
+    {
+     "name": "serial_<convention>",
+     "type": "int",
+     "units": "",
+     "meaning": "The scene's position on its slide under each mounting convention (S_scan_order, A_rows_LR, B_cols_TB, C_rows_serpentine, D_cols_serpentine).",
+     "literal": "serial_"
+    },
+    {
+     "name": "slide_serial",
+     "type": "int",
+     "units": "",
+     "meaning": "The position under the study's chosen convention (`section_order_convention`)."
+    },
+    {
+     "name": "section_order",
+     "type": "int",
+     "units": "",
+     "meaning": "Position of the section along the animal's brain, 1..N within one marker's series."
+    }
+   ]
+  },
+  {
+   "path": "qc/slide_layout_summary.csv",
+   "names": [
+    "slide_layout_summary.csv"
+   ],
+   "writer": "00_manifest.py",
+   "what": "One row per file: the grid of sections 00 rebuilt from the scene positions, and whether it needs a person's look.",
+   "columns": [
+    {
+     "name": "file",
+     "type": "text",
+     "units": "",
+     "meaning": "The CZI file name."
+    },
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "slide",
+     "type": "text",
+     "units": "",
+     "meaning": "The slide id parsed from the file name."
+    },
+    {
+     "name": "variant",
+     "type": "text",
+     "units": "",
+     "meaning": "Which scan of the slide, when it was scanned more than once (`a`, `b`, ...); empty for one scan."
+    },
+    {
+     "name": "n_scenes",
+     "type": "int",
+     "units": "",
+     "meaning": "Scenes on the slide."
+    },
+    {
+     "name": "n_rows",
+     "type": "int",
+     "units": "",
+     "meaning": "Rows in the rebuilt grid."
+    },
+    {
+     "name": "n_cols",
+     "type": "int",
+     "units": "",
+     "meaning": "Columns in the rebuilt grid."
+    },
+    {
+     "name": "row_counts",
+     "type": "text",
+     "units": "",
+     "meaning": "Scenes per row, joined with `|`."
+    },
+    {
+     "name": "row_spread_ratio",
+     "type": "float",
+     "units": "",
+     "meaning": "How spread out the scenes of one row are vertically, relative to the row spacing; high means rows were guessed wrongly."
+    },
+    {
+     "name": "rows_forced",
+     "type": "int",
+     "units": "",
+     "meaning": "Row count set by hand in layout_overrides.csv, if any."
+    },
+    {
+     "name": "suggested_rows",
+     "type": "int",
+     "units": "",
+     "meaning": "A row count 00 proposes when the spread is high."
+    },
+    {
+     "name": "needs_review",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when a suggestion is waiting for a person."
+    }
+   ]
+  },
+  {
+   "path": "manifest/layout_overrides.csv",
+   "names": [
+    "layout_overrides.csv"
+   ],
+   "writer": "00_manifest.py (`--accept-suggestions`) or a person",
+   "what": "Row counts set by hand for slides whose grid 00 cannot rebuild alone.",
+   "columns": [
+    {
+     "name": "file",
+     "type": "text",
+     "units": "",
+     "meaning": "The CZI file name."
+    },
+    {
+     "name": "n_rows",
+     "type": "int",
+     "units": "",
+     "meaning": "The number of rows of sections on that slide."
+    }
+   ]
+  },
+  {
+   "path": "qc/slide_layout_review.csv",
+   "names": [
+    "slide_layout_review.csv"
+   ],
+   "writer": "00_manifest.py",
+   "what": "The rows of slide_layout_summary.csv whose `needs_review` is 1, worst spread first, for a person to check.",
+   "columns": [
+    {
+     "name": "file",
+     "type": "text",
+     "units": "",
+     "meaning": "The CZI file name."
+    },
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "slide",
+     "type": "text",
+     "units": "",
+     "meaning": "The slide id parsed from the file name."
+    },
+    {
+     "name": "variant",
+     "type": "text",
+     "units": "",
+     "meaning": "Which scan of the slide, when it was scanned more than once (`a`, `b`, ...); empty for one scan."
+    },
+    {
+     "name": "n_scenes",
+     "type": "int",
+     "units": "",
+     "meaning": "Scenes on the slide."
+    },
+    {
+     "name": "n_rows",
+     "type": "int",
+     "units": "",
+     "meaning": "Rows in the rebuilt grid."
+    },
+    {
+     "name": "n_cols",
+     "type": "int",
+     "units": "",
+     "meaning": "Columns."
+    },
+    {
+     "name": "row_counts",
+     "type": "text",
+     "units": "",
+     "meaning": "Scenes per row."
+    },
+    {
+     "name": "row_spread_ratio",
+     "type": "float",
+     "units": "",
+     "meaning": "As in the summary."
+    },
+    {
+     "name": "rows_forced",
+     "type": "int",
+     "units": "",
+     "meaning": "As in the summary."
+    },
+    {
+     "name": "suggested_rows",
+     "type": "int",
+     "units": "",
+     "meaning": "The proposed row count."
+    },
+    {
+     "name": "needs_review",
+     "type": "0/1",
+     "units": "",
+     "meaning": "Always 1 here."
+    }
+   ]
+  },
+  {
+   "path": "qc/extraction_status.csv",
+   "names": [
+    "extraction_status.csv"
+   ],
+   "writer": "00b_verify_extraction.py",
+   "what": "One row per file in the transfer zips: did it arrive whole.",
+   "columns_from": "00b_verify_extraction.py:STATUS_KEYS",
+   "columns": [
+    {
+     "name": "file",
+     "type": "text",
+     "units": "",
+     "meaning": "The CZI file name."
+    },
+    {
+     "name": "zip",
+     "type": "text",
+     "units": "",
+     "meaning": "The zip the file came from."
+    },
+    {
+     "name": "expected_bytes",
+     "type": "int",
+     "units": "bytes",
+     "meaning": "Size recorded in the zip's directory."
+    },
+    {
+     "name": "actual_bytes",
+     "type": "int",
+     "units": "bytes",
+     "meaning": "Size on disk."
+    },
+    {
+     "name": "status",
+     "type": "text",
+     "units": "",
+     "meaning": "`ok`, `missing`, `in_progress`, `size_mismatch` or `crc_mismatch`."
+    },
+    {
+     "name": "crc_ok",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when the content checksum matched (only with `--crc`)."
+    }
+   ]
+  },
+  {
+   "path": "qc/channel_identity/channel_identity.csv",
+   "names": [
+    "channel_identity.csv"
+   ],
+   "writer": "00c_channel_identity.py",
+   "what": "One row per section: how the marker signal is laid out, which tells the markers apart.",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "marker_channel",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye as the file names it (for example AF568)."
+    },
+    {
+     "name": "n_objects",
+     "type": "int",
+     "units": "",
+     "meaning": "Bright marker objects found on the overview."
+    },
+    {
+     "name": "clustering_index",
+     "type": "float",
+     "units": "",
+     "meaning": "Mean nearest-neighbour distance over the distance expected for a random scatter (Clark-Evans); below 1 = clustered."
+    },
+    {
+     "name": "edge_affinity",
+     "type": "float",
+     "units": "",
+     "meaning": "Median distance from an object to the tissue edge, over the tissue's half-width; low = near the edge (PCNA lines the ventricles)."
+    }
+   ]
+  },
+  {
+   "path": "qc/czi_selftest.csv",
+   "names": [
+    "czi_selftest.csv"
+   ],
+   "writer": "00d_czi_selftest.py",
+   "what": "One row per file: the four assumptions every reading stage makes, and the measured properties around them.",
+   "columns": [
+    {
+     "name": "file",
+     "type": "text",
+     "units": "",
+     "meaning": "The CZI file name."
+    },
+    {
+     "name": "error",
+     "type": "text",
+     "units": "",
+     "meaning": "The exception, if the file could not be opened or read."
+    },
+    {
+     "name": "violations",
+     "type": "text",
+     "units": "",
+     "meaning": "Gated failures, joined with `;` (empty = passes)."
+    },
+    {
+     "name": "n_scenes",
+     "type": "int",
+     "units": "",
+     "meaning": "Scenes in the file."
+    },
+    {
+     "name": "overlapping_pairs",
+     "type": "int",
+     "units": "",
+     "meaning": "Pairs of scene rectangles that overlap."
+    },
+    {
+     "name": "scenes_in_overlap",
+     "type": "int",
+     "units": "",
+     "meaning": "Scenes that overlap at least one other."
+    },
+    {
+     "name": "max_overlap_frac",
+     "type": "float",
+     "units": "",
+     "meaning": "Largest overlap as a fraction of the smaller scene."
+    },
+    {
+     "name": "pyramid_levels",
+     "type": "text",
+     "units": "",
+     "meaning": "The stored pyramid levels."
+    },
+    {
+     "name": "frames_compared",
+     "type": "int",
+     "units": "",
+     "meaning": "Scenes whose frame was compared with and without the pyramid."
+    },
+    {
+     "name": "frame_key_mismatch",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when the two frame reports list different scenes (gated)."
+    },
+    {
+     "name": "origin_drift",
+     "type": "int",
+     "units": "",
+     "meaning": "Scenes whose origin differs between the two reports (gated)."
+    },
+    {
+     "name": "extent_drift",
+     "type": "int",
+     "units": "",
+     "meaning": "Scenes whose size differs between the two reports."
+    },
+    {
+     "name": "image_bit_count",
+     "type": "int",
+     "units": "",
+     "meaning": "Image-level ComponentBitCount."
+    },
+    {
+     "name": "channel_bit_counts",
+     "type": "text",
+     "units": "",
+     "meaning": "Each channel's ComponentBitCount."
+    },
+    {
+     "name": "channel_pixel_types",
+     "type": "text",
+     "units": "",
+     "meaning": "Each channel's pixel type."
+    },
+    {
+     "name": "bit_count_disagreement",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when a channel disagrees with the image level (gated)."
+    },
+    {
+     "name": "nominal_ceiling",
+     "type": "int",
+     "units": "",
+     "meaning": "2^bits - 1."
+    },
+    {
+     "name": "bitcount_ranges",
+     "type": "text",
+     "units": "",
+     "meaning": "BitCountRange values from the display settings."
+    },
+    {
+     "name": "bitcount_range_mismatch",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when BitCountRange disagrees with ComponentBitCount (reported, not gated)."
+    },
+    {
+     "name": "shading",
+     "type": "text",
+     "units": "",
+     "meaning": "The scanner's shading-correction setting."
+    },
+    {
+     "name": "online_stitching",
+     "type": "text",
+     "units": "",
+     "meaning": "Whether tiles were stitched during the scan."
+    },
+    {
+     "name": "strip_rows",
+     "type": "int",
+     "units": "px",
+     "meaning": "Rows sampled at native resolution from the largest scene (`--pixels`)."
+    },
+    {
+     "name": "strip_frac_of_scene",
+     "type": "float",
+     "units": "",
+     "meaning": "That strip as a fraction of the scene."
+    },
+    {
+     "name": "strip_max_by_channel",
+     "type": "text",
+     "units": "",
+     "meaning": "Highest value per channel in the strip."
+    },
+    {
+     "name": "clipped_at_ceiling_by_channel",
+     "type": "text",
+     "units": "",
+     "meaning": "Fraction of strip pixels at the ceiling, per channel."
+    },
+    {
+     "name": "shallow_signature_by_channel",
+     "type": "text",
+     "units": "",
+     "meaning": "Channels whose values look like a shallower sensor than declared."
+    }
+   ]
+  },
+  {
+   "path": "qc/focus.csv",
+   "names": [
+    "focus.csv"
+   ],
+   "writer": "01_overviews.py",
+   "what": "One row per exported section: the quality numbers every later stage reads. Measured on the 5.20 µm overview after the tile correction.",
+   "columns_from": "01_overviews.py:QC_KEYS",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "file",
+     "type": "text",
+     "units": "",
+     "meaning": "The CZI file name."
+    },
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "slide",
+     "type": "text",
+     "units": "",
+     "meaning": "The slide id parsed from the file name."
+    },
+    {
+     "name": "variant",
+     "type": "text",
+     "units": "",
+     "meaning": "Which scan of the slide, when it was scanned more than once (`a`, `b`, ...); empty for one scan."
+    },
+    {
+     "name": "marker_channel",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye as the file names it (for example AF568)."
+    },
+    {
+     "name": "scene_index",
+     "type": "int",
+     "units": "",
+     "meaning": "The scene's index inside the CZI, counted from 0."
+    },
+    {
+     "name": "section_order",
+     "type": "int",
+     "units": "",
+     "meaning": "Position of the section along the animal's brain, 1..N within one marker's series."
+    },
+    {
+     "name": "width",
+     "type": "int",
+     "units": "px",
+     "meaning": "Overview width."
+    },
+    {
+     "name": "height",
+     "type": "int",
+     "units": "px",
+     "meaning": "Overview height."
+    },
+    {
+     "name": "um_px",
+     "type": "float",
+     "units": "µm",
+     "meaning": "Overview pixel size (5.20 on the LS study)."
+    },
+    {
+     "name": "tissue_threshold",
+     "type": "int",
+     "units": "grey value",
+     "meaning": "Otsu threshold on the DAPI overview that separates tissue from glass."
+    },
+    {
+     "name": "tissue_fraction",
+     "type": "float",
+     "units": "",
+     "meaning": "Share of the overview that is tissue."
+    },
+    {
+     "name": "tissue_area_mm2",
+     "type": "float",
+     "units": "mm²",
+     "meaning": "Tissue area."
+    },
+    {
+     "name": "tissue_mean",
+     "type": "float",
+     "units": "grey value",
+     "meaning": "Mean marker value inside tissue."
+    },
+    {
+     "name": "background_mean",
+     "type": "float",
+     "units": "grey value",
+     "meaning": "Mean marker value on scanned glass."
+    },
+    {
+     "name": "contrast",
+     "type": "float",
+     "units": "",
+     "meaning": "tissue_mean / background_mean."
+    },
+    {
+     "name": "focus_score",
+     "type": "float",
+     "units": "",
+     "meaning": "Edge energy inside tissue divided by mean brightness; under 0.070 means out of focus."
+    },
+    {
+     "name": "saturated_fraction",
+     "type": "float",
+     "units": "",
+     "meaning": "Share of marker pixels at the ceiling after the tile correction (an undercount, kept for comparison)."
+    },
+    {
+     "name": "saturated_fraction_raw",
+     "type": "float",
+     "units": "",
+     "meaning": "Share of marker pixels at the ceiling on the raw plane."
+    },
+    {
+     "name": "saturated_fraction_dapi_raw",
+     "type": "float",
+     "units": "",
+     "meaning": "The same for DAPI."
+    },
+    {
+     "name": "tilefield_applied",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when the tile correction from 01f was applied before measuring."
+    },
+    {
+     "name": "reader",
+     "type": "text",
+     "units": "",
+     "meaning": "Which library decoded the pixels (always `pylibCZIrw`)."
+    }
+   ]
+  },
+  {
+   "path": "qc/saturation_raw.csv",
+   "names": [
+    "saturation_raw.csv"
+   ],
+   "writer": "01_overviews.py (01k_saturation_raw.py backfills)",
+   "what": "One row per section: clipping on the raw plane, and where its mask is. 04j censors from these masks.",
+   "columns_from": "01_overviews.py:SAT_RAW_KEYS",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "file",
+     "type": "text",
+     "units": "",
+     "meaning": "The CZI file name."
+    },
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "slide",
+     "type": "text",
+     "units": "",
+     "meaning": "The slide id parsed from the file name."
+    },
+    {
+     "name": "variant",
+     "type": "text",
+     "units": "",
+     "meaning": "Which scan of the slide, when it was scanned more than once (`a`, `b`, ...); empty for one scan."
+    },
+    {
+     "name": "marker_channel",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye as the file names it (for example AF568)."
+    },
+    {
+     "name": "scene_index",
+     "type": "int",
+     "units": "",
+     "meaning": "The scene's index inside the CZI, counted from 0."
+    },
+    {
+     "name": "section_order",
+     "type": "int",
+     "units": "",
+     "meaning": "Position of the section along the animal's brain, 1..N within one marker's series."
+    },
+    {
+     "name": "width",
+     "type": "int",
+     "units": "px",
+     "meaning": "Mask width."
+    },
+    {
+     "name": "height",
+     "type": "int",
+     "units": "px",
+     "meaning": "Mask height."
+    },
+    {
+     "name": "um_px",
+     "type": "float",
+     "units": "µm",
+     "meaning": "Mask pixel size."
+    },
+    {
+     "name": "zoom",
+     "type": "float",
+     "units": "",
+     "meaning": "The pylibCZIrw zoom it was read at."
+    },
+    {
+     "name": "rect_x",
+     "type": "int",
+     "units": "px",
+     "meaning": "Scene origin, x, in CZI stage pixels."
+    },
+    {
+     "name": "rect_y",
+     "type": "int",
+     "units": "px",
+     "meaning": "Scene origin, y."
+    },
+    {
+     "name": "rect_w",
+     "type": "int",
+     "units": "px",
+     "meaning": "Scene width at full resolution."
+    },
+    {
+     "name": "rect_h",
+     "type": "int",
+     "units": "px",
+     "meaning": "Scene height at full resolution."
+    },
+    {
+     "name": "saturated_fraction_raw",
+     "type": "float",
+     "units": "",
+     "meaning": "Share of marker pixels at the ceiling, raw."
+    },
+    {
+     "name": "saturated_fraction_dapi_raw",
+     "type": "float",
+     "units": "",
+     "meaning": "The same for DAPI."
+    },
+    {
+     "name": "saturated_fraction_corrected",
+     "type": "float",
+     "units": "",
+     "meaning": "Share at the ceiling after the tile correction."
+    },
+    {
+     "name": "raw_over_corrected",
+     "type": "float",
+     "units": "",
+     "meaning": "How much the correction hid: raw / corrected."
+    },
+    {
+     "name": "mask_path",
+     "type": "path",
+     "units": "",
+     "meaning": "The clipped-pixel mask, `qc/censor_raw/<scene_uid>_clipped.png`, relative to the output folder."
+    },
+    {
+     "name": "tilefield_applied",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when the tile correction from 01f was applied before measuring."
+    },
+    {
+     "name": "reader",
+     "type": "text",
+     "units": "",
+     "meaning": "Which library decoded the pixels (always `pylibCZIrw`)."
+    }
+   ]
+  },
+  {
+   "path": "qc/overview_failures.csv",
+   "names": [
+    "overview_failures.csv"
+   ],
+   "writer": "01_overviews.py",
+   "what": "Sections 01 could not export this run, and why; rewritten every run.",
+   "columns_from": "01_overviews.py:FAILURE_KEYS",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "file",
+     "type": "text",
+     "units": "",
+     "meaning": "The CZI file name."
+    },
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "marker_channel",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye as the file names it (for example AF568)."
+    },
+    {
+     "name": "scene_index",
+     "type": "int",
+     "units": "",
+     "meaning": "The scene's index inside the CZI, counted from 0."
+    },
+    {
+     "name": "reason",
+     "type": "text",
+     "units": "",
+     "meaning": "Why, in words."
+    }
+   ]
+  },
+  {
+   "path": "qc/display_ranges.json",
+   "names": [
+    "display_ranges.json"
+   ],
+   "writer": "01_overviews.py",
+   "what": "The brightness range of every overview picture, frozen once for the dataset from tissue pixels.",
+   "format": "JSON: `{channel name: {\"lo\": int, \"hi\": int}}`, the 1st and 99.5th percentiles of sampled tissue pixels.",
+   "columns": []
+  },
+  {
+   "path": "qc/censor_raw/<scene_uid>_clipped.png",
+   "names": [],
+   "writer": "01_overviews.py",
+   "what": "The clipped pixels of each section's marker, on the raw plane at overview size.",
+   "format": "8-bit PNG, 255 where the raw value reached the clip ceiling.",
+   "readers": [
+    "04j_censor_clipped.py",
+    "01g_saturation_map.py",
+    "06f_recensor_nuclei.py"
+   ],
+   "columns": []
+  },
+  {
+   "path": "qc/tilefield_sample.csv",
+   "names": [
+    "tilefield_sample.csv"
+   ],
+   "writer": "01b_pick_sections.py",
+   "what": "The sections the Fiji export reads to build the tile correction.",
+   "columns": [
+    {
+     "name": "file",
+     "type": "text",
+     "units": "",
+     "meaning": "The CZI file name."
+    },
+    {
+     "name": "scene",
+     "type": "int",
+     "units": "",
+     "meaning": "Scene index in the CZI."
+    },
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "marker_channel",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye as the file names it (for example AF568)."
+    }
+   ]
+  },
+  {
+   "path": "qc/tile_geometry.csv",
+   "names": [
+    "tile_geometry.csv"
+   ],
+   "writer": "01e_tile_geometry.py",
+   "what": "Per scene: the exact tile grid read from the CZI's subblock directory.",
+   "columns": [
+    {
+     "name": "file",
+     "type": "text",
+     "units": "",
+     "meaning": "The CZI file name."
+    },
+    {
+     "name": "scene",
+     "type": "int",
+     "units": "",
+     "meaning": "Scene index."
+    },
+    {
+     "name": "n_tiles",
+     "type": "int",
+     "units": "",
+     "meaning": "Tiles in the scene."
+    },
+    {
+     "name": "tile_w",
+     "type": "int",
+     "units": "px",
+     "meaning": "Tile width."
+    },
+    {
+     "name": "tile_h",
+     "type": "int",
+     "units": "px",
+     "meaning": "Tile height."
+    },
+    {
+     "name": "n_cols",
+     "type": "int",
+     "units": "",
+     "meaning": "Tile columns."
+    },
+    {
+     "name": "n_rows",
+     "type": "int",
+     "units": "",
+     "meaning": "Tile rows."
+    },
+    {
+     "name": "pitch_x_px",
+     "type": "float",
+     "units": "px",
+     "meaning": "Distance between tile origins, x."
+    },
+    {
+     "name": "pitch_y_px",
+     "type": "float",
+     "units": "px",
+     "meaning": "Distance between tile origins, y."
+    },
+    {
+     "name": "pitch_x_um",
+     "type": "float",
+     "units": "µm",
+     "meaning": "The same in µm."
+    },
+    {
+     "name": "pitch_y_um",
+     "type": "float",
+     "units": "µm",
+     "meaning": "The same in µm."
+    },
+    {
+     "name": "overlap_x_pct",
+     "type": "float",
+     "units": "%",
+     "meaning": "Overlap between neighbouring tiles, x."
+    },
+    {
+     "name": "overlap_y_pct",
+     "type": "float",
+     "units": "%",
+     "meaning": "Overlap, y."
+    },
+    {
+     "name": "origin_x",
+     "type": "int",
+     "units": "px",
+     "meaning": "Leftmost tile origin."
+    },
+    {
+     "name": "origin_y",
+     "type": "int",
+     "units": "px",
+     "meaning": "Topmost tile origin."
+    }
+   ]
+  },
+  {
+   "path": "qc/saturation/saturation_<marker>.csv",
+   "names": [
+    "saturation_{args.marker}{suffix}.csv"
+   ],
+   "writer": "01g_saturation_map.py",
+   "what": "Per section: where the clipping falls relative to the tissue, and a verdict on whether it matters.",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "slide",
+     "type": "text",
+     "units": "",
+     "meaning": "The slide id parsed from the file name."
+    },
+    {
+     "name": "marker_channel",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye as the file names it (for example AF568)."
+    },
+    {
+     "name": "section_order",
+     "type": "int",
+     "units": "",
+     "meaning": "Position of the section along the animal's brain, 1..N within one marker's series."
+    },
+    {
+     "name": "sat_fraction_frame",
+     "type": "float",
+     "units": "",
+     "meaning": "Share of the whole overview that is clipped."
+    },
+    {
+     "name": "tissue_median",
+     "type": "float",
+     "units": "grey value",
+     "meaning": "Median marker value in tissue."
+    },
+    {
+     "name": "background_median",
+     "type": "float",
+     "units": "grey value",
+     "meaning": "Median marker value on scanned glass."
+    },
+    {
+     "name": "contrast",
+     "type": "float",
+     "units": "",
+     "meaning": "tissue_median / background_median."
+    },
+    {
+     "name": "inverted",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when the glass is brighter than the tissue."
+    },
+    {
+     "name": "in_tissue_fraction",
+     "type": "float",
+     "units": "",
+     "meaning": "Share of clipped pixels that are inside tissue."
+    },
+    {
+     "name": "tissue_coverage",
+     "type": "float",
+     "units": "",
+     "meaning": "Share of tissue that is clipped."
+    },
+    {
+     "name": "edge_affinity",
+     "type": "float",
+     "units": "",
+     "meaning": "Median depth of clipped pixels inside the tissue, as a fraction of the tissue's half-width."
+    },
+    {
+     "name": "tissue_edge_affinity",
+     "type": "float",
+     "units": "",
+     "meaning": "The same for all tissue pixels, for comparison."
+    },
+    {
+     "name": "n_blobs",
+     "type": "int",
+     "units": "",
+     "meaning": "Separate clipped patches in tissue."
+    },
+    {
+     "name": "median_blob_um2",
+     "type": "float",
+     "units": "µm²",
+     "meaning": "Median patch size."
+    },
+    {
+     "name": "max_blob_um2",
+     "type": "float",
+     "units": "µm²",
+     "meaning": "Largest patch."
+    },
+    {
+     "name": "frac_area_in_big_blobs",
+     "type": "float",
+     "units": "",
+     "meaning": "Share of clipped area in patches far bigger than a nucleus."
+    },
+    {
+     "name": "verdict",
+     "type": "text",
+     "units": "",
+     "meaning": "`negligible`, `inverted contrast`, `no tissue mask`, or the cosmetic/costly call from `classify`."
+    }
+   ]
+  },
+  {
+   "path": "qc/saturation_raw_native.csv",
+   "names": [
+    "saturation_raw_native.csv"
+   ],
+   "writer": "01k_saturation_raw.py (`--native-sample`, on by default; 0 turns it off)",
+   "what": "A check of clipping at full resolution against the overview, on a sample of sections.",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "file",
+     "type": "text",
+     "units": "",
+     "meaning": "The CZI file name."
+    },
+    {
+     "name": "frac_at_5_20um",
+     "type": "float",
+     "units": "",
+     "meaning": "Clipped share on the 5.20 µm read."
+    },
+    {
+     "name": "frac_at_0_65um",
+     "type": "float",
+     "units": "",
+     "meaning": "Clipped share at full resolution."
+    },
+    {
+     "name": "native_over_overview",
+     "type": "float",
+     "units": "",
+     "meaning": "Their ratio."
+    }
+   ]
+  },
+  {
+   "path": "qc/multisection/multisection_review.csv",
+   "names": [
+    "multisection_review.csv"
+   ],
+   "writer": "01i_multisection_review.py",
+   "what": "Scenes whose overview holds more than one piece of tissue large enough to be a section, for a person to judge.",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "slide",
+     "type": "text",
+     "units": "",
+     "meaning": "The slide id parsed from the file name."
+    },
+    {
+     "name": "marker_channel",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye as the file names it (for example AF568)."
+    },
+    {
+     "name": "n_blobs",
+     "type": "int",
+     "units": "",
+     "meaning": "Large tissue pieces."
+    },
+    {
+     "name": "blob_boxes",
+     "type": "JSON",
+     "units": "px",
+     "meaning": "Each piece's box `[x, y, w, h]` on the overview."
+    },
+    {
+     "name": "separation_ratio",
+     "type": "float",
+     "units": "",
+     "meaning": "Spread across the short axis over spread along the long axis: hemispheres sit side by side, stacked sections end to end."
+    },
+    {
+     "name": "size_ratio",
+     "type": "float",
+     "units": "",
+     "meaning": "Second-largest piece over the largest."
+    },
+    {
+     "name": "blob_area_frac",
+     "type": "float",
+     "units": "",
+     "meaning": "Share of the overview the pieces cover."
+    },
+    {
+     "name": "tissue_area_mm2",
+     "type": "float",
+     "units": "mm²",
+     "meaning": "From focus.csv."
+    },
+    {
+     "name": "n_sections",
+     "type": "int",
+     "units": "",
+     "meaning": "Filled in by a person (in the curator built by 01j): how many sections it really is."
+    }
+   ]
+  },
+  {
+   "path": "qc/scene_renders.csv",
+   "names": [
+    "scene_renders.csv"
+   ],
+   "writer": "01l_scene_renders.py",
+   "what": "One row per scene picture drawn, with the settings it was drawn under so a rerun redraws only what changed.",
+   "columns_from": "01l_scene_renders.py:INDEX_KEYS",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "file",
+     "type": "text",
+     "units": "",
+     "meaning": "The CZI file name."
+    },
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "slide",
+     "type": "text",
+     "units": "",
+     "meaning": "The slide id parsed from the file name."
+    },
+    {
+     "name": "variant",
+     "type": "text",
+     "units": "",
+     "meaning": "Which scan of the slide, when it was scanned more than once (`a`, `b`, ...); empty for one scan."
+    },
+    {
+     "name": "marker_channel",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye as the file names it (for example AF568)."
+    },
+    {
+     "name": "scene_index",
+     "type": "int",
+     "units": "",
+     "meaning": "The scene's index inside the CZI, counted from 0."
+    },
+    {
+     "name": "section_order",
+     "type": "int",
+     "units": "",
+     "meaning": "Position of the section along the animal's brain, 1..N within one marker's series."
+    },
+    {
+     "name": "um_per_px",
+     "type": "float",
+     "units": "µm",
+     "meaning": "Picture pixel size (2.6 by default)."
+    },
+    {
+     "name": "block",
+     "type": "int",
+     "units": "",
+     "meaning": "Native pixels averaged per picture pixel along each side."
+    },
+    {
+     "name": "width",
+     "type": "int",
+     "units": "px",
+     "meaning": "Picture width."
+    },
+    {
+     "name": "height",
+     "type": "int",
+     "units": "px",
+     "meaning": "Picture height."
+    },
+    {
+     "name": "range",
+     "type": "text",
+     "units": "",
+     "meaning": "`dataset` (the frozen display range) or `section` (stretched to this section)."
+    },
+    {
+     "name": "nuclear_lo",
+     "type": "int",
+     "units": "grey value",
+     "meaning": "Bottom of the counterstain stretch."
+    },
+    {
+     "name": "nuclear_hi",
+     "type": "int",
+     "units": "grey value",
+     "meaning": "Top of the counterstain stretch."
+    },
+    {
+     "name": "nuclear_range_from",
+     "type": "text",
+     "units": "",
+     "meaning": "Where that range came from: `dataset` or `section`."
+    },
+    {
+     "name": "marker_lo",
+     "type": "int",
+     "units": "grey value",
+     "meaning": "Bottom of the marker stretch."
+    },
+    {
+     "name": "marker_hi",
+     "type": "int",
+     "units": "grey value",
+     "meaning": "Top of the marker stretch."
+    },
+    {
+     "name": "marker_range_from",
+     "type": "text",
+     "units": "",
+     "meaning": "`dataset` or `section`."
+    },
+    {
+     "name": "clipped_fraction_marker",
+     "type": "float",
+     "units": "",
+     "meaning": "Share of marker pixels at the ceiling."
+    },
+    {
+     "name": "tilefield_applied",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when the tile correction from 01f was applied before measuring."
+    },
+    {
+     "name": "stain_counterstain_png",
+     "type": "path",
+     "units": "",
+     "meaning": "The colour picture, marker over counterstain."
+    },
+    {
+     "name": "stain_only_png",
+     "type": "path",
+     "units": "",
+     "meaning": "The marker-only picture."
+    },
+    {
+     "name": "reader",
+     "type": "text",
+     "units": "",
+     "meaning": "Which library decoded the pixels (always `pylibCZIrw`)."
+    },
+    {
+     "name": "source",
+     "type": "text",
+     "units": "",
+     "meaning": "`scan` (averaged from full resolution) or `zeiss_preview` (the stored pyramid copy)."
+    },
+    {
+     "name": "background",
+     "type": "text",
+     "units": "",
+     "meaning": "`blanked` outside the tissue outline, `kept`, or `no silhouette` when the overview had none."
+    }
+   ]
+  },
+  {
+   "path": "qc/scene_render_failures.csv",
+   "names": [
+    "scene_render_failures.csv"
+   ],
+   "writer": "01l_scene_renders.py",
+   "what": "Scenes 01l could not draw, and why.",
+   "columns_from": "01l_scene_renders.py:FAILURE_KEYS",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "file",
+     "type": "text",
+     "units": "",
+     "meaning": "The CZI file name."
+    },
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "marker_channel",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye as the file names it (for example AF568)."
+    },
+    {
+     "name": "scene_index",
+     "type": "int",
+     "units": "",
+     "meaning": "The scene's index inside the CZI, counted from 0."
+    },
+    {
+     "name": "reason",
+     "type": "text",
+     "units": "",
+     "meaning": "Why, in words."
+    }
+   ]
+  },
+  {
+   "path": "qc/flatfield/tilefield_c<channel>.npy",
+   "names": [
+    "tilefield_c{channel}.npy",
+    "tilefield_c{c}.npy",
+    "tilefield_c{idx}.npy"
+   ],
+   "writer": "01f_tilefield.py",
+   "what": "The tile correction: one gain per position inside a tile, per channel.",
+   "format": "NumPy float32 array the size of one tile cell; divide a pixel by the gain at its tile position.",
+   "columns": []
+  },
+  {
+   "path": "qc/flatfield/tilefield_raw_<name>.npy",
+   "names": [
+    "tilefield_raw_{name}.npy",
+    "tilefield_raw_{name}_tiledomain.npy"
+   ],
+   "writer": "01h_tilefield_raw.py",
+   "what": "The same correction measured from raw tiles with czifile, as a check on 01f; `_tiledomain` is before mapping onto the stitched grid.",
+   "format": "NumPy float32 array.",
+   "readers": [],
+   "columns": []
+  },
+  {
+   "path": "qc/tile_artifact/<sections folder>_summary.json",
+   "names": [
+    "_summary.json"
+   ],
+   "writer": "01c_measure_tile_artifact.py",
+   "what": "How strong the tile pattern is before and after correction, from the spectral peak at the tile pitch.",
+   "format": "JSON summary of the per-section measurements.",
+   "readers": [],
+   "columns": []
+  },
+  {
+   "path": "pairs.csv",
+   "names": [
+    "pairs.csv"
+   ],
+   "writer": "02_pair_passes.py",
+   "what": "One row per physical section of a paired study: which scan of each marker shows it. The `section_uid` joins the two scans.",
+   "columns": [
+    {
+     "name": "section_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "`<animal>_secNNN`, numbered along the brain across the whole animal."
+    },
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "slide",
+     "type": "text",
+     "units": "",
+     "meaning": "The slide id parsed from the file name."
+    },
+    {
+     "name": "slide_serial",
+     "type": "int",
+     "units": "",
+     "meaning": "Position on the slide."
+    },
+    {
+     "name": "status",
+     "type": "text",
+     "units": "",
+     "meaning": "`matched`, `unmatched_<marker>`, `separate_slide_<marker>` or `no_centre_<marker>`."
+    },
+    {
+     "name": "<marker>_file",
+     "type": "text",
+     "units": "",
+     "meaning": "The CZI of each marker's scan (one set per marker, named by `ls_paths.slug`).",
+     "literal": "_file"
+    },
+    {
+     "name": "<marker>_scene",
+     "type": "int",
+     "units": "",
+     "meaning": "Its scene index.",
+     "literal": "_scene"
+    },
+    {
+     "name": "<marker>_scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "Its scene_uid.",
+     "literal": "_scene_uid"
+    },
+    {
+     "name": "match_distance_um",
+     "type": "float",
+     "units": "µm",
+     "meaning": "Distance between the two scans' centres after removing the slide's shift."
+    },
+    {
+     "name": "center_x_um",
+     "type": "float",
+     "units": "µm",
+     "meaning": "Section centre, x."
+    },
+    {
+     "name": "center_y_um",
+     "type": "float",
+     "units": "µm",
+     "meaning": "Section centre, y."
+    }
+   ]
+  },
+  {
+   "path": "qc/pairing_offsets.csv",
+   "names": [
+    "pairing_offsets.csv"
+   ],
+   "writer": "02_pair_passes.py",
+   "what": "One row per slide: the shift between the two scans and how firmly the vote found it.",
+   "columns": [
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "slide",
+     "type": "text",
+     "units": "",
+     "meaning": "The slide id parsed from the file name."
+    },
+    {
+     "name": "n_<marker>",
+     "type": "int",
+     "units": "",
+     "meaning": "Scenes of each marker on the slide.",
+     "literal": "n_"
+    },
+    {
+     "name": "same_slide",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when the two scans' layouts agree."
+    },
+    {
+     "name": "tight_fraction",
+     "type": "float",
+     "units": "",
+     "meaning": "Share of scenes that land close after the shift."
+    },
+    {
+     "name": "median_residual_um",
+     "type": "float",
+     "units": "µm",
+     "meaning": "Median distance left after the shift."
+    },
+    {
+     "name": "dx_um",
+     "type": "float",
+     "units": "µm",
+     "meaning": "Shift, x."
+    },
+    {
+     "name": "dy_um",
+     "type": "float",
+     "units": "µm",
+     "meaning": "Shift, y."
+    },
+    {
+     "name": "inlier_votes",
+     "type": "int",
+     "units": "",
+     "meaning": "Pairings that voted for the winning shift."
+    },
+    {
+     "name": "n_matched",
+     "type": "int",
+     "units": "",
+     "meaning": "Sections paired."
+    },
+    {
+     "name": "note",
+     "type": "text",
+     "units": "",
+     "meaning": "Why a slide was treated as two."
+    }
+   ]
+  },
+  {
+   "path": "manifest/variant_choices.csv",
+   "names": [
+    "variant_choices.csv"
+   ],
+   "writer": "02_pair_passes.py",
+   "what": "Where a slide was scanned more than once: which scan was used.",
+   "columns": [
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "slide",
+     "type": "text",
+     "units": "",
+     "meaning": "The slide id parsed from the file name."
+    },
+    {
+     "name": "marker_channel",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye as the file names it (for example AF568)."
+    },
+    {
+     "name": "chosen_variant",
+     "type": "text",
+     "units": "",
+     "meaning": "The scan used."
+    },
+    {
+     "name": "candidates",
+     "type": "text",
+     "units": "",
+     "meaning": "Every scan with its scene count, `a(9)|b(10)`."
+    },
+    {
+     "name": "source",
+     "type": "text",
+     "units": "",
+     "meaning": "`override` (from chosen_variants.csv) or `most_scenes`."
+    }
+   ]
+  },
+  {
+   "path": "manifest/chosen_variants.csv",
+   "names": [
+    "chosen_variants.csv"
+   ],
+   "writer": "a person",
+   "what": "Optional: which scan of a re-scanned slide to use.",
+   "column_sources": [
+    "02_pair_passes.py"
+   ],
+   "columns": [
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "slide",
+     "type": "text",
+     "units": "",
+     "meaning": "The slide id parsed from the file name."
+    },
+    {
+     "name": "marker_channel",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye as the file names it (for example AF568)."
+    },
+    {
+     "name": "variant",
+     "type": "text",
+     "units": "",
+     "meaning": "The scan to use."
+    }
+   ]
+  },
+  {
+   "path": "atlas/plates/plates.csv",
+   "names": [
+    "plates.csv"
+   ],
+   "writer": "04a_atlas_extract.py",
+   "what": "The salmon atlas plates as the PDF stores them (one row per stored image). The bundled copy ships in the repository's `atlas/plates/`; a study gets it copied in on first use.",
+   "columns": [
+    {
+     "name": "plate_id",
+     "type": "text",
+     "units": "",
+     "meaning": "The plate's id, which sorts rostral to caudal."
+    },
+    {
+     "name": "page",
+     "type": "int",
+     "units": "",
+     "meaning": "PDF page, from 1."
+    },
+    {
+     "name": "index_on_page",
+     "type": "int",
+     "units": "",
+     "meaning": "The image's order on its page."
+    },
+    {
+     "name": "image_file",
+     "type": "text",
+     "units": "",
+     "meaning": "The plate picture's file name, beside the CSV."
+    },
+    {
+     "name": "px_w",
+     "type": "int",
+     "units": "px",
+     "meaning": "Plate picture width."
+    },
+    {
+     "name": "px_h",
+     "type": "int",
+     "units": "px",
+     "meaning": "Plate picture height."
+    },
+    {
+     "name": "n_seeds",
+     "type": "int",
+     "units": "",
+     "meaning": "Region dots on the plate."
+    },
+    {
+     "name": "n_seeds_raster",
+     "type": "int",
+     "units": "",
+     "meaning": "Of those, dots read from a flattened inset."
+    },
+    {
+     "name": "n_text_labels",
+     "type": "int",
+     "units": "",
+     "meaning": "Text labels found on the plate."
+    },
+    {
+     "name": "regions",
+     "type": "text",
+     "units": "",
+     "meaning": "Regions on the plate, joined with `|`."
+    },
+    {
+     "name": "overlay_written",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when the check picture with the dots drawn on was written."
+    }
+   ]
+  },
+  {
+   "path": "atlas/plates/seeds.csv",
+   "names": [
+    "seeds.csv"
+   ],
+   "writer": "04a_atlas_extract.py (also 04a2, 04a4, 04w and the Fiji importer)",
+   "what": "One row per region dot. The same columns in every plate set; the Wullimann set's is header-only because its regions are polygons.",
+   "columns_from": "ls_atlas_import.py:SEED_HEADER",
+   "columns": [
+    {
+     "name": "plate_id",
+     "type": "text",
+     "units": "",
+     "meaning": "The plate's id, which sorts rostral to caudal."
+    },
+    {
+     "name": "page",
+     "type": "int",
+     "units": "",
+     "meaning": "PDF page, from 1."
+    },
+    {
+     "name": "plate_seq",
+     "type": "int",
+     "units": "",
+     "meaning": "The dot's number on its plate."
+    },
+    {
+     "name": "region",
+     "type": "text",
+     "units": "",
+     "meaning": "The region's canonical abbreviation, or `UNMAPPED` when the legend has no name for the colour."
+    },
+    {
+     "name": "region_raw",
+     "type": "text",
+     "units": "",
+     "meaning": "The name as the legend writes it."
+    },
+    {
+     "name": "is_unknown",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when the atlas itself marks the region as uncertain (`??`) or unnamed."
+    },
+    {
+     "name": "colour_hex",
+     "type": "text",
+     "units": "",
+     "meaning": "The dot's colour, `#rrggbb`."
+    },
+    {
+     "name": "from_raster",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when the dot was read from a flattened inset picture rather than the PDF's drawing list."
+    },
+    {
+     "name": "x_px",
+     "type": "float",
+     "units": "px",
+     "meaning": "Dot position on the plate picture, x."
+    },
+    {
+     "name": "y_px",
+     "type": "float",
+     "units": "px",
+     "meaning": "Dot position, y."
+    },
+    {
+     "name": "x_frac",
+     "type": "float",
+     "units": "",
+     "meaning": "The same as a fraction of the plate width."
+    },
+    {
+     "name": "y_frac",
+     "type": "float",
+     "units": "",
+     "meaning": "The same as a fraction of the plate height."
+    }
+   ]
+  },
+  {
+   "path": "atlas/plates/text_labels.csv",
+   "names": [
+    "text_labels.csv"
+   ],
+   "writer": "04a_atlas_extract.py",
+   "what": "Every word printed on a plate, with its position, for checking the dots against.",
+   "columns": [
+    {
+     "name": "plate_id",
+     "type": "text",
+     "units": "",
+     "meaning": "The plate's id, which sorts rostral to caudal."
+    },
+    {
+     "name": "page",
+     "type": "int",
+     "units": "",
+     "meaning": "PDF page, from 1."
+    },
+    {
+     "name": "text",
+     "type": "text",
+     "units": "",
+     "meaning": "The word."
+    },
+    {
+     "name": "x_px",
+     "type": "float",
+     "units": "px",
+     "meaning": "Position, x."
+    },
+    {
+     "name": "y_px",
+     "type": "float",
+     "units": "px",
+     "meaning": "Position, y."
+    }
+   ]
+  },
+  {
+   "path": "atlas/plates/legend_by_page.csv",
+   "names": [
+    "legend_by_page.csv"
+   ],
+   "writer": "04a_atlas_extract.py",
+   "what": "Each page's colour legend: which colour names which region.",
+   "columns": [
+    {
+     "name": "page",
+     "type": "int",
+     "units": "",
+     "meaning": "PDF page, from 1."
+    },
+    {
+     "name": "colour_hex",
+     "type": "text",
+     "units": "",
+     "meaning": "The swatch colour."
+    },
+    {
+     "name": "region",
+     "type": "text",
+     "units": "",
+     "meaning": "The name beside it."
+    }
+   ]
+  },
+  {
+   "path": "atlas/plates/gaps.csv",
+   "names": [
+    "gaps.csv"
+   ],
+   "writer": "04a_atlas_extract.py",
+   "what": "Plates with no region dots, so nothing can be outlined from them.",
+   "columns": [
+    {
+     "name": "plate_id",
+     "type": "text",
+     "units": "",
+     "meaning": "The plate's id, which sorts rostral to caudal."
+    },
+    {
+     "name": "page",
+     "type": "int",
+     "units": "",
+     "meaning": "PDF page, from 1."
+    },
+    {
+     "name": "image_file",
+     "type": "text",
+     "units": "",
+     "meaning": "The plate picture's file name, beside the CSV."
+    },
+    {
+     "name": "reason",
+     "type": "text",
+     "units": "",
+     "meaning": "Why, in words."
+    }
+   ]
+  },
+  {
+   "path": "atlas/plates_merged/plates.csv",
+   "names": [],
+   "writer": "04a2_atlas_remerge.py",
+   "what": "The PDF's image strips merged back into whole figures (101 strips became 47 figures). Seeds are carried across into `plates_merged/seeds.csv`.",
+   "columns": [
+    {
+     "name": "plate_id",
+     "type": "text",
+     "units": "",
+     "meaning": "The plate's id, which sorts rostral to caudal."
+    },
+    {
+     "name": "page",
+     "type": "int",
+     "units": "",
+     "meaning": "PDF page, from 1."
+    },
+    {
+     "name": "index_on_page",
+     "type": "int",
+     "units": "",
+     "meaning": "Figure order on the page."
+    },
+    {
+     "name": "image_file",
+     "type": "text",
+     "units": "",
+     "meaning": "The plate picture's file name, beside the CSV."
+    },
+    {
+     "name": "px_w",
+     "type": "int",
+     "units": "px",
+     "meaning": "Plate picture width."
+    },
+    {
+     "name": "px_h",
+     "type": "int",
+     "units": "px",
+     "meaning": "Plate picture height."
+    },
+    {
+     "name": "n_strips",
+     "type": "int",
+     "units": "",
+     "meaning": "Strips merged into the figure."
+    },
+    {
+     "name": "x0",
+     "type": "float",
+     "units": "pt",
+     "meaning": "Figure box on the PDF page, left."
+    },
+    {
+     "name": "y0",
+     "type": "float",
+     "units": "pt",
+     "meaning": "Top."
+    },
+    {
+     "name": "x1",
+     "type": "float",
+     "units": "pt",
+     "meaning": "Right."
+    },
+    {
+     "name": "y1",
+     "type": "float",
+     "units": "pt",
+     "meaning": "Bottom."
+    }
+   ],
+   "readers": [
+    "04a3_plate_reframe.py",
+    "04a3b_enforce_sections.py",
+    "04a4_plate_rebuild.py"
+   ]
+  },
+  {
+   "path": "atlas/plate_boxes.csv",
+   "names": [
+    "plate_boxes.csv",
+    "plate_boxes.prev.csv"
+   ],
+   "writer": "04a3_plate_reframe.py (the page's Export), rewritten by 04a3b_enforce_sections.py",
+   "what": "One box per plate inside each merged figure, as fractions of the figure. 04a3b keeps the previous file as `plate_boxes.prev.csv`.",
+   "column_sources": [
+    "04a3_plate_reframe.py",
+    "04a3b_enforce_sections.py"
+   ],
+   "columns": [
+    {
+     "name": "figure_id",
+     "type": "text",
+     "units": "",
+     "meaning": "The merged figure's plate_id."
+    },
+    {
+     "name": "page",
+     "type": "int",
+     "units": "",
+     "meaning": "PDF page, from 1."
+    },
+    {
+     "name": "box",
+     "type": "int",
+     "units": "",
+     "meaning": "The box's number inside the figure, from 1."
+    },
+    {
+     "name": "x0_frac",
+     "type": "float",
+     "units": "",
+     "meaning": "Left edge, as a fraction of the figure width."
+    },
+    {
+     "name": "y0_frac",
+     "type": "float",
+     "units": "",
+     "meaning": "Top edge."
+    },
+    {
+     "name": "x1_frac",
+     "type": "float",
+     "units": "",
+     "meaning": "Right edge."
+    },
+    {
+     "name": "y1_frac",
+     "type": "float",
+     "units": "",
+     "meaning": "Bottom edge."
+    },
+    {
+     "name": "edited",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when a person changed the proposed boxes."
+    },
+    {
+     "name": "review",
+     "type": "0/1",
+     "units": "",
+     "meaning": "Written by 04a3b: 1 when the declared section count forced a change worth a look."
+    }
+   ]
+  },
+  {
+   "path": "atlas/plates_final/plates.csv",
+   "names": [],
+   "writer": "04a4_plate_rebuild.py",
+   "what": "The final salmon plates: each box rendered from the PDF at full resolution. This is the set the ROI curator shows.",
+   "columns": [
+    {
+     "name": "plate_id",
+     "type": "text",
+     "units": "",
+     "meaning": "The plate's id, which sorts rostral to caudal."
+    },
+    {
+     "name": "page",
+     "type": "int",
+     "units": "",
+     "meaning": "PDF page, from 1."
+    },
+    {
+     "name": "source_figure",
+     "type": "text",
+     "units": "",
+     "meaning": "The merged figure it was cut from."
+    },
+    {
+     "name": "box",
+     "type": "int",
+     "units": "",
+     "meaning": "Which box of that figure."
+    },
+    {
+     "name": "image_file",
+     "type": "text",
+     "units": "",
+     "meaning": "The plate picture's file name, beside the CSV."
+    },
+    {
+     "name": "px_w",
+     "type": "int",
+     "units": "px",
+     "meaning": "Plate picture width."
+    },
+    {
+     "name": "px_h",
+     "type": "int",
+     "units": "px",
+     "meaning": "Plate picture height."
+    },
+    {
+     "name": "x0",
+     "type": "float",
+     "units": "pt",
+     "meaning": "Plate box on the PDF page, left."
+    },
+    {
+     "name": "y0",
+     "type": "float",
+     "units": "pt",
+     "meaning": "Top."
+    },
+    {
+     "name": "x1",
+     "type": "float",
+     "units": "pt",
+     "meaning": "Right."
+    },
+    {
+     "name": "y1",
+     "type": "float",
+     "units": "pt",
+     "meaning": "Bottom."
+    }
+   ],
+   "readers": [
+    "04l_roi_curator.py",
+    "04a_reformat.py",
+    "ls_atlas.py"
+   ]
+  },
+  {
+   "path": "atlas/wullimann1996/index.csv",
+   "names": [
+    "index.csv"
+   ],
+   "writer": "04v_wullimann_extract.py",
+   "what": "The Wullimann (1996) cross-sections cut out of the book's PDF. Ships in the repository; a study never runs 04v.",
+   "columns": [
+    {
+     "name": "file",
+     "type": "text",
+     "units": "",
+     "meaning": "The CZI file name."
+    },
+    {
+     "name": "pdf_page",
+     "type": "int",
+     "units": "",
+     "meaning": "Page in the PDF."
+    },
+    {
+     "name": "label",
+     "type": "text",
+     "units": "",
+     "meaning": "The cross-section's printed label."
+    },
+    {
+     "name": "px_w",
+     "type": "int",
+     "units": "px",
+     "meaning": "Plate picture width."
+    },
+    {
+     "name": "px_h",
+     "type": "int",
+     "units": "px",
+     "meaning": "Plate picture height."
+    }
+   ]
+  },
+  {
+   "path": "atlas/wullimann1996/legends.csv",
+   "names": [
+    "legends.csv"
+   ],
+   "writer": "04v_wullimann_extract.py",
+   "what": "Each cross-section's legend of abbreviations.",
+   "columns": [
+    {
+     "name": "cross_section",
+     "type": "text",
+     "units": "",
+     "meaning": "Which cross-section."
+    },
+    {
+     "name": "pdf_page",
+     "type": "int",
+     "units": "",
+     "meaning": "Page in the PDF."
+    },
+    {
+     "name": "abbreviation",
+     "type": "text",
+     "units": "",
+     "meaning": "The region's abbreviation."
+    },
+    {
+     "name": "definition",
+     "type": "text",
+     "units": "",
+     "meaning": "Its full name."
+    }
+   ]
+  },
+  {
+   "path": "atlas/plates_wullimann/plates.csv",
+   "names": [],
+   "writer": "04w_wullimann_plates.py",
+   "what": "The Wullimann plates arranged for the curator.",
+   "columns_from": "04w_wullimann_plates.py:PLATE_KEYS",
+   "columns": [
+    {
+     "name": "plate_id",
+     "type": "text",
+     "units": "",
+     "meaning": "The plate's id, which sorts rostral to caudal."
+    },
+    {
+     "name": "page",
+     "type": "int",
+     "units": "",
+     "meaning": "PDF page, from 1."
+    },
+    {
+     "name": "image_file",
+     "type": "text",
+     "units": "",
+     "meaning": "The plate picture's file name, beside the CSV."
+    },
+    {
+     "name": "px_w",
+     "type": "int",
+     "units": "px",
+     "meaning": "Plate picture width."
+    },
+    {
+     "name": "px_h",
+     "type": "int",
+     "units": "px",
+     "meaning": "Plate picture height."
+    },
+    {
+     "name": "n_seeds",
+     "type": "int",
+     "units": "",
+     "meaning": "Always 0: regions come from polygons.csv."
+    },
+    {
+     "name": "regions",
+     "type": "text",
+     "units": "",
+     "meaning": "Regions in the plate's legend, joined with `|`."
+    },
+    {
+     "name": "section_level",
+     "type": "int",
+     "units": "",
+     "meaning": "Wullimann's own section number; sections are 8 to 21 apart."
+    },
+    {
+     "name": "midline_frac",
+     "type": "float",
+     "units": "",
+     "meaning": "Where the outline drawing meets the micrograph, as a fraction of the width."
+    }
+   ],
+   "readers": [
+    "04x_wullimann_polygons.py",
+    "04l_roi_curator.py",
+    "ls_atlas.py"
+   ]
+  },
+  {
+   "path": "atlas/plates_wullimann/polygons.csv",
+   "names": [
+    "polygons.csv",
+    "polygons_review.csv"
+   ],
+   "writer": "04x_wullimann_polygons.py (and the Fiji importer for an own atlas)",
+   "what": "One row per enclosed area of a plate drawing: its outline and the region it names. The review page exports `polygons_review.csv`, which `04x --merge` folds back in.",
+   "columns_from": "atlas_polygons.py:KEYS",
+   "columns": [
+    {
+     "name": "plate_id",
+     "type": "text",
+     "units": "",
+     "meaning": "The plate's id, which sorts rostral to caudal."
+    },
+    {
+     "name": "roi_number",
+     "type": "int",
+     "units": "",
+     "meaning": "The area's number, in reading order: down each column, columns left to right."
+    },
+    {
+     "name": "region",
+     "type": "text",
+     "units": "",
+     "meaning": "The region abbreviation, or empty."
+    },
+    {
+     "name": "status",
+     "type": "text",
+     "units": "",
+     "meaning": "`auto` (from OCR), `reviewed` (a person confirmed) or `unassigned`."
+    },
+    {
+     "name": "label_conf",
+     "type": "float",
+     "units": "",
+     "meaning": "OCR confidence for the label, 0 to 1."
+    },
+    {
+     "name": "vertices",
+     "type": "text",
+     "units": "",
+     "meaning": "The outline as `x y` pairs joined with `;`, as fractions of the plate."
+    }
+   ]
+  },
+  {
+   "path": "atlas/<set>/fingerprints.csv",
+   "names": [
+    "fingerprints.csv"
+   ],
+   "writer": "ls_atlas.py",
+   "what": "A cache of each plate picture's hash, so the curator can tell a re-rendered plate from the one a curation was made on. Derived: delete it and it comes back.",
+   "columns_from": "ls_atlas.py:CACHE_COLUMNS",
+   "columns": [
+    {
+     "name": "image_stem",
+     "type": "text",
+     "units": "",
+     "meaning": "Picture file name without its extension."
+    },
+    {
+     "name": "image_file",
+     "type": "text",
+     "units": "",
+     "meaning": "The plate picture's file name, beside the CSV."
+    },
+    {
+     "name": "bytes",
+     "type": "int",
+     "units": "bytes",
+     "meaning": "File size."
+    },
+    {
+     "name": "mtime_ns",
+     "type": "int",
+     "units": "ns",
+     "meaning": "Modification time."
+    },
+    {
+     "name": "digest",
+     "type": "text",
+     "units": "",
+     "meaning": "The first 12 hex characters of the SHA-256 of the picture's bytes."
+    }
+   ]
+  },
+  {
+   "path": "artifacts/artifact_summary[_<marker>].csv",
+   "names": [
+    "artifact_summary.csv",
+    "artifact_summary_{marker}.csv"
+   ],
+   "writer": "04g_artifact_mask.py",
+   "what": "One row per section: how much of the tissue 04g masked as artifact, by kind. Under a paired study the geometry-source marker (the second declared) has the unsuffixed name and the other marker `_<marker>`; under multiplex there is one file (see `ls_paths`).",
+   "columns_from": "04g_artifact_mask.py:SUMMARY_KEYS",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "section_order",
+     "type": "int",
+     "units": "",
+     "meaning": "Position of the section along the animal's brain, 1..N within one marker's series."
+    },
+    {
+     "name": "excluded",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when the section is excluded (its mask is still made, for the record)."
+    },
+    {
+     "name": "tissue_mm2",
+     "type": "float",
+     "units": "mm²",
+     "meaning": "Tissue area on the overview."
+    },
+    {
+     "name": "n_compact",
+     "type": "int",
+     "units": "",
+     "meaning": "Compact artifacts: bubbles, antibody clumps."
+    },
+    {
+     "name": "n_elongated",
+     "type": "int",
+     "units": "",
+     "meaning": "Elongated artifacts: fibres, hairs."
+    },
+    {
+     "name": "compact_mm2",
+     "type": "float",
+     "units": "mm²",
+     "meaning": "Area of compact artifacts."
+    },
+    {
+     "name": "elongated_mm2",
+     "type": "float",
+     "units": "mm²",
+     "meaning": "Area of elongated artifacts."
+    },
+    {
+     "name": "artifact_mm2",
+     "type": "float",
+     "units": "mm²",
+     "meaning": "Total masked area."
+    },
+    {
+     "name": "artifact_pct_of_tissue",
+     "type": "float",
+     "units": "%",
+     "meaning": "Masked area as a share of the tissue."
+    },
+    {
+     "name": "measurable_mm2",
+     "type": "float",
+     "units": "mm²",
+     "meaning": "Tissue left after masking."
+    },
+    {
+     "name": "saturated_fraction",
+     "type": "float",
+     "units": "",
+     "meaning": "From focus.csv, for reference."
+    },
+    {
+     "name": "saturated_fraction_raw",
+     "type": "float",
+     "units": "",
+     "meaning": "From focus.csv, for reference."
+    }
+   ]
+  },
+  {
+   "path": "artifacts/<scene_uid>_artifact.png",
+   "names": [],
+   "writer": "04g_artifact_mask.py",
+   "what": "The artifact mask of each section on the overview.",
+   "format": "8-bit PNG labels: 0 clean, 1 compact artifact, 2 elongated artifact.",
+   "readers": [
+    "04a_reformat.py",
+    "04p_section_provenance.py"
+   ],
+   "columns": []
+  },
+  {
+   "path": "reformatted/exclusion_candidates.csv",
+   "names": [
+    "exclusion_candidates.csv",
+    "survey.csv"
+   ],
+   "writer": "04f_exclusion_candidates.py",
+   "what": "One row per reformatted section: whether 04f proposes it for exclusion, and the measurements behind the call. `--survey` writes the same columns to `qc/exclusion/survey.csv` with no proposals.",
+   "columns": [
+    {
+     "name": "uid",
+     "type": "text",
+     "units": "",
+     "meaning": "The section's scene_uid."
+    },
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "section_order",
+     "type": "int",
+     "units": "",
+     "meaning": "Position of the section along the animal's brain, 1..N within one marker's series."
+    },
+    {
+     "name": "proposed",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when proposed for exclusion."
+    },
+    {
+     "name": "artifact_class",
+     "type": "text",
+     "units": "",
+     "meaning": "`no_tissue`, `out_of_focus`, or both joined with `+`."
+    },
+    {
+     "name": "reason",
+     "type": "text",
+     "units": "",
+     "meaning": "Why, in words."
+    },
+    {
+     "name": "largest_mm2",
+     "type": "float",
+     "units": "mm²",
+     "meaning": "Largest connected piece of tissue (rule: under 2.5 mm² proposes `no_tissue`)."
+    },
+    {
+     "name": "total_mm2",
+     "type": "float",
+     "units": "mm²",
+     "meaning": "All tissue pieces together."
+    },
+    {
+     "name": "n_pieces",
+     "type": "int",
+     "units": "",
+     "meaning": "Pieces above the minimum size."
+    },
+    {
+     "name": "focus_score",
+     "type": "float",
+     "units": "",
+     "meaning": "From focus.csv (rule: under 0.070 proposes `out_of_focus`)."
+    },
+    {
+     "name": "frame_mm2",
+     "type": "float",
+     "units": "mm²",
+     "meaning": "Area of the whole working frame."
+    }
+   ]
+  },
+  {
+   "path": "reformatted/reformat_index[_<marker>].csv",
+   "names": [
+    "reformat_index.csv",
+    "reformat_index_{marker}.csv"
+   ],
+   "writer": "04a_reformat.py",
+   "what": "Every section and atlas plate in the standard 256 frame. A section in this file is in the analysis; an excluded one never is. Under a paired study the geometry-source marker (the second declared) has the unsuffixed name and the other marker `_<marker>`; under multiplex there is one file (see `ls_paths`).",
+   "columns": [
+    {
+     "name": "kind",
+     "type": "text",
+     "units": "",
+     "meaning": "`section` or `plate`."
+    },
+    {
+     "name": "id",
+     "type": "text",
+     "units": "",
+     "meaning": "The section's scene_uid or the plate's plate_id."
+    },
+    {
+     "name": "angle",
+     "type": "float",
+     "units": "degrees",
+     "meaning": "Total rotation applied: automatic plus the person's correction."
+    },
+    {
+     "name": "fill",
+     "type": "float",
+     "units": "",
+     "meaning": "Share of the 256 frame the tissue covers."
+    },
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "section_order",
+     "type": "int",
+     "units": "",
+     "meaning": "Position of the section along the animal's brain, 1..N within one marker's series."
+    },
+    {
+     "name": "regions",
+     "type": "text",
+     "units": "",
+     "meaning": "For a plate: the regions on it."
+    },
+    {
+     "name": "manual_rotation",
+     "type": "float",
+     "units": "degrees",
+     "meaning": "The person's correction on top of the automatic angle."
+    },
+    {
+     "name": "manual_flip",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when the section was mirrored."
+    }
+   ]
+  },
+  {
+   "path": "reformatted/excluded_sections[_<marker>].csv",
+   "names": [
+    "excluded_sections.csv",
+    "excluded_sections_{marker}.csv"
+   ],
+   "writer": "04a_reformat.py",
+   "what": "The canonical exclusion list, one row per excluded section; header only when nothing is excluded. Under a paired study the geometry-source marker (the second declared) has the unsuffixed name and the other marker `_<marker>`; under multiplex there is one file (see `ls_paths`).",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "decision",
+     "type": "text",
+     "units": "",
+     "meaning": "`auto` (04f's proposal), `manual` (a person) or `restored`."
+    },
+    {
+     "name": "reason",
+     "type": "text",
+     "units": "",
+     "meaning": "Why, in words."
+    }
+   ]
+  },
+  {
+   "path": "reformatted/lost_sections[_<marker>].csv",
+   "names": [
+    "lost_sections.csv",
+    "lost_sections_{marker}.csv"
+   ],
+   "writer": "04a_reformat.py",
+   "what": "Sections nobody excluded that still did not come through the reformat.",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "reason",
+     "type": "text",
+     "units": "",
+     "meaning": "Why, in words."
+    }
+   ]
+  },
+  {
+   "path": "reformatted/rotation_overrides[_<marker>].csv",
+   "names": [
+    "rotation_overrides.csv",
+    "perk_overrides.csv"
+   ],
+   "writer": "04i_propagate_to_perk.py (the second scan of a paired study); older studies carry the removed rotation curator's export",
+   "what": "Per section: the rotation and exclusion carried onto the second scan. The LS study keeps its old name, `perk_overrides.csv`, through `ls_paths.LEGACY`.",
+   "columns_from": "04i_propagate_to_perk.py:OVERRIDE_KEYS",
+   "columns": [
+    {
+     "name": "perk_scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "The second scan's section (the column keeps its first study's name)."
+    },
+    {
+     "name": "pcna_scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "Its partner in the curated pass."
+    },
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "extra_rotation",
+     "type": "int",
+     "units": "degrees",
+     "meaning": "Rotation on top of the automatic angle, re-derived by silhouette alignment."
+    },
+    {
+     "name": "flip",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 to mirror."
+    },
+    {
+     "name": "excluded",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when excluded (carried from the partner)."
+    },
+    {
+     "name": "align_iou",
+     "type": "float",
+     "units": "",
+     "meaning": "Overlap of the two tissue masks at the best rotation."
+    },
+    {
+     "name": "final_iou_256",
+     "type": "float",
+     "units": "",
+     "meaning": "Overlap of the two 256-pixel masks after reformatting."
+    },
+    {
+     "name": "flip_margin",
+     "type": "float",
+     "units": "",
+     "meaning": "How much better the chosen side is than the mirrored one."
+    },
+    {
+     "name": "confidence",
+     "type": "text",
+     "units": "",
+     "meaning": "`high`, or `low` when align_iou is under the threshold and the transfer is worth a look."
+    },
+    {
+     "name": "reason",
+     "type": "text",
+     "units": "",
+     "meaning": "Why, in words."
+    }
+   ]
+  },
+  {
+   "path": "reformatted/section_review.csv",
+   "names": [
+    "section_review.csv"
+   ],
+   "writer": "04l_roi_curator.py (the Review mode's export)",
+   "what": "Review decisions made in the ROI curator; 04a merges them over the exclusion list.",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye name, as declared in the study."
+    },
+    {
+     "name": "extra_rotation",
+     "type": "float",
+     "units": "degrees",
+     "meaning": "Blank: the review does not rotate."
+    },
+    {
+     "name": "flip",
+     "type": "0/1",
+     "units": "",
+     "meaning": "Blank."
+    },
+    {
+     "name": "excluded",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 to drop the section."
+    },
+    {
+     "name": "decision",
+     "type": "text",
+     "units": "",
+     "meaning": "`restored`, `manual` or blank."
+    },
+    {
+     "name": "mask_rejected",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when the artifact mask was rejected and the section is measured unmasked."
+    },
+    {
+     "name": "reason",
+     "type": "text",
+     "units": "",
+     "meaning": "Why, in words."
+    },
+    {
+     "name": "prior_status",
+     "type": "text",
+     "units": "",
+     "meaning": "The section's status when the decision was made."
+    }
+   ]
+  },
+  {
+   "path": "reformatted/sections[_<marker>]/",
+   "names": [
+    "_mask.npy",
+    "_artifact.npy",
+    "_censor.npy",
+    "{uid}_mask.npy",
+    "{uid}_{kind}.npy"
+   ],
+   "writer": "04a_reformat.py",
+   "what": "Per section: `<uid>.png` (the 256 picture), `<uid>_mask.npy` (tissue in the 256 frame), `<uid>_artifact.npy` and `<uid>_censor.npy` (artifact and clipped pixels in that frame), `<uid>_tissue_overview.png` (tissue in the overview frame, for 05c's off-tissue test). Plates get `<plate_id>_mask.npy` beside the plate pictures.",
+   "format": "PNG and NumPy boolean arrays; the .npy files exist only for sections in the analysis.",
+   "readers": [
+    "04o_section_rgb.py",
+    "05c_detect_rois.py",
+    "06g_flag_off_tissue.py",
+    "04i_propagate_to_perk.py"
+   ],
+   "columns": []
+  },
+  {
+   "path": "reformatted/<marker>_analysis_set.csv",
+   "names": [
+    "pcna_analysis_set.csv",
+    "perk_analysis_set.csv"
+   ],
+   "writer": "04j_censor_clipped.py",
+   "what": "Per section: its clipped share, and whether it stays in the analysis set (under 1 % of tissue pixels clipped). Named after each marker; the LS study keeps `pcna_`/`perk_` names.",
+   "columns_from": "04j_censor_clipped.py:ANALYSIS_KEYS",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "section_order",
+     "type": "int",
+     "units": "",
+     "meaning": "Position of the section along the animal's brain, 1..N within one marker's series."
+    },
+    {
+     "name": "censored_fraction",
+     "type": "float",
+     "units": "",
+     "meaning": "Share of frame pixels clipped."
+    },
+    {
+     "name": "censored_fraction_in_tissue",
+     "type": "float",
+     "units": "",
+     "meaning": "Share of tissue pixels clipped; this decides."
+    },
+    {
+     "name": "recorded_saturated_fraction",
+     "type": "float",
+     "units": "",
+     "meaning": "focus.csv's after-correction number, for comparison."
+    },
+    {
+     "name": "recorded_saturated_fraction_raw",
+     "type": "float",
+     "units": "",
+     "meaning": "focus.csv's raw number."
+    },
+    {
+     "name": "in_analysis_set",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 to keep, 0 set aside, blank when there is no raw mask yet."
+    },
+    {
+     "name": "gate",
+     "type": "text",
+     "units": "",
+     "meaning": "`tissue`, or `frame` when there was no tissue mask to decide on."
+    },
+    {
+     "name": "reason",
+     "type": "text",
+     "units": "",
+     "meaning": "Why, in words."
+    }
+   ]
+  },
+  {
+   "path": "reformatted/sections_dataset[_<marker>].csv",
+   "names": [
+    "perk_sections_dataset.csv"
+   ],
+   "writer": "04m_sections_dataset.py",
+   "what": "Paired studies: every section of the measured pass with its fate, joined to its partner. Kept so the rejection rate can be checked against treatment at unblinding.",
+   "columns_from": "04m_sections_dataset.py:COLUMNS",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "slide",
+     "type": "text",
+     "units": "",
+     "meaning": "The slide id parsed from the file name."
+    },
+    {
+     "name": "variant",
+     "type": "text",
+     "units": "",
+     "meaning": "Which scan of the slide, when it was scanned more than once (`a`, `b`, ...); empty for one scan."
+    },
+    {
+     "name": "scene_index",
+     "type": "int",
+     "units": "",
+     "meaning": "The scene's index inside the CZI, counted from 0."
+    },
+    {
+     "name": "section_order",
+     "type": "int",
+     "units": "",
+     "meaning": "Position of the section along the animal's brain, 1..N within one marker's series."
+    },
+    {
+     "name": "status",
+     "type": "text",
+     "units": "",
+     "meaning": "`analysis_set`, `censored_out`, `excluded` or `unmeasured`."
+    },
+    {
+     "name": "exclusion_class",
+     "type": "text",
+     "units": "",
+     "meaning": "Why excluded, as a class (no_tissue, out_of_focus, manual, ...)."
+    },
+    {
+     "name": "disposition_reason",
+     "type": "text",
+     "units": "",
+     "meaning": "The reason in words."
+    },
+    {
+     "name": "partner_scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "The same section in the other pass."
+    },
+    {
+     "name": "paired",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when a partner exists."
+    },
+    {
+     "name": "partner_kept",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when the partner is in its own analysis."
+    },
+    {
+     "name": "pair_align_iou",
+     "type": "float",
+     "units": "",
+     "meaning": "From the overrides file."
+    },
+    {
+     "name": "pair_flip_margin",
+     "type": "float",
+     "units": "",
+     "meaning": "From the overrides file."
+    },
+    {
+     "name": "pair_confidence",
+     "type": "text",
+     "units": "",
+     "meaning": "From the overrides file."
+    },
+    {
+     "name": "partner_manual_rotation_deg",
+     "type": "float",
+     "units": "degrees",
+     "meaning": "The rotation a person entered on the partner."
+    },
+    {
+     "name": "partner_manual_flip",
+     "type": "0/1",
+     "units": "",
+     "meaning": "The partner's flip."
+    },
+    {
+     "name": "partner_final_angle_deg",
+     "type": "float",
+     "units": "degrees",
+     "meaning": "The partner's total angle."
+    },
+    {
+     "name": "derived_rotation_deg",
+     "type": "float",
+     "units": "degrees",
+     "meaning": "This section's rotation, re-derived by 04i (not copied)."
+    },
+    {
+     "name": "manual_flip",
+     "type": "0/1",
+     "units": "",
+     "meaning": "This section's flip."
+    },
+    {
+     "name": "final_angle_deg",
+     "type": "float",
+     "units": "degrees",
+     "meaning": "This section's total angle."
+    },
+    {
+     "name": "censored_fraction",
+     "type": "float",
+     "units": "",
+     "meaning": "From 04j."
+    },
+    {
+     "name": "censored_fraction_in_tissue",
+     "type": "float",
+     "units": "",
+     "meaning": "From 04j."
+    },
+    {
+     "name": "recorded_saturated_fraction",
+     "type": "float",
+     "units": "",
+     "meaning": "From 04j."
+    },
+    {
+     "name": "qc_source",
+     "type": "text",
+     "units": "",
+     "meaning": "Where the partner's quality numbers came from: `exclusion_candidates` or `reason_string`."
+    },
+    {
+     "name": "partner_focus_score",
+     "type": "float",
+     "units": "",
+     "meaning": "The partner's focus score."
+    },
+    {
+     "name": "partner_largest_piece_mm2",
+     "type": "float",
+     "units": "mm²",
+     "meaning": "The partner's largest tissue piece."
+    },
+    {
+     "name": "partner_total_tissue_mm2",
+     "type": "float",
+     "units": "mm²",
+     "meaning": "The partner's tissue."
+    },
+    {
+     "name": "partner_n_pieces",
+     "type": "int",
+     "units": "",
+     "meaning": "The partner's piece count."
+    }
+   ]
+  },
+  {
+   "path": "reformatted/roi_worklist.csv",
+   "names": [
+    "roi_worklist.csv"
+   ],
+   "writer": "04n_roi_worklist.py",
+   "what": "The ROI curation queue, in an order where any first part is a usable dataset.",
+   "columns_from": "04n_roi_worklist.py:COLUMNS",
+   "columns": [
+    {
+     "name": "rank",
+     "type": "int",
+     "units": "",
+     "meaning": "Position in the queue."
+    },
+    {
+     "name": "tier",
+     "type": "text",
+     "units": "",
+     "meaning": "`core`, `unpaired_unchecked` or `animal_underpowered`."
+    },
+    {
+     "name": "tier_reason",
+     "type": "text",
+     "units": "",
+     "meaning": "Why that tier."
+    },
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "partner_scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "The partner section (blank in a multiplex study)."
+    },
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "section_order",
+     "type": "int",
+     "units": "",
+     "meaning": "Position of the section along the animal's brain, 1..N within one marker's series."
+    },
+    {
+     "name": "rotation_unchecked",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when no partner checked the rotation."
+    },
+    {
+     "name": "pair_confidence",
+     "type": "text",
+     "units": "",
+     "meaning": "Carried for unblinding; not used to order."
+    },
+    {
+     "name": "pair_align_iou",
+     "type": "float",
+     "units": "",
+     "meaning": "Carried."
+    },
+    {
+     "name": "partner_focus_score",
+     "type": "float",
+     "units": "",
+     "meaning": "Carried."
+    },
+    {
+     "name": "partner_n_pieces",
+     "type": "int",
+     "units": "",
+     "meaning": "Carried."
+    },
+    {
+     "name": "partner_largest_piece_mm2",
+     "type": "float",
+     "units": "mm²",
+     "meaning": "Carried."
+    }
+   ]
+  },
+  {
+   "path": "reformatted/<composite folder>_render.csv",
+   "names": [
+    "_render.csv"
+   ],
+   "writer": "04o_section_rgb.py",
+   "what": "Which colour composite was drawn from what, appended per run.",
+   "column_sources": [
+    "04o_section_rgb.py"
+   ],
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "source",
+     "type": "text",
+     "units": "",
+     "meaning": "Always `czi`."
+    },
+    {
+     "name": "um_per_px",
+     "type": "float",
+     "units": "µm",
+     "meaning": "Pixel size read at."
+    },
+    {
+     "name": "side_px",
+     "type": "int",
+     "units": "px",
+     "meaning": "Side of the square picture."
+    },
+    {
+     "name": "czi_file",
+     "type": "text",
+     "units": "",
+     "meaning": "The CZI read."
+    },
+    {
+     "name": "reader",
+     "type": "text",
+     "units": "",
+     "meaning": "Which library decoded the pixels (always `pylibCZIrw`)."
+    }
+   ]
+  },
+  {
+   "path": "reformatted/section_provenance.csv",
+   "names": [
+    "section_provenance.csv"
+   ],
+   "writer": "04p_section_provenance.py",
+   "what": "Every scanned section, both markers, and what each stage decided about it. A join, not a measurement.",
+   "columns_from": "04p_section_provenance.py:COLUMNS",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye name, as declared in the study."
+    },
+    {
+     "name": "slide",
+     "type": "text",
+     "units": "",
+     "meaning": "The slide id parsed from the file name."
+    },
+    {
+     "name": "variant",
+     "type": "text",
+     "units": "",
+     "meaning": "Which scan of the slide, when it was scanned more than once (`a`, `b`, ...); empty for one scan."
+    },
+    {
+     "name": "scene_index",
+     "type": "int",
+     "units": "",
+     "meaning": "The scene's index inside the CZI, counted from 0."
+    },
+    {
+     "name": "section_order",
+     "type": "int",
+     "units": "",
+     "meaning": "Position of the section along the animal's brain, 1..N within one marker's series."
+    },
+    {
+     "name": "czi_file",
+     "type": "text",
+     "units": "",
+     "meaning": "The CZI it came from."
+    },
+    {
+     "name": "status",
+     "type": "text",
+     "units": "",
+     "meaning": "Where it ended up: `measured`, `curated`, `excluded`, `censored_out`, `reformatted` or `not_reformatted`."
+    },
+    {
+     "name": "proposed_excluded",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when 04f proposed it."
+    },
+    {
+     "name": "decision",
+     "type": "text",
+     "units": "",
+     "meaning": "What was decided: auto, manual, restored."
+    },
+    {
+     "name": "exclusion_class",
+     "type": "text",
+     "units": "",
+     "meaning": "Class of exclusion."
+    },
+    {
+     "name": "decision_reason",
+     "type": "text",
+     "units": "",
+     "meaning": "The reason in words."
+    },
+    {
+     "name": "tissue_area_mm2",
+     "type": "float",
+     "units": "mm²",
+     "meaning": "From focus.csv."
+    },
+    {
+     "name": "focus_score",
+     "type": "float",
+     "units": "",
+     "meaning": "From focus.csv."
+    },
+    {
+     "name": "contrast",
+     "type": "float",
+     "units": "",
+     "meaning": "From focus.csv."
+    },
+    {
+     "name": "saturated_fraction",
+     "type": "float",
+     "units": "",
+     "meaning": "From focus.csv."
+    },
+    {
+     "name": "largest_mm2",
+     "type": "float",
+     "units": "mm²",
+     "meaning": "From 04f (survivors)."
+    },
+    {
+     "name": "total_mm2",
+     "type": "float",
+     "units": "mm²",
+     "meaning": "From 04f."
+    },
+    {
+     "name": "n_pieces",
+     "type": "int",
+     "units": "",
+     "meaning": "From 04f."
+    },
+    {
+     "name": "qc_source",
+     "type": "text",
+     "units": "",
+     "meaning": "`exclusion_candidates` or `reason_string`."
+    },
+    {
+     "name": "n_artifact_objects",
+     "type": "int",
+     "units": "",
+     "meaning": "From 04g."
+    },
+    {
+     "name": "artifact_pct_of_tissue",
+     "type": "float",
+     "units": "%",
+     "meaning": "From 04g."
+    },
+    {
+     "name": "in_analysis_set",
+     "type": "0/1",
+     "units": "",
+     "meaning": "From 04j."
+    },
+    {
+     "name": "censored_fraction_in_tissue",
+     "type": "float",
+     "units": "",
+     "meaning": "From 04j."
+    },
+    {
+     "name": "censor_reason",
+     "type": "text",
+     "units": "",
+     "meaning": "From 04j."
+    },
+    {
+     "name": "reformatted",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when 04a made its 256 picture."
+    },
+    {
+     "name": "angle",
+     "type": "float",
+     "units": "degrees",
+     "meaning": "From the reformat index."
+    },
+    {
+     "name": "manual_rotation",
+     "type": "float",
+     "units": "degrees",
+     "meaning": "From the reformat index."
+    },
+    {
+     "name": "manual_flip",
+     "type": "0/1",
+     "units": "",
+     "meaning": "From the reformat index."
+    },
+    {
+     "name": "overview_img",
+     "type": "path",
+     "units": "",
+     "meaning": "The overview picture, when there is one."
+    },
+    {
+     "name": "section_img",
+     "type": "path",
+     "units": "",
+     "meaning": "The 256 picture."
+    },
+    {
+     "name": "section_rgb",
+     "type": "path",
+     "units": "",
+     "meaning": "The colour composite."
+    },
+    {
+     "name": "section_thumb",
+     "type": "path",
+     "units": "",
+     "meaning": "Its thumbnail."
+    },
+    {
+     "name": "mask_img",
+     "type": "path",
+     "units": "",
+     "meaning": "The artifact mask."
+    },
+    {
+     "name": "tissue_img",
+     "type": "path",
+     "units": "",
+     "meaning": "The tissue mask (`--tissue-masks`)."
+    },
+    {
+     "name": "censor_img",
+     "type": "path",
+     "units": "",
+     "meaning": "The clipped-pixel mask."
+    },
+    {
+     "name": "n_rois",
+     "type": "int",
+     "units": "",
+     "meaning": "Regions curated on it."
+    },
+    {
+     "name": "n_nuclei",
+     "type": "int",
+     "units": "",
+     "meaning": "Nuclei measured in it."
+    }
+   ]
+  },
+  {
+   "path": "curation/ls_roi_curator_v1.json",
+   "names": [
+    "ls_roi_curator_v1.json",
+    "ls_roi_curator_v1_rois.json",
+    "ls_roi_curator_v1_custom.json"
+   ],
+   "writer": "the app (app/state.py mirrors the curator page's storage), or 04q_import_curation.py `--write`",
+   "what": "The ROI curator's working state, filed per study (`ls_curation`): per section the plate, landmark pairs, outlines, favourites, view rotation and exclusion. 04l seeds a fresh page from it. `_rois.json` holds which regions to draw and `_custom.json` the regions a person added.",
+   "format": "JSON: `{\"_studies\": {<out_root>: {<scene_uid>: {plate, plate_id, plate_fp, plate_px, verified, pairs, polys, assigned, noroi, fav, rot, excl}}}, \"_tokens\": ...}`",
+   "readers": [
+    "04l_roi_curator.py",
+    "04q_import_curation.py"
+   ],
+   "columns": []
+  },
+  {
+   "path": "roi_plates.csv (curator export)",
+   "names": [
+    "roi_plates.csv"
+   ],
+   "writer": "04l_roi_curator.py (Export, in the browser)",
+   "what": "One row per section with any curation work: the plate it was matched to and how far it got. Saved by the app into the study (Import exports); 05a reads it.",
+   "readers": [
+    "05a_roi_geometry.py",
+    "04q_import_curation.py",
+    "04e_register_elastix.py"
+   ],
+   "column_sources": [
+    "04l_roi_curator.py"
+   ],
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye name, as declared in the study."
+    },
+    {
+     "name": "subset",
+     "type": "text",
+     "units": "",
+     "meaning": "Which queue the section was loaded from."
+    },
+    {
+     "name": "section_order",
+     "type": "int",
+     "units": "",
+     "meaning": "Position of the section along the animal's brain, 1..N within one marker's series."
+    },
+    {
+     "name": "plate_set",
+     "type": "text",
+     "units": "",
+     "meaning": "The atlas plate set (`plates_final`, `plates_wullimann`, or an own atlas)."
+    },
+    {
+     "name": "plate_id",
+     "type": "text",
+     "units": "",
+     "meaning": "The plate's id, which sorts rostral to caudal."
+    },
+    {
+     "name": "plate_index",
+     "type": "int",
+     "units": "",
+     "meaning": "The plate's position in the set when it was chosen."
+    },
+    {
+     "name": "plate_fp",
+     "type": "text",
+     "units": "",
+     "meaning": "The plate picture's fingerprint when it was chosen."
+    },
+    {
+     "name": "plate_px",
+     "type": "text",
+     "units": "",
+     "meaning": "The plate picture's size then, `WxH`."
+    },
+    {
+     "name": "plate_verified",
+     "type": "text",
+     "units": "",
+     "meaning": "Whether the plate on disk is still the one chosen: `ok`, `resized`, `changed`, `gone`, `unchecked` or `by_index` (no id was recorded)."
+    },
+    {
+     "name": "plate_has_seeds",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when the plate has region dots."
+    },
+    {
+     "name": "n_landmarks",
+     "type": "int",
+     "units": "",
+     "meaning": "Landmark pairs placed."
+    },
+    {
+     "name": "n_background",
+     "type": "int",
+     "units": "",
+     "meaning": "Background discs placed."
+    },
+    {
+     "name": "transform",
+     "type": "text",
+     "units": "",
+     "meaning": "`affine` (3 to 5 pairs) or `tps` (6 or more)."
+    },
+    {
+     "name": "status",
+     "type": "text",
+     "units": "",
+     "meaning": "`registered`, `plate_only`, `favourite_only`, `no_roi` or `excluded`."
+    },
+    {
+     "name": "favorite",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when starred."
+    },
+    {
+     "name": "view_rotation_deg",
+     "type": "float",
+     "units": "degrees",
+     "meaning": "How the section was turned for viewing; geometry is unaffected."
+    },
+    {
+     "name": "excluded",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when excluded in the curator."
+    }
+   ]
+  },
+  {
+   "path": "roi_landmarks.csv (curator export)",
+   "names": [
+    "roi_landmarks.csv"
+   ],
+   "writer": "04l_roi_curator.py (Export)",
+   "what": "One row per landmark pair: a point on the section and the same point on the plate.",
+   "readers": [
+    "05a_roi_geometry.py",
+    "04q_import_curation.py",
+    "04e_register_elastix.py"
+   ],
+   "column_sources": [
+    "04l_roi_curator.py"
+   ],
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye name, as declared in the study."
+    },
+    {
+     "name": "section_order",
+     "type": "int",
+     "units": "",
+     "meaning": "Position of the section along the animal's brain, 1..N within one marker's series."
+    },
+    {
+     "name": "plate_set",
+     "type": "text",
+     "units": "",
+     "meaning": "The plate set."
+    },
+    {
+     "name": "plate_id",
+     "type": "text",
+     "units": "",
+     "meaning": "The plate's id, which sorts rostral to caudal."
+    },
+    {
+     "name": "pair",
+     "type": "int",
+     "units": "",
+     "meaning": "The pair's number."
+    },
+    {
+     "name": "sec_x",
+     "type": "float",
+     "units": "px (256 frame)",
+     "meaning": "Point on the section, x, in the 256 frame."
+    },
+    {
+     "name": "sec_y",
+     "type": "float",
+     "units": "px (256 frame)",
+     "meaning": "Point on the section, y."
+    },
+    {
+     "name": "sec_r",
+     "type": "float",
+     "units": "px (256 frame)",
+     "meaning": "The marker's radius."
+    },
+    {
+     "name": "plate_x",
+     "type": "float",
+     "units": "plate px",
+     "meaning": "Point on the plate, x."
+    },
+    {
+     "name": "plate_y",
+     "type": "float",
+     "units": "plate px",
+     "meaning": "Point on the plate, y."
+    },
+    {
+     "name": "residual_px",
+     "type": "float",
+     "units": "px",
+     "meaning": "How far the fitted transform misses this pair."
+    },
+    {
+     "name": "seed_n",
+     "type": "int",
+     "units": "",
+     "meaning": "The atlas dot the pair was placed against, blank when free-clicked."
+    },
+    {
+     "name": "seed_region",
+     "type": "text",
+     "units": "",
+     "meaning": "That dot's region."
+    }
+   ]
+  },
+  {
+   "path": "roi_regions.csv (curator export)",
+   "names": [
+    "roi_regions.csv"
+   ],
+   "writer": "04l_roi_curator.py (Export)",
+   "what": "One row per region outline or background disc, in the section's 256 frame. 05a carries these to the slide.",
+   "readers": [
+    "05a_roi_geometry.py",
+    "04q_import_curation.py",
+    "04e_register_elastix.py"
+   ],
+   "column_sources": [
+    "04l_roi_curator.py"
+   ],
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye name, as declared in the study."
+    },
+    {
+     "name": "plate_set",
+     "type": "text",
+     "units": "",
+     "meaning": "The plate set."
+    },
+    {
+     "name": "plate_id",
+     "type": "text",
+     "units": "",
+     "meaning": "The plate's id, which sorts rostral to caudal."
+    },
+    {
+     "name": "roi_kind",
+     "type": "text",
+     "units": "",
+     "meaning": "`roi` (a region) or `background` (a disc on tissue with no real signal)."
+    },
+    {
+     "name": "region",
+     "type": "text",
+     "units": "",
+     "meaning": "The region abbreviation; `__background__` for a disc."
+    },
+    {
+     "name": "region_ambiguous",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when the plate's dot could be one of several regions."
+    },
+    {
+     "name": "ambiguity_group",
+     "type": "text",
+     "units": "",
+     "meaning": "Which regions it could be."
+    },
+    {
+     "name": "region_uncertain_in_atlas",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when the atlas itself marks the region `??`."
+    },
+    {
+     "name": "sec_x",
+     "type": "float",
+     "units": "px (256 frame)",
+     "meaning": "Centre (or centroid of an outline), x."
+    },
+    {
+     "name": "sec_y",
+     "type": "float",
+     "units": "px (256 frame)",
+     "meaning": "Centre, y."
+    },
+    {
+     "name": "sec_r",
+     "type": "float",
+     "units": "px (256 frame)",
+     "meaning": "Disc radius; blank for an outline."
+    },
+    {
+     "name": "seed_n",
+     "type": "int",
+     "units": "",
+     "meaning": "Which numbered atlas region it answers."
+    },
+    {
+     "name": "n_landmarks",
+     "type": "int",
+     "units": "",
+     "meaning": "The section's landmark pairs now."
+    },
+    {
+     "name": "transform",
+     "type": "text",
+     "units": "",
+     "meaning": "`affine` or `tps`."
+    },
+    {
+     "name": "mean_residual_px",
+     "type": "float",
+     "units": "px",
+     "meaning": "Mean landmark residual."
+    },
+    {
+     "name": "roi_shape",
+     "type": "text",
+     "units": "",
+     "meaning": "`disc` or `polygon`."
+    },
+    {
+     "name": "part",
+     "type": "int",
+     "units": "",
+     "meaning": "Which part, for a region drawn in several pieces."
+    },
+    {
+     "name": "sec_poly",
+     "type": "text",
+     "units": "px (256 frame)",
+     "meaning": "An outline's vertices, `x y` pairs joined with `;`."
+    },
+    {
+     "name": "roi_n",
+     "type": "int",
+     "units": "",
+     "meaning": "The region's number on the section."
+    },
+    {
+     "name": "landmarks_at_draw",
+     "type": "int",
+     "units": "",
+     "meaning": "Landmark pairs when the outline was closed; blank for discs."
+    }
+   ]
+  },
+  {
+   "path": "reformatted/roi_geometry_<marker>.csv",
+   "names": [
+    "roi_geometry_{marker}.csv",
+    "roi_geometry.csv"
+   ],
+   "writer": "05a_roi_geometry.py",
+   "what": "One row per curated section: the six reformat steps 04a took, and the one affine map they compose to. The LS study's AF568 file keeps its old name `roi_geometry.csv`.",
+   "column_sources": [
+    "05a_roi_geometry.py"
+   ],
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye name, as declared in the study."
+    },
+    {
+     "name": "czi_file",
+     "type": "text",
+     "units": "",
+     "meaning": "The CZI."
+    },
+    {
+     "name": "scene_index",
+     "type": "int",
+     "units": "",
+     "meaning": "The scene's index inside the CZI, counted from 0."
+    },
+    {
+     "name": "scene_x",
+     "type": "int",
+     "units": "CZI px",
+     "meaning": "Scene origin, x."
+    },
+    {
+     "name": "scene_y",
+     "type": "int",
+     "units": "CZI px",
+     "meaning": "Scene origin, y."
+    },
+    {
+     "name": "scene_w",
+     "type": "int",
+     "units": "CZI px",
+     "meaning": "Scene width."
+    },
+    {
+     "name": "scene_h",
+     "type": "int",
+     "units": "CZI px",
+     "meaning": "Scene height."
+    },
+    {
+     "name": "overview_um_px",
+     "type": "float",
+     "units": "µm",
+     "meaning": "Overview pixel size."
+    },
+    {
+     "name": "native_um_px",
+     "type": "float",
+     "units": "µm",
+     "meaning": "Full-resolution pixel size."
+    },
+    {
+     "name": "src_w",
+     "type": "int",
+     "units": "px",
+     "meaning": "Overview width before the square resize."
+    },
+    {
+     "name": "src_h",
+     "type": "int",
+     "units": "px",
+     "meaning": "Overview height."
+    },
+    {
+     "name": "work_size",
+     "type": "int",
+     "units": "px",
+     "meaning": "Side of the square working grid (400)."
+    },
+    {
+     "name": "angle_deg",
+     "type": "float",
+     "units": "degrees",
+     "meaning": "Total rotation."
+    },
+    {
+     "name": "flip",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when mirrored."
+    },
+    {
+     "name": "manual_rotation_deg",
+     "type": "float",
+     "units": "degrees",
+     "meaning": "The person's part of the rotation."
+    },
+    {
+     "name": "rot_w",
+     "type": "int",
+     "units": "px",
+     "meaning": "Width after rotation."
+    },
+    {
+     "name": "rot_h",
+     "type": "int",
+     "units": "px",
+     "meaning": "Height after rotation."
+    },
+    {
+     "name": "crop_x0",
+     "type": "int",
+     "units": "px",
+     "meaning": "Crop origin, x."
+    },
+    {
+     "name": "crop_y0",
+     "type": "int",
+     "units": "px",
+     "meaning": "Crop origin, y."
+    },
+    {
+     "name": "crop_w",
+     "type": "int",
+     "units": "px",
+     "meaning": "Crop width."
+    },
+    {
+     "name": "crop_h",
+     "type": "int",
+     "units": "px",
+     "meaning": "Crop height."
+    },
+    {
+     "name": "pad_side",
+     "type": "int",
+     "units": "px",
+     "meaning": "Side of the padded square."
+    },
+    {
+     "name": "pad_ox",
+     "type": "int",
+     "units": "px",
+     "meaning": "Where the crop sits in it, x."
+    },
+    {
+     "name": "pad_oy",
+     "type": "int",
+     "units": "px",
+     "meaning": "Where the crop sits, y."
+    },
+    {
+     "name": "grid",
+     "type": "int",
+     "units": "px",
+     "meaning": "Output side (256 × the supersampling factor)."
+    },
+    {
+     "name": "m00",
+     "type": "float",
+     "units": "",
+     "meaning": "Row 1, column 1 of the 2 × 3 affine from the 256 frame (u, v) to absolute CZI pixels (x, y)."
+    },
+    {
+     "name": "m01",
+     "type": "float",
+     "units": "",
+     "meaning": "Row 1, column 2 of the 2 × 3 affine from the 256 frame (u, v) to absolute CZI pixels (x, y)."
+    },
+    {
+     "name": "m02",
+     "type": "float",
+     "units": "",
+     "meaning": "Row 1, translation of the 2 × 3 affine from the 256 frame (u, v) to absolute CZI pixels (x, y)."
+    },
+    {
+     "name": "m10",
+     "type": "float",
+     "units": "",
+     "meaning": "Row 2, column 1 of the 2 × 3 affine from the 256 frame (u, v) to absolute CZI pixels (x, y)."
+    },
+    {
+     "name": "m11",
+     "type": "float",
+     "units": "",
+     "meaning": "Row 2, column 2 of the 2 × 3 affine from the 256 frame (u, v) to absolute CZI pixels (x, y)."
+    },
+    {
+     "name": "m12",
+     "type": "float",
+     "units": "",
+     "meaning": "Row 2, translation of the 2 × 3 affine from the 256 frame (u, v) to absolute CZI pixels (x, y)."
+    },
+    {
+     "name": "anisotropy",
+     "type": "float",
+     "units": "",
+     "meaning": "Ratio of the map's two singular values; 1.0 would keep a circle a circle."
+    }
+   ]
+  },
+  {
+   "path": "reformatted/roi_boxes_<marker>.csv",
+   "names": [
+    "roi_boxes_{marker}.csv",
+    "roi_boxes.csv"
+   ],
+   "writer": "05a_roi_geometry.py",
+   "what": "One row per region or background disc: its outline carried onto the CZI, the box 05c reads, and its true area. 06a joins nuclei to this file by position.",
+   "column_sources": [
+    "05a_roi_geometry.py"
+   ],
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye name, as declared in the study."
+    },
+    {
+     "name": "roi_kind",
+     "type": "text",
+     "units": "",
+     "meaning": "`roi` or `background`."
+    },
+    {
+     "name": "region",
+     "type": "text",
+     "units": "",
+     "meaning": "The region abbreviation."
+    },
+    {
+     "name": "seed_n",
+     "type": "int",
+     "units": "",
+     "meaning": "Which atlas region it answers."
+    },
+    {
+     "name": "sec_x",
+     "type": "float",
+     "units": "px (256 frame)",
+     "meaning": "As exported, in the 256 frame."
+    },
+    {
+     "name": "sec_y",
+     "type": "float",
+     "units": "px (256 frame)",
+     "meaning": "As exported."
+    },
+    {
+     "name": "sec_r",
+     "type": "float",
+     "units": "px (256 frame)",
+     "meaning": "As exported."
+    },
+    {
+     "name": "czi_file",
+     "type": "text",
+     "units": "",
+     "meaning": "The CZI."
+    },
+    {
+     "name": "scene_index",
+     "type": "int",
+     "units": "",
+     "meaning": "The scene's index inside the CZI, counted from 0."
+    },
+    {
+     "name": "czi_cx",
+     "type": "float",
+     "units": "CZI px",
+     "meaning": "Centre on the CZI, x."
+    },
+    {
+     "name": "czi_cy",
+     "type": "float",
+     "units": "CZI px",
+     "meaning": "Centre on the CZI, y."
+    },
+    {
+     "name": "czi_x0",
+     "type": "int",
+     "units": "CZI px",
+     "meaning": "Box origin, x."
+    },
+    {
+     "name": "czi_y0",
+     "type": "int",
+     "units": "CZI px",
+     "meaning": "Box origin, y."
+    },
+    {
+     "name": "czi_w",
+     "type": "int",
+     "units": "CZI px",
+     "meaning": "Box width."
+    },
+    {
+     "name": "czi_h",
+     "type": "int",
+     "units": "CZI px",
+     "meaning": "Box height."
+    },
+    {
+     "name": "axis_a_um",
+     "type": "float",
+     "units": "µm",
+     "meaning": "A disc's longer semi-axis on the slide (a circle becomes an ellipse); blank for an outline."
+    },
+    {
+     "name": "axis_b_um",
+     "type": "float",
+     "units": "µm",
+     "meaning": "The shorter semi-axis."
+    },
+    {
+     "name": "area_um2",
+     "type": "float",
+     "units": "µm²",
+     "meaning": "The area on the slide: π·a·b for a disc, the shoelace formula over the mapped outline otherwise."
+    },
+    {
+     "name": "roi_shape",
+     "type": "text",
+     "units": "",
+     "meaning": "`disc` or `polygon`."
+    },
+    {
+     "name": "sec_poly",
+     "type": "text",
+     "units": "px (256 frame)",
+     "meaning": "The outline as exported."
+    }
+   ]
+  },
+  {
+   "path": "reformatted/roi_regions_used_<marker>.csv",
+   "names": [
+    "roi_regions_used_{marker}.csv"
+   ],
+   "writer": "05a_roi_geometry.py",
+   "what": "A copy of the curator export 05a read, kept beside its output so the boxes can always be traced to the outlines they came from. Same columns as roi_regions.csv.",
+   "readers": [],
+   "columns": []
+  },
+  {
+   "path": "qc/detection_tuning.csv",
+   "names": [
+    "detection_tuning.csv"
+   ],
+   "writer": "05b_tune_detection.py",
+   "what": "One row per sampled crop: the signal statistics 05b's verdict is made from (summary and chosen cut in `qc/detection_tuning.md`).",
+   "columns_from": "05b_tune_detection.py:COLUMNS",
+   "columns": [
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye name, as declared in the study."
+    },
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "roi_index",
+     "type": "int",
+     "units": "",
+     "meaning": "Which region of the section."
+    },
+    {
+     "name": "segmented_on",
+     "type": "text",
+     "units": "",
+     "meaning": "The plane detection will use."
+    },
+    {
+     "name": "width",
+     "type": "int",
+     "units": "px",
+     "meaning": "Crop width."
+    },
+    {
+     "name": "height",
+     "type": "int",
+     "units": "px",
+     "meaning": "Crop height."
+    },
+    {
+     "name": "background",
+     "type": "float",
+     "units": "grey value",
+     "meaning": "Median of the pixels below the crop's Otsu cut."
+    },
+    {
+     "name": "foreground",
+     "type": "float",
+     "units": "grey value",
+     "meaning": "Median of the pixels above it."
+    },
+    {
+     "name": "noise",
+     "type": "float",
+     "units": "grey value",
+     "meaning": "Robust SD of neighbour differences / √2."
+    },
+    {
+     "name": "snr",
+     "type": "float",
+     "units": "",
+     "meaning": "(foreground - background) / noise."
+    },
+    {
+     "name": "contrast",
+     "type": "float",
+     "units": "",
+     "meaning": "(foreground - background) / (foreground + background)."
+    },
+    {
+     "name": "coverage",
+     "type": "float",
+     "units": "",
+     "meaning": "Share of the crop above the Otsu cut."
+    },
+    {
+     "name": "saturated",
+     "type": "float",
+     "units": "",
+     "meaning": "Share of the crop at the clip ceiling."
+    }
+   ]
+  },
+  {
+   "path": "results/roi_nuclei.csv",
+   "names": [
+    "roi_nuclei.csv"
+   ],
+   "writer": "05c_detect_rois.py (06f, 06g and 06h repair it in place)",
+   "what": "One row per detected nucleus in every region and background disc. About 900,000 rows on the LS study; appended section by section so a stopped run resumes.",
+   "columns_from": "05c_detect_rois.py:COLUMNS",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye name, as declared in the study."
+    },
+    {
+     "name": "roi_kind",
+     "type": "text",
+     "units": "",
+     "meaning": "`roi` or `background`."
+    },
+    {
+     "name": "region",
+     "type": "text",
+     "units": "",
+     "meaning": "The region."
+    },
+    {
+     "name": "seed_n",
+     "type": "int",
+     "units": "",
+     "meaning": "Atlas region number."
+    },
+    {
+     "name": "roi_index",
+     "type": "int",
+     "units": "",
+     "meaning": "The region's row in roi_boxes, from 1."
+    },
+    {
+     "name": "nucleus_id",
+     "type": "int",
+     "units": "",
+     "meaning": "The object's label inside its box."
+    },
+    {
+     "name": "czi_x",
+     "type": "float",
+     "units": "CZI px",
+     "meaning": "Centroid on the CZI, x."
+    },
+    {
+     "name": "czi_y",
+     "type": "float",
+     "units": "CZI px",
+     "meaning": "Centroid, y."
+    },
+    {
+     "name": "sec_x",
+     "type": "float",
+     "units": "px (256 frame)",
+     "meaning": "Centroid in the 256 frame, x."
+    },
+    {
+     "name": "sec_y",
+     "type": "float",
+     "units": "px (256 frame)",
+     "meaning": "Centroid in the 256 frame, y."
+    },
+    {
+     "name": "area_um2",
+     "type": "float",
+     "units": "µm²",
+     "meaning": "Nucleus area."
+    },
+    {
+     "name": "equiv_diam_um",
+     "type": "float",
+     "units": "µm",
+     "meaning": "Diameter of a circle of that area."
+    },
+    {
+     "name": "dapi_mean",
+     "type": "float",
+     "units": "grey value",
+     "meaning": "Mean counterstain inside the nucleus."
+    },
+    {
+     "name": "marker_mean",
+     "type": "float",
+     "units": "grey value",
+     "meaning": "Mean marker inside the nucleus, censored pixels left out."
+    },
+    {
+     "name": "marker_median",
+     "type": "float",
+     "units": "grey value",
+     "meaning": "Median marker inside the nucleus; 06a's positivity reads this."
+    },
+    {
+     "name": "marker_p90",
+     "type": "float",
+     "units": "grey value",
+     "meaning": "90th percentile of the marker inside it."
+    },
+    {
+     "name": "censored",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when the nucleus covers clipped pixels; counted, and positive."
+    },
+    {
+     "name": "artifact",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when it sits on 04g's artifact mask; dropped by 06a."
+    },
+    {
+     "name": "off_tissue",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when its centroid is outside the tissue; dropped by 06a."
+    },
+    {
+     "name": "segmented_on",
+     "type": "text",
+     "units": "",
+     "meaning": "The plane it was found on (the counterstain's name, `nuclear`, or the marker)."
+    },
+    {
+     "name": "backend",
+     "type": "text",
+     "units": "",
+     "meaning": "`stardist` or `threshold`."
+    },
+    {
+     "name": "nucleus_shaped",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when the objects are nuclei, so the Abercrombie correction applies."
+    }
+   ]
+  },
+  {
+   "path": "results/roi_nuclei_sections_done.csv",
+   "names": [
+    "roi_nuclei_sections_done.csv"
+   ],
+   "writer": "05c_detect_rois.py",
+   "what": "The sections whose rows were written whole. No header: `marker,*` starts a marker's log, then `marker,scene_uid[,box_fingerprint]` per finished section.",
+   "format": "Headerless CSV, 2 or 3 fields per line.",
+   "columns": []
+  },
+  {
+   "path": "results/detection_settings.json",
+   "names": [
+    "detection_settings.json"
+   ],
+   "writer": "05c_detect_rois.py",
+   "what": "The StarDist thresholds each marker's rows were measured with; a resume refuses to mix two.",
+   "format": "JSON: `{marker: {\"prob_thresh\": float|null, \"nms_thresh\": float|null, \"source\": text}}`.",
+   "columns": []
+  },
+  {
+   "path": "results/roi_normalisation.csv",
+   "names": [
+    "roi_normalisation.csv"
+   ],
+   "writer": "05c_detect_rois.py",
+   "what": "For a marker counted on its own channel: the one intensity range every box of a section was stretched by.",
+   "columns_from": "05c_detect_rois.py:NORM_COLUMNS",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye name, as declared in the study."
+    },
+    {
+     "name": "segmented_on",
+     "type": "text",
+     "units": "",
+     "meaning": "The plane."
+    },
+    {
+     "name": "norm_lo",
+     "type": "float",
+     "units": "grey value",
+     "meaning": "Bottom of the stretch (the 1st percentile over the section's boxes)."
+    },
+    {
+     "name": "norm_hi",
+     "type": "float",
+     "units": "grey value",
+     "meaning": "Top (the 99.8th percentile)."
+    },
+    {
+     "name": "n_crops",
+     "type": "int",
+     "units": "",
+     "meaning": "Boxes the range was taken over."
+    }
+   ]
+  },
+  {
+   "path": "results/roi_measured_geometry.csv",
+   "names": [
+    "roi_measured_geometry.csv"
+   ],
+   "writer": "05c_detect_rois.py",
+   "what": "The shape each region was measured on, so 06a can tell when a region was moved after detection.",
+   "columns_from": "05c_detect_rois.py:GEOMETRY_COLUMNS",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye name, as declared in the study."
+    },
+    {
+     "name": "roi_index",
+     "type": "int",
+     "units": "",
+     "meaning": "Row in roi_boxes."
+    },
+    {
+     "name": "roi_kind",
+     "type": "text",
+     "units": "",
+     "meaning": "As in roi_boxes."
+    },
+    {
+     "name": "region",
+     "type": "text",
+     "units": "",
+     "meaning": "As in roi_boxes."
+    },
+    {
+     "name": "sec_x",
+     "type": "float",
+     "units": "px (256 frame)",
+     "meaning": "As in roi_boxes."
+    },
+    {
+     "name": "sec_y",
+     "type": "float",
+     "units": "px (256 frame)",
+     "meaning": "As in roi_boxes."
+    },
+    {
+     "name": "sec_r",
+     "type": "float",
+     "units": "px (256 frame)",
+     "meaning": "As in roi_boxes."
+    },
+    {
+     "name": "sec_poly",
+     "type": "text",
+     "units": "",
+     "meaning": "As in roi_boxes."
+    },
+    {
+     "name": "area_um2",
+     "type": "float",
+     "units": "µm²",
+     "meaning": "As in roi_boxes."
+    }
+   ]
+  },
+  {
+   "path": "results/roi_colocalisation.csv",
+   "names": [
+    "roi_colocalisation.csv"
+   ],
+   "writer": "05c_detect_rois.py",
+   "what": "Multiplex studies only: which object of one marker overlaps which of another.",
+   "columns_from": "05c_detect_rois.py:COLOC_COLUMNS",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "roi_index",
+     "type": "int",
+     "units": "",
+     "meaning": "The region."
+    },
+    {
+     "name": "marker_a",
+     "type": "text",
+     "units": "",
+     "meaning": "First marker."
+    },
+    {
+     "name": "object_a",
+     "type": "int",
+     "units": "",
+     "meaning": "Its object."
+    },
+    {
+     "name": "marker_b",
+     "type": "text",
+     "units": "",
+     "meaning": "Second marker."
+    },
+    {
+     "name": "object_b",
+     "type": "int",
+     "units": "",
+     "meaning": "Its object."
+    },
+    {
+     "name": "a_centroid_in_b",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when a's centre lies inside b."
+    },
+    {
+     "name": "b_centroid_in_a",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when b's centre lies inside a."
+    }
+   ]
+  },
+  {
+   "path": "qc/roi_background_assumption.csv",
+   "names": [
+    "roi_background_assumption.csv"
+   ],
+   "writer": "05c_detect_rois.py",
+   "what": "Threshold backend only, and only when it failed: regions whose frame broke the background assumption, so a zero there means the estimate failed.",
+   "columns_from": "05c_detect_rois.py:BACKGROUND_COLUMNS",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "roi_index",
+     "type": "int",
+     "units": "",
+     "meaning": "The region."
+    },
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye name, as declared in the study."
+    },
+    {
+     "name": "segmented_on",
+     "type": "text",
+     "units": "",
+     "meaning": "The plane."
+    },
+    {
+     "name": "backend",
+     "type": "text",
+     "units": "",
+     "meaning": "`threshold`."
+    },
+    {
+     "name": "n_objects",
+     "type": "int",
+     "units": "",
+     "meaning": "Objects found."
+    },
+    {
+     "name": "cut",
+     "type": "float",
+     "units": "grey value",
+     "meaning": "median + k·1.4826·MAD."
+    },
+    {
+     "name": "above_cut",
+     "type": "float",
+     "units": "",
+     "meaning": "Share of pixels above the cut."
+    },
+    {
+     "name": "below_background",
+     "type": "float",
+     "units": "",
+     "meaning": "Share of pixels below the background estimate."
+    }
+   ]
+  },
+  {
+   "path": "qc/roi_no_artifact_mask.csv",
+   "names": [
+    "roi_no_artifact_mask.csv"
+   ],
+   "writer": "05c_detect_rois.py",
+   "what": "Sections measured with no artifact mask, so `artifact` is 0 there because nothing was checked. Header only when none.",
+   "columns_from": "05c_detect_rois.py:NO_ARTIFACT_COLUMNS",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye name, as declared in the study."
+    }
+   ]
+  },
+  {
+   "path": "detection_outlines/<marker>/<scene_uid>.npz",
+   "names": [],
+   "writer": "05c_detect_rois.py",
+   "what": "Every detected nucleus's outline, so 06i can draw them without detecting again.",
+   "format": "Compressed NumPy archive: `roiNN` (uint32 label image of box NN, 0 = background) and `roiNN_origin` (the box's CZI x, y).",
+   "readers": [
+    "06i_detection_overlays.py"
+   ],
+   "columns": []
+  },
+  {
+   "path": "detection_overlays/index.csv",
+   "names": [
+    "index.csv",
+    "index_05c.csv"
+   ],
+   "writer": "06i_detection_overlays.py",
+   "what": "One row per detection picture. 05c keeps its own list, `index_05c.csv`, with these columns plus `data_fingerprint` and `error`.",
+   "columns_from": "ls_overlay.py:INDEX_KEYS",
+   "columns": [
+    {
+     "name": "path",
+     "type": "path",
+     "units": "",
+     "meaning": "The picture."
+    },
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye name, as declared in the study."
+    },
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "slide",
+     "type": "text",
+     "units": "",
+     "meaning": "The slide id parsed from the file name."
+    },
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "picture",
+     "type": "text",
+     "units": "",
+     "meaning": "`roi`, `background` or `scene` (a whole-section picture)."
+    },
+    {
+     "name": "roi_index",
+     "type": "int",
+     "units": "",
+     "meaning": "The region."
+    },
+    {
+     "name": "region",
+     "type": "text",
+     "units": "",
+     "meaning": "The region."
+    },
+    {
+     "name": "n_counted",
+     "type": "int",
+     "units": "",
+     "meaning": "Nuclei counted."
+    },
+    {
+     "name": "n_positive",
+     "type": "int",
+     "units": "",
+     "meaning": "Of those, positive (blank with no cut)."
+    },
+    {
+     "name": "pct_positive",
+     "type": "float",
+     "units": "%",
+     "meaning": "n_positive / n_counted."
+    },
+    {
+     "name": "cut",
+     "type": "float",
+     "units": "grey value",
+     "meaning": "The section's positivity cut."
+    },
+    {
+     "name": "n_outside",
+     "type": "int",
+     "units": "",
+     "meaning": "Detected but outside the outline."
+    },
+    {
+     "name": "n_artifact",
+     "type": "int",
+     "units": "",
+     "meaning": "On an artifact."
+    },
+    {
+     "name": "n_off_tissue",
+     "type": "int",
+     "units": "",
+     "meaning": "Off the tissue."
+    },
+    {
+     "name": "n_censored",
+     "type": "int",
+     "units": "",
+     "meaning": "On clipped pixels."
+    },
+    {
+     "name": "um_per_px",
+     "type": "float",
+     "units": "µm",
+     "meaning": "Picture pixel size."
+    },
+    {
+     "name": "outlines",
+     "type": "text",
+     "units": "",
+     "meaning": "Where the outlines came from: saved by 05c, or detected again."
+    },
+    {
+     "name": "drawn_at",
+     "type": "text",
+     "units": "",
+     "meaning": "When drawn."
+    },
+    {
+     "name": "fingerprint",
+     "type": "text",
+     "units": "",
+     "meaning": "What it was drawn from, so a stale picture is redrawn."
+    }
+   ]
+  },
+  {
+   "path": "detection_overlays/failures.csv",
+   "names": [
+    "failures.csv"
+   ],
+   "writer": "06i_detection_overlays.py",
+   "what": "Sections 06i could not draw, and why.",
+   "columns_from": "06i_detection_overlays.py:FAILURE_KEYS",
+   "columns": [
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye name, as declared in the study."
+    },
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "slide",
+     "type": "text",
+     "units": "",
+     "meaning": "The slide id parsed from the file name."
+    },
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "reason",
+     "type": "text",
+     "units": "",
+     "meaning": "Why, in words."
+    }
+   ]
+  },
+  {
+   "path": "results/roi_measurements.csv",
+   "names": [
+    "roi_measurements.csv"
+   ],
+   "writer": "06a_roi_dataset.py",
+   "what": "One row per region and background disc per section: counts, positives and densities. Keyed by animal only; no group yet.",
+   "column_sources": [
+    "06a_roi_dataset.py"
+   ],
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye name, as declared in the study."
+    },
+    {
+     "name": "roi_kind",
+     "type": "text",
+     "units": "",
+     "meaning": "`roi` or `background`."
+    },
+    {
+     "name": "region",
+     "type": "text",
+     "units": "",
+     "meaning": "The region."
+    },
+    {
+     "name": "seed_n",
+     "type": "int",
+     "units": "",
+     "meaning": "Atlas region number."
+    },
+    {
+     "name": "roi_index",
+     "type": "int",
+     "units": "",
+     "meaning": "Row in roi_boxes."
+    },
+    {
+     "name": "plate_id",
+     "type": "text",
+     "units": "",
+     "meaning": "Blank (kept for older readers)."
+    },
+    {
+     "name": "sec_x",
+     "type": "float",
+     "units": "px (256 frame)",
+     "meaning": "From roi_boxes."
+    },
+    {
+     "name": "sec_y",
+     "type": "float",
+     "units": "px (256 frame)",
+     "meaning": "From roi_boxes."
+    },
+    {
+     "name": "roi_area_um2",
+     "type": "float",
+     "units": "µm²",
+     "meaning": "Region area on the slide."
+    },
+    {
+     "name": "roi_area_mm2",
+     "type": "float",
+     "units": "mm²",
+     "meaning": "The same."
+    },
+    {
+     "name": "n_nuclei",
+     "type": "int",
+     "units": "",
+     "meaning": "Nuclei kept (not on an artifact, not off tissue)."
+    },
+    {
+     "name": "n_positive",
+     "type": "int",
+     "units": "",
+     "meaning": "Of those, positive: marker_median above the cut, or censored. Blank with no cut."
+    },
+    {
+     "name": "frac_positive",
+     "type": "float",
+     "units": "",
+     "meaning": "n_positive / n_nuclei; blank where withheld."
+    },
+    {
+     "name": "profile_density_per_mm2",
+     "type": "float",
+     "units": "per mm²",
+     "meaning": "Nuclear profiles per mm², uncorrected."
+    },
+    {
+     "name": "abercrombie_factor",
+     "type": "float",
+     "units": "",
+     "meaning": "T / (T + h); 1.0 where withheld."
+    },
+    {
+     "name": "abercrombie_withheld_reason",
+     "type": "text",
+     "units": "",
+     "meaning": "Why the correction was not applied, blank where it was."
+    },
+    {
+     "name": "mean_nucleus_diam_um",
+     "type": "float",
+     "units": "µm",
+     "meaning": "h: mean nucleus diameter for this marker and region."
+    },
+    {
+     "name": "cell_density_per_mm2",
+     "type": "float",
+     "units": "per mm²",
+     "meaning": "Corrected cells per mm²; blank where the denominator is withheld."
+    },
+    {
+     "name": "denominator_withheld_reason",
+     "type": "text",
+     "units": "",
+     "meaning": "Why there is no count of all cells (a marker counted on its own channel)."
+    },
+    {
+     "name": "positive_density_per_mm2",
+     "type": "float",
+     "units": "per mm²",
+     "meaning": "Corrected positive cells per mm²."
+    },
+    {
+     "name": "marker_median_of_roi",
+     "type": "float",
+     "units": "grey value",
+     "meaning": "Median of the nuclei's marker medians."
+    },
+    {
+     "name": "section_bg_level",
+     "type": "float",
+     "units": "grey value",
+     "meaning": "Median marker of the section's background nuclei."
+    },
+    {
+     "name": "section_bg_spread",
+     "type": "float",
+     "units": "grey value",
+     "meaning": "Their MAD × 1.4826."
+    },
+    {
+     "name": "section_bg_nuclei",
+     "type": "int",
+     "units": "",
+     "meaning": "Background nuclei the cut was set from."
+    },
+    {
+     "name": "section_positivity_cut",
+     "type": "float",
+     "units": "grey value",
+     "meaning": "level + 3 × spread."
+    },
+    {
+     "name": "n_censored",
+     "type": "int",
+     "units": "",
+     "meaning": "Nuclei on clipped pixels."
+    }
+   ]
+  },
+  {
+   "path": "results/detector_specificity.csv",
+   "names": [
+    "detector_specificity.csv"
+   ],
+   "writer": "06a_roi_dataset.py",
+   "what": "Per section: how many background-disc nuclei land above the cut. A measurement of the detector, not a negative control.",
+   "column_sources": [
+    "06a_roi_dataset.py"
+   ],
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye name, as declared in the study."
+    },
+    {
+     "name": "n_discs",
+     "type": "int",
+     "units": "",
+     "meaning": "Background discs."
+    },
+    {
+     "name": "bg_nuclei",
+     "type": "int",
+     "units": "",
+     "meaning": "Nuclei in them."
+    },
+    {
+     "name": "bg_area_mm2",
+     "type": "float",
+     "units": "mm²",
+     "meaning": "Their area."
+    },
+    {
+     "name": "bg_nuclei_per_mm2",
+     "type": "float",
+     "units": "per mm²",
+     "meaning": "Density."
+    },
+    {
+     "name": "bg_false_positives",
+     "type": "int",
+     "units": "",
+     "meaning": "Background nuclei above the cut."
+    },
+    {
+     "name": "false_positive_rate",
+     "type": "float",
+     "units": "",
+     "meaning": "bg_false_positives / bg_nuclei; blank where the denominator is withheld."
+    },
+    {
+     "name": "bg_false_positives_per_mm2",
+     "type": "float",
+     "units": "per mm²",
+     "meaning": "False positives per area."
+    },
+    {
+     "name": "denominator_withheld_reason",
+     "type": "text",
+     "units": "",
+     "meaning": "As in roi_measurements."
+    },
+    {
+     "name": "bg_level",
+     "type": "float",
+     "units": "grey value",
+     "meaning": "Background median."
+    },
+    {
+     "name": "bg_spread",
+     "type": "float",
+     "units": "grey value",
+     "meaning": "Background MAD × 1.4826."
+    },
+    {
+     "name": "positivity_cut",
+     "type": "float",
+     "units": "grey value",
+     "meaning": "The cut."
+    },
+    {
+     "name": "disc_density_spread",
+     "type": "float",
+     "units": "per mm²",
+     "meaning": "Largest minus smallest disc density on the section."
+    }
+   ]
+  },
+  {
+   "path": "results/positivity_cuts.csv",
+   "names": [
+    "positivity_cuts.csv"
+   ],
+   "writer": "06a_roi_dataset.py",
+   "what": "The exact cut per section, at full precision, so 06i draws the same calls 06a counted.",
+   "columns_from": "06a_roi_dataset.py:CUTS_COLUMNS",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye name, as declared in the study."
+    },
+    {
+     "name": "cut",
+     "type": "float",
+     "units": "grey value",
+     "meaning": "The cut, as Python's repr of the float."
+    }
+   ]
+  },
+  {
+   "path": "results/roi_geometry_changed.csv",
+   "names": [
+    "roi_geometry_changed.csv"
+   ],
+   "writer": "06a_roi_dataset.py",
+   "what": "Sections whose regions changed after detection; 06a refuses them until 05c measures them again. Removed when there are none.",
+   "column_sources": [
+    "06a_roi_dataset.py"
+   ],
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye name, as declared in the study."
+    },
+    {
+     "name": "reason",
+     "type": "text",
+     "units": "",
+     "meaning": "Why, in words."
+    }
+   ]
+  },
+  {
+   "path": "results/animal_metadata.csv",
+   "names": [
+    "animal_metadata.csv"
+   ],
+   "writer": "06b_join_sampling.py",
+   "what": "One row per animal: its row of the sampling sheet and the group it joined to. Written only at unblinding.",
+   "column_sources": [
+    "ls_sampling.py"
+   ],
+   "columns": [
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "sheet_id",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal's id as the sheet writes it."
+    },
+    {
+     "name": "treatment",
+     "type": "text",
+     "units": "",
+     "meaning": "The group: the chosen treatment columns joined with ` · `."
+    },
+    {
+     "name": "treatment_source",
+     "type": "text",
+     "units": "",
+     "meaning": "`sheet`, `rule` (a fill rule) or `unresolved`."
+    },
+    {
+     "name": "<sheet column>",
+     "type": "text",
+     "units": "",
+     "meaning": "Every other sheet column not marked Ignore, lower-cased with `_` for spaces.",
+     "literal": "animal"
+    }
+   ]
+  },
+  {
+   "path": "results/roi_dataset.csv",
+   "names": [
+    "roi_dataset.csv"
+   ],
+   "writer": "06b_join_sampling.py",
+   "what": "roi_measurements.csv with the animal's metadata columns added to every row.",
+   "readers": [
+    "06c_excel_dataset.py"
+   ],
+   "columns": []
+  },
+  {
+   "path": "results/roi_dataset.xlsx",
+   "names": [
+    "roi_dataset.xlsx"
+   ],
+   "writer": "06c_excel_dataset.py",
+   "what": "The analysis table: sheet `by_roi`, one row per region per animal (the animal is the unit for statistics). Also `by_disc` (every region placement), `by_section` (how much of each animal is measured) and `coverage` (what is still missing). The columns below are `by_roi`'s.",
+   "column_sources": [
+    "06c_excel_dataset.py"
+   ],
+   "columns": [
+    {
+     "name": "n_nuclei",
+     "type": "int",
+     "units": "",
+     "meaning": "Nuclei counted in that region for that animal."
+    },
+    {
+     "name": "ROI",
+     "type": "text",
+     "units": "",
+     "meaning": "The region."
+    },
+    {
+     "name": "sample",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal."
+    },
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye name, as declared in the study."
+    },
+    {
+     "name": "treatment",
+     "type": "text",
+     "units": "",
+     "meaning": "The group."
+    },
+    {
+     "name": "environment",
+     "type": "text",
+     "units": "",
+     "meaning": "From the sampling sheet (LS study)."
+    },
+    {
+     "name": "total_tissue_area_mm2",
+     "type": "float",
+     "units": "mm²",
+     "meaning": "Summed area of the regions those nuclei came from."
+    },
+    {
+     "name": "n_positive",
+     "type": "int",
+     "units": "",
+     "meaning": "Positive nuclei."
+    },
+    {
+     "name": "frac_positive",
+     "type": "float",
+     "units": "",
+     "meaning": "n_positive / n_nuclei."
+    },
+    {
+     "name": "positive_cells_per_mm2",
+     "type": "float",
+     "units": "per mm²",
+     "meaning": "Corrected."
+    },
+    {
+     "name": "n_discs",
+     "type": "int",
+     "units": "",
+     "meaning": "Regions summed."
+    },
+    {
+     "name": "n_sections",
+     "type": "int",
+     "units": "",
+     "meaning": "Sections they came from."
+    },
+    {
+     "name": "profiles_per_mm2",
+     "type": "float",
+     "units": "per mm²",
+     "meaning": "Uncorrected."
+    },
+    {
+     "name": "mean_nucleus_diam_um",
+     "type": "float",
+     "units": "µm",
+     "meaning": "h."
+    },
+    {
+     "name": "abercrombie_factor",
+     "type": "float",
+     "units": "",
+     "meaning": "T / (T + h)."
+    },
+    {
+     "name": "cells_per_mm2",
+     "type": "float",
+     "units": "per mm²",
+     "meaning": "Corrected."
+    },
+    {
+     "name": "abercrombie_withheld_reason",
+     "type": "text",
+     "units": "",
+     "meaning": "Carried from 06a."
+    },
+    {
+     "name": "denominator_withheld_reason",
+     "type": "text",
+     "units": "",
+     "meaning": "Carried from 06a."
+    }
+   ]
+  },
+  {
+   "path": "results/roi_dataset_by_slide.xlsx",
+   "names": [
+    "roi_dataset_by_slide.xlsx"
+   ],
+   "writer": "06d_excel_by_slide.py",
+   "what": "The same, one level finer: sheet `by_slide` has one row per region per slide (plus `slide` and without `abercrombie_withheld_reason`), with `by_section` and `coverage` sheets.",
+   "readers": [],
+   "columns": []
+  },
+  {
+   "path": "results/build_results_pass.json",
+   "names": [
+    "build_results_pass.json"
+   ],
+   "writer": "06e_refresh_loop.py",
+   "what": "Proof that a results pass ran, for the app's tick.",
+   "format": "JSON: `{\"finished\": \"YYYY-MM-DD HH:MM:SS\", \"sections_measured\": int, \"sections_planned\": int}`.",
+   "columns": []
+  },
+  {
+   "path": "<study>.json (the study file, also `config.json`)",
+   "names": [
+    "config.json",
+    "study.json",
+    "config.example.json"
+   ],
+   "writer": "the app (Set up, `ls_project`); `config.example.json` is the template",
+   "what": "The study: where the slides and outputs are, the markers and channels, every setting a stage reads, the sampling-sheet mapping, and the app's own `project` block (detected facts, decisions, run history). Every key is documented in `docs/config-reference.md`; `ls_config` fills defaults and validates it once per process. A new study keeps it as `study.json` in its output folder.",
+   "format": "JSON. Stages read it at import time through `ls_config.CONFIG`.",
+   "readers": [
+    "every stage, through ls_config.py"
+   ],
+   "columns": []
+  },
+  {
+   "path": "<app home>/settings.json",
+   "names": [
+    "settings.json"
+   ],
+   "writer": "ls_config.py (`write_settings`)",
+   "what": "App-level settings: recent studies, window choices. Never read by a stage.",
+   "format": "JSON object, merged on write, never deleted from.",
+   "readers": [
+    "the app"
+   ],
+   "columns": []
+  },
+  {
+   "path": "slide_metadata.json",
+   "names": [
+    "slide_metadata.json"
+   ],
+   "writer": "the app's Set up (`ls_project.note_slides`)",
+   "what": "What the slide headers said about every file, in full; the study file keeps only a summary.",
+   "format": "JSON report with a `fields` table.",
+   "readers": [
+    "the app"
+   ],
+   "columns": []
+  },
+  {
+   "path": "bundle .zip: manifest.json, project.json",
+   "names": [
+    "manifest.json",
+    "project.json"
+   ],
+   "writer": "ls_bundle.py `export`",
+   "what": "A shared copy of a study: `project.json` is the study file with paths blanked and (unless unblinded) the treatment key removed; `manifest.json` lists every member with its size and SHA-256, checked on import.",
+   "format": "Zip of JSON plus optional operator CSVs and own atlases.",
+   "readers": [
+    "ls_bundle.py `import`"
+   ],
+   "columns": []
+  },
+  {
+   "path": "Tutorial demo pack: pack.json, study/study.json, study/sampling.xlsx",
+   "names": [
+    "pack.json",
+    "sampling.xlsx"
+   ],
+   "writer": "make_demo_pack.py",
+   "what": "The tutorial's demo study, cut losslessly from real slides; `pack.json` records its source and every renamed id. Lab-only: the pack and its tissue are never committed or published.",
+   "format": "JSON and a one-sheet workbook.",
+   "readers": [
+    "app/tutorial_pack.py"
+   ],
+   "columns": []
+  },
+  {
+   "path": "qc/atlasmatch/atlas_proposals[_v2].csv",
+   "names": [
+    "atlas_proposals.csv",
+    "atlas_proposals_v2.csv",
+    "curated_atlas_levels.csv"
+   ],
+   "writer": "04b_atlas_match.py, 04c_atlas_match.py (tools, not stages)",
+   "what": "The two automatic plate matchers' proposals, kept as evidence that automatic matching does not work on this data. 04b's page exports `curated_atlas_levels.csv` (scene_uid, confirmed_plate).",
+   "column_sources": [
+    "04b_atlas_match.py",
+    "04c_atlas_match.py"
+   ],
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "section_order",
+     "type": "int",
+     "units": "",
+     "meaning": "Position of the section along the animal's brain, 1..N within one marker's series."
+    },
+    {
+     "name": "proposed_plate",
+     "type": "text",
+     "units": "",
+     "meaning": "The matched plate."
+    },
+    {
+     "name": "proposed_score",
+     "type": "float",
+     "units": "",
+     "meaning": "Its similarity."
+    },
+    {
+     "name": "local_best",
+     "type": "text",
+     "units": "",
+     "meaning": "The best plate for this section alone."
+    },
+    {
+     "name": "confirmed_plate",
+     "type": "text",
+     "units": "",
+     "meaning": "Blank until a person confirms."
+    }
+   ]
+  },
+  {
+   "path": "atlas_levels.csv (level curator export)",
+   "names": [
+    "atlas_levels.csv"
+   ],
+   "writer": "04k_level_curator.py (Export, in the browser)",
+   "what": "The level curator's plate per section, interpolated between the sections a person set.",
+   "readers": [],
+   "column_sources": [
+    "04k_level_curator.py"
+   ],
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "section_order",
+     "type": "int",
+     "units": "",
+     "meaning": "Position of the section along the animal's brain, 1..N within one marker's series."
+    },
+    {
+     "name": "plate_set",
+     "type": "text",
+     "units": "",
+     "meaning": "The plate set."
+    },
+    {
+     "name": "plate_id",
+     "type": "text",
+     "units": "",
+     "meaning": "The plate's id, which sorts rostral to caudal."
+    },
+    {
+     "name": "plate_index",
+     "type": "int",
+     "units": "",
+     "meaning": "Its position in the set."
+    },
+    {
+     "name": "source",
+     "type": "text",
+     "units": "",
+     "meaning": "Set by a person, or interpolated."
+    },
+    {
+     "name": "regions",
+     "type": "text",
+     "units": "",
+     "meaning": "Regions on the plate."
+    }
+   ]
+  },
+  {
+   "path": "registered/registration_quality.csv",
+   "names": [
+    "registration_quality.csv",
+    "roi_regions_refined.csv"
+   ],
+   "writer": "04e_register_elastix.py (QC only)",
+   "what": "How well elastix registered each section to its plate. `roi_regions_refined.csv` beside it holds the region positions elastix would give; nothing downstream reads either.",
+   "readers": [],
+   "column_sources": [
+    "04e_register_elastix.py"
+   ],
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "plate_id",
+     "type": "text",
+     "units": "",
+     "meaning": "The plate's id, which sorts rostral to caudal."
+    },
+    {
+     "name": "animal",
+     "type": "text",
+     "units": "",
+     "meaning": "The animal id parsed from the file name."
+    },
+    {
+     "name": "section_order",
+     "type": "int",
+     "units": "",
+     "meaning": "Position of the section along the animal's brain, 1..N within one marker's series."
+    },
+    {
+     "name": "flipped",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when the section was mirrored."
+    },
+    {
+     "name": "match_score",
+     "type": "float",
+     "units": "",
+     "meaning": "The matcher's score."
+    },
+    {
+     "name": "post_reg_iou",
+     "type": "float",
+     "units": "",
+     "meaning": "Overlap of section and plate after registration."
+    }
+   ]
+  },
+  {
+   "path": "qc/multisection/curated_sections.csv",
+   "names": [
+    "curated_sections.csv"
+   ],
+   "writer": "01j_build_curator.py (the page's Export)",
+   "what": "A person's count of sections in each multi-blob scene; `01i --fit` reads it back.",
+   "readers": [
+    "01i_multisection_review.py"
+   ],
+   "column_sources": [
+    "01j_build_curator.py"
+   ],
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "n_sections",
+     "type": "int",
+     "units": "",
+     "meaning": "How many sections the scene really holds."
+    }
+   ]
+  }
+ ],
+ "not_files": {
+  "shotgun_manifest.csv": "the curator's Shotgun deck export, a picture list (never bundled: it carries the group key)"
+ }
+}

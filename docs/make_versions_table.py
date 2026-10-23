@@ -26,7 +26,6 @@ PY_PACKAGES = [
     ("imagecodecs",      "imagecodecs",    "JPEG-XR decoding, required by czifile"),
     ("numpy",            "NumPy",          "arrays, the affine algebra, the mask lookups"),
     ("scipy",            "SciPy",          "rotation, filtering, optimal assignment"),
-    ("pandas",           "pandas",         "tabular joins in the dataset stages"),
     ("pillow",           "Pillow",         "image resizing in the reformat and its inverse"),
     ("scikit-image",     "scikit-image",   "per-object measurement (regionprops)"),
     ("stardist",         "StarDist",       "nucleus segmentation"),

@@ -715,8 +715,8 @@ used throughout this pipeline, and against treating any single expert pass as gr
 
 Every stage is written in Python and rests on the standard numerical stack: NumPy
 (Harris et al., 2020) for arrays and the affine algebra, SciPy (Virtanen et al., 2020) for
-filtering, rotation and optimal assignment, pandas (McKinney, 2010) for the tabular joins, and
-matplotlib (Hunter, 2007) for every figure including Figure 1.
+filtering, rotation and optimal assignment, and matplotlib (Hunter, 2007) for every figure
+including Figure 1. Tables are read and written as CSV with Python's own `csv` module.
 
 Versions are those installed in the analysis environment and are read from it rather than
 transcribed.
@@ -731,7 +731,6 @@ transcribed.
 | imagecodecs | 2026.8.16 | JPEG-XR decoding, required by czifile |
 | NumPy | 2.5.2 | arrays, the affine algebra, the mask lookups |
 | SciPy | 1.18.1 | rotation, filtering, optimal assignment |
-| pandas | 3.0.5 | tabular joins in the dataset stages |
 | Pillow | 12.3.0 | image resizing in the reformat and its inverse |
 | scikit-image | 0.26.0 | per-object measurement (regionprops) |
 | StarDist | 0.9.2 | nucleus segmentation |
@@ -842,9 +841,6 @@ effects models. *Journal of Statistical Software* 82(13):1–26.
 
 Linkert M, Rueden CT, Allan C, et al. (2010). Metadata matters: access to image data in the real
 world. *Journal of Cell Biology* 189(5):777–782.
-
-McKinney W (2010). Data structures for statistical computing in Python. *Proceedings of the 9th
-Python in Science Conference*, 56–61.
 
 R Core Team (2026). *R: A Language and Environment for Statistical Computing*. R Foundation for
 Statistical Computing, Vienna, Austria.

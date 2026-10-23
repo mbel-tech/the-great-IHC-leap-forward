@@ -75,6 +75,8 @@ tests/build/
 # Generated from the .md by pandoc; the markdown is the source.
 docs/*.docx
 docs/*.pdf
+docs/guides/*.docx
+docs/guides/*.pdf
 
 # Compiled binaries (the venv itself is covered by work/ above)
 *.pyd
@@ -103,4 +105,4 @@ reformatted/roi_curator.html
 !/atlas/*/*.jpeg
 
 # User guide screenshots are part of the docs
-!docs/img/user-guide/*.png
+!docs/guides/img/user-guide/*.png

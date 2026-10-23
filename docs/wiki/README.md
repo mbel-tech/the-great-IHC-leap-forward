@@ -8,8 +8,8 @@ These files are the repository's GitHub wiki. Edit them here, not on GitHub: the
   *Quick Start*); `Home.md` is the front page, `_Sidebar.md` and `_Footer.md` appear on
   every page.
 - Link to another page by its name without `.md`: `[Measure](Measure)`.
-- Reference pictures as `images/<name>.png`. The workflow copies `docs/img/user-guide/*.png`
+- Reference pictures as `images/<name>.png`. The workflow copies `docs/guides/img/user-guide/*.png`
   (the user guide's screenshots) into the wiki's `images/` folder; a picture only for the wiki
   can go in `docs/wiki/images/`.
 - `tests/test_wiki.py` checks every page link and picture resolves.
-- Keep the pages in step with `docs/user-guide.md`, which is the complete reference.
+- Keep the pages in step with `docs/guides/user-guide.md`, which is the complete reference.

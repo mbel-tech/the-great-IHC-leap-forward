@@ -61,7 +61,7 @@ into, and **File > Import settings...** reads one into the open study: it lists 
 it would change, refuses one that does not validate, and copies the study file aside first.
 That is how a second study starts from the first one's settings.
 
-The step-by-step guide for a newcomer is [docs/user-guide.md](docs/user-guide.md), also under
+The step-by-step guide for a newcomer is [docs/guides/user-guide.md](docs/guides/user-guide.md), also under
 **Help > User guide** in the app; **Help > Wiki** opens short question-led pages
 ([docs/wiki/](docs/wiki/)).
 **Start the tutorial** on the Project screen (or **Help > Tutorial…**) walks through a whole study
@@ -529,7 +529,7 @@ JSON, then use **Tools → Migrate browser curation → Import curation state**.
 ### All stages is the workflow figure
 
 `app/stages.py` lists every stage in the bands of Figure 1 in
-`docs/pipeline-methods.md` — Ingest and QC, Instrument characterisation, Atlas,
+`docs/guides/pipeline-methods.md` — Ingest and QC, Instrument characterisation, Atlas,
 Normalisation and curation, Quantification, Beyond blinding — with the two facts
 the figure encodes: a pencil marks a stage where an operator decides (the red
 outline), and the detail pane names the files each stage leaves behind and which
@@ -687,9 +687,9 @@ Four documents, answering four different questions:
 | Question | Document |
 |---|---|
 | How do I install, run or change this? | this README |
-| I am new: how do I use the app, screen by screen? | `docs/user-guide.md` |
-| What happens to a brain section, step by step, in plain language? | `docs/pipeline-guide.md` |
-| What is the Methods section, with citations and the measured numbers? | `docs/pipeline-methods.md` |
+| I am new: how do I use the app, screen by screen? | `docs/guides/user-guide.md` |
+| What happens to a brain section, step by step, in plain language? | `docs/guides/pipeline-guide.md` |
+| What is the Methods section, with citations and the measured numbers? | `docs/guides/pipeline-methods.md` |
 
 The guide covers every stage in `app/stages.py`, in the order they run; `tests/test_stages.py`
 holds it to that list, so a stage nobody wrote up fails the tests. `bash docs/build_methods.sh`

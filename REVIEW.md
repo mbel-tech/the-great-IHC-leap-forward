@@ -52,4 +52,4 @@ change a result. Skip style unless it hides a bug.
 - `scripts/04l_roi_curator.py`: generates the ROI curator page; most of it is
   JavaScript in a Python string. Check exports (`roi_regions`, `roi_plates`,
   `roi_landmarks`) for coordinate frames and for state that is saved and reloaded.
-- `docs/user-guide.md`: keep it in step when on-screen words or steps change.
+- `docs/guides/user-guide.md`: keep it in step when on-screen words or steps change.

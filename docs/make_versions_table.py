@@ -106,7 +106,7 @@ def splice(table):
     finished table rather than a placeholder that only pandoc resolves. Splicing
     keeps that copy current without a second source of truth.
     """
-    path = os.path.join(HERE, "pipeline-methods.md")
+    path = os.path.join(HERE, "guides", "pipeline-methods.md")
     if not os.path.exists(path):
         print("no pipeline-methods.md to splice into", file=sys.stderr)
         return

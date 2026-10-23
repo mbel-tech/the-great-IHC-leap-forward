@@ -13,7 +13,7 @@ Measure puts your regions back onto the original slides, finds every nucleus ins
 | 05a Verify the inverse transform | Checks that regions map back onto the slides accurately, before anything is measured | A pass or fail in the log |
 | 05a Place the regions on the slides | Maps every region from the 256-pixel curation picture back onto the slide's own 0.65 µm pixels | Region geometry for each marker |
 | 05b Check signal quality and tune detection | Measures how bright, clean and even the signal is on a sample of regions, gives a verdict (good, marginal or poor), and picks the nucleus-detection setting that suits it. One setting per marker for the whole study. **Open report** on its row shows the reasons. | `qc/detection_tuning.md` and `.csv` |
-| 05c Detect and measure nuclei | Reads each region at full resolution, finds nuclei with StarDist, measures the marker in each, and flags nuclei on clipped pixels | `results/roi_nuclei.csv` |
+| 05c Detect and measure nuclei | Reads each region at full resolution, finds nuclei with StarDist, measures the marker in each, and flags nuclei on clipped pixels. Draws each region's detection overlay picture as it goes. | `results/roi_nuclei.csv`, `detection_overlays/` |
 | 06a Per-region dataset | Turns nuclei into per-region numbers: how many cells, how many positive, per mm² | `results/roi_measurements.csv`, `results/detector_specificity.csv` |
 
 ## How detection works, in plain words
@@ -23,7 +23,10 @@ Measure puts your regions back onto the original slides, finds every nucleus ins
 - **A poor signal stops the run first.** If the signal check calls a marker's signal *poor*, **Run all remaining** stops before detection. Read the report; to measure anyway, press **Run** on *Detect and measure nuclei*.
 - **It takes hours.** Stop with **Stop after this stage** or close the app, and run again later. Finished sections are not redone.
 - **Measurement order.** *balanced* (default) alternates treatment and control, so a part-finished run is already a fair comparison; it reads the group key only to choose the order. *uid* keeps the run fully blind. The finished file is identical either way.
-- **Check pictures** save one picture per region with nuclei outlined: green counted, red found but outside the region. Turn them on for a first run on a new study.
+- **Detection overlays as it goes.** As each section is measured, 05c draws one picture per region and per background disc, with every nucleus it found over the marker channel: positives filled magenta, negatives outlined cyan, outside the region yellow. They go to `detection_overlays/<marker>/<animal>/`, so you can check the counts by eye long before detection finishes. A picture that cannot be written never stops detection or changes a count. **Do not draw detection overlays** in its Options skips them; [Results](Results#check-detection) adds the whole-scene pictures.
+- **Check pictures** (an older, separate option) save one DAPI picture per region with nuclei outlined: green counted, red found but outside the region. Turn them on for a first run on a new study.
+
+![A detection overlay picture of one region, with the counts and colour key in the strip above](images/14-overlay-crop.png)
 
 ## How your regions reach the slide
 

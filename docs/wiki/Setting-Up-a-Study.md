@@ -21,6 +21,8 @@ Every field has a short hint, an **(i)** with the full reasoning and which stage
 
 **Match the sheet…** opens the workbook's first rows with a menu above each column: **Animal ID** (the one column that names the animal), **Treatment** (the column, or several, holding what you want to compare; several make one group, such as `exercise · 1`), **Keep** (carried into the results at Unblind) or **Ignore**. As you choose, it compares the ID column with the animals in the slide file names: how many have a row, which slides have none (Unblind stops on these), and IDs written on two rows. IDs match by name, or by number when no name matches, so `22` in the sheet is `LS22`. An animal whose treatment cell is blank gets no group unless you add a rule, such as "when 'brackish Tank' is 303, 304, 'treatment' is exercise". **Save** keeps the choice in the study; Check workbook, Load the groups for Shotgun and Unblind all use it, Unblind only when it runs. A study that has not made a choice and uses the LS sampling sheet is read as before.
 
+![Match the sheet: a menu above each column of the workbook, and a check of how many animals have a row](images/13-sheet-match.png)
+
 **Load the groups for Shotgun** reads the same workbook the same way and keeps each animal's treatment group in the study (`groups.order` and `groups.by_animal`), so the ROI curator's Shotgun deck can lay favourites out by treatment while you are still curating; press **Build page** on the ROI curator afterwards to turn Shotgun on. The deck shows the groups by design. Nothing else does: the curator's sections, plates and ROIs, every count and threshold, and Set up itself (which shows only how many animals each group has) stay keyed by animal, and 05c uses the groups only for the order it measures sections in. Results are still joined to the groups at Unblind. **Remove the groups** makes the study blind again, and a copy shared as blinded never carries them.
 
 Choosing a folder only records where the slides are; nothing is moved or copied. Picking files from one folder records a list, which costs no space. If the files are spread over several folders, the app offers to link or copy them and shows the size first.
@@ -60,6 +62,12 @@ Without **Show advanced settings** this card shows only the section thickness, *
 **Find nuclei** (paired studies) has one row per marker. Leave it on *On the counterstain (DAPI)* unless a marker's scan has no usable DAPI. Then choose *On this marker's own channel*, and only for a marker whose signal is in the nucleus. In the LS study this is needed for PCNA, whose DAPI plane is noise at full resolution. For such a marker only the positive density is reported; see [Measure](Measure#pcna-counted-on-its-own-channel).
 
 ![Microscope and channels, with Find nuclei set to the marker's own channel for AF488 (PCNA)](images/03-setup-microscope.png)
+
+**Multiplex studies.** When every marker is a channel of the same scan, the table has one row per channel: its **Name** (the antibody, which becomes folder and file names and the marker column in every output), its **Role** (*nuclear* for the counterstain, *marker*, *registration*, or *ignore*), the **CZI channel name** and **Plane** in the file, and where its nuclei are found. The line under the table says whether the pipeline accepts it. Each marker keeps the name you gave it in the slide list and the ROI queue.
+
+![Channels and markers in a multiplex study: DAPI as the counterstain, pERK and PCNA as markers, one channel ignored](images/15-multiplex-channels.png)
+
+**One marker.** List only that marker. Stages for a second marker then say *Not used in this study*, as do second passes that would repeat the first marker's work; Run all remaining skips them and every screen counts as done without them.
 
 ## Pictures
 

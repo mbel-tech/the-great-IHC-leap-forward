@@ -10,11 +10,11 @@ import re
 import sys
 
 WIKI = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "docs", "wiki")
-# Pictures live in docs/img/user-guide/ and are copied to the wiki's images/ folder
+# Pictures live in docs/guides/img/user-guide/ and are copied to the wiki's images/ folder
 # when it is published, so a page's images/<name> resolves there (or in docs/wiki/images/).
-SHARED = os.path.join(WIKI, "..", "img", "user-guide")
+SHARED = os.path.join(WIKI, "..", "guides", "img", "user-guide")
 LINK = re.compile(r"(!?)\[[^\]]*\]\(([^)\s]+)\)")
-GUIDE = os.path.join(WIKI, "..", "user-guide.md")
+GUIDE = os.path.join(WIKI, "..", "guides", "user-guide.md")
 # Wording for controls and states the screens no longer have, with what the user
 # guide (the complete reference) says now. The wiki shares the guide's screenshots,
 # so a page still using the old words contradicts its own pictures. Each new wording

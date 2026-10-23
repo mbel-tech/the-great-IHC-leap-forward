@@ -1,13 +1,13 @@
 """The app's stage list must cover the pipeline and describe real scripts.
 
 `app/stages.py` is the pipeline as data. It drifted once - the figure in
-docs/pipeline-methods.md had 04f, 04g, 04j, 06f and the atlas chain on it and
+docs/guides/pipeline-methods.md had 04f, 04g, 04j, 06f and the atlas chain on it and
 the sidebar did not - so this pins the two together: every numbered script
 in scripts/ is either a stage or is named in NOT_LISTED with a reason, every
 stage's script exists and has a main(), and every box on the workflow figure
 has a stage id.
 
-docs/pipeline-guide.md is held to the same list, and for the same reason: it
+docs/guides/pipeline-guide.md is held to the same list, and for the same reason: it
 walks the stages one by one, so a stage nobody wrote up is exactly the drift
 above in a third document. Its entries are anchored `{#stage-<sid>}`.
 
@@ -76,7 +76,7 @@ for st in S.STAGES:
         reason is None or (isinstance(reason, str) and bool(reason)))
 
 # The workflow figure, box by box. A box with no stage is the drift this
-# file exists to catch; keep the names in step with docs/pipeline-methods.md.
+# file exists to catch; keep the names in step with docs/guides/pipeline-methods.md.
 FIGURE = {
     "manifest", "verify", "channel_identity",                    # 00, 00b/00c
     "overviews",                                                 # 01
@@ -112,8 +112,8 @@ chk("groups appear in sidebar order",
 # one document further out: a stage nobody wrote up, or a write-up of a stage
 # that no longer exists. Entries are anchored `{#stage-<sid>}`, which pandoc
 # consumes into the heading id and does not print.
-GUIDE = os.path.join(REPO, "docs", "pipeline-guide.md")
-chk("docs/pipeline-guide.md exists", os.path.exists(GUIDE))
+GUIDE = os.path.join(REPO, "docs", "guides", "pipeline-guide.md")
+chk("docs/guides/pipeline-guide.md exists", os.path.exists(GUIDE))
 if os.path.exists(GUIDE):
     guide = open(GUIDE, encoding="utf-8").read()
     cited = re.findall(r"\{#stage-([A-Za-z0-9_]+)\}", guide)
@@ -332,7 +332,7 @@ chk("06i is no longer parked in NOT_LISTED", "06i_detection_overlays.py" in S.NO
 # whole-scene pictures are 100-500 MB each, so --no-scenes is offered.
 with open(os.path.join(SCRIPTS, "06i_detection_overlays.py"), encoding="utf-8") as _fh:
     _doc06i = _fh.read().split('"""')[1]
-with open(os.path.join(REPO, "docs", "pipeline-guide.md"), encoding="utf-8") as _fh:
+with open(os.path.join(REPO, "docs", "guides", "pipeline-guide.md"), encoding="utf-8") as _fh:
     _guide = _fh.read()
 _sec = _guide.split("{#stage-detection_overlays}", 1)[-1].split("\n## ", 1)[0]
 with open(os.path.join(REPO, "app", "workflow.py"), encoding="utf-8") as _fh:

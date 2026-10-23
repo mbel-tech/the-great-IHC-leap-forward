@@ -28,6 +28,14 @@ The spreadsheets can be rebuilt any time, including while detection is still run
 
 ![The Results screen: Join the experiment is marked as unblinding, then the spreadsheet stages](images/08-results.png)
 
+## Check detection
+
+*Detection overlays, for checking* (06i), the last group on Results, draws every nucleus the detector found over its marker picture, for every marker: positives filled magenta, negatives outlined cyan, outside the region yellow, artifact orange, off the tissue blue, and a white outline on a positive nucleus with clipped pixels. Detection has already drawn the region pictures (see [Measure](Measure)), so this mostly draws one picture of each whole scene, several at once, and fills any gaps. **Open pictures** opens `detection_overlays/`. It is made on request only, and it does not read the treatment groups.
+
+- The counts drawn are 06a's. A section whose picture would disagree is not drawn; the run ends with *N not drawn* and `detection_overlays/failures.csv` says why.
+- Each whole-scene picture is roughly 100 to 500 MB. **Skip the whole-scene pictures** draws only the region pictures; **Only the first N scenes of each marker** makes a trial. Open scene pictures in Fiji.
+- For sections measured before the outlines were saved, the first run re-runs StarDist once, which takes about as long as detection did.
+
 ## Before you compare groups
 
 - **Check measurement is finished**, or decide consciously to look at a partial result.

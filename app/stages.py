@@ -1,7 +1,7 @@
 """The pipeline, as data.
 
 One entry per stage, in the order and the groups of the workflow figure in
-docs/pipeline-methods.md (Figure 1). That figure is the authority for what the
+docs/guides/pipeline-methods.md (Figure 1). That figure is the authority for what the
 pipeline IS; `run_all.sh` is the authority for how the batch part of it is
 run; this file is a transcription of both, and `tests/test_stages.py` holds it
 to them - every numbered script is either a stage or is named in NOT_LISTED

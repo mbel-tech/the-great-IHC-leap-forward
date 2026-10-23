@@ -42,7 +42,7 @@ from widgets import COLOUR, QUIET, StepList, UnblindDialog
 # releases. The guide is read from docs/ beside the code when it is there (a
 # source checkout); an installed copy ships app/ and scripts/ but not docs/, so
 # it opens the copy on GitHub instead.
-GUIDE_URL = f"https://github.com/{UP.REPO_SLUG}/blob/main/docs/user-guide.md"
+GUIDE_URL = f"https://github.com/{UP.REPO_SLUG}/blob/main/docs/guides/user-guide.md"
 WIKI_URL = f"https://github.com/{UP.REPO_SLUG}/wiki"
 
 
@@ -408,7 +408,7 @@ class MainWindow(QMainWindow):
 
     def _open_guide(self):
         """The guide beside the code, rendered here; else the online copy."""
-        path = os.path.join(self.repo_root, "docs", "user-guide.md")
+        path = os.path.join(self.repo_root, "docs", "guides", "user-guide.md")
         if not os.path.isfile(path):
             QDesktopServices.openUrl(QUrl(GUIDE_URL))
             return

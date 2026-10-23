@@ -53,6 +53,22 @@ The window has a step list down the left with six screens, in the order you work
 | Tools | All settings | Every setting in one dialog |
 | Tools | Switch study | Move to another study's project |
 | Tools | Migrate browser curation | Bring in curation done earlier in a web browser |
+| Help | User guide, Wiki | The full guide, and these pages |
+| Help | Tutorial… | Start or continue the tutorial on the demo study (below) |
+| Help | Show the activity log, Open the log folder | The full log, and the folder holding `lsapp-crash.log` |
+| Help | Check for updates, Undo last update, About | Install a newer version, go back one, see which version this is |
+
+## The tutorial
+
+The tutorial walks you through a whole study on a small demo study: a few sections cut from a real slide, at full resolution. Press **Start the tutorial** on the Project screen, or **Help > Tutorial…**; the first time the app opens it also offers it once. Your own study is closed while it runs and reopened when you leave, and the tutorial study lives in its own folder, so your studies are never touched.
+
+- A panel on the right lists the 18 steps and says what to do; an orange box points at the button to press. **Next** stays greyed out until the step is done; **Skip** and **Back** move without doing it.
+- On the slow steps (scene pictures, composites, nucleus detection) **Use ready-made results** copies in results made earlier from the same slide, so you need not wait.
+- In the ROI curator you outline the regions on two practice sections yourself. The tutorial then compares your outlines with an expert's and draws the expert's dashed on the section; **Try again** or **Carry on**.
+- **Leave tutorial** reopens your study; the Project screen then offers **Continue the tutorial**, and **Start over** makes a fresh tutorial study.
+- **The demo study** is looked for in a `demo` folder beside the app; otherwise the app asks you to choose the demo pack (a folder or a `.zip`). The pack holds real, unpublished sections, so it is not part of the app's download: it is shared privately within the lab. Ask whoever set up the app for the link, download the `.zip`, and choose it as it is.
+
+![The tutorial: the panel on the right lists the steps and says what to do, and an orange box points at the button to press](images/12-tutorial.png)
 
 ## Three habits that save trouble
 

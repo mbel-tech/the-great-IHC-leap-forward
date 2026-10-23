@@ -94,7 +94,7 @@ the picture is built FROM 05a's map, a point on it is where 05a will measure
 (the 768 composite agreed with it to about 0.1 grid pixel).
 
 What it does not undo: the scan's own JPEG-XR tile compression (fixed at
-acquisition, see docs/pipeline-guide.md), and the brightest 0.1% of tissue,
+acquisition, see docs/guides/pipeline-guide.md), and the brightest 0.1% of tissue,
 which the display range still saturates. Measurement never
 saw any of this - 05c reads native pixels from the CZI.
 

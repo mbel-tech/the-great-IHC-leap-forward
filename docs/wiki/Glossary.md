@@ -13,6 +13,7 @@
 | Counterstain (DAPI) | Stains every nucleus. Nuclei are usually found on it; it is not itself measured. |
 | Curator | An interactive page where you make decisions. It saves as you go and hands decisions on with Export. |
 | CZI | Zeiss's slide file: one slide, several sections, every channel and tile |
+| Detection overlay | A picture with every nucleus the detector found drawn over the marker, coloured by whether it counted as positive; one per region (drawn by 05c) and one per whole scene (06i) |
 | Exclusion | A decision that a section should not be used. It is a flag, not a deletion. |
 | False-positive rate | The share of background-disc nuclei above the positivity cut |
 | Favourite | A section you want in the quantified subset or the Shotgun deck |
@@ -29,6 +30,7 @@
 | scene\_uid | The ID every table uses for a section, built from animal, slide and scene, for example `LS105_s10a_sc03` |
 | Stage | One step of the pipeline, with a number such as `04g` and a script in `scripts/` |
 | StarDist | The published model that finds nuclei, used without tuning |
+| Tutorial | A guided walk through a whole study on the lab's demo study, started from Project or Help |
 | Tile | One camera frame; the scanner stitches many into a section |
 | Unblinding | Joining animals to their treatment groups, the first stage on the Results screen |
 | Worklist | The order the ROI curator shows sections in, balanced across animals |

@@ -17,6 +17,15 @@ Check a copy with `python -m app --self-test`; it writes PASS or FAIL per check 
 
 Every stage is a script in `scripts/`, numbered in pipeline order. The **(i)** panel on each stage in the app shows its exact command line. `scripts/run_all.sh` runs the whole pipeline in order. The app and the scripts read the same settings file, so you can mix the two.
 
+To run a whole screen without the window, for example overnight on a machine with no display:
+
+```
+python -m app --run prepare  D:\LS-analysis\study.json
+python -m app --run measure  D:\LS-analysis\study.json
+```
+
+It makes the same plan as that screen's **Run all remaining**, with the Options saved in the study and Redo where a stage is out of date, and records each run in the study. It stops at the first failure or a *poor* signal check, never unblinds, and exits 0 when every planned stage ran, 1 when one failed or a hold stopped it, and 2 when the screen or study file is not there.
+
 Common flags: `--limit N` (first N sections only), `--force` (redo finished work), `--dry-run` (repair tools: report only).
 
 ## Curators in a browser

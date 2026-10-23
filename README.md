@@ -1,3 +1,5 @@
+<p align="center"><img src="app/assets/logo-256.png" alt="The Great IHC Leap Forward logo: two origami koi, one orange and one blue" width="160"></p>
+
 # The Great IHC Leap Forward
 
 Whole-brain IHC pipeline for LS (formerly `ls-ihc-pipeline`).

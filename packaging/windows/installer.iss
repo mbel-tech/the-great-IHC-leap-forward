@@ -2,6 +2,9 @@
 ;
 ;   iscc /DAppVersion=1.2.0 /DBundle=dist\LS-IHC packaging\windows\installer.iss
 ;
+; The shortcuts' AppUserModelID must match WINDOWS_APP_ID in app/__main__.py,
+; or a pinned shortcut and the running window show as two taskbar buttons.
+;
 ; Per-user, no administrator rights: installs to %LOCALAPPDATA%\Programs, which
 ; the app can write to (it keeps its self-test log beside itself; the crash log
 ; is per-user, in %LOCALAPPDATA%\The Great IHC Leap Forward\logs).
@@ -35,6 +38,10 @@ SolidCompression=yes
 LZMANumBlockThreads=4
 WizardStyle=modern
 UninstallDisplayName=The Great IHC Leap Forward {#AppVersion}
+; The logo (app/assets/icon.ico) on the Setup .exe, in Apps & features and on
+; the shortcuts.
+SetupIconFile=..\..\app\assets\icon.ico
+UninstallDisplayIcon={app}\app\assets\icon.ico
 
 [InstallDelete]
 ; An upgrade replaces the code and the interpreter wholesale. Files a newer
@@ -55,9 +62,9 @@ Type: filesandordirs; Name: "{app}\updates"
 Source: "{#Bundle}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\The Great IHC Leap Forward"; Filename: "{app}\runtime\pythonw.exe"; Parameters: "-m app"; WorkingDir: "{app}"
+Name: "{group}\The Great IHC Leap Forward"; Filename: "{app}\runtime\pythonw.exe"; Parameters: "-m app"; WorkingDir: "{app}"; IconFilename: "{app}\app\assets\icon.ico"; AppUserModelID: "mbel-tech.TheGreatIHCLeapForward"
 Name: "{group}\Uninstall The Great IHC Leap Forward"; Filename: "{uninstallexe}"
-Name: "{userdesktop}\The Great IHC Leap Forward"; Filename: "{app}\runtime\pythonw.exe"; Parameters: "-m app"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{userdesktop}\The Great IHC Leap Forward"; Filename: "{app}\runtime\pythonw.exe"; Parameters: "-m app"; WorkingDir: "{app}"; IconFilename: "{app}\app\assets\icon.ico"; AppUserModelID: "mbel-tech.TheGreatIHCLeapForward"; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"

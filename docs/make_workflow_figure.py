@@ -1,6 +1,6 @@
-"""Draw the pipeline workflow figure for docs/pipeline-methods.md.
+"""Draw the pipeline workflow figure for docs/guides/pipeline-methods.md.
 
-Writes docs/img/workflow.png (300 dpi, for the DOCX) and docs/img/workflow.pdf
+Writes docs/guides/img/workflow.png (300 dpi, for the DOCX) and docs/guides/img/workflow.pdf
 (vector, for print).
 
 The layout is a hand-written table rather than a graph-layout engine: the flow is
@@ -29,7 +29,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import FancyArrowPatch, FancyBboxPatch, Rectangle
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-OUT = os.path.join(HERE, "img")
+OUT = os.path.join(HERE, "guides", "img")
 
 # ---------------------------------------------------------------- palette ----
 # The three reader fills differ in lightness as well as hue, because this figure

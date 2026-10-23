@@ -42,7 +42,7 @@ $PYTHON make_versions_table.py
 # reader comparing the two files would read the difference as a decision.
 render() {
     "$PANDOC" "$1.md" -o "$1.docx" \
-        --reference-doc=ref_styled.docx --toc --toc-depth=2 \
+        --reference-doc="$HERE/ref_styled.docx" --toc --toc-depth=2 \
         --resource-path=. -f markdown+raw_html
     if [ "${WITH_PDF:-0}" = "1" ]; then
         rm -f "$1.pdf"
@@ -50,6 +50,9 @@ render() {
         echo "      also wrote $1.pdf"
     fi
 }
+
+# The guides and their pictures live in guides/; the tools stay here.
+cd "$HERE/guides"
 
 echo "[4/5] pandoc -> pipeline-methods.docx, pipeline-guide.docx"
 render pipeline-methods

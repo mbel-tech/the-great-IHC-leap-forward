@@ -103,4 +103,4 @@ reformatted/roi_curator.html
 !/atlas/*/*.jpeg
 
 # User guide screenshots are part of the docs
-!docs/img/user-guide/*.png
+!docs/guides/img/user-guide/*.png

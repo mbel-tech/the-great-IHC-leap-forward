@@ -23,7 +23,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-DOC = os.path.join(HERE, "pipeline-methods.md")
+DOC = os.path.join(HERE, "guides", "pipeline-methods.md")
 
 with open(os.path.join(ROOT, "config.json"), encoding="utf8") as fh:
     CONFIG = json.load(fh)

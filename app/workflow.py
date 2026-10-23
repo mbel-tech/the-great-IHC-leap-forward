@@ -231,7 +231,7 @@ ALL = Screen(
     "same Run, Options and (i) buttons as the other screens. For when you know "
     "exactly which stage you want.",
     "<p>This is the app's previous layout. Stages are grouped by the bands of "
-    "Figure 1 in <code>docs/pipeline-methods.md</code>.</p>",
+    "Figure 1 in <code>docs/guides/pipeline-methods.md</code>.</p>",
     parts=[(g, "", [st.sid for st in S.in_group(g)]) for g in S.GROUPS],
     role="Only here if you know exactly which stage you want. New to the app? Use the "
          "steps on the left.")

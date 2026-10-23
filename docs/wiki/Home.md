@@ -41,8 +41,8 @@ The hexagon is the one place a normal run stops for you.
 
 These wiki pages are the short version. The full references live in the repository:
 
-- `docs/user-guide.md`: the complete user guide, with every option.
-- `docs/pipeline-guide.md`: every stage in depth, with the reasoning behind it.
+- `docs/guides/user-guide.md`: the complete user guide, with every option.
+- `docs/guides/pipeline-guide.md`: every stage in depth, with the reasoning behind it.
 - `docs/setting-up-a-study.md`: settings, channels and segmentation choices in detail.
 - `docs/adding-your-own-atlas.md`: drawing an atlas in Fiji.
 - `LOGS.md`: the running record of what went wrong and how it was fixed.

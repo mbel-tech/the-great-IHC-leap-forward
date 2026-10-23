@@ -918,7 +918,7 @@ if MW:
     MW.reveal = lambda path: revealed.append(path)
     w.run_stages = lambda sids: queued.append(list(sids))
     by_label["User guide"].trigger()
-    guide = os.path.join(REPO, "docs", "user-guide.md")
+    guide = os.path.join(REPO, "docs", "guides", "user-guide.md")
     chk("User guide shows the guide beside the code, rendered",
         (w._guide.isVisible(), os.path.normcase(w._guide.browser.source().toLocalFile()),
          bool(w._guide.browser.toPlainText().strip())),
@@ -928,7 +928,7 @@ if MW:
     by_label["User guide"].trigger()
     w.repo_root = _root
     chk("...and without it, the online copy",
-        opened, [f"https://github.com/{UP.REPO_SLUG}/blob/main/docs/user-guide.md"])
+        opened, [f"https://github.com/{UP.REPO_SLUG}/blob/main/docs/guides/user-guide.md"])
     by_label["Wiki"].trigger()
     chk("Wiki opens the project's wiki", opened[-1], f"https://github.com/{UP.REPO_SLUG}/wiki")
     by_label["Show the activity log"].trigger()

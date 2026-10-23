@@ -16,7 +16,7 @@ Prepare reads the slides, checks them, builds the atlas, and turns every section
 | 4. Final images | Sets aside sections with too much saturated tissue, flags saturated pixels in the rest, and carries everything onto the second marker | 04j, 04a, 04i, 04m |
 | 5. Get ready for the ROI curator | Orders the curation queue, draws the colour pictures and thumbnails, and traces every section's fate for Review | 04n, 04o, 04p |
 
-Each stage's **(i)** says what it makes and where. `docs/pipeline-guide.md` explains every stage in depth.
+Each stage's **(i)** says what it makes and where. `docs/guides/pipeline-guide.md` explains every stage in depth.
 
 ### Optional: pictures of every scene (01l)
 

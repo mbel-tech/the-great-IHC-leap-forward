@@ -197,7 +197,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "file",
@@ -543,7 +543,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "animal",
@@ -756,7 +756,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "file",
@@ -905,7 +905,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "file",
@@ -1054,7 +1054,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "file",
@@ -1135,7 +1135,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "animal",
@@ -1263,7 +1263,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "animal",
@@ -1380,14 +1380,14 @@
    "names": [
     "saturation_raw_native.csv"
    ],
-   "writer": "01k_saturation_raw.py (`--native`)",
+   "writer": "01k_saturation_raw.py (`--native-sample`, on by default; 0 turns it off)",
    "what": "A check of clipping at full resolution against the overview, on a sample of sections.",
    "columns": [
     {
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "file",
@@ -1427,7 +1427,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "animal",
@@ -1504,7 +1504,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "file",
@@ -1671,7 +1671,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "file",
@@ -2712,7 +2712,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "animal",
@@ -2961,7 +2961,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "decision",
@@ -2990,7 +2990,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "reason",
@@ -3090,7 +3090,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "marker",
@@ -3176,7 +3176,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "animal",
@@ -3247,7 +3247,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "animal",
@@ -3450,7 +3450,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "partner_scene_uid",
@@ -3523,7 +3523,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "source",
@@ -3570,7 +3570,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "animal",
@@ -3838,7 +3838,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "animal",
@@ -3970,7 +3970,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "animal",
@@ -4078,7 +4078,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "animal",
@@ -4224,7 +4224,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "animal",
@@ -4442,7 +4442,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "animal",
@@ -4601,7 +4601,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "animal",
@@ -4690,7 +4690,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "animal",
@@ -4865,7 +4865,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "marker",
@@ -4912,7 +4912,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "marker",
@@ -4983,7 +4983,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "roi_index",
@@ -5042,7 +5042,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "roi_index",
@@ -5107,7 +5107,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "marker",
@@ -5166,7 +5166,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "picture",
@@ -5291,7 +5291,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "reason",
@@ -5316,7 +5316,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "animal",
@@ -5497,7 +5497,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "animal",
@@ -5598,7 +5598,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "marker",
@@ -5629,7 +5629,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "marker",
@@ -5929,7 +5929,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "animal",
@@ -5985,7 +5985,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "animal",
@@ -6048,7 +6048,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "plate_id",
@@ -6106,7 +6106,7 @@
      "name": "scene_uid",
      "type": "text",
      "units": "",
-     "meaning": "One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`."
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
     },
     {
      "name": "n_sections",

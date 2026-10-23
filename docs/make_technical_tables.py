@@ -287,8 +287,11 @@ def build_tables():
 def splice(doc, tables):
     for key, body in tables.items():
         start, end = f"<!-- tables:{key} -->", f"<!-- /tables:{key} -->"
-        if start not in doc or end not in doc:
-            raise KeyError(f"the guide has no {start} ... {end} block")
+        # Exactly one block, in order: a second copy would stay stale while
+        # --check passed over the first.
+        if (doc.count(start) != 1 or doc.count(end) != 1
+                or doc.index(start) > doc.index(end)):
+            raise KeyError(f"the guide needs exactly one {start} ... {end} block, in that order")
         before, rest = doc.split(start, 1)
         _old, after = rest.split(end, 1)
         doc = f"{before}{start}\n{body}\n{end}{after}"

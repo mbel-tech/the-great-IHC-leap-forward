@@ -36,6 +36,19 @@ def test_tables_current():
         "run python docs/make_technical_tables.py"
 
 
+def test_splice_refuses_bad_markers():
+    body = {"stages": "X"}
+    for doc in ("a <!-- tables:stages --> b <!-- /tables:stages --> "
+                "c <!-- tables:stages --> d <!-- /tables:stages -->",
+                "a <!-- /tables:stages --> b <!-- tables:stages -->",
+                "no markers"):
+        try:
+            T.splice(doc, body)
+        except KeyError:
+            continue
+        raise AssertionError("splice accepted: " + doc)
+
+
 def test_every_script_has_entry():
     headings = set(re.findall(r"^### `([^`]+)`", _doc(), re.M))
     missing = [n for n in T.script_names() if n not in headings]
@@ -71,10 +84,15 @@ def test_columns_match_code():
                 src += fh.read()
         for c in entry.get("columns", []):
             literal = c.get("literal", c["name"])
-            # a quote, or the } closing an f-string field: f"{slug}_file"
-            if not re.search(r"""["'}]""" + re.escape(literal), src):
+            # The whole name, quoted: opened by a quote or by the } closing an
+            # f-string field (f"{slug}_file"), closed by a quote or by the { of
+            # one. Without the closing half, "edge_affinity_x" vouched for
+            # "edge_affinity".
+            if not re.search(r"""["'}]""" + re.escape(literal) + r"""["'{]""", src):
                 bad.append(f"{entry['path']}: {c['name']} not in the writer's code")
-    assert bad == [], "\n".join(bad)
+    assert bad == [], ("\n".join(bad) + "\nThe registry is written by hand: fix "
+                       "docs/guides/file_formats.json, then run "
+                       "python docs/make_technical_tables.py")
 
 
 if __name__ == "__main__":

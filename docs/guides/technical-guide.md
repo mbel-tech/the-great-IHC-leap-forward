@@ -659,8 +659,10 @@ The repository holds two programs that share one set of files on disk.
   calls its `main()` (section 5.3), hosts the HTML curators the stages generate (chapter 7), and keeps a
   record of what was run in the study file.
 
-The stages import each other **by file path**, not by module name, because a name such as `04a_reformat`
-starts with a digit and is not a legal Python identifier. Every cross-script import looks like this:
+The shared `ls_*`, `czi_*` and `atlas_*` modules are imported by name (`from ls_config import CONFIG`,
+`import ls_channels as CH`), with `scripts/` on the path. A stage that uses another stage imports it
+**by file path**, because a name such as `04a_reformat` starts with a digit and is not a legal Python
+identifier; so do some older imports of `ls_io`. Those imports look like this:
 
 ```python
 _spec = importlib.util.spec_from_file_location(
@@ -800,10 +802,9 @@ decision and which no stage reads) before each run, and when the hash changes it
 stage module and `ls_config` itself, so the next run imports them fresh.
 
 **Exit codes.** A stage exits 0 when it did its work or found nothing left to do, 1 when it refuses (a
-missing input, a bad setting, an operator decision still needed), and 2 in the few places where the
-failure is a verdict rather than a refusal: `00d` when a file breaks a structural assumption, `06e` when
-detection has stalled, `06i` and `make_demo_pack.py` on a check that did not pass, and `ls_config.py`'s
-command-line checks.
+missing input, a bad setting, an operator decision still needed), and 2 in a few places: `00d` when a file breaks a structural assumption, `06e` when detection has
+stalled, `06i` when its inputs are missing or older than the nuclei (a refusal, but with its own code),
+`make_demo_pack.py` on a check that did not pass, and `ls_config.py`'s command-line checks.
 
 ### 5.4 Headless runs
 
@@ -852,10 +853,14 @@ maps the files renamed out of the LS study's antibody names (`perk_overrides.csv
 `perk_sections_dataset.csv`, `perk_analysis_set.csv`, `pcna_analysis_set.csv`, `roi_geometry.csv`,
 `roi_boxes.csv`) to their new names, so an older drive is still read.
 
-**Atomic writes.** Every keyed output is written to `<path>.tmp` beside the target and swapped in with
-`os.replace`, which is atomic on Windows and POSIX when both are on one drive (`ls_io.py` for CSVs and
-text, `ls_jsonio.py` for JSON). `ls_io` retries five times over about 31 seconds, because the operator's
-USB drive has been seen to vanish for seconds at a time; after that the error is raised, not swallowed.
+**Atomic writes.** Most keyed outputs (the manifest, display ranges, pairing, reformat indices, analysis
+sets, overrides, ROI geometry, results tables and workbooks) are written to `<path>.tmp` beside the target
+and swapped in with `os.replace`, which is atomic on Windows and POSIX when both are on one drive (`ls_io.py` for CSVs and
+text, `ls_jsonio.py` for JSON). `ls_io` makes five attempts with about 15 seconds of waiting between them (1, 2, 4 and 8 s), because the
+operator's USB drive has been seen to vanish for seconds at a time; after that the error is raised, not
+swallowed. Some older writers still open their file directly: `00c`, `01b`, `01e`, `01g`, `04a3b`,
+`04a_atlas_extract`, `04a_reformat`'s lost-sections list, `05b`, `04k`, `04l`, `04q` and `04x`; 05c appends
+to its tables rather than replacing them.
 `tests/test_atomic_stage_writes.py` checks that a failure at the swap leaves the previous manifest,
 display ranges and pairing whole.
 
@@ -897,8 +902,8 @@ chapter.
 
 Three rules hold for every stage and are not repeated in each entry. A stage reads the study file at
 import through `ls_config`, and the folders `source_dir` (the slides) and `out_root` (everything it
-writes). Every keyed output is written through `ls_io` or `ls_jsonio` (section 5.6), so a crash leaves
-the previous copy whole. And a stage refuses work it cannot do with a message and exit status 1, rather
+writes). Most keyed outputs are written through `ls_io` or `ls_jsonio` (section 5.6, which names the exceptions),
+so a crash leaves the previous copy whole. And a stage refuses work it cannot do with a message and exit status 1, rather
 than writing a partial or a guessed result.
 
 ### `00_manifest.py`
@@ -1015,11 +1020,11 @@ TIFF at a chosen resolution, for measuring the tile artifact.
 
 Stage `pick_sections`. Chooses a spread of sections for building the tile-correction field.
 
-- **Reads:** `manifest/manifest_scenes.csv` and `qc/focus.csv`.
+- **Reads:** `manifest/manifest_scenes.csv`.
 - **Writes:** `qc/tilefield_sample.csv` (about 72 sections by default; `--n` changes it).
-- **How:** spreads across every animal, both markers and the length of each series, preferring
-  sections with plenty of tissue, so no one piece of anatomy is baked into the field. Seeded, so the
-  same study gives the same pick.
+- **How:** groups sections by animal and marker, and within each group takes sections spread evenly
+  along the series (with seeded jitter) from up to `--scenes-per-file` scenes per file, so no one piece of
+  anatomy is baked into the field. Seeded, so the same study gives the same pick.
 
 ### `01c_measure_tile_artifact.py`
 
@@ -1118,8 +1123,8 @@ Stage `saturation_raw`. Measures clipping on the raw plane for sections exported
 itself, and measures how much downsampling dilutes it.
 
 - **Reads:** the CZIs (pylibCZIrw, through 01's own reader) and `qc/focus.csv`.
-- **Writes:** `qc/saturation_raw.csv`, `qc/censor_raw/<uid>_clipped.png`, and with `--native-sample`
-  `qc/saturation_raw_native.csv`.
+- **Writes:** `qc/saturation_raw.csv`, `qc/censor_raw/<uid>_clipped.png`, and `qc/saturation_raw_native.csv`
+  (`--native-sample` sections, 30 by default; 0 skips it).
 - **How:** reads the marker plane before the tile field and counts pixels at the clip ceiling. The
   native sample compares clipping at 0.65 and 5.2 µm per pixel: median dilution 1.09 times where clipping
   is above 0.1 % of the frame.
@@ -1156,7 +1161,9 @@ Stage `pair` (paired layout only). Pairs the two marker passes onto the same phy
   that offset is solved optimally (Hungarian algorithm, `scipy.optimize.linear_sum_assignment`), so one bad
   section cannot cascade. Produces the canonical `section_uid`. Unmatched sections are listed, not
   dropped.
-- **Failure and re-run:** refuses under `multiplex` with a message saying the stage does not apply.
+- **Failure and re-run:** refuses when the study does not declare exactly two markers, and says to set
+  the layout to `multiplex` if each scan carries every marker. Under `multiplex` the app and `run_all.sh`
+  skip it (`ls_layouts`).
 
 ### `04a2_atlas_remerge.py`
 
@@ -1277,8 +1284,8 @@ carries the region seeds across with transformix, as a quality check. Nothing do
 Stage `exclusion`. Proposes the sections that cannot be measured, conservatively.
 
 - **Reads:** the DAPI overviews and `qc/focus.csv`.
-- **Writes:** `reformatted/exclusion_candidates.csv`; with `--survey`, `qc/exclusion/survey.csv`; with
-  `--montage`, pictures in `qc/exclusion/`.
+- **Writes:** `reformatted/exclusion_candidates.csv`; with `--survey`, `qc/exclusion/survey.csv`; and a montage of the proposed sections in `qc/exclusion/`
+(`--montage` sets how many, 32 by default).
 - **How:** two separate reasons. `no_tissue`: the largest connected tissue component is below 2.5 mm² on
   the 5.20 µm overview. `out_of_focus`: `focus_score` below 0.070, placed by looking at sections in
   0.01-wide focus bands. Solidity was tried and rejected: it proposed excluding good telencephalon,
@@ -1580,8 +1587,8 @@ Stage `excel_sample`. The analysis table as a workbook, one row per ROI per anim
   `by_section` and `coverage`, written with openpyxl (bold header, frozen first row, sized columns).
 - **How:** groups 06a's rows. Withheld values (no cut, no denominator, Abercrombie not applied) are blank,
   with the reason carried from 06a.
-- **Failure and re-run:** refuses when `roi_measurements.csv` is older than `roi_nuclei.csv`, rather than
-  writing stale numbers. Buildable at any point during detection.
+- **Failure and re-run:** refuses when `roi_nuclei.csv` or `roi_measurements.csv` is missing. It does not
+  compare their dates, so run 06a first (06e always does). Buildable at any point during detection.
 
 ### `06d_excel_by_slide.py`
 
@@ -1783,8 +1790,7 @@ and its entry is carried over, never taken from another study. Used by 04k, 04l,
 
 ### `ls_io.py`
 
-Shared module: `atomic_write_csv`, `atomic_save` (a context manager for any file), a retry of five
-attempts over about 31 seconds for a vanishing drive, `pick_column` (a column by any of its accepted names),
+Shared module: `atomic_write_csv`, `atomic_save` (a context manager for any file), a retry for a vanishing drive (five attempts, about 15 seconds of waiting), `pick_column` (a column by any of its accepted names),
 and `embed`/`fill`, which put JSON into an HTML template safely for a `<script>` block in one pass. Section
 5.6.
 
@@ -2400,7 +2406,7 @@ One row per scene, which is one section: where it sits on the slide and its plac
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `file` | text |  | The CZI file name. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `slide` | text |  | The slide id parsed from the file name. |
@@ -2499,7 +2505,7 @@ One row per section: how the marker signal is laid out, which tells the markers 
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `marker_channel` | text |  | The marker's dye as the file names it (for example AF568). |
 | `n_objects` | int |  | Bright marker objects found on the overview. |
@@ -2551,7 +2557,7 @@ One row per exported section: the quality numbers every later stage reads. Measu
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `file` | text |  | The CZI file name. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `slide` | text |  | The slide id parsed from the file name. |
@@ -2584,7 +2590,7 @@ One row per section: clipping on the raw plane, and where its mask is. 04j censo
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `file` | text |  | The CZI file name. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `slide` | text |  | The slide id parsed from the file name. |
@@ -2617,7 +2623,7 @@ Sections 01 could not export this run, and why; rewritten every run.
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `file` | text |  | The CZI file name. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `marker_channel` | text |  | The marker's dye as the file names it (for example AF568). |
@@ -2651,7 +2657,7 @@ The sections the Fiji export reads to build the tile correction.
 |------------|------|------|---------------------------|
 | `file` | text |  | The CZI file name. |
 | `scene` | int |  | Scene index in the CZI. |
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `marker_channel` | text |  | The marker's dye as the file names it (for example AF568). |
 
@@ -2689,7 +2695,7 @@ Per section: where the clipping falls relative to the tissue, and a verdict on w
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `slide` | text |  | The slide id parsed from the file name. |
 | `marker_channel` | text |  | The marker's dye as the file names it (for example AF568). |
@@ -2713,12 +2719,12 @@ Per section: where the clipping falls relative to the tissue, and a verdict on w
 
 A check of clipping at full resolution against the overview, on a sample of sections.
 
-- **Written by:** 01k_saturation_raw.py (`--native`)
+- **Written by:** 01k_saturation_raw.py (`--native-sample`, on by default; 0 turns it off)
 - **Read by:** a person
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `file` | text |  | The CZI file name. |
 | `frac_at_5_20um` | float |  | Clipped share on the 5.20 µm read. |
 | `frac_at_0_65um` | float |  | Clipped share at full resolution. |
@@ -2733,7 +2739,7 @@ Scenes whose overview holds more than one piece of tissue large enough to be a s
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `slide` | text |  | The slide id parsed from the file name. |
 | `marker_channel` | text |  | The marker's dye as the file names it (for example AF568). |
@@ -2754,7 +2760,7 @@ One row per scene picture drawn, with the settings it was drawn under so a rerun
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `file` | text |  | The CZI file name. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `slide` | text |  | The slide id parsed from the file name. |
@@ -2790,7 +2796,7 @@ Scenes 01l could not draw, and why.
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `file` | text |  | The CZI file name. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `marker_channel` | text |  | The marker's dye as the file names it (for example AF568). |
@@ -3127,7 +3133,7 @@ One row per section: how much of the tissue 04g masked as artifact, by kind. Und
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `section_order` | int |  | Position of the section along the animal's brain, 1..N within one marker's series. |
 | `excluded` | 0/1 |  | 1 when the section is excluded (its mask is still made, for the record). |
@@ -3199,7 +3205,7 @@ The canonical exclusion list, one row per excluded section; header only when not
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `decision` | text |  | `auto` (04f's proposal), `manual` (a person) or `restored`. |
 | `reason` | text |  | Why, in words. |
 
@@ -3212,7 +3218,7 @@ Sections nobody excluded that still did not come through the reformat.
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `reason` | text |  | Why, in words. |
 
 #### `reformatted/rotation_overrides[_<marker>].csv`
@@ -3245,7 +3251,7 @@ Review decisions made in the ROI curator; 04a merges them over the exclusion lis
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
 | `extra_rotation` | float | degrees | Blank: the review does not rotate. |
 | `flip` | 0/1 |  | Blank. |
@@ -3272,7 +3278,7 @@ Per section: its clipped share, and whether it stays in the analysis set (under 
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `section_order` | int |  | Position of the section along the animal's brain, 1..N within one marker's series. |
 | `censored_fraction` | float |  | Share of frame pixels clipped. |
@@ -3292,7 +3298,7 @@ Paired studies: every section of the measured pass with its fate, joined to its 
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `slide` | text |  | The slide id parsed from the file name. |
 | `variant` | text |  | Which scan of the slide, when it was scanned more than once (`a`, `b`, ...); empty for one scan. |
@@ -3334,7 +3340,7 @@ The ROI curation queue, in an order where any first part is a usable dataset.
 | `rank` | int |  | Position in the queue. |
 | `tier` | text |  | `core`, `unpaired_unchecked` or `animal_underpowered`. |
 | `tier_reason` | text |  | Why that tier. |
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `partner_scene_uid` | text |  | The partner section (blank in a multiplex study). |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `section_order` | int |  | Position of the section along the animal's brain, 1..N within one marker's series. |
@@ -3354,7 +3360,7 @@ Which colour composite was drawn from what, appended per run.
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `source` | text |  | Always `czi`. |
 | `um_per_px` | float | µm | Pixel size read at. |
 | `side_px` | int | px | Side of the square picture. |
@@ -3370,7 +3376,7 @@ Every scanned section, both markers, and what each stage decided about it. A joi
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
 | `slide` | text |  | The slide id parsed from the file name. |
@@ -3427,7 +3433,7 @@ One row per section with any curation work: the plate it was matched to and how 
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
 | `subset` | text |  | Which queue the section was loaded from. |
@@ -3456,7 +3462,7 @@ One row per landmark pair: a point on the section and the same point on the plat
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
 | `section_order` | int |  | Position of the section along the animal's brain, 1..N within one marker's series. |
@@ -3481,7 +3487,7 @@ One row per region outline or background disc, in the section's 256 frame. 05a c
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
 | `plate_set` | text |  | The plate set. |
@@ -3513,7 +3519,7 @@ One row per curated section: the six reformat steps 04a took, and the one affine
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
 | `czi_file` | text |  | The CZI. |
@@ -3557,7 +3563,7 @@ One row per region or background disc: its outline carried onto the CZI, the box
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
 | `roi_kind` | text |  | `roi` or `background`. |
@@ -3597,7 +3603,7 @@ One row per sampled crop: the signal statistics 05b's verdict is made from (summ
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
 | `marker` | text |  | The marker's dye name, as declared in the study. |
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `roi_index` | int |  | Which region of the section. |
 | `segmented_on` | text |  | The plane detection will use. |
@@ -3620,7 +3626,7 @@ One row per detected nucleus in every region and background disc. About 900,000 
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
 | `roi_kind` | text |  | `roi` or `background`. |
@@ -3670,7 +3676,7 @@ For a marker counted on its own channel: the one intensity range every box of a 
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
 | `segmented_on` | text |  | The plane. |
 | `norm_lo` | float | grey value | Bottom of the stretch (the 1st percentile over the section's boxes). |
@@ -3686,7 +3692,7 @@ The shape each region was measured on, so 06a can tell when a region was moved a
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
 | `roi_index` | int |  | Row in roi_boxes. |
 | `roi_kind` | text |  | As in roi_boxes. |
@@ -3706,7 +3712,7 @@ Multiplex studies only: which object of one marker overlaps which of another.
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `roi_index` | int |  | The region. |
 | `marker_a` | text |  | First marker. |
 | `object_a` | int |  | Its object. |
@@ -3724,7 +3730,7 @@ Threshold backend only, and only when it failed: regions whose frame broke the b
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `roi_index` | int |  | The region. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
 | `segmented_on` | text |  | The plane. |
@@ -3743,7 +3749,7 @@ Sections measured with no artifact mask, so `artifact` is 0 there because nothin
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
 
 #### `detection_outlines/<marker>/<scene_uid>.npz`
@@ -3767,7 +3773,7 @@ One row per detection picture. 05c keeps its own list, `index_05c.csv`, with the
 | `marker` | text |  | The marker's dye name, as declared in the study. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `slide` | text |  | The slide id parsed from the file name. |
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `picture` | text |  | `roi`, `background` or `scene` (a whole-section picture). |
 | `roi_index` | int |  | The region. |
 | `region` | text |  | The region. |
@@ -3796,7 +3802,7 @@ Sections 06i could not draw, and why.
 | `marker` | text |  | The marker's dye name, as declared in the study. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `slide` | text |  | The slide id parsed from the file name. |
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `reason` | text |  | Why, in words. |
 
 #### `results/roi_measurements.csv`
@@ -3808,7 +3814,7 @@ One row per region and background disc per section: counts, positives and densit
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
 | `roi_kind` | text |  | `roi` or `background`. |
@@ -3846,7 +3852,7 @@ Per section: how many background-disc nuclei land above the cut. A measurement o
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
 | `n_discs` | int |  | Background discs. |
@@ -3871,7 +3877,7 @@ The exact cut per section, at full precision, so 06i draws the same calls 06a co
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
 | `cut` | float | grey value | The cut, as Python's repr of the float. |
 
@@ -3884,7 +3890,7 @@ Sections whose regions changed after detection; 06a refuses them until 05c measu
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
 | `reason` | text |  | Why, in words. |
 
@@ -4002,7 +4008,7 @@ The two automatic plate matchers' proposals, kept as evidence that automatic mat
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `section_order` | int |  | Position of the section along the animal's brain, 1..N within one marker's series. |
 | `proposed_plate` | text |  | The matched plate. |
@@ -4019,7 +4025,7 @@ The level curator's plate per section, interpolated between the sections a perso
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `section_order` | int |  | Position of the section along the animal's brain, 1..N within one marker's series. |
 | `plate_set` | text |  | The plate set. |
@@ -4037,7 +4043,7 @@ How well elastix registered each section to its plate. `roi_regions_refined.csv`
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `plate_id` | text |  | The plate's id, which sorts rostral to caudal. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `section_order` | int |  | Position of the section along the animal's brain, 1..N within one marker's series. |
@@ -4054,7 +4060,7 @@ A person's count of sections in each multi-blob scene; `01i --fit` reads it back
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `scene_uid` | text |  | One section: `<animal>_<slide><variant>_<marker>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `n_sections` | int |  | How many sections the scene really holds. |
 <!-- /tables:files -->
 
@@ -4074,7 +4080,7 @@ that need them skip those parts; the page suites need a real study's worklist an
 
 ### 10.2 What they cover
 
-There are 123 Python suites and 21 page suites. By area:
+There are 119 Python suites and 21 page suites. By area:
 
 - **Reading files:** `test_czi_meta`, `test_czi_read`, `test_czi_report`, `test_czi_selftest`,
   `test_czi_speed`, `test_czi_render`, `test_ceilings`, `test_ls_channels`, `test_slide_naming`,
@@ -4115,9 +4121,11 @@ stage by path inside it.
 3. **A CSV is not registered** (`test_every_written_csv_registered`): a script names a `.csv` file that is
    neither in `file_formats.json` nor in its `not_files` list (a file deliberately left out, with the reason: today only the Shotgun deck's `shotgun_manifest.csv`, which carries the group key).
 4. **A column has changed** (`test_columns_match_code`): for an entry with `columns_from`, the registry's
-   columns must equal the writer's own constant, in order. For any other entry with columns, each
-   column's name (or its `literal`, where the code builds it, such as `f"{slug}_file"`) must still be
-   spelled in the writer's code.
+   columns must equal the writer's own constant, in order. For any other entry with columns, each column's name (or its `literal`, where the code builds it, such as `f"{slug}_file"`) must still
+   appear, whole and quoted, in the writer's code. That is weaker than an exact match: a name the code
+   also uses elsewhere still passes after a rename in the header. The file table is built from the
+   registry, never from the code, so the fix for a failure is to edit `file_formats.json`, then run the
+   generator.
 
 The option table is read from the scripts' `argparse` calls with Python's `ast` module, not by importing
 them, because a stage reads the study file at import and the guide must build without one.

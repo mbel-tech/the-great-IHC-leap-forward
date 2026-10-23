@@ -135,6 +135,37 @@ division — the one the application's sidebar uses — which splits instrument 
 the atlas into parts of their own, because each is a self-contained argument worth reading in one
 go. The order of the steps is identical.
 
+## When a step counts as done
+
+A step is done when what it leaves behind is in the output folder, so progress is right even for
+work done outside the app. One exception: a step whose newest run failed is not done, even if its
+files are there, and the app says *its last run failed*. Some steps write files on behalf of a
+later one (01 writes the tables 01k fills), and without that rule a step that refused the study
+would have been skipped as done on the next run and its absence never noticed.
+
+## Studies with one marker, and multiplex studies
+
+The LS study has two markers, scanned separately (paired). The entries below describe that case.
+A study that declares **one marker** leaves out every step that exists for a second marker, and
+says *Not used in this study* on its row. Two PCNA steps have a pERK twin that would write the
+same files when there is no second marker (the artifact mask and the final reformat); with one
+marker the twin alone runs, so no work is done twice. The PCNA steps that do still run are named
+for the study's one marker.
+
+In a **multiplex** study every marker is a channel of the same scan. The pairing step and 04m
+(which are about separate scans) do not apply, and each marker keeps the name the study gives it
+from the first table onward (see 00 and 04n).
+
+## Running the steps
+
+Each step is a script in `scripts/`, and the app runs it with the study's settings. The app's
+**Run all remaining** on a screen can also be run without the window, for example overnight on a
+machine with no display: `python -m app --run prepare <study.json>` (or `measure`). It makes the same
+plan as the button, with the options saved in the study and **Redo** where a step is out of date,
+records each run in the study file as the app does, and stops at the first failure or at the weak
+signal hold before detection (05b). It never unblinds. It exits 0 when every planned step ran, 1
+when one failed or a hold stopped it, and 2 when the screen or the study file is not there.
+
 \newpage
 
 # Part 1 — Ingest and QC
@@ -158,6 +189,11 @@ Every scan file is opened and its header read — the settings, the channels, th
 of scenes and where each sits on the glass — without decoding a single pixel. This is fast because
 it touches only the file's index, and it produces the two tables the whole pipeline is built on:
 one row per file, one row per scanned section.
+
+In a multiplex study the table of channels can rename a marker (the scan's AF568 called pERK). The
+manifest records each scene's marker under the study's name, not the scan's, because every later
+step selects scenes by comparing that name; under the scan's name, 01 would write no clipping masks
+and 01k would refuse the study.
 
 It also solves a problem that is easy to miss. **Nothing in the file says how the sections were
 laid out on the slide.** The scanner records where each scan region sits in millimetres, but not
@@ -892,6 +928,10 @@ one, so the question had been unanswerable rather than answered. Measured proper
 plane, AF488 does clip — very little on most sections, but not nothing, and more than a per cent on
 the worst. A clipped PCNA pixel is lost for exactly the same reasons a clipped pERK pixel is.
 
+If no section reaches this step, usually because the exclusion step proposed every section as
+having no tissue, it stops with *no … sections to check: the exclusion step left none* rather than
+writing an empty analysis set that would read as done. Both 04j entries behave this way.
+
 ## 04a  Reformat PCNA — masked and censored {#stage-reformat_pcna_final}
 
 *`scripts/04a_reformat.py --apply-overrides --mask-artifacts --censor` → `reformatted/sections/`*
@@ -1016,6 +1056,11 @@ the brain rather than clustering at one end.
 
 The sections are the same either way. What changes is what stopping early is worth.
 
+In a paired study the queue is built from 04m's table, so it waits for 04m. 04m is about two
+separate scans and does not apply to a multiplex study, so there the queue is built from the
+sections the final reformat kept and 04j left in the analysis set, with no partner columns. A
+missing input is named in the message.
+
 ## 04o  Colour composites — pERK {#stage-rgb_perk}
 
 *`scripts/04o_section_rgb.py --marker AF568 --all --thumbs` → `reformatted/sections_AF568_rgb/`, `reformatted/sections_AF568_rgb_thumb/`*
@@ -1031,6 +1076,10 @@ carried by the same rotation and crop that the DAPI silhouette determined.
 The same run writes small copies of each composite, so the curator's review grid can show every
 section at once without loading full-size images. A thumbnail is only a downscale of its composite,
 so making both in one run keeps the two from drifting apart.
+
+When the list of sections to composite is empty, because every section was excluded further up, it
+stops with *no … sections to composite* instead of reporting "wrote 0 composites", which would
+read as a step that worked. Both 04o entries behave this way.
 
 ## 04o  Colour composites — PCNA {#stage-rgb_pcna}
 
@@ -1347,6 +1396,13 @@ shared intensity range, recorded in `results/roi_normalisation.csv`, rather than
 background disc's noise does not look like signal. Which route each nucleus took is recorded on its
 row (`segmented_on`).
 
+Each crop is stretched between its 1st and 99.8th percentiles before StarDist sees it. A crop at the
+16-bit ceiling with only a few pixels just under it has the two percentiles equal, and the stretch
+would send those pixels to about −10²¹, which makes StarDist abort the whole process with no message.
+Such a crop is refused instead: the box is reported as not segmented and detection carries on with
+the next. A crop that is exactly constant is left alone; it stretches to zeros, which StarDist
+handles.
+
 The region is not a rectangle but the box is, so a nucleus found inside the box is kept only if it
 falls inside the actual region. That is decided by mapping the nucleus back to the 256-pixel frame
 and testing it there, against the polygon the operator drew.
@@ -1535,8 +1591,19 @@ The join validates itself rather than trusting the spreadsheet: the cohort it pr
 against an independent column in the workbook recording which animals were sliced for this
 experiment, and a disagreement is reported loudly. A run that mis-assigns animals to groups should
 fail obviously rather than produce a plausible and wrong result. An animal with no row in the
-workbook stops the join. Where the workbook leaves a treatment blank, the tank the animal was held
-in recovers it, and every row records whether its group came from the sheet or from the tank.
+workbook stops the join. A blank treatment is left blank unless a fill rule says otherwise: in the
+LS sheet the tanks partition cleanly (303/304/307/308 exercise, 305/306/309/310 control) and only the
+control side was typed at timepoint 1, so the LS choice carries those tanks as rules.
+
+**Which columns.** The study says which sheet column names the animal and which column (or
+columns) hold the treatment; two or more make one group, such as "exercise · 1". The person chooses
+them in Set up under **Match the sheet**, which also lets them add a rule for a blank treatment
+cell ("when 'brackish Tank' is 303, 304, 'treatment' is exercise") and mark other columns to carry
+into the results or ignore. The choice is saved in the study but the sheet itself is read only when
+this step runs. A study with no choice whose sheet has the LS headers is read as before (Fish ID
+matched by number, so LS22 is fish 22, `treatment`, and the tank rules); any other sheet stops and
+says to choose the columns. Each row records where its group came from (`treatment_source`: sheet, rule
+or unresolved).
 
 The workbook is `large scale exp sampling data.xlsx` in the slides folder unless the study names
 another (`--xlsx`, which can be set when the study is created or later in Set up). It used to be

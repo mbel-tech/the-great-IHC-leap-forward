@@ -574,8 +574,7 @@ written in the curator's JavaScript and needs no library.
 Every table the pipeline writes and reads is a CSV handled with Python's own `csv` module
 (`csv.DictReader`, `csv.DictWriter`), through the helpers in `ls_io.py`, which write each file to a
 temporary name and rename it into place so a stopped run never leaves half a table. **pandas** is installed
-with the app (it is in `requirements.txt` and in the installer's smoke test) and listed in
-`docs/software_versions.md`, but no stage imports it today.
+with the app (it is in `requirements.txt` and in the installer's smoke test), but no stage imports it.
 
 #### openpyxl
 

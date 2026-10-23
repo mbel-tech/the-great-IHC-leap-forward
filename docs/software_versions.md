@@ -6,7 +6,6 @@
 | imagecodecs | 2026.8.16 | JPEG-XR decoding, required by czifile |
 | NumPy | 2.5.2 | arrays, the affine algebra, the mask lookups |
 | SciPy | 1.18.1 | rotation, filtering, optimal assignment |
-| pandas | 3.0.5 | tabular joins in the dataset stages |
 | Pillow | 12.3.0 | image resizing in the reformat and its inverse |
 | scikit-image | 0.26.0 | per-object measurement (regionprops) |
 | StarDist | 0.9.2 | nucleus segmentation |

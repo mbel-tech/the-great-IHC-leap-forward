@@ -130,7 +130,7 @@ The tutorial walks you through a whole study on a small demo study: a few sectio
 - **Slow stages.** Drawing scene pictures, composites and nucleus detection take a while even on the demo. On those steps **Use ready-made results** copies in results made earlier from the same slide, so you can carry on at once, or you can run the stage and wait.
 - **Practice in the ROI curator.** You outline the regions on two practice sections yourself and press **Done**. The tutorial compares your outlines with an expert's, says for each region how much overlaps, and draws the expert's outlines dashed on the section. **Try again** clears your outlines on those two sections; **Carry on** moves to the next step.
 - **Leaving and coming back.** **Leave tutorial** reopens the study you had open; while a stage is running it says so and stays put. The Project screen button then says **Continue the tutorial** and picks up at the same step. **Start over** makes a fresh tutorial study; the old one is kept beside it as `Tutorial study.old`.
-- **The demo study.** The app looks for it in a `demo` folder beside the app. If there is none, it asks you to choose the demo pack (a folder or a `.zip`) and remembers your choice.
+- **The demo study.** The app looks for it in a `demo` folder beside the app. If there is none, it asks you to choose the demo pack (a folder or a `.zip`) and remembers your choice. The demo pack holds real, unpublished sections, so it is not part of the app's download: it is shared privately within the lab. Ask whoever set up the app for the link, download the `.zip`, and choose it as it is; there is no need to unzip it.
 
 ## 4. Set up: telling the app about your study
 

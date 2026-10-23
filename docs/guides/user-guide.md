@@ -1,10 +1,10 @@
 # The Great IHC Leap Forward: user guide
 
-15 October 2026. The editable version of this guide is the [Claude Doc](https://claude.ai/code/artifact/3935b5bd-45c5-4a2c-8b13-005fa0d0e0df); this file is a copy kept with the code.
+23 October 2026. The editable version of this guide is the [Claude Doc](https://claude.ai/code/artifact/3935b5bd-45c5-4a2c-8b13-005fa0d0e0df); this file is a copy kept with the code.
 
 This guide takes you from a folder of slide scans to a spreadsheet of per-region cell counts using The Great IHC Leap Forward, the lab's desktop app for the LS IHC pipeline. It is written for someone who has never used the app. Read sections 1 to 3 once, then use the rest as a reference while you work.
 
-> **Up to date with the redesigned app** (light theme, numbered steps, one curation stop). The pictures were taken on a made-up study, so the animal names and numbers in them are only examples.
+> **Up to date with the app as of 23 October 2026**: the tutorial, Match the sheet, detection overlays, one-marker studies and running a screen from the command line are all covered. The pictures were taken on a made-up study, so the animal names and numbers in them are only examples.
 
 ## 1. Quick start
 
@@ -132,6 +132,8 @@ The tutorial walks you through a whole study on a small demo study: a few sectio
 - **Leaving and coming back.** **Leave tutorial** reopens the study you had open; while a stage is running it says so and stays put. The Project screen button then says **Continue the tutorial** and picks up at the same step. **Start over** makes a fresh tutorial study; the old one is kept beside it as `Tutorial study.old`.
 - **The demo study.** The app looks for it in a `demo` folder beside the app. If there is none, it asks you to choose the demo pack (a folder or a `.zip`) and remembers your choice. The demo pack holds real, unpublished sections, so it is not part of the app's download: it is shared privately within the lab. Ask whoever set up the app for the link, download the `.zip`, and choose it as it is; there is no need to unzip it.
 
+![The tutorial: the panel on the right lists the steps and says what to do, and an orange box points at the button to press](img/user-guide/12-tutorial.png)
+
 ## 4. Set up: telling the app about your study
 
 Set up is where you describe the study once: where the slides are, how their files are named, how they were imaged, which atlas to use and how nuclei are counted. Only what the slide files cannot tell the app is asked: the two folders, the section thickness, the markers and the atlas. The pixel size, the file-name rule, the channels and how the markers were scanned are read from the slide files themselves, and every other folder sits inside the output folder. All of those are still there, filled in: tick **Show advanced settings** at the top of Set up to see and change them (the Pictures and Nucleus detection cards, among others). A required setting that is still empty is always shown. Come back any time to change a setting; stages read the new value the next time they run.
@@ -157,6 +159,8 @@ Once a folder is set, the top of the Slides tab says which folder the study read
 **Sampling workbook** names the workbook Results will read to unblind (section 8); leave it empty to use the one in the slide folder. **Check workbook** tries the join now, without unblinding anything: it reads the workbook, matches it against the study's animals and slides, writes nothing and reports how many animals and slides it matched to a group, any animal with no row, and any blank group. Use it early, so a mismatch is fixed before the measuring is done.
 
 **Match the sheet…** opens the workbook's first rows with a menu above each column: **Animal ID** (the one column that names the animal), **Treatment** (the column, or several, holding what you want to compare; several make one group, such as `exercise · 1`), **Keep** (carried into the results at Unblind) or **Ignore**. As you choose, it compares the ID column with the animals in the slide file names: how many have a row, which slides have none (Unblind stops on these), and IDs written on two rows. IDs match by name, or by number when no name matches, so `22` in the sheet is `LS22`. An animal whose treatment cell is blank gets no group unless you add a rule, such as "when 'brackish Tank' is 303, 304, 'treatment' is exercise". **Save** keeps the choice in the study; Check workbook, Load the groups for Shotgun and Unblind all use it, Unblind only when it runs. A study that has not made a choice and uses the LS sampling sheet is read as before.
+
+![Match the sheet: a menu above each column of the workbook, and a check of how many animals have a row](img/user-guide/13-sheet-match.png)
 
 **Load the groups for Shotgun** reads the same workbook the same way and keeps each animal's treatment group in the study (`groups.order` and `groups.by_animal`), so the ROI curator's Shotgun deck can lay favourites out by treatment while you are still curating; press **Build page** on the ROI curator afterwards to turn Shotgun on. The deck shows the groups by design. Nothing else does: the curator's sections, plates and ROIs, every count and threshold, and Set up itself (which shows only how many animals each group has) stay keyed by animal, and 05c uses the groups only for the order it measures sections in. Results are still joined to the groups at Unblind. **Remove the groups** makes the study blind again, and a copy shared as blinded never carries them.
 
@@ -204,6 +208,12 @@ In a paired study the table has one row per marker with two names. **Scan channe
 **Find nuclei** (paired studies only) has one row per marker. Leave it on *On the counterstain (DAPI)* unless a marker's scan has no usable DAPI. For such a marker, choose *On this marker's own channel*. The LS study needs this for PCNA (AF488), because its DAPI plane is noise at full resolution. Use it only for a marker whose signal is in the nucleus, as PCNA's is. Its fraction positive and total cell density are then not reported; positive density is. Section 7 explains why.
 
 ![Microscope and channels, with Find nuclei set to the marker's own channel for AF488 (PCNA)](img/user-guide/03-setup-microscope.png)
+
+In a **multiplex** study every marker is a channel of the same scan, so the table has one row per channel instead: its **Name** (the antibody, which becomes folder and file names and the marker column in every output), its **Role** (*nuclear* for the counterstain, *marker*, or *ignore* for a channel nothing reads), the **CZI channel name** and **Plane** it sits on in the file, and where its nuclei are found. The line under the table says whether the pipeline accepts it. Each marker keeps its own name all the way through: the slide list and the ROI queue use the name you gave it, not the scan's channel name.
+
+![Channels and markers in a multiplex study: DAPI as the counterstain, pERK and PCNA as markers, one channel ignored](img/user-guide/15-multiplex-channels.png)
+
+**A study with one marker.** List only that marker. Stages that exist only for a second marker are then shown as *Not used in this study: it is for marker 2, and this study has one marker*, and where the LS pipeline does the same work twice, once per marker, the second pass is left out with *Not used in this study: with one marker, "…" does the same work*. Run all remaining skips them, and every screen counts as done without them. The tutorial's demo study is a one-marker study (pERK only).
 
 ### Pictures
 
@@ -458,8 +468,12 @@ Measure puts your regions back onto the original slides, finds every nucleus ins
 | 05a Verify the inverse transform | Checks that regions map back onto the slides accurately before anything is measured | A pass or fail in the log |  |
 | 05a Place the regions on the slides | Maps every region from the 256-pixel curation picture back onto the slide's own 0.65 µm pixels | Region geometry and boxes for each marker | Every section with a region (also those without a background disc); first N |
 | 05b Check signal quality and tune detection | Measures how bright, clean and even the signal is on a sample of regions, gives a verdict (good, marginal or poor) with its reasons, and picks the nucleus-detection setting that suits it. One setting per marker for the whole study. | `qc/detection_tuning.md` and `.csv`; the tuned setting in the study file | Sections to sample (12 per marker); report only |
-| 05c Detect and measure nuclei | Reads each region at full resolution, finds nuclei with StarDist (on DAPI; PCNA on its own channel, see below), measures the marker in each, and flags nuclei that sit on clipped pixels | `results/roi_nuclei.csv` | Order sections are measured in; save check pictures; redo; first N |
+| 05c Detect and measure nuclei | Reads each region at full resolution, finds nuclei with StarDist (on DAPI; PCNA on its own channel, see below), measures the marker in each, and flags nuclei that sit on clipped pixels | `results/roi_nuclei.csv` | Order sections are measured in; save check pictures; do not draw detection overlays; redo; first N |
 | 06a Per-region dataset | Turns nuclei into per-region numbers: how many cells, how many positive, per mm² | `results/roi_measurements.csv`, `results/detector_specificity.csv` |  |
+
+**Pictures as it goes.** As each section is measured, 05c also draws that section's detection overlay pictures: one per region and one per background disc, every nucleus it found drawn over the marker channel, coloured by whether it was counted positive. They go to `detection_overlays/<marker>/<animal>/` and are listed in `detection_overlays/index_05c.csv`, so you can check the counts by eye long before detection finishes. They are drawn while StarDist works on the next section, and a picture that cannot be written is noted but never stops detection or changes a count. **Do not draw detection overlays** in its Options skips them. Results' *Check detection* adds the whole-scene pictures (section 8). The older **Save check pictures** (`--qc`) is separate: it writes one DAPI picture per region to `qc/roi_detections/`, green counted, red found but outside the region.
+
+![A detection overlay picture of one region: positives filled magenta, negatives outlined cyan, nuclei outside the region yellow, with the counts and colour key in the strip above](img/user-guide/14-overlay-crop.png)
 
 **About 05b.** It reads three regions from each of twelve sections per marker, spread over every animal, at full resolution, on the plane detection uses (DAPI, or the marker itself for PCNA). It then counts nuclei at a range of StarDist probability cuts and keeps the cut where the count changes least, so the count reflects the nuclei rather than the cut. It never reads the treatment groups, and it never tunes per section, because a per-section setting would follow brightness and so could follow treatment. Its row shows the verdict for each marker once it has run, and its **Open report** button opens `qc/detection_tuning.md`. Read it before you start 05c: a *poor* verdict means fix the scans or the settings first. So **Run all remaining** stops after the signal check when any marker's verdict is *poor*, and a message names the marker and the reasons; the check's report and settings are kept. If you have looked and want to measure anyway, press **Run** on *Detect and measure nuclei*, which carries on with the tuned settings. 05c uses the tuned cut unless you set one yourself or switch off *Use auto-tuned detection settings* (Set up > Show advanced settings > Nucleus detection). **05c records the settings each marker was measured with and refuses to add sections measured with different ones**, so if you change them mid-study, re-measure that marker with **Redo … already done**.
 
@@ -553,6 +567,14 @@ Pressing **Run** on *Join the experiment (06b, marked ⚠ unblinds; its button r
 | 06c Spreadsheet per sample | One row per region per animal, plus per-disc, per-section and coverage sheets. **The figures and statistics read this one**, because the animal is the unit of comparison. | `results/roi_dataset.xlsx` |
 | 06d Spreadsheet per slide | The same, one level finer, to show spread within an animal. Slides are not independent replicates; do not test on this sheet. | `results/roi_dataset_by_slide.xlsx` |
 | 06e Refresh hourly | Rebuilds the spreadsheets every hour while detection is still running, and stops when it finishes or stalls. Run it from `refresh_loop.bat`, not the app. | `results/ROI_plots/` |
+| 06i Detection overlays, for checking (*Check detection*) | Draws every nucleus the detector found over its marker picture, for every marker: positives filled magenta, negatives outlined cyan, outside the region yellow, artifact orange, off the tissue blue, and a white outline on a positive nucleus with clipped pixels. One picture of each whole scene and one of each region, at full resolution. Made on request only: Run all remaining skips it. | `detection_overlays/`, opened with **Open pictures** |
+
+### Checking detection by eye
+
+*Check detection* is the last group on Results. 05c has already drawn the region pictures as it measured (section 7), so this stage mostly draws the whole-scene pictures, several at once, and fills any gaps; a region picture is redrawn only if its numbers changed since. The counts drawn are the per-region dataset's (06a), and a section whose pictures would disagree with them is not drawn; the run ends with *N not drawn* and `detection_overlays/failures.csv` says why. A section with too few background nuclei has no cut, so nothing in it is called positive and the picture says so. It does not read the treatment groups, so you can run it before you unblind.
+
+- **Size.** Each whole-scene picture is roughly 100 to 500 MB, so a study's can fill tens of GB. Turn on **Skip the whole-scene pictures** to draw only the region and background-disc pictures, or set **Only the first N scenes of each marker** for a trial. Open the scene pictures in Fiji; many photo viewers refuse images that size.
+- **Older studies.** For sections measured before the outlines were saved, the first run re-runs StarDist once, which takes about as long as detection did. After that, redraws are fast.
 
 ### Before you unblind
 
@@ -589,6 +611,15 @@ Every stage in one list, in the order of the methods figure, with the same Run, 
 
 Every stage is a script in `scripts/` and can also be run from a terminal; the (i) panel on each stage shows its exact command line. `scripts/run_all.sh` runs the whole pipeline in order. The app and the scripts read the same settings file, so you can mix the two.
 
+To run a whole screen without the window, for example overnight on a machine with no display, use
+
+```
+python -m app --run prepare  D:\LS-analysis\study.json
+python -m app --run measure  D:\LS-analysis\study.json
+```
+
+It makes the same plan as that screen's **Run all remaining**, with the Options saved in the study and Redo where a stage is out of date, prints each stage's output as it comes, and records each run in the study as the window does. It stops at the first failure, and at the same hold the window stops at (a *poor* signal check before detection). It never unblinds. It ends with 0 when every planned stage ran, 1 when one failed or a hold stopped it, and 2 when the screen or the study file is not there.
+
 ## 10. Troubleshooting and safe re-runs
 
 ### Re-running safely
@@ -596,6 +627,7 @@ Every stage is a script in `scripts/` and can also be run from a terminal; the (
 - **Stages skip finished work.** Pressing Run again only fills the gaps, so it is cheap and safe.
 - **Out of date.** From *Place the ROIs on the slide* on, a finished stage shows an amber **Out of date** with the reason when what it was made from has changed since it ran: your ROI export, the output of an earlier stage (including re-placed regions for either marker, so re-placing only PCNA's regions also marks its detection and results out of date), or a setting it reads (named on the row). A fix to the app that changed its results does the same: regions placed or nuclei measured before the region fixes of 14 October 2026 (the half-pixel correction and native-pixel clipped-nucleus flags; see section 7) show Out of date. Everything made from an out-of-date stage shows it too. **Run all remaining** runs them again in order, and their progress no longer counts as done. Saving the same export again, or changing a setting back, changes nothing.
 - **An out-of-date stage is redone in full.** Nucleus detection normally keeps finished sections; when it is out of date its next run switches Redo on for that run (the row says *Run redoes all of it*, and the log says so), because a resume would keep every section as it was. That takes hours. Your saved Options are not changed.
+- **A failed run is not done.** If a stage's last run failed, its row is not ticked even though its output files are there, and it says *its last run failed*. Run it again (or with Redo) once you have read the log.
 - **Out of date never deletes anything.** It only changes the status and what Run all remaining runs; the old outputs stay until the stage runs again. It is judged from the run history the app keeps in the project, so a stage last run outside the app, or with *Only the first N*, is judged by file dates instead, which can tell that an input is newer but not that a setting changed.
 - **After changing a setting** that no Out of date row picks up (stages before *Place the ROIs on the slide*), re-run the stages that read it with **Redo … already done** switched on in Options. The setting's (i) says which stages read it. Then switch Redo off again.
 - **Nothing is deleted.** Excluded sections can be reinstated in the ROI curator's Review. Repair tools back up the results file before changing it.
@@ -616,6 +648,8 @@ Every stage is a script in `scripts/` and can also be run from a terminal; the (
 | A curator pane is blank in the .exe | The packaged files are incomplete | Start the app with `--self-test` and read `lsapp-selftest.log`; reinstall if it fails |
 | The app will not start | A missing library or a broken environment | Read `lsapp-crash.log`, in `%LOCALAPPDATA%\The Great IHC Leap Forward\logs` on Windows (`~/.local/state/The Great IHC Leap Forward/logs` elsewhere; the message box names it). **Help > Open the log folder** opens that folder. To keep curating meanwhile, run `serve_curators.bat` and use a browser. |
 | No new figures in results/ROI\_plots | The R figure steps are switched off for now | Run the scripts in `analysis/` by hand with `Rscript` (section 8) |
+| *no … sections to check: the exclusion step left none* (04j), or *no … sections to composite* (04o) | Every section of that marker was proposed as no tissue, or excluded | Look at `reformatted/exclusion_candidates.csv` and the overviews; reinstate the sections that have tissue in the ROI curator's Review, then run again |
+| A stage says *Not used in this study* | The study has one marker, so the second marker's stages are left out | Nothing to do (section 4, *A study with one marker*) |
 | 06b says the workbook header does not match | The sampling workbook's columns differ | Fix the workbook's column names to the ones it lists |
 
 ### Where to look for more detail
@@ -640,15 +674,19 @@ Every stage is a script in `scripts/` and can also be run from a terminal; the (
 | Blinding | No stage reads an animal's treatment group until Results, so no decision can be biased by it |
 | Censored (clipped) pixel | A pixel where the camera hit its maximum, so its true brightness is unknown. Nuclei under one count as positive. |
 | Channel | One colour recorded by the scanner, such as DAPI or a marker |
+| Check pictures | The older per-region DAPI pictures from 05c's **Save check pictures**, in `qc/roi_detections/` |
 | Counterstain (DAPI) | Stains every nucleus. Nuclei are found on it (except for PCNA, whose DAPI plane is unusable); it is not itself measured. |
 | Curator | An interactive page where you make decisions; it saves as you go and hands decisions on with Export |
 | CZI | Zeiss's slide file: one slide, several sections, every channel and tile |
+| Detection overlay | A picture with every nucleus the detector found drawn over the marker, coloured by whether it counted as positive; one per region and background disc (drawn by 05c) and one per whole scene (06i) |
 | Exclusion | A decision that a section should not be used. It is a flag, not a deletion. |
 | False-positive rate | The share of background-disc nuclei above the positivity cut |
 | Favourite | A section you want in the quantified subset or the Shotgun deck |
 | Landmark | A matching pair of points on the section and the plate, showing how well they fit |
 | Marker | The stain being measured, such as pERK or PCNA |
+| Headless run | `python -m app --run prepare <study.json>` (or `measure`): a screen's Run all remaining without the window |
 | Multiplex, paired | Multiplex: one scan holds every marker. Paired: one scan per marker, of different sections. |
+| One-marker study | A study with a single marker; the second marker's stages are left out as *Not used in this study* |
 | Overview | A small picture of one section made once, so nothing reopens the large slide file to look at it |
 | Plate set | A folder of atlas plates with the region outlines on them |
 | Positivity cut | The marker brightness above which a nucleus counts as positive; set per section from its background discs |
@@ -659,6 +697,7 @@ Every stage is a script in `scripts/` and can also be run from a terminal; the (
 | scene\_uid | The ID every table uses for a section, built from animal, slide and scene, for example `LS105_s10a_sc03` |
 | Stage | One step of the pipeline, with a number such as `04g` and a script in `scripts/` |
 | StarDist | The published model that finds nuclei on DAPI, used without tuning |
+| Tutorial | A guided walk through a whole study on the lab's demo study, started from Project or Help |
 | Tile | One camera frame; the scanner stitches many into a section |
 | Unblinding | Joining animals to their treatment groups, the first stage on the Results screen |
 | Worklist | The order the ROI curator shows sections in, balanced across animals |

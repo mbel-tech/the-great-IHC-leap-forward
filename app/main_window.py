@@ -503,8 +503,9 @@ class MainWindow(QMainWindow):
         QMessageBox.information(
             self, "Demo study",
             "The tutorial needs its demo study, which is not installed with this copy of "
-            "the app. If you have it (a folder holding pack.json, or a .zip of one), "
-            "choose it next.")
+            "the app. It is shared privately within the lab: ask whoever set up the app "
+            "for the download link. If you have it (a folder holding pack.json, or the "
+            ".zip as downloaded), choose it next.")
         path, _ = QFileDialog.getOpenFileName(
             self, "Choose the demo study for the tutorial", os.path.expanduser("~"),
             "Demo study (*.zip pack.json)")

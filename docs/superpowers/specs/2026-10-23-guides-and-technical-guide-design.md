@@ -9,7 +9,7 @@ Approved 23 October 2026 (decision cards in the project thread).
 | User guide (Claude Doc, `docs/user-guide.md`) | Full update to current main. Covers everything merged since 16 October (#116 to #127). All 11 screenshots are retaken, and new ones are added |
 | Wiki (`docs/wiki/`) | Brought into line with the updated user guide |
 | Pipeline guide (`docs/pipeline-guide.md`) | Stage entries added or changed for 01l, 05b, 06i, the crops drawn during 05c, one-marker and multiplex studies, and `--run` |
-| **Technical guide (new)** | `docs/technical-guide.md` plus a built PDF |
+| **Technical guide (new)** | `docs/guides/technical-guide.md` plus a built PDF |
 
 What the user guide update adds:
 
@@ -21,6 +21,27 @@ What the user guide update adds:
 - In-app updates and the Mac app, checked against what is merged
 
 The new screenshots are: the tutorial bubble, the sheet match window, an overlay picture, multiplex setup, and the unblinding step.
+
+## One folder for the guides
+
+All four guides move to `docs/guides/`. That means `user-guide.md`, `pipeline-guide.md`, `pipeline-methods.md` and the new `technical-guide.md`. Their pictures move to `docs/guides/img/`, and the built PDFs go in the same folder.
+
+The build tools stay in `docs/`, with their paths updated:
+
+- `build_methods.sh`
+- `check_methods_claims.py`
+- `make_versions_table.py`
+- `make_workflow_figure.py`
+
+Each old path keeps a one-line pointer `.md`, because installed apps open `docs/user-guide.md` on GitHub from Help. Every reference is updated to the new folder:
+
+- the app's Help (`GUIDE_URL` and the local path)
+- README and REVIEW
+- the wiki pages and `wiki.yml`
+- `tests/test_wiki.py`, `tests/test_workflow.py` and `tests/test_stages.py`
+- `04o`'s comment and `app/stages.py`'s docstring
+
+The ROI curator guide stays where it is. This move is decided on the user's card from 23 October.
 
 ## Technical guide outline
 
@@ -72,7 +93,7 @@ The new screenshots are: the tutorial bubble, the sheet match window, an overlay
 
 There are three PRs, so each one can be reviewed on its own:
 
-- **A.** User guide, wiki and pipeline guide.
+- **A.** The move to `docs/guides/`, then the user guide, wiki and pipeline guide.
 - **B.** Technical guide Part 1.
 - **C.** Technical guide Part 2, the table generator and the drift test, and the PDF.
 

@@ -152,6 +152,11 @@ class PartHeader(QWidget):
             lay.addWidget(line)
 
 
+#: The file filter for the sampling sheet: a workbook or a text table (ls_sampling).
+SHEET_FILTER = ("Sampling sheet (*.xlsx *.csv *.tsv *.txt);;Excel workbook (*.xlsx);;"
+                "Text table (*.csv *.tsv *.txt);;All files (*)")
+
+
 class FileField(QWidget):
     """A file path with a Browse button, for a stage option that names a file."""
 
@@ -672,10 +677,9 @@ class UnblindDialog(QDialog):
             which.setStyleSheet(QUIET)
             which.setWordWrap(True)
             body.addWidget(which)
-        label = QLabel("<b>Sampling workbook (.xlsx)</b>")
+        label = QLabel("<b>Sampling sheet (.xlsx, .csv or .tsv)</b>")
         body.addWidget(label)
-        self.field = FileField(workbook or "", button="Choose...",
-                               filter="Excel workbook (*.xlsx);;All files (*)")
+        self.field = FileField(workbook or "", button="Choose...", filter=SHEET_FILTER)
         self.field.edit.setPlaceholderText("(the workbook in the slide folder)")
         label.setBuddy(self.field.edit)
         body.addWidget(self.field)

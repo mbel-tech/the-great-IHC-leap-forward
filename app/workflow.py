@@ -703,9 +703,9 @@ OPTIONS = {
     ],
     "join_sampling": [
         Opt("--xlsx", "file", "Sampling spreadsheet",
-            "The experiment's sampling workbook: one row per fish with its tanks and "
-            "treatment. Empty uses 'large scale exp sampling data.xlsx' in the slide "
-            "folder."),
+            "The experiment's sampling sheet: one row per fish with its tanks and "
+            "treatment, as an Excel workbook (.xlsx) or a .csv/.tsv table. Empty uses "
+            "'large scale exp sampling data.xlsx' in the slide folder."),
     ],
     "recensor": [Opt("--dry-run", "bool", "Report only", "Says what would change and "
                      "writes nothing.")],

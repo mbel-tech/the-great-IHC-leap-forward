@@ -881,12 +881,19 @@ class SetupScreen(QWidget):
         import workbook_check as WC
         from widgets import FileField
         book = QHBoxLayout()
-        book.addWidget(QLabel("Sampling workbook"))
-        self.workbook_field = FileField("", button="Choose…",
-                                        filter="Excel workbook (*.xlsx);;All files (*)")
+        from widgets import SHEET_FILTER
+        book.addWidget(QLabel("Sampling sheet"))
+        self.workbook_field = FileField("", button="Choose…", filter=SHEET_FILTER)
         self.workbook_field.edit.setPlaceholderText("(the workbook in the slide folder)")
         self.workbook_field.valueChanged.connect(self._workbook_chosen)
         book.addWidget(self.workbook_field, 1)
+        self.paste_sheet_btn = QPushButton("Paste from clipboard")
+        self.paste_sheet_btn.setToolTip(
+            "Copy the sheet's cells in Excel (header row included) and press this: the "
+            "table is saved as '%s' in the study folder and chosen here" % "sampling sheet "
+            "(pasted).tsv")
+        self.paste_sheet_btn.clicked.connect(lambda _checked=False: self.paste_sheet())
+        book.addWidget(self.paste_sheet_btn)
         self.match_sheet_btn = QPushButton("Match the sheet…")
         self.match_sheet_btn.setToolTip(
             "Say which column is the animal and which hold the treatment, checked against "
@@ -962,6 +969,7 @@ class SetupScreen(QWidget):
         self.workbook_field.setValue(project.stage_options("join_sampling").get("--xlsx", ""))
         self.workbook_field.setEnabled(not project.read_only)
         self.match_sheet_btn.setEnabled(not project.read_only)
+        self.paste_sheet_btn.setEnabled(not project.read_only)
         self._sync_groups()
         while self.tabs.count() > 1:
             w = self.tabs.widget(1)
@@ -1174,6 +1182,53 @@ class SetupScreen(QWidget):
         values["--xlsx"] = path
         self.workbook_line.setText("")
         self.options_changed.emit("join_sampling", values)
+
+    def paste_sheet(self, text=None):
+        """Save the table on the clipboard as the study's sampling sheet and choose it.
+
+        `text` is for tests; otherwise the clipboard is read. The table is kept
+        as a .tsv in the study folder (ls_sampling.PASTED_NAME), so 06b reads
+        the same file Set up checked. Returns the path, or None.
+        """
+        import ls_sampling as SAMPLING
+        project = self.session.project
+        if project.read_only:
+            return None
+        if text is None:
+            from PySide6.QtWidgets import QApplication
+            text = QApplication.clipboard().text()
+
+        def say(words, failed=False):
+            self.workbook_line.setText(words)
+            self.workbook_line.setStyleSheet(f"color:{COLOUR['failed']}" if failed else QUIET)
+
+        try:
+            rows = SAMPLING.parse_text(text)
+        except ValueError as exc:
+            say("The clipboard does not hold a table: %s. Select the cells in Excel, "
+                "header row included, copy them and press Paste again." % exc, True)
+            return None
+        folder = project.folder()
+        if not folder:
+            say("Save the study first: the pasted sheet is kept in the study folder.", True)
+            return None
+        path = os.path.join(folder, SAMPLING.PASTED_NAME)
+        if os.path.exists(path) and QMessageBox.question(
+                self, "Replace the pasted sheet?",
+                "%s is already there. Replace it with the table on the clipboard?" % path
+        ) != QMessageBox.Yes:
+            return None
+        try:
+            SAMPLING.write_text(path, rows)
+        except OSError as exc:
+            say("Could not save the pasted sheet: %s" % exc, True)
+            return None
+        self.workbook_field.setValue(path)
+        self._workbook_chosen(path)
+        width = max(max(r) + 1 for r in rows)
+        say("Pasted %d fish rows and %d columns into %s. Next: Match the sheet."
+            % (len(rows) - 1, width, path))
+        return path
 
     def match_sheet(self):
         """Open Match the sheet on the chosen workbook; Save keeps the study's `sampling`."""

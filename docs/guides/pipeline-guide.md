@@ -1606,7 +1606,10 @@ says to choose the columns. Each row records where its group came from (`treatme
 or unresolved).
 
 The workbook is `large scale exp sampling data.xlsx` in the slides folder unless the study names
-another (`--xlsx`, which can be set when the study is created or later in Set up). It used to be
+another (`--xlsx`, which can be set when the study is created or later in Set up). The sheet can be
+an Excel workbook (.xlsx) or a text table (.csv, .tsv or .txt, separated by tabs, commas or
+semicolons). Set up's **Paste from clipboard** takes cells copied from Excel, header row included,
+saves them as `sampling sheet (pasted).tsv` in the study folder and chooses that file. It used to be
 opened for the first time here, at the very end of a study, so a renamed column or a fish nobody
 typed in was found months after the slides. Set up's **Check workbook** now runs the same join at
 any time, on whichever animals the study already knows. It writes nothing, and it reports only

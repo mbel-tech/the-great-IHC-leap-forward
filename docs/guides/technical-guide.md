@@ -581,7 +581,8 @@ with the app (it is in `requirements.txt` and in the installer's smoke test), bu
 - **Used by:** 06c and 06d, which write `roi_dataset.xlsx` and `roi_dataset_by_slide.xlsx`.
 - **How it works:** an .xlsx file is a zip of XML files, one per sheet plus shared strings and styles;
   openpyxl writes those directly, without Excel. Reading the sampling workbook (Set up and 06b) does not
-  use it: `ls_sampling.read_sheet` opens the zip and parses the one sheet's XML itself.
+  use it: `ls_sampling.read_sheet` opens the zip and parses the one sheet's XML itself. A .csv, .tsv
+  or .txt sampling sheet, or one pasted in Set up, is read with Python's own `csv` module.
 - **Version and citation:** openpyxl 3.1.5. Gazoni E, Clark C, *openpyxl*, <https://openpyxl.readthedocs.io/>.
 
 #### matplotlib

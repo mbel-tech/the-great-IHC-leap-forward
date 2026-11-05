@@ -281,5 +281,37 @@ while s.workbook_check.busy and time.monotonic() < end:
 app.processEvents()
 chk("a workbook that is not there is said so", "no workbook" in s.workbook_line.text(), True)
 
+print("--- Set up > Slides: paste the sheet from the clipboard ---")
+import ls_sampling as SAMPLING                                  # noqa: E402
+chk("Set up has a Paste button", s.paste_sheet_btn.isEnabled(), True)
+app.clipboard().setText("just one word")
+chk("a clipboard with no table is refused", s.paste_sheet(), None)
+chk("...and says so", "does not hold a table" in s.workbook_line.text(), True)
+app.clipboard().setText("ID\tGroup\tTreatment\tDate to tank\r\n"
+                        "LS22\tControl\tObserver\t25.11.04\r\n")
+s.paste_sheet_btn.click()
+pasted = os.path.join(project.folder(), SAMPLING.PASTED_NAME)
+chk("Paste saves the table in the study folder and chooses it",
+    (os.path.isfile(pasted), s.workbook_field.value(),
+     project.stage_options("join_sampling").get("--xlsx")), (True, pasted, pasted))
+chk("...and says what it kept", "1 fish rows and 4 columns" in s.workbook_line.text(), True)
+project.set("sampling", {"id_column": "ID", "group_columns": ["Group", "Treatment"],
+                         "match": "exact", "fill": []}, by="test")
+s.check_workbook_btn.click()
+end = time.monotonic() + 20
+while s.workbook_check.busy and time.monotonic() < end:
+    app.processEvents()
+    time.sleep(0.005)
+app.processEvents()
+chk("...and the pasted sheet checks like a workbook",
+    "1 of 1 animals" in s.workbook_line.text(), True)
+QMessageBox.question = staticmethod(lambda *a, **k: QMessageBox.No)
+try:
+    app.clipboard().setText("ID\tGroup\nLS22\tother\n")
+    chk("pasting again over it asks first, and No keeps the old sheet",
+        (s.paste_sheet(), SAMPLING.table(pasted)[1][0][1]), (None, "Control"))
+finally:
+    QMessageBox.question = _q
+
 print("\n%s" % ("FAILED: %s" % failures if failures else "all passed"))
 sys.exit(1 if failures else 0)

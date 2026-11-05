@@ -31,7 +31,7 @@ import ls_channels as CH
 import ls_project as LP
 import slide_read as SRD
 import theme as T
-from widgets import FileField
+from widgets import SHEET_FILTER, FileField
 
 ATLASES = (
     (AR.SALMON, "Salmon (Vindas), ready-made plates ship with the app"),
@@ -102,11 +102,11 @@ class NewStudyDialog(QDialog):
         self.markers_note.setStyleSheet(T.HINT)
         self.markers_box.setVisible(False)
         self.markers_note.setVisible(False)
-        self.workbook = FileField("", button="Choose…",
-                                  filter="Excel workbook (*.xlsx);;All files (*)")
+        self.workbook = FileField("", button="Choose…", filter=SHEET_FILTER)
         self.workbook.edit.setPlaceholderText("(optional: add it later in Set up)")
-        book_note = QLabel("The sheet with one row per fish and its treatment group. Only "
-                           "read at Unblind; Set up > Slides can check it before then.")
+        book_note = QLabel("The sheet with one row per fish and its treatment group, as "
+                           ".xlsx, .csv or .tsv. Only read at Unblind; Set up > Slides can "
+                           "check it, or take it pasted from the clipboard, before then.")
         book_note.setWordWrap(True)
         book_note.setStyleSheet(T.HINT)
         out_note = QLabel("The study's settings file, your curation, the pictures and the "

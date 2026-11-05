@@ -1,5 +1,10 @@
 """The sampling workbook: read it, and join the study's animals to it.
 
+The sheet is an Excel workbook (.xlsx) or a text table (.csv, .tsv, .txt),
+comma, semicolon or tab separated; a text table has one sheet. A table pasted
+from the clipboard is kept as a .tsv next to the study (`parse_text`,
+`write_text`).
+
 06b_join_sampling.py is the unblinding stage and the only one that writes what
 this decides. Set up reads the same workbook early, with the same functions:
 "Match the sheet" (app/sheet_match.py) is where the person says which column
@@ -20,6 +25,9 @@ Columns are named by header text, compared with case and spacing ignored. A
 study with no block whose sheet has the LS headers gets `legacy_mapping`, which
 is what 06b did before the choice existed.
 
+    is_text(path)                     a .csv/.tsv/.txt table rather than a workbook
+    parse_text(text)                  rows of a pasted or saved text table
+    write_text(path, rows)            those rows as a .tsv
     sheet_names(path)                 the worksheets, in workbook order
     table(path, sheet)                (headers, data rows)
     mapping_for(saved, headers)       the saved choice, else the LS one, else None
@@ -30,7 +38,9 @@ is what 06b did before the choice existed.
     group_key(report)                 groups.order / groups.by_animal from a check
 """
 
+import csv
 import html
+import io
 import os
 import re
 import zipfile
@@ -52,6 +62,12 @@ COLUMN_PREFIX = {"fish": "fish id", "timepoint": "timepoint", "environment": "en
                  "treatment": "treatment", "body_weight_g": "body weight",
                  "fork_length_cm": "fork length", "sex": "sex", "brain_for": "brain for",
                  "sliced_july_2025": "slicing ihc july 2025"}
+
+#: File endings read as a text table rather than as an Excel workbook.
+TEXT_ENDINGS = (".csv", ".tsv", ".tab", ".txt")
+
+#: The name a table pasted from the clipboard is saved under, in the study folder.
+PASTED_NAME = "sampling sheet (pasted).tsv"
 
 #: Columns 06b writes itself, so a sheet column of the same name is not carried.
 RESERVED = ("animal", "sheet_id", "treatment", "treatment_source")
@@ -90,13 +106,86 @@ def read_table(path):
     return resolve_columns(rows[0]), rows[1:]
 
 
+def is_text(path):
+    """True for a text table (.csv, .tsv, .tab, .txt), read by parse_text."""
+    return os.path.splitext(str(path or ""))[1].lower() in TEXT_ENDINGS
+
+
+def _delimiter(header):
+    """Tab if the header line has one, else whichever of ; and , it has more of."""
+    if "\t" in header:
+        return "\t"
+    return ";" if header.count(";") > header.count(",") else ","
+
+
+def parse_text(text):
+    """A text table (pasted, or a .csv/.tsv file's text) as a list of {column index: value}.
+
+    The first line is the header, as in a worksheet. The separator is tab,
+    semicolon or comma, taken from the header line; quoted cells may hold it.
+    Blank lines are dropped. Raises ValueError when there is no header with two
+    or more columns and at least one row under it, so a stray paste of a single
+    word is refused rather than kept as a sheet.
+    """
+    text = str(text or "").lstrip("\ufeff")
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        raise ValueError("there is no table: the text is empty")
+    reader = csv.reader(io.StringIO("\n".join(lines)), delimiter=_delimiter(lines[0]))
+    rows = []
+    for cells in reader:
+        row = {i: re.sub(r"\s+", " ", c).strip() for i, c in enumerate(cells)}
+        if any(row.values()):
+            rows.append({i: v for i, v in row.items() if v})
+    header = rows[0] if rows else {}
+    if len(header) < 2:
+        raise ValueError("the first line has %d column heading%s; a sampling sheet needs "
+                         "an ID column and at least one more, separated by tabs, "
+                         "commas or semicolons" % (len(header), "" if len(header) == 1 else "s"))
+    if len(rows) < 2:
+        raise ValueError("there is a header line but no rows under it")
+    return rows
+
+
+def _read_text(path):
+    raw = open(path, "rb").read()
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:          # Excel's "CSV" on Windows is the ANSI code page
+        text = raw.decode("cp1252", errors="replace")
+    try:
+        return parse_text(text)
+    except ValueError as exc:
+        raise SystemExit(f"{os.path.basename(path)}: {exc}")
+
+
+def write_text(path, rows):
+    """Save rows ({column index: value}, header first) as a tab-separated file.
+
+    Written to a temporary name and moved into place, so a half-written sheet
+    is never what Set up or 06b reads.
+    """
+    width = max((max(r) + 1 for r in rows if r), default=0)
+    tmp = path + ".part"
+    with open(tmp, "w", encoding="utf-8", newline="") as f:
+        w = csv.writer(f, delimiter="\t", lineterminator="\r\n")
+        for r in rows:
+            w.writerow([r.get(i, "") for i in range(width)])
+    os.replace(tmp, path)
+    return path
+
+
 def read_sheet(path, sheet=None):
     """A worksheet (`sheet` by name, else the first) as a list of {column index: value}.
+
+    A text table (is_text) is its one sheet, whatever `sheet` says.
 
     Parsed from the sheet XML directly. openpyxl would be the obvious tool and
     is not installed in the pipeline environment; this needs one sheet and no
     formulas, so it does not earn a dependency.
     """
+    if is_text(path):
+        return _read_text(path)
     z = zipfile.ZipFile(path)
     shared = []
     if "xl/sharedStrings.xml" in z.namelist():
@@ -148,7 +237,12 @@ def fish_id(animal):
 
 
 def sheet_names(path):
-    """[(name, member)] for every worksheet, in the order the workbook lists them."""
+    """[(name, member)] for every worksheet, in the order the workbook lists them.
+
+    A text table has one, named after the file, with no member.
+    """
+    if is_text(path):
+        return [(os.path.splitext(os.path.basename(path))[0], None)]
     z = zipfile.ZipFile(path)
     names = z.namelist()
     try:
@@ -384,7 +478,7 @@ def check(path, animals, saved=None, sheet=None):
         rep["error"] = str(exc)
         return rep
     except (OSError, KeyError, ValueError, IndexError, zipfile.BadZipFile,
-            UnicodeDecodeError) as exc:
+            UnicodeDecodeError, csv.Error) as exc:
         rep["error"] = f"{os.path.basename(path)} could not be read as a workbook ({exc})"
         return rep
     mapping = mapping_for(saved, headers)

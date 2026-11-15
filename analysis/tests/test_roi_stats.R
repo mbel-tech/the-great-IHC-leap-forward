@@ -137,6 +137,43 @@ ok("...the interaction says it is not estimable",
    is.na(se$tests$p[se$tests$term == "treatment:environment"]))
 ok("...and the caption says where the main effects came from",
    grepl("main effects from the additive model", se$caption, fixed = TRUE))
+ok("...and the tests say so too", all(se$tests$model == "additive"))
+
+# ---- two diagonal cells --------------------------------------------------------
+# Both factors vary, but treatment fixes phase: the additive model cannot tell
+# them apart, so no main effect may be reported - only the group test.
+g <- d[d$group4 %in% c("brackish control", "sea exercise"), ]
+sg <- stat_group4(g)
+og <- anova(lm(value ~ group4, droplevels(g)))["group4", ]
+ok("diagonal cells: no treatment or production-phase line",
+   !grepl("treatment:", sg$caption, fixed = TRUE) &&
+   !grepl("production phase:", sg$caption, fixed = TRUE))
+ok("...one group line, the one-way F",
+   # six animals in two groups: 1 and 4 df
+   grepl(sprintf("group: F<sub>1,4</sub> = %.2f", og[["F value"]]),
+         sg$caption, fixed = TRUE) &&
+   identical(sg$tests$term, "group4") && identical(sg$tests$model, "oneway") &&
+   isTRUE(all.equal(sg$tests$p, og[["Pr(>F)"]], tolerance = 1e-8)))
+ok("...and the caption says why",
+   grepl("coincide", sg$caption, fixed = TRUE))
+ok("the full model's tests say full", all(st$tests$model == "full"))
+ok("series 1's test says oneway", identical(st1$tests$model, "oneway"))
+
+# ---- no denominator df -----------------------------------------------------------
+# Forced through term_test, since no model here produces one; the line must not
+# print "Inf" and must be flagged.
+real_term_test <- term_test
+term_test <- function(fit, term) list(F = 5, df1 = 1, df2 = Inf, p = 0.03,
+                                      mixed = TRUE)
+li <- term_line(f1, "treatment")
+term_test <- real_term_test
+ok("infinite df: not printed as Inf",
+   !grepl("Inf", as.character(li), fixed = TRUE) &&
+   grepl("^treatment: F<sub>1</sub> = 5.00, p = 0.030", as.character(li)))
+ok("...and flagged", grepl("(no denominator df - do not interpret)",
+                           as.character(li), fixed = TRUE))
+ok("...and the df column is df1 alone",
+   identical(test_rows(list(li), "treatment", "full")$df, "1"))
 
 # ---- BH within term ---------------------------------------------------------
 tests <- data.frame(

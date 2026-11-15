@@ -5926,6 +5926,69 @@
    "columns": []
   },
   {
+   "path": "results/ROI_plots/roi_tests_<series>[_<marker>].csv",
+   "names": [
+    "roi_tests_treatment.csv",
+    "roi_tests_production_phase.csv"
+   ],
+   "writer": "analysis/plot_roi_figures.R (run by hand with Rscript; the R figures are off in the app)",
+   "what": "The F tests printed in the per-ROI figure captions, one row per ROI, measure and term, with a Benjamini-Hochberg p across the ROIs of the series. One file per series; a marker other than the first declared one gets a `_<marker>` suffix, like the figure folders.",
+   "readers": [],
+   "column_sources": [
+    "../analysis/plot_roi_figures.R"
+   ],
+   "columns": [
+    {
+     "name": "roi",
+     "type": "text",
+     "units": "",
+     "meaning": "The region."
+    },
+    {
+     "name": "measure",
+     "type": "text",
+     "units": "",
+     "meaning": "The measure's key in the figure script (for example `positive`)."
+    },
+    {
+     "name": "term",
+     "type": "text",
+     "units": "",
+     "meaning": "The term tested: `treatment`, `environment` (production phase), `treatment:environment`, or `group4` (the groups, one factor)."
+    },
+    {
+     "name": "model",
+     "type": "text",
+     "units": "",
+     "meaning": "The fit the test came from: `full` (treatment * environment), `additive` (treatment + environment, a group empty) or `oneway` (one factor)."
+    },
+    {
+     "name": "F",
+     "type": "float",
+     "units": "",
+     "meaning": "The F ratio, from emmeans::joint_tests (four significant figures)."
+    },
+    {
+     "name": "df",
+     "type": "text",
+     "units": "",
+     "meaning": "Numerator and denominator df, `df1,df2`; df1 alone when no denominator df exists."
+    },
+    {
+     "name": "p",
+     "type": "float",
+     "units": "",
+     "meaning": "The raw p value, as in the caption."
+    },
+    {
+     "name": "p_bh",
+     "type": "float",
+     "units": "",
+     "meaning": "Benjamini-Hochberg adjusted p across the ROIs of this series, measure and marker, within the term; blank where the term was not estimable."
+    }
+   ]
+  },
+  {
    "path": "<study>.json (the study file, also `config.json`)",
    "names": [
     "config.json",

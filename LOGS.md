@@ -17,14 +17,18 @@ in place of `anova()`. The caption format, the `df too low to interpret` flag an
 attribute are unchanged; F, df1 and df2 now ride along as attributes too. In `stat_group4()` the
 overall p used for the two-group asterisk is the omnibus F of `value ~ group4` (the fit the letters
 already came from) instead of the smallest of the three term p values. Where a group has no animals
-the full fit is rank-deficient and `joint_tests()` errors, so the two main effects are then read
-from the additive model `treatment + environment`, the interaction line says "not estimable" and
-one caption line says the main effects came from the additive model. `analysis/plot_roi_figures.R`
+the full fit is rank-deficient and `joint_tests()` errors. With three groups present the two main
+effects are then read from the additive model `treatment + environment`, the interaction line says
+"not estimable" and one caption line says the main effects came from the additive model. With only
+two diagonal groups (treatment fixes phase) the factors cannot be separated, so only the one-way
+`group` line is printed, with the reason. A denominator df that is not finite is not printed and
+the line is flagged. `analysis/plot_roi_figures.R`
 walks each measure twice: once to collect every ROI's tests, then BH-adjusts them per term across
 the ROIs of that series, measure and marker (`p.adjust(p, "BH")`), and draws each caption with the
 adjusted p beside the raw one (`p = 0.012, BH-adjusted 0.048`). The tests are written to
-`results/ROI_plots/roi_tests_<series><marker suffix>.csv` (roi, measure, term, F, df, p, p_bh) via a
-temp file and rename. New check: `Rscript analysis/tests/test_roi_stats.R`.
+`results/ROI_plots/roi_tests_<series><marker suffix>.csv` (roi, measure, term, model, F, df, p,
+p_bh; `model` is full, additive or oneway) via a temp file and rename, registered in
+`docs/guides/file_formats.json`. New check: `Rscript analysis/tests/test_roi_stats.R`.
 
 **Why:** found on review. `anova()` on an `lm` is sequential, so on the 3/2/3/3 cells the F for
 treatment in `treatment * environment` changed with the order of the terms, while the `lmer` branch
@@ -34,7 +38,7 @@ tested.
 
 **Cost:** treatment and production-phase p values in the four-group figures change wherever cells
 are unbalanced, and ROIs with an empty group now report additive-model main effects where they used
-to report sequential ones. The asterisk still uses the raw p. The figure pass now fits every model
+to report sequential ones (or, with two diagonal groups, a single group test). The asterisk still uses the raw p. The figure pass now fits every model
 twice; with a dozen rows per ROI this is negligible. `joint_tests()` rounds F to four significant
 figures, so the F column in the CSV is rounded too (p is not). The R figures stay switched off in the
 app.

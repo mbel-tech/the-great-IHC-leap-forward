@@ -2270,8 +2270,13 @@ The pages' JavaScript is tested under Node (`tests/*.test.js`), against a stub D
 `tests/run.sh` regenerates each page into `tests/build/` with `--out` (and `--no-seed` for the ROI
 curator, so a suite never starts with a person's curation), lifts out its largest `<script>` block, and
 runs the suites against it. The stub absorbs canvas calls, so the suites cover state, ordering and what
-reaches the exports; anything only visible as pixels is checked in a real browser. The page suites need a
-real study's worklist and are skipped in the GitHub workflow.
+reaches the exports; anything only visible as pixels is checked in a real browser. The pages are built
+from the study `config.json` names; with no `config.json` (a fresh clone, and the GitHub workflow)
+`tests/_curator_study.py` writes a small synthetic study - reformat indexes, a worklist, composites and a
+provenance table, no operator data, the shipped `plates_final` atlas - and the real `04l` and `04k` are
+run against that. A page suite that asserts a fact only the real study has is listed in `run.sh`'s
+`NEEDS_REAL_STUDY` with the reason and is not run against the synthetic study; the last line says how many
+ran and how many did not.
 
 ## 8. The app
 
@@ -4003,6 +4008,24 @@ Proof that a results pass ran, for the app's tick.
 - **Read by:** a person
 - **Format:** JSON: `{"finished": "YYYY-MM-DD HH:MM:SS", "sections_measured": int, "sections_planned": int}`.
 
+#### `results/ROI_plots/roi_tests_<series>[_<marker>].csv`
+
+The F tests printed in the per-ROI figure captions, one row per ROI, measure and term, with a Benjamini-Hochberg p across the ROIs of the series. One file per series; a marker other than the first declared one gets a `_<marker>` suffix, like the figure folders.
+
+- **Written by:** analysis/plot_roi_figures.R (run by hand with Rscript; the R figures are off in the app)
+- **Read by:** a person
+
+| Column | Type | Units | Meaning |
+|------------|------|------|---------------------------|
+| `roi` | text |  | The region. |
+| `measure` | text |  | The measure's key in the figure script (for example `positive`). |
+| `term` | text |  | The term tested: `treatment`, `environment` (production phase), `treatment:environment`, or `group4` (the groups, one factor). |
+| `model` | text |  | The fit the test came from: `full` (treatment * environment), `additive` (treatment + environment, a group empty) or `oneway` (one factor). |
+| `F` | float |  | The F ratio, from emmeans::joint_tests (four significant figures). |
+| `df` | text |  | Numerator and denominator df, `df1,df2`; df1 alone when no denominator df exists. |
+| `p` | float |  | The raw p value, as in the caption. |
+| `p_bh` | float |  | Benjamini-Hochberg adjusted p across the ROIs of this series, measure and marker, within the term; blank where the term was not estimable. |
+
 #### `<study>.json (the study file, also `config.json`)`
 
 The study: where the slides and outputs are, the markers and channels, every setting a stage reads, the sampling-sheet mapping, and the app's own `project` block (detected facts, decisions, run history). Every key is documented in `docs/config-reference.md`; `ls_config` fills defaults and validates it once per process. A new study keeps it as `study.json` in its output folder.
@@ -4115,12 +4138,12 @@ A person's count of sections in each multi-blob scene; `01i --fit` reads it back
 `bash tests/run.sh` runs everything: the curator page suites under Node (`tests/*.test.js`, section 7.5)
 and then every Python suite (`tests/test_*.py`). Each Python suite is a plain script that also runs under
 pytest; run one on its own with `python tests/test_<name>.py`. The script sets `LS_CONFIG_STRICT=1`, so a
-suite that forgets to name its own study fails instead of reading a person's real one. A run that skipped
-the page suites says so in its last line.
+suite that forgets to name its own study fails instead of reading a person's real one. The last line says
+how many page suites ran, against the real or the synthetic study (section 7.5), and how many did not.
 
 The GitHub workflow `.github/workflows/tests.yml` runs `tests/run.sh` on Python 3.13 on every pull request
 and on `main`, with Qt offscreen. StarDist, TensorFlow and elastix are not installed there, so the suites
-that need them skip those parts; the page suites need a real study's worklist and are skipped too.
+that need them skip those parts. The page suites run against the synthetic study, under Node 22.
 
 ### 10.2 What they cover
 

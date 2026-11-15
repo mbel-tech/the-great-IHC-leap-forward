@@ -58,7 +58,8 @@
 # Benjamini-Hochberg p across every ROI of the same series, measure and marker
 # (per term), and the tests behind those captions are written to
 # results/ROI_plots/roi_tests_<series>.csv, suffixed per marker like the series
-# folders (roi, measure, term, F, df, p, p_bh).
+# folders (roi, measure, term, model, F, df, p, p_bh; `model` names the fit
+# each test came from: full, additive or oneway).
 # That is why each measure is walked twice: once to collect every ROI's tests,
 # once to draw - a figure cannot be captioned with an adjustment until the
 # family it belongs to is complete.
@@ -527,8 +528,8 @@ for (M in MEASURES) {
 for (s in names(TESTS)) {
   path <- file.path(outdir, sprintf("roi_tests_%s%s.csv", s, sfx))
   tmp <- paste0(path, ".tmp")
-  utils::write.csv(TESTS[[s]][, c("roi", "measure", "term", "F", "df", "p", "p_bh")],
-                   tmp, row.names = FALSE)
+  utils::write.csv(TESTS[[s]][, c("roi", "measure", "term", "model", "F", "df", "p", "p_bh")],
+                   tmp, row.names = FALSE, na = "")
   if (!file.rename(tmp, path)) stop("could not replace ", path)
   message(sprintf("  %d test%s -> %s", nrow(TESTS[[s]]),
                   if (nrow(TESTS[[s]]) == 1) "" else "s", path))

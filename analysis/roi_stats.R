@@ -157,9 +157,18 @@ term_line <- function(fit, term, label = term, p_adj = NA_real_) {
   # renders. Everything downstream that shows a caption has to use
   # element_markdown, or these tags appear as literal text. Satterthwaite df are
   # fractional and keep a decimal; least-squares df are whole numbers.
-  out <- sprintf(if (tt$mixed) "%s: F<sub>%.0f,%.1f</sub> = %.2f, %s"
-                 else "%s: F<sub>%.0f,%.0f</sub> = %.2f, %s",
-                 label, tt$df1, dfd, tt$F, fmt_p(tt$p))
+  #
+  # A denominator df that is not finite (emmeans falls back to an asymptotic
+  # test when it cannot get one) would print as F<sub>1,Inf</sub>, which reads
+  # as "infinitely many animals". Only the numerator df is printed then, and the
+  # line is flagged below, as a low df is.
+  out <- if (!is.finite(dfd)) {
+    sprintf("%s: F<sub>%.0f</sub> = %.2f, %s", label, tt$df1, tt$F, fmt_p(tt$p))
+  } else {
+    sprintf(if (tt$mixed) "%s: F<sub>%.0f,%.1f</sub> = %.2f, %s"
+            else "%s: F<sub>%.0f,%.0f</sub> = %.2f, %s",
+            label, tt$df1, dfd, tt$F, fmt_p(tt$p))
+  }
   p_adj <- suppressWarnings(as.numeric(unname(p_adj))[1])
   if (isTRUE(is.finite(p_adj))) {
     out <- paste0(out, ", BH-adjusted ",
@@ -171,20 +180,26 @@ term_line <- function(fit, term, label = term, p_adj = NA_real_) {
   # and a small p means almost nothing. Printing it without this reads as a
   # finding.
   if (is.finite(dfd) && dfd < 3) out <- paste(out, "(df too low to interpret)")
+  if (!is.finite(dfd)) out <- paste(out, "(no denominator df - do not interpret)")
   structure(out, p = unname(tt$p), F = unname(tt$F),
             df1 = unname(tt$df1), df2 = unname(dfd))
 }
 
 # The tests behind a caption, one row per term, for the caller to adjust and
-# write out. `df` is "df1,df2" as the caption prints it.
-test_rows <- function(lines, terms) {
+# write out. `df` is "df1,df2" as the caption prints it (df1 alone when df2 is
+# not finite). `model` says which fit the test came from: "full"
+# (treatment * environment), "additive" (treatment + environment, when a cell
+# is empty) or "oneway" (a single factor: treatment, or the groups).
+test_rows <- function(lines, terms, model) {
   data.frame(
     term = terms,
+    model = rep(model, length(terms)),
     F = vapply(lines, function(l) attr(l, "F"), numeric(1)),
     df = vapply(lines, function(l) {
       a <- attr(l, "df1"); b <- attr(l, "df2")
-      if (is.finite(a) && is.finite(b)) paste0(format(a), ",", format(round(b, 1)))
-      else NA_character_
+      if (!is.finite(a)) NA_character_
+      else if (!is.finite(b)) format(a)
+      else paste0(format(a), ",", format(round(b, 1)))
     }, character(1)),
     p = vapply(lines, function(l) attr(l, "p"), numeric(1)),
     stringsAsFactors = FALSE, row.names = NULL)
@@ -220,8 +235,8 @@ add_bh <- function(tests) {
 # from add_bh() over every ROI of the series; NULL on the first pass, when the
 # caller is still collecting the raw tests. $tests is that collection's input:
 # one row per term tested, none when nothing was.
-NO_TESTS <- data.frame(term = character(0), F = numeric(0), df = character(0),
-                       p = numeric(0), stringsAsFactors = FALSE)
+NO_TESTS <- data.frame(term = character(0), model = character(0), F = numeric(0),
+                       df = character(0), p = numeric(0), stringsAsFactors = FALSE)
 
 stat_treatment <- function(d, p_adj = NULL) {
   n_an <- length(unique(d$sample))
@@ -244,7 +259,7 @@ stat_treatment <- function(d, p_adj = NULL) {
                         if (m$mixed) "mixed model, animal as a random effect"
                         else "one point per animal, plain ANOVA"),
        p = attr(line, "p"),
-       tests = test_rows(list(line), "treatment"))
+       tests = test_rows(list(line), "treatment", "oneway"))
 }
 
 # --------------------------------------------------------------- series 2
@@ -254,7 +269,8 @@ stat_treatment <- function(d, p_adj = NULL) {
 # group -> letter), or $letters = NULL when the model would not fit.
 #
 # `p_adj` and $tests as for stat_treatment, by term: "treatment", "environment"
-# and "treatment:environment" for the full model, "group4" otherwise.
+# and "treatment:environment" for the full and additive models, "group4" for
+# the one-way model (a factor absent, or two diagonal groups).
 stat_group4 <- function(d, p_adj = NULL) {
   cells <- table(droplevels(d$group4))
   present <- sum(cells > 0)
@@ -281,31 +297,54 @@ stat_group4 <- function(d, p_adj = NULL) {
   # The first column is the term name joint_tests() actually uses; only the
   # second is the label shown. Changing the lookup to a prettier string makes
   # every interaction line read "not estimable".
-  terms <- if (full) c("treatment", "environment", "treatment:environment")
-           else "group4"
-  labels <- if (full) c("treatment", "production phase", "interaction") else "group"
+  # The one-way parameterisation: the letters, the overall p, and the F line
+  # whenever the two factors cannot be told apart (below). For a reduced model
+  # it is the model itself.
+  fit1 <- if (full) fit_model(value ~ group4, d)$fit else fit
 
   # AN EMPTY CELL TAKES THE INTERACTION WITH IT, and joint_tests() does not
   # degrade gracefully: on a rank-deficient fit (lm leaves the coefficient NA,
   # lmer drops the column) it stops with an rbind error, which would turn all
   # three lines into "not estimable". anova() used to print the two main
-  # effects there - sequentially. The order-free equivalent is the ADDITIVE
-  # model, where each main effect is adjusted for the other and nothing is
-  # assumed about the missing cell; the interaction line still says it could
-  # not be estimated, and one more line says where the main effects came from.
+  # effects there - sequentially.
+  #
+  # THREE CELLS: the order-free equivalent is the ADDITIVE model, where each
+  # main effect is adjusted for the other and nothing is assumed about the
+  # missing cell. The interaction line still says it could not be estimated,
+  # and one more line says where the main effects came from.
+  #
+  # TWO DIAGONAL CELLS (brackish control and sea exercise, say): both factors
+  # vary, but every animal's treatment fixes its phase, so the two are the SAME
+  # contrast and the additive model cannot separate them either - joint_tests
+  # drops one and hands the whole between-group difference to the other, which
+  # is a real F under the wrong name. Only the group test is honest there, so
+  # that is what is printed, with the reason.
+  model <- if (full) "full" else "oneway"
   fit_t <- fit
-  additive <- full && rank_deficient(fit)
-  if (additive) {
-    fit_t <- fit_model(value ~ treatment + environment, d)$fit
-    if (is.null(fit_t)) fit_t <- fit
+  note <- NULL
+  if (full && rank_deficient(fit)) {
+    add <- if (present >= 3) fit_model(value ~ treatment + environment, d)$fit else NULL
+    if (!is.null(add) && !rank_deficient(add)) {
+      model <- "additive"
+      fit_t <- add
+      note <- "a group has no animals: main effects from the additive model"
+    } else {
+      model <- "oneway"
+      fit_t <- fit1
+      note <- paste0("treatment and production phase coincide in these groups, ",
+                     "so only the groups are compared")
+    }
   }
+  terms <- switch(model, oneway = "group4",
+                  c("treatment", "environment", "treatment:environment"))
+  labels <- switch(model, oneway = "group",
+                   c("treatment", "production phase", "interaction"))
   lines <- Map(function(t, l) term_line(
                  fit_t, t, l, p_adj = if (t %in% names(p_adj)) p_adj[[t]] else NA_real_),
                terms, labels)
-  tests <- test_rows(lines, terms)
+  tests <- test_rows(lines, terms, model)
   cap <- paste(unlist(lines), collapse = "<br>")
-  if (additive) cap <- paste0(
-    cap, "<br>a group has no animals: main effects from the additive model")
+  if (!is.null(note)) cap <- paste0(cap, "<br>", note)
   # A singular fit means the animal variance collapsed to zero. The letters are
   # still computed - the fixed effects are fine - but it is said out loud,
   # because it is the model telling you the design is thin.
@@ -341,7 +380,6 @@ stat_group4 <- function(d, p_adj = NULL) {
   #
   # - Sidak applies to the confidence intervals cld also reports, which nothing
   # here uses, and the PAIRWISE p values that decide the letters are Tukey.
-  fit1 <- if (full) fit_model(value ~ group4, d)$fit else fit
   lets <- tryCatch({
     em <- emmeans(fit1, ~ group4)
     # TUKEY ON ONE RESIDUAL DEGREE OF FREEDOM RETURNS NaN, and cld does not

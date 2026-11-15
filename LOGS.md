@@ -9,6 +9,36 @@ where things landed, not which plausible-looking route was tried and abandoned, 
 
 ---
 
+## 2026-11-15 - The curator page suites run without a study, and so in CI
+
+**Changed:** new `tests/_curator_study.py` writes a small synthetic study (six animals LS101-LS106,
+a paired AF568/AF488 layout, per-marker reformat indexes and 1x1 section, composite and thumbnail
+PNGs, `roi_worklist.csv`, `section_provenance.csv`; the atlas is the shipped `plates_final`, seeded
+by 04l itself). With no `config.json`, `tests/run.sh` builds the two pages from it, running the real
+`04l_roi_curator.py --worklist --rgb --no-seed` and `04k_level_curator.py`, and runs every page
+suite against them. A suite that can only pass against the real study goes in run.sh's
+`NEEDS_REAL_STUDY` with its reason and is reported as not run (none today). The last line now
+counts page suites from the files and says how many ran, against which study, and how many did
+not; the hard-coded "16" is gone. A `config.json` that is present behaves as before, and an
+`LS_BUILD_CONFIG` that names a missing file still skips. `.github/workflows/tests.yml` sets up
+Node 22 and its header says the page suites run there.
+
+**Why:** found on review. The page suites cover the tools hours of hand curation are made in, and
+they were skipped on every machine without a study, CI included. Running them there found that
+`wullimann_review.test.js` builds its page with `04x_wullimann_polygons.py` without naming a
+config, so on a clone with no `config.json` it could not build and failed; it only ever passed on
+machines with the operator's config, and built against that study. It now writes its own study
+config through `tests/_fixture.py` and names it with `LS_CONFIG`, as `wullimann_level.test.js`
+does; no assertion changed.
+
+**Cost:** under a second here to write the study and build both pages, most of it copying the
+172 MB shipped plate set into a temporary folder (removed when run.sh exits). The
+synthetic study reuses the marker names and the LS-style animal ids the suites already assert on,
+so they run unedited; a suite that needs a different shape of study extends the constants at the top
+of the builder.
+
+---
+
 ## 2026-11-15 - Statistics that do not depend on term order, and a multiplicity column
 
 **Changed:** `analysis/roi_stats.R` reads every F line from `emmeans::joint_tests()` for both `lm`
@@ -17,14 +47,18 @@ in place of `anova()`. The caption format, the `df too low to interpret` flag an
 attribute are unchanged; F, df1 and df2 now ride along as attributes too. In `stat_group4()` the
 overall p used for the two-group asterisk is the omnibus F of `value ~ group4` (the fit the letters
 already came from) instead of the smallest of the three term p values. Where a group has no animals
-the full fit is rank-deficient and `joint_tests()` errors, so the two main effects are then read
-from the additive model `treatment + environment`, the interaction line says "not estimable" and
-one caption line says the main effects came from the additive model. `analysis/plot_roi_figures.R`
+the full fit is rank-deficient and `joint_tests()` errors. With three groups present the two main
+effects are then read from the additive model `treatment + environment`, the interaction line says
+"not estimable" and one caption line says the main effects came from the additive model. With only
+two diagonal groups (treatment fixes phase) the factors cannot be separated, so only the one-way
+`group` line is printed, with the reason. A denominator df that is not finite is not printed and
+the line is flagged. `analysis/plot_roi_figures.R`
 walks each measure twice: once to collect every ROI's tests, then BH-adjusts them per term across
 the ROIs of that series, measure and marker (`p.adjust(p, "BH")`), and draws each caption with the
 adjusted p beside the raw one (`p = 0.012, BH-adjusted 0.048`). The tests are written to
-`results/ROI_plots/roi_tests_<series><marker suffix>.csv` (roi, measure, term, F, df, p, p_bh) via a
-temp file and rename. New check: `Rscript analysis/tests/test_roi_stats.R`.
+`results/ROI_plots/roi_tests_<series><marker suffix>.csv` (roi, measure, term, model, F, df, p,
+p_bh; `model` is full, additive or oneway) via a temp file and rename, registered in
+`docs/guides/file_formats.json`. New check: `Rscript analysis/tests/test_roi_stats.R`.
 
 **Why:** found on review. `anova()` on an `lm` is sequential, so on the 3/2/3/3 cells the F for
 treatment in `treatment * environment` changed with the order of the terms, while the `lmer` branch
@@ -34,7 +68,7 @@ tested.
 
 **Cost:** treatment and production-phase p values in the four-group figures change wherever cells
 are unbalanced, and ROIs with an empty group now report additive-model main effects where they used
-to report sequential ones. The asterisk still uses the raw p. The figure pass now fits every model
+to report sequential ones (or, with two diagonal groups, a single group test). The asterisk still uses the raw p. The figure pass now fits every model
 twice; with a dozen rows per ROI this is negligible. `joint_tests()` rounds F to four significant
 figures, so the F column in the CSV is rounded too (p is not). The R figures stay switched off in the
 app.

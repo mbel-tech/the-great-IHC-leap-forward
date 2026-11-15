@@ -52,17 +52,35 @@ print(f"  {len(js)} chars -> {sys.argv[2]}")
 PYEOF
 }
 
-# The three page builds are the one part of this run that cannot use a
-# throwaway study: --worklist reads reformatted/roi_worklist.csv, so a page is
-# generated from real pipeline outputs. They are handed the repo config
-# EXPLICITLY rather than inheriting it, so that dependency is stated rather
-# than accidental - and if there is no config, the page suites are skipped and
-# the Python suites still run, which is what a fresh clone gets.
+# Which study the pages are built from. A real one when there is a config:
+# --worklist reads reformatted/roi_worklist.csv, so the page is generated from
+# pipeline outputs, and the operator's are the richest there are. They are
+# handed the repo config EXPLICITLY rather than inheriting it, so that
+# dependency is stated rather than accidental.
+#
+# With NO config - a fresh clone, and therefore CI - the pages are built from a
+# synthetic study instead: tests/_curator_study.py writes the smallest set of
+# pipeline outputs the two generators read (no operator data; the atlas is the
+# shipped one) and the REAL 04l/04k run against it end to end. Until that
+# existed every page suite was skipped on every machine without a study, which
+# is every machine CI has.
 BUILD_CONFIG="${LS_BUILD_CONFIG:-$REPO/config.json}"
+PAGE_STUDY=real
 SKIP_PAGES=0
 if [ ! -f "$BUILD_CONFIG" ]; then
-  echo "no $BUILD_CONFIG - skipping the curator page suites"
-  SKIP_PAGES=1
+  if [ -n "${LS_BUILD_CONFIG:-}" ]; then
+    # Named and absent is a mistake, not a fresh clone: say so rather than
+    # quietly testing a different study than the one asked for.
+    echo "no $BUILD_CONFIG - skipping the curator page suites"
+    SKIP_PAGES=1
+  else
+    SYNTH="$(mktemp -d "${TMPDIR:-/tmp}/ls-curator-study-XXXXXX")"
+    trap 'rm -rf "$SYNTH"' EXIT
+    echo "no $BUILD_CONFIG - building the curator pages from a synthetic study"
+    BUILD_CONFIG="$("$PY" "$TESTS/_curator_study.py" "$SYNTH")" || {
+      echo "could not write the synthetic study"; exit 2; }
+    PAGE_STUDY=synthetic
+  fi
 else
   # A config that exists but points at an out_root that does not is the state
   # this machine is in whenever the data drive is unplugged, and the drive here
@@ -103,11 +121,39 @@ if [ "$SKIP_PAGES" = "0" ]; then
   build_page 04k_level_curator.py level_curator
 fi
 
+# Page suites that assert facts only the real study has - a count of its
+# sections, one of its scene_uids - and so cannot pass against the synthetic
+# one. They run whenever the pages are built from a real study, and are listed
+# here, with the reason, rather than edited to pass or dropped without a word.
+# One line each: "<file> <reason>". Empty today: every page suite passes
+# against the synthetic study.
+NEEDS_REAL_STUDY=(
+)
+needs_real () {
+  local entry
+  for entry in ${NEEDS_REAL_STUDY[@]+"${NEEDS_REAL_STUDY[@]}"}; do
+    [ "${entry%% *}" = "$1" ] && { echo "${entry#* }"; return 0; }
+  done
+  return 1
+}
+
 fail=0
+# Counted from the files, not written down: the summary used to say "16" while
+# there were 21.
+PAGE_SUITES=("$TESTS"/*.test.js)
+N_PAGE=${#PAGE_SUITES[@]}
+PAGE_RAN=0
+PAGE_NOT_RUN=()
 if [ "$SKIP_PAGES" = "0" ]; then
-for t in "$TESTS"/*.test.js; do
+for t in "${PAGE_SUITES[@]}"; do
   echo
   echo "=== $(basename "$t") ==="
+  if [ "$PAGE_STUDY" = "synthetic" ] && why="$(needs_real "$(basename "$t")")"; then
+    echo "not run: needs the real study - $why"
+    PAGE_NOT_RUN+=("$(basename "$t")")
+    continue
+  fi
+  PAGE_RAN=$((PAGE_RAN + 1))
   node "$t" || fail=1
 done
 fi
@@ -122,18 +168,28 @@ for t in "$TESTS"/test_*.py; do
 done
 
 echo
-# A run that skipped the curator pages has not tested the curators AT ALL -
-# 16 of the suites here are page suites. Printing a bare "ALL SUITES PASS"
-# over them is how this file already went green once over 222 files it never
-# opened, and how the page suites themselves went unrun from 3e6c250 onward.
-# The summary line says what it actually covered.
-if [ "$fail" -eq 0 ]; then
-  if [ "$SKIP_PAGES" = "1" ]; then
-    echo "ALL SUITES PASS - BUT THE 16 CURATOR PAGE SUITES WERE SKIPPED (reason above)"
+# A run that skipped the curator pages has not tested the curators AT ALL.
+# Printing a bare "ALL SUITES PASS" over them is how this file already went
+# green once over 222 files it never opened, and how the page suites themselves
+# went unrun from 3e6c250 onward. The summary line says what it actually
+# covered: how many page suites ran, against which study, and how many did not.
+if [ "$SKIP_PAGES" = "1" ]; then
+  pages="THE $N_PAGE CURATOR PAGE SUITES WERE SKIPPED (reason above)"
+else
+  pages="$PAGE_RAN of $N_PAGE curator page suites ran against the $PAGE_STUDY study"
+  if [ "${#PAGE_NOT_RUN[@]}" -gt 0 ]; then
+    pages="$pages; ${#PAGE_NOT_RUN[@]} NEED THE REAL STUDY AND WERE NOT RUN: ${PAGE_NOT_RUN[*]}"
   else
-    echo "ALL SUITES PASS"
+    pages="$pages, 0 not run"
+  fi
+fi
+if [ "$fail" -eq 0 ]; then
+  if [ "$SKIP_PAGES" = "1" ] || [ "${#PAGE_NOT_RUN[@]}" -gt 0 ]; then
+    echo "ALL SUITES PASS - BUT $pages"
+  else
+    echo "ALL SUITES PASS ($pages)"
   fi
 else
-  echo "SUITE FAILURES"
+  echo "SUITE FAILURES ($pages)"
 fi
 exit "$fail"

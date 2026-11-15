@@ -2,9 +2,11 @@
 #
 #   bash tests/run.sh   is what this runs, the same script a contributor runs.
 #
-# The curator page suites (tests/*.test.js) need a real study's worklist and
-# are skipped here; run.sh says so in its last line. StarDist/TensorFlow and
-# elastix are not installed: the suites that need them skip those parts.
+# The curator page suites (tests/*.test.js) run under Node against pages
+# generated from a synthetic study (tests/_curator_study.py), since there is no
+# config.json here; run.sh's last line says how many ran and how many need the
+# real study. StarDist/TensorFlow and elastix are not installed: the suites
+# that need them skip those parts.
 name: Tests
 
 on:
@@ -35,6 +37,13 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
+
+      # The page suites run under Node. Pinned rather than left to whatever
+      # the runner image carries, so a runner update cannot change the JS
+      # engine the suites are judged by.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
 
       - name: System libraries for Qt
         run: |

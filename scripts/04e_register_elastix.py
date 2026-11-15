@@ -44,6 +44,7 @@ from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
 import ls_atlas as AT  # noqa: E402
 import atlas_polygons as AP  # noqa: E402
 import ls_io as IO  # noqa: E402
+import ls_paths as LP  # noqa: E402
 
 OUT_ROOT = CONFIG["out_root"]
 REFORMAT_DIR = os.path.join(OUT_ROOT, "reformatted")
@@ -57,6 +58,40 @@ MATCH_CSV = os.path.join(OUT_ROOT, "qc", "atlasmatch", "atlas_proposals_v2.csv")
 REG_DIR = os.path.join(OUT_ROOT, "registered")
 
 GRID = 256   # reformatted images are GRID x GRID
+
+# The section-directory rule, borrowed rather than restated. See section_dirs.
+NAMES = LP.for_config(CONFIG)
+
+
+def section_dirs():
+    """Every directory 04a may have written a section into, in marker order.
+
+    The same list `05c.section_dirs` and `06g.section_dirs` build, from the
+    same table. This stage read `reformatted/sections/` only, which under
+    `paired` holds the geometry source's sections and no other marker's - so a
+    landmark export for the other marker found none of its sections and the
+    run ended "nothing refined", as if nothing had been curated. The
+    unsuffixed directory stays on the end for the pre-rename layout.
+    """
+    dirs = [NAMES.path("sections", m) for m in NAMES.markers]
+    dirs.append(os.path.join(REFORMAT_DIR, "sections"))
+    seen, out = set(), []
+    for d in dirs:
+        if d not in seen:
+            seen.add(d)
+            out.append(d)
+    return out
+
+
+def section_png(uid):
+    """The reformatted picture of `uid`, from whichever marker's directory
+    holds it, or None. A scene uid belongs to one marker under `paired`, and
+    is the same picture for every marker under `multiplex`."""
+    for d in section_dirs():
+        p = os.path.join(d, uid + ".png")
+        if os.path.exists(p):
+            return p
+    return None
 
 
 def parameter_maps(itk, bspline_spacing):
@@ -350,24 +385,30 @@ def run_from_landmarks(itk, args):
 
     os.makedirs(REG_DIR, exist_ok=True)
     tmp = tempfile.mkdtemp()
-    out_rows, skipped, failed = [], 0, 0
+    # `few` and `held` are the curation not being finished - too few landmarks,
+    # or a plate not verified - and are counted, not failed: the operator's to
+    # finish, like 05a's analysis-set rule. `missing`, `no_seeds` and `failed`
+    # are sections this run was asked to refine and could not; any of them
+    # fails the run.
+    out_rows, few, missing, no_seeds, failed = [], 0, [], [], []
     items = list(by_sec.items())
     if args.limit:
         items = items[: args.limit]
 
     for i, (uid, rows) in enumerate(items, 1):
         if len(rows) < 3:
-            skipped += 1
+            few += 1
             continue
         pid = rows[0]["plate_id"]
         p = plates.get(pid)
-        sec_png = os.path.join(REFORMAT_DIR, "sections", uid + ".png")
-        if p is None or not os.path.exists(sec_png):
-            skipped += 1
+        sec_png = section_png(uid)
+        if p is None or sec_png is None:
+            missing.append((uid, "no section picture in any marker's directory"
+                            if p is not None else f"plate {pid} not in plates.csv"))
             continue
         plate_png = os.path.join(PLATE_DIR, p["image_file"])
         if not os.path.exists(plate_png):
-            skipped += 1
+            missing.append((uid, f"plate image {p['image_file']} missing"))
             continue
 
         # Plate inverted into DAPI polarity. Mutual information does not care
@@ -391,7 +432,7 @@ def run_from_landmarks(itk, args):
             if mask.sum() < 0.05 * mask.size:
                 print(f"  !! {uid}: the micrograph lands on under 5% of the section "
                       "(landmarks on the wrong half?) - skipped")
-                skipped += 1
+                failed.append((uid, "micrograph lands on under 5% of the section"))
                 continue
         else:
             A_img = A
@@ -422,11 +463,14 @@ def run_from_landmarks(itk, args):
             tp = el.GetTransformParameterObject()
         except Exception as exc:                                   # noqa: BLE001
             print(f"  !! {uid}: {str(exc)[:90]}")
-            failed += 1
+            failed.append((uid, f"elastix: {str(exc)[:60]}"))
             continue
 
         seeds = load_seeds(pid, int(p["px_w"]), int(p["px_h"]), p)
         if not seeds:
+            # Was a silent `continue`: a registered section with nothing to
+            # carry across left no row and no word.
+            no_seeds.append((uid, f"plate {pid} has no seeds or reviewed polygons"))
             continue
         sf = os.path.join(tmp, "seeds.txt")
         # Seeds go through the SAME initialisation before transformix, so the
@@ -444,10 +488,10 @@ def run_from_landmarks(itk, args):
             moved = read_output_points(os.path.join(outd, "outputpoints.txt"))
         except Exception as exc:                                   # noqa: BLE001
             print(f"  !! {uid}: transformix {str(exc)[:80]}")
-            failed += 1
+            failed.append((uid, f"transformix: {str(exc)[:60]}"))
             continue
         if len(moved) != len(seeds):
-            failed += 1
+            failed.append((uid, f"transformix moved {len(moved)} of {len(seeds)} seeds"))
             continue
 
         for s, (x, y) in zip(seeds, moved):
@@ -458,8 +502,12 @@ def run_from_landmarks(itk, args):
         print(f"\r  refined {i}/{len(items)}", end="")
     print(f"\r  refined {len({r['scene_uid'] for r in out_rows})} sections        ")
 
+    not_done = missing + no_seeds + failed
     if not out_rows:
-        raise SystemExit("nothing refined")
+        report_not_done(not_done)
+        raise SystemExit(f"nothing refined ({few} section(s) with fewer than 3 "
+                         f"landmark pairs, {len(held)} withheld, {len(not_done)} "
+                         f"could not be refined)")
     out = os.path.join(REG_DIR, "roi_regions_refined.csv")
     # Atomic: a crash mid-write must not leave a partial table that reads
     # as a finished refinement.
@@ -468,15 +516,46 @@ def run_from_landmarks(itk, args):
     print()
     print("=" * 74)
     print(f"{len(out_rows)} seed positions -> {out}")
-    print(f"  sections skipped (fewer than 3 pairs, or missing files): {skipped}")
+    print(f"  sections with fewer than 3 landmark pairs: {few}")
     print(f"  sections withheld (plate not verified ok): {len(held)}")
-    print(f"  failed: {failed}")
+    print(f"  missing a section picture or plate        : {len(missing)}")
+    print(f"  registered, but no seeds on the plate     : {len(no_seeds)}")
+    print(f"  failed in elastix / transformix           : {len(failed)}")
     print()
     print("Compare against roi_regions.csv from the curator: that is the landmark")
     print("interpolation alone, this adds the image content between the landmarks.")
     print("Where the two disagree by a lot, look at the section - it means the image")
     print("metric pulled away from where a human put the points.")
     print("=" * 74)
+    return fail_if_not_done(not_done, "refined")
+
+
+def report_not_done(not_done):
+    """Name the sections a run could not do, and why."""
+    if not not_done:
+        return
+    print(f"  {len(not_done)} section(s) could not be done:")
+    for uid, why in not_done[:15]:
+        print(f"    {uid:<24} {why}")
+    if len(not_done) > 15:
+        print(f"    ... and {len(not_done) - 15} more")
+
+
+def fail_if_not_done(not_done, verb):
+    """1, with the reason as the last line printed, when sections were skipped.
+
+    05c's rule (REVIEW.md rule 2): what was done is written and stays, and a
+    run that skipped work it was asked to do says so in its exit status - an
+    exception per section used to be caught and carried past, and a section
+    with no seeds was a silent `continue`, so a run that did half its
+    sections exited like one that did all of them.
+    """
+    if not not_done:
+        return 0
+    report_not_done(not_done)
+    print(f"!! {len(not_done)} section(s) NOT {verb.upper()} (see above): this run "
+          f"is not complete. Fix the cause and run it again.")
+    return 1
 
 
 def read_output_points(path):
@@ -514,8 +593,7 @@ def main():
         raise SystemExit("itk-elastix not installed:  python -m pip install itk-elastix")
 
     if args.from_landmarks:
-        run_from_landmarks(itk, args)
-        return
+        return run_from_landmarks(itk, args)
 
     os.makedirs(REG_DIR, exist_ok=True)
     if not os.path.exists(MATCH_CSV):
@@ -532,22 +610,25 @@ def main():
 
     po = parameter_maps(itk, args.spacing)
     results = []
-    skipped = 0
+    not_done = []
     for i, r in enumerate(rows, 1):
         plate_id = r["confirmed_plate"] or r["proposed_plate"] if args.use == "confirmed" else r["proposed_plate"]
-        sec_path = os.path.join(REFORMAT_DIR, "sections", r["scene_uid"] + ".png")
+        sec_path = section_png(r["scene_uid"]) or ""
         plate_path = os.path.join(REFORMAT_DIR, AT.reformatted_dir(CONFIG), plate_id + ".png")
-        # A plate id with no reformatted image is SKIPPED silently below. That
+        # A plate id with no reformatted image used to be SKIPPED silently. That
         # was masking a real mismatch until 2026-09-23: 04a_reformat builds
         # these images from its own hardcoded extraction set (untouched here -
         # that move is Task 8b) while PLATE_DIR above now comes from the
         # study's configured set. On this drive plates_final has 64 ids and
         # the extraction set's reformatted/plates/ only ever held images for
-        # 47 of them, so 17 hit this branch every run. Counted here rather
-        # than only vanishing from the loop, so the gap is measured, not
-        # rediscovered.
+        # 47 of them, so 17 hit this branch every run. Each is now named, and
+        # the run fails for it (fail_if_not_done), so the gap is measured, not
+        # rediscovered. The section picture comes from whichever marker's
+        # directory holds it (section_png), not from `sections/` alone.
         if not (os.path.exists(sec_path) and os.path.exists(plate_path)):
-            skipped += 1
+            not_done.append((r["scene_uid"], "no reformatted section picture"
+                             if not os.path.exists(sec_path)
+                             else f"no reformatted image for {plate_id}"))
             continue
 
         section = np.asarray(Image.open(sec_path).convert("L")).astype(np.float32)
@@ -564,7 +645,10 @@ def main():
             resampled, transform = itk.elastix_registration_method(
                 fixed, moving, parameter_object=po, log_to_console=False)
         except Exception as exc:  # noqa: BLE001
+            # Counted: this was a bare `continue`, so a section elastix failed
+            # on vanished from the quality table with the run exiting 0.
             print(f"  !! {r['scene_uid']}: {str(exc)[:90]}")
+            not_done.append((r["scene_uid"], f"elastix: {str(exc)[:60]}"))
             continue
 
         out_img = np.asarray(resampled)
@@ -584,10 +668,10 @@ def main():
         print(f"\r  [{i}/{len(rows)}] {r['scene_uid']} -> {plate_id}  IoU {overlap:.3f}   ", end="")
 
     print()
-    if skipped:
-        print(f"  skipped {skipped} row(s) with no reformatted section or plate image")
     if not results:
-        raise SystemExit("nothing registered")
+        report_not_done(not_done)
+        raise SystemExit(f"nothing registered ({len(not_done)} section(s) could "
+                         f"not be, see above)")
 
     out = os.path.join(REG_DIR, "registration_quality.csv")
     IO.atomic_write_csv(out, results, list(results[0].keys()))
@@ -609,7 +693,8 @@ def main():
         print("region transfer - a high IoU on silhouettes does not guarantee that")
         print("internal structures line up.")
     print("=" * 72)
+    return fail_if_not_done(not_done, "registered")
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

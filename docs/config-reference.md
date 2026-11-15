@@ -23,7 +23,7 @@ A key marked *required* has to be present before any stage will run.
 | `section_order_convention` | str | `"S_scan_order"` | `00_manifest` | How serial section order is recovered from the scan. |
 | `pixel_size_um` | float | *required* | `01c`, `01e`, `01f`, `01_overviews`, `05a`, `05c`, `06a` | Camera pixel size at the objective used, in micrometres. |
 | `section_thickness_um` | float | *required* | `06a` | How thick the sections were cut, in micrometres. |
-| `overview_target_um_per_px` | float | `5.2` | `01_overviews`, `01_overviews.groovy` | Resolution the per-section overviews are exported at. |
+| `overview_target_um_per_px` | float | `5.2` | `01_overviews`, `01_overviews.groovy`, `04f`, `04g`, `04i` | Resolution the per-section overviews are exported at. |
 | `curation_render.source` | str | `"czi"` | `04o` | Where the curation composites take their pixels from. |
 | `curation_render.um_per_px` | float | `2.6` | `04o` | Resolution of the curation composites rendered from the CZI. |
 | `scene_render.out_dir` | path_dir_opt |  | `01l` | Where the pictures of every scene go. Empty means <out_root>/scene_renders. |

@@ -301,9 +301,11 @@ with temp_study(acquisition={"layout": "paired",
           ["id", "kind", "angle"])
     _wcsv(os.path.join(reformat_dir, "excluded_sections.csv"), [], ["scene_uid"])
     _wcsv(os.path.join(P4.OUT_ROOT, "qc", "focus.csv"),
-          [{"scene_uid": u_src, "animal": "AB12", "marker_channel": SRC},
-           {"scene_uid": u_tgt, "animal": "AB12", "marker_channel": TGT}],
-          ["scene_uid", "animal", "marker_channel"])
+          [{"scene_uid": u_src, "animal": "AB12", "marker_channel": SRC,
+            "um_px": "5.20"},
+           {"scene_uid": u_tgt, "animal": "AB12", "marker_channel": TGT,
+            "um_px": "10.40"}],
+          ["scene_uid", "animal", "marker_channel", "um_px"])
     for _animal, _marker, _uid in (("AB12", SRC, u_src), ("AB12", TGT, u_tgt)):
         d = os.path.join(P4.OVERVIEW_DIR, _animal, _marker)
         os.makedirs(d, exist_ok=True)
@@ -313,9 +315,13 @@ with temp_study(acquisition={"layout": "paired",
     flips_seen = []
     EXTRA = [3.0]
 
-    def _derive(p_source, p_target, total_source, curated_mask=None, source_flip=False):
+    scales_seen = []
+
+    def _derive(p_source, p_target, total_source, curated_mask=None, source_flip=False,
+                um_source=None, um_target=None):
         seen.append((p_source, p_target))
         flips_seen.append(source_flip)
+        scales_seen.append((um_source, um_target))
         return {"extra": EXTRA[0], "deg": 0.0, "auto_target": 0.0, "align_iou": 0.9,
                 "flip_margin": 0.0, "final_iou_256": 0.88}
 
@@ -336,6 +342,29 @@ with temp_study(acquisition={"layout": "paired",
             _parts(src_p)[-3:], ["AB12", SRC, u_src + "_DAPI.png"])
         chk("...and so does the target's",
             _parts(tgt_p)[-3:], ["AB12", TGT, u_tgt + "_DAPI.png"])
+    # Each pass's own overview scale reaches the derivation: the two passes
+    # need not have been exported at one um/px.
+    chk("each overview's um_px from focus.csv is handed to the derivation",
+        scales_seen[:1], [(5.2, 10.4)])
+
+    # ...and the physical mask is on the shared grid from that scale: one
+    # section exported at 5.20 and at 10.40 um/px is the same mask there.
+    # Downsampling both by one factor, as before, made the second half the size.
+    from PIL import Image as _Im  # noqa: E402
+    _d = os.path.join(P4.OUT_ROOT, "phys")
+    os.makedirs(_d, exist_ok=True)
+    for _n, _px in (("fine", 800), ("coarse", 400)):
+        _yy, _xx = np.mgrid[:_px, :_px]
+        _r = 0.3 * _px
+        _img = np.where(((_yy - _px / 2) / 1.5) ** 2 + (_xx - _px / 2) ** 2 < _r ** 2,
+                        180, 8).astype(np.uint8)
+        _Im.fromarray(_img).save(os.path.join(_d, _n + ".png"))
+    _mf = P4.physical_mask(os.path.join(_d, "fine.png"), P4.CANVAS, 5.2)
+    _mc = P4.physical_mask(os.path.join(_d, "coarse.png"), P4.CANVAS, 10.4)
+    chk("a section at 5.20 and at 10.40 um/px lands on one physical grid",
+        round(float(_mc.sum()) / float(_mf.sum()), 1), 1.0)
+    chk("...where they overlap almost entirely",
+        P4.mask_iou(_mf, _mc) > 0.95, True)
 
     with open(P4.OUT_CSV, newline="", encoding="utf-8") as fh:
         written = list(csv.DictReader(fh))

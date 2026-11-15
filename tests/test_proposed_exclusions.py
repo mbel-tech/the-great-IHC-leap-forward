@@ -138,5 +138,51 @@ with temp_study(**PAIRED):
         "carried 1 already-excluded section(s)" in out.getvalue())
 
 print()
+print("--- 04f: areas at each section's own scale; an unmeasured section fails the run ---")
+# The areas used to be converted with the LS study's 5.20 um/px as a literal,
+# so a study exported at another overview scale had every area gate in the
+# wrong place. And a section whose overview could not be read was a silent
+# `continue`: never measured, never proposed, and the stage showed done.
+with temp_study(**PAIRED):
+    F = load_stage("04f_exclusion_candidates.py", name="lsstage_04f_scale")
+    RF = F._RF
+    src = RF.marker_paths(RF.DEFAULT_MARKER)
+    at5, at10, absent = "LS02_s01b_sc01", "LS02_s01b_sc02", "LS02_s01b_sc03"
+    write(F.QC_CSV, [{"scene_uid": u, "animal": "LS02",
+                      "marker_channel": RF.DEFAULT_MARKER, "focus_score": "0.2",
+                      "um_px": um}
+                     for u, um in ((at5, "5.20"), (at10, "10.40"), (absent, "5.20"))])
+    yy, xx = np.mgrid[:600, :600]
+    img = np.where((yy - 300) ** 2 + (xx - 300) ** 2 < 220 ** 2, 180, 8).astype(np.uint8)
+    d = os.path.join(F.OVERVIEW_DIR, "LS02", RF.DEFAULT_MARKER)
+    os.makedirs(d, exist_ok=True)
+    for u in (at5, at10):
+        Image.fromarray(img).save(os.path.join(d, u + "_DAPI.png"))
+    write(src["index"], [{"kind": "section", "id": u, "animal": "LS02",
+                          "section_order": str(i), "angle": "0", "fill": "0.5"}
+                         for i, u in enumerate((at5, at10, absent))])
+    saved = sys.argv
+    out = io.StringIO()
+    try:
+        sys.argv = ["04f", "--montage", "0"]
+        with contextlib.redirect_stdout(out):
+            rc = F.main()
+    finally:
+        sys.argv = saved
+    with open(F.CANDIDATES_CSV, newline="", encoding="utf-8") as fh:
+        got = {r["uid"]: r for r in csv.DictReader(fh)}
+    a5, a10 = float(got[at5]["total_mm2"]), float(got[at10]["total_mm2"])
+    chk("the same pixels at twice the um_px are four times the area",
+        round(a10 / a5, 1), 4.0)
+    chk("...the 5.20 um/px one measured at that scale (a 220 px disc ~ 4.1 mm2)",
+        3.8 < a5 < 4.4)
+    chk("a section whose overview is missing fails the run", rc, 1)
+    said = [ln for ln in out.getvalue().splitlines() if ln.strip()]
+    chk("...the reason is its last line",
+        bool(said) and "1 section(s) NOT MEASURED" in said[-1])
+    chk("...and the section is named", absent in out.getvalue())
+    chk("the sections that were measured are still written", sorted(got), [at5, at10])
+
+print()
 print("FAILURES" if fails else "ALL PASS")
 sys.exit(1 if fails else 0)

@@ -18,7 +18,8 @@ Two failure modes, kept separate
 -------------------------------
 
 **`no_tissue` - largest connected tissue component below 2.5 mm2.** Measured on
-the source overview at a known 5.20 um/px, so it is a physical size rather than
+the source overview at its own recorded scale (focus.csv's `um_px`; 5.20 um/px
+on the LS study), so it is a physical size rather than
 a fraction of a hand-drawn scan box. A section reduced to debris has no piece of
 any real size, whatever threshold you pick, because specks are physically small.
 On hand-labelled examples the separation was clean: 0.8-1.9 mm2 for debris-only
@@ -175,7 +176,12 @@ def _order_key(r):
             return 0
     return (-num(r["proposed"]), r["animal"], num(r["section_order"]))
 
-UM_PX = 5.20e-3        # mm per pixel in the overviews - verified constant, all 222 files
+# NO PIXEL SIZE HERE. Areas are converted with each section's own scale -
+# focus.csv's `um_px`, through 04a.overview_um_px. This was the literal
+# `UM_PX = 5.20e-3`, "verified constant, all 222 files" - of the LS study. For
+# a study exported at another overview scale the 2.5 mm2 cut below then fell at
+# a different physical size, and sections were proposed (or kept) for tissue
+# they did not have.
 PIECE_MIN_MM2 = 0.5    # a "piece" of tissue rather than a speck
 
 # Rule 1 - not enough tissue. Placed inside the gap that separated hand-labelled
@@ -190,7 +196,7 @@ LARGEST_MIN_MM2 = 2.5
 FOCUS_MIN = 0.070
 
 
-def measure(path):
+def measure(path, um_px):
     """Physical geometry of the tissue in one overview.
 
     Uses `04a_reformat.tissue_mask` rather than a threshold of its own. Two
@@ -214,11 +220,12 @@ def measure(path):
     w, h = img.size
     work = np.asarray(img.resize((WORK, WORK), Image.BILINEAR)).astype(np.float32)
 
-    # One work pixel covers (w/WORK) x (h/WORK) source pixels, and the source
-    # pixel size is a verified constant across all 222 files. So this is a
-    # physical area, not a fraction of a hand-drawn scan box.
-    px_mm2 = (w * h / float(WORK * WORK)) * UM_PX ** 2
-    frame_mm2 = round(w * h * UM_PX ** 2, 1)
+    # One work pixel covers (w/WORK) x (h/WORK) source pixels, and `um_px` is
+    # the source's own pixel size. So this is a physical area, not a fraction
+    # of a hand-drawn scan box.
+    mm_px = um_px / 1000.0
+    px_mm2 = (w * h / float(WORK * WORK)) * mm_px ** 2
+    frame_mm2 = round(w * h * mm_px ** 2, 1)
 
     mask = tissue_mask(work, light_background=False)
     if mask is None:
@@ -247,10 +254,11 @@ def main():
     args = ap.parse_args()
     os.makedirs(REPORT_DIR, exist_ok=True)
 
-    chan, focus = {}, {}
+    chan, focus, um_px = {}, {}, {}
     with open(QC_CSV, newline="", encoding="utf-8") as fh:
         for r in csv.DictReader(fh):
             chan[r["scene_uid"]] = r["marker_channel"]
+            um_px[r["scene_uid"]] = _RF.overview_um_px(r)
             try:
                 focus[r["scene_uid"]] = float(r["focus_score"])
             except (KeyError, ValueError):
@@ -260,10 +268,15 @@ def main():
         index = [r for r in csv.DictReader(fh) if r["kind"] == "section"]
 
     rows = []
+    # Sections this run could not measure. A silent `continue` once: a section
+    # never measured is never proposed, and the candidates file just came out
+    # shorter with the stage showing done.
+    unmeasured = []
     for i, r in enumerate(index):
         src = source_png(r["animal"], r["id"], chan)
-        m = measure(src)
+        m = measure(src, um_px.get(r["id"]) or _RF.overview_um_px(None))
         if m is None:
+            unmeasured.append(r["id"])
             continue
         m.update(uid=r["id"], animal=r["animal"], section_order=int(r["section_order"]),
                  focus_score=round(focus.get(r["id"], float("nan")), 4))
@@ -346,6 +359,16 @@ def main():
     print(f"wrote {out}")
 
     montage(rows, args.montage)
+    # A SKIPPED SECTION FAILS THE RUN - 05c's rule. What was measured is
+    # written; printed last, because app/runner.py shows the last line printed
+    # as the reason.
+    if unmeasured:
+        print(f"  could not read the overview of: {', '.join(unmeasured[:10])}"
+              + (f" ... and {len(unmeasured) - 10} more" if len(unmeasured) > 10 else ""))
+        print(f"!! {len(unmeasured)} section(s) NOT MEASURED (overview missing or "
+              f"unreadable), so never proposed: this stage is not complete. Run "
+              f"01_overviews.py for them and run it again.")
+        return 1
 
 
 def montage(rows, n):
@@ -393,4 +416,4 @@ def montage(rows, n):
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

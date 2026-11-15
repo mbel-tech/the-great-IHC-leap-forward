@@ -885,7 +885,11 @@ def main():
               f"red and green by default.")
         print(f"  Give it one: `display.colours: {{\"{args.marker}\": "
               f"\"magenta\"}}` in config.json.")
-        return
+        # Not built is not done. This returned None, which the app reads as a
+        # finished stage - with no composite on disk for the curator to show.
+        print(f"!! no {args.marker} composite was built: this marker has no "
+              f"colour. Set display.colours for it and run this again.")
+        return 1
     made = skipped = mismatched = existing = 0
     missing = []
     if args.thumbs and not args.verify:
@@ -989,7 +993,16 @@ def main():
     # fills in the ones that were left alone and never had one.
     if args.thumbs and not args.verify:
         write_thumbs(out_dir, args.thumb_size, force=False)
+    # A SECTION NOT BUILT FAILS THE RUN - 05c's rule. The list above used to be
+    # the whole of it and the run returned None, so the app showed the stage
+    # done and the curator showed those sections grey. What was built stays;
+    # printed last, because app/runner.py shows the last line as the reason.
+    if missing:
+        print(f"!! {len(missing)} {args.marker} composite(s) NOT BUILT (see above): "
+              f"this stage is not complete. Fix the cause and run it again; it "
+              f"builds only what is missing.")
+        return 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

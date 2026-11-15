@@ -1257,6 +1257,8 @@ padded square and resized.
   also draws the excluded sections so Review mode can show them (an excluded section whose picture cannot
   be made is reported in its own count, never in `lost_sections`, which lists only kept sections that
   vanished); `--only` limits the run to named uids.
+  A kept section that did not survive (it is in `lost_sections`) or a section neither kept nor excluded
+  fails the run: the index is still written, and the last line says how many.
   A changed angle moves every ROI placed on that section, so 05a refuses a section whose recorded angle no
   longer matches.
 
@@ -1285,13 +1287,18 @@ animals, and adjacent sections differ in silhouette almost as little as sections
 Not a stage (`NOT_LISTED`): registers atlas plates to sections with elastix (affine, then B-spline) and
 carries the region seeds across with transformix, as a quality check. Nothing downstream reads it.
 
-- **Reads:** reformatted sections, the plates, and the matches in `atlas_proposals_v2.csv` (or, with
+- **Reads:** reformatted sections (from every marker's section directory, by `ls_paths`'s rule, so a
+  paired study's second marker is found), the plates, and the matches in `atlas_proposals_v2.csv` (or, with
   `--from-landmarks`, the ROI curator's landmarks).
 - **Writes:** `registered/registration_quality.csv` and `registered/roi_regions_refined.csv`.
 - **How:** the plate is the **fixed** image and the section the **moving** one, because elastix's
   transform maps fixed coordinates into moving ones and the seeds have to go from plate to section.
   `--spacing` sets the B-spline grid; `--landmark-weight` adds the curator's point pairs as a penalty.
-- **Failure and re-run:** needs `itk-elastix`; refuses without it.
+- **Failure and re-run:** needs `itk-elastix`; refuses without it. A section it was asked to do and could
+  not (no section picture or plate image, elastix or transformix failed, no seeds on the plate) is named,
+  and the run exits 1 with the count as its last line; what was done is written. With `--from-landmarks`,
+  sections with fewer than three landmark pairs or an unverified plate are counted but do not fail the
+  run: they are curation still to finish.
 
 ### `04f_exclusion_candidates.py`
 
@@ -1301,14 +1308,16 @@ Stage `exclusion`. Proposes the sections that cannot be measured, conservatively
 - **Writes:** `reformatted/exclusion_candidates.csv`; with `--survey`, `qc/exclusion/survey.csv`; and a montage of the proposed sections in `qc/exclusion/`
 (`--montage` sets how many, 32 by default).
 - **How:** two separate reasons. `no_tissue`: the largest connected tissue component is below 2.5 mm² on
-  the 5.20 µm overview. `out_of_focus`: `focus_score` below 0.070, placed by looking at sections in
+  the overview, converted with that section's own `um_px` from `qc/focus.csv` (the config's
+  `overview_target_um_per_px` when the row has none; 5.20 µm on the LS study). `out_of_focus`: `focus_score` below 0.070, placed by looking at sections in
   0.01-wide focus bands. Solidity was tried and rejected: it proposed excluding good telencephalon,
   because a section there is two lobes. Every proposal carries the number that produced it, is applied by
   `04a --apply-overrides`, and can be reinstated in the ROI curator's Review mode.
 - **Failure and re-run:** it measures the sections in `reformat_index.csv`. A section already in
   `excluded_sections.csv` and no longer in the index (a final reformat left it out) keeps its previous
   row unchanged, and the run says how many it carried; dropping it would put it back into the analysis at
-  the next final reformat.
+  the next final reformat. A section whose overview cannot be read is named and fails the run (exit 1, the
+  count as the last line); the sections that were measured are written.
 
 ### `04g_artifact_mask.py`
 
@@ -1318,14 +1327,19 @@ otherwise good tissue and masks them.
 - **Reads:** the DAPI overviews and `qc/focus.csv`.
 - **Writes:** `artifacts/<scene_uid>_artifact.png` and `artifacts/artifact_summary[_<marker>].csv`;
   previews in `qc/artifacts/`.
-- **How:** at 5.20 µm per pixel, on DAPI (artifacts that affect every channel equally). The tissue rim is
+- **How:** on the DAPI overview (artifacts that affect every channel equally), 5.20 µm per pixel on the
+  LS study. Every area (the object size gates, tissue and measurable mm²) is converted with the section's
+  own `um_px` from `qc/focus.csv`, or the config's `overview_target_um_per_px` when the row has none. The tissue rim is
   eroded by 6 px (31 µm) first, because the pial and ventricular surfaces are genuinely bright. Bright
   objects inside are classed by shape as compact (air bubble, antibody aggregate) or elongated
   (fibre, hair, external debris). The masked area is small (median 0.13 % of
   tissue) but it is the brightest signal, so `04a --mask-artifacts` applies it before anything is
   normalised. `--include-excluded` also masks the excluded sections, for Review mode.
 - **Failure and re-run:** `--limit N` writes `artifact_summary[_<marker>].trialN.csv` instead of the real
-  summary, which is left as it was and is what the app's Done check looks for.
+  summary, which is left as it was and is what the app's Done check looks for. A section it could not mask
+  (overview missing, or no tissue mask) is named, its `_artifact.png` from an earlier run is removed so it
+  cannot be read as current, and the run exits 1 with the count as its last line. A trial counts only the
+  sections it was told to do.
 
 ### `04i_propagate_to_perk.py`
 
@@ -1337,7 +1351,9 @@ other pass of the same physical sections.
   score of each section.
 - **How:** exclusions are copied straight through `pairs.csv` (it is one section imaged twice). Rotations
   are **re-derived**, not copied: the other pass is reformatted, and the rotation that best aligns its
-  tissue mask with the curated pass's mask is searched over the full 360°, with a flip scored alongside as
+  tissue mask with the curated pass's mask is searched over the full 360°, on a shared physical grid
+  (four overview pixels of the configured scale) that each pass is brought onto from its own `um_px` in
+  `qc/focus.csv`, with a flip scored alongside as
   a check (a flip should never win). The overlap of the two 256 px masks is reported as `final_iou_256`.
   Artifacts are not propagated: 04g runs on each pass's own overviews. A flip the operator made on the
   curated section (`manual_flip` in its index) is carried to the partner, applied after the rotation as
@@ -1443,7 +1459,10 @@ frame.
   GB to render and more than a browser holds comfortably. Measurement never depends on it.
 - **Settings:** `curation_render.*`, `display`, `acquisition`, `channels`.
 - **Failure and re-run:** resumable; `--force` redraws. `--all` builds the whole index and
-  `--include-excluded` every scanned section, unmasked, for Review mode.
+  `--include-excluded` every scanned section, unmasked, for Review mode. A composite it could not build
+  (overview missing, no tissue mask, the CZI unreadable) is named and the run exits 1 with the count as its
+  last line, as does a marker with no `display.colours` entry; what was built is kept, and a re-run builds
+  only what is missing.
 
 ### `04p_section_provenance.py`
 
@@ -1535,7 +1554,11 @@ real slide pixels.
 - **Settings:** `pixel_size_um`, `acquisition`.
 - **Failure and re-run:** `--limit N` writes `roi_geometry_<marker>.trialN.csv` and
   `roi_boxes_<marker>.trialN.csv` beside the real pair and archives no export; the real pair, which 05c
-  reads and the app's Done check looks for, is left as it was.
+  reads and the app's Done check looks for, is left as it was. A section with ROIs that could not be
+  placed (its angle no longer matches, its overview or scene rectangle is missing, or it has no index
+  row) is listed under `SKIPPED` and the run exits 1 with the count as its last line, a trial included
+  for the sections it was told to place; the boxes that were placed are written. Sections left out by the
+  analysis-set rule (no background disc) are the curation's decision and do not fail the run.
 
 ### `05b_tune_detection.py`
 

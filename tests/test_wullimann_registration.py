@@ -111,6 +111,23 @@ try:
          "absent": "not in roi_plates.csv", "moved": "plate_id differs from roi_plates.csv",
          "rsz": "resized"})
 
+    # ---- the section picture comes from the marker's own directory -----------
+    # 04e read reformatted/sections/ only. Under `paired` that is the geometry
+    # source's directory, so the other marker's landmark export found none of
+    # its sections and the run ended "nothing refined".
+    from _fixture import temp_study, load_stage
+    with temp_study(acquisition={"layout": "paired", "markers": ["Mk1", "Mk2"]}) as pst:
+        RP = load_stage("04e_register_elastix.py", name="lsstage_04e_paired")
+        own = RP.NAMES.path("sections", "Mk1")
+        chk("Mk1's sections are not the unsuffixed directory",
+            os.path.basename(own) != "sections", True)
+        os.makedirs(own)
+        Image.fromarray(np.zeros((8, 8), np.uint8)).save(os.path.join(own, "P1.png"))
+        chk("a non-default marker's section is found in its own directory",
+            RP.section_png("P1"), os.path.join(own, "P1.png"))
+        chk("...and a section in no directory is None, not a guessed path",
+            RP.section_png("P9"), None)
+
     # ---- end to end ------------------------------------------------------------
     if not HAVE_ITK:
         print("SKIP end-to-end: itk-elastix not installed")
@@ -189,6 +206,25 @@ try:
             print("     landmarks alone %.2f px, after elastix %.2f px" % (base_err, err))
         else:
             chk("output written", False)
+
+        # A second section with verified landmarks and no section picture
+        # anywhere: it cannot be refined, and the run must say so in its exit
+        # status, with S1 still written.
+        with open(os.path.join(out_root, "reformatted", "roi_landmarks.csv"), "a", newline="") as fh:
+            for sx, sy, x, y in noisy:
+                fh.write("S2,A1,plates_wullimann,wplate_071,%.2f,%.2f,%d,%d\n" % (sx, sy, x, y))
+        with open(os.path.join(out_root, "reformatted", "roi_plates.csv"), "a", newline="") as fh:
+            fh.write("S2,A1,plates_wullimann,wplate_071,0,ok\n")
+        r = subprocess.run([sys.executable, "-I", os.path.join(SCRIPTS, "04e_register_elastix.py"),
+                            "--from-landmarks"] + extra, capture_output=True, text=True,
+                           env={**os.environ, "LS_CONFIG": cfg})
+        said = [ln for ln in r.stdout.splitlines() if ln.strip()]
+        chk("a section it could not refine fails the run", r.returncode, 1)
+        chk("...the reason is the last line",
+            bool(said) and "1 section(s) NOT REFINED" in said[-1], True)
+        chk("...and the section is named", "S2" in r.stdout, True)
+        chk("the section it could refine is still written",
+            sorted({row["scene_uid"] for row in csv.DictReader(open(out_csv))}), ["S1"])
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

@@ -703,6 +703,53 @@ with temp_study(acquisition={"layout": "paired",
     with open(P5.box_csv("Mk2"), encoding="utf-8") as fh:
         chk("...without touching Mk2's boxes", fh.read() == _sentinel, True)
 
+    # A section with ROIs whose angle does not reproduce is SKIPPED: no box,
+    # so 05c never measures it. That printed "SKIPPED 1" and returned 0, and
+    # the app showed 05a done. Now the run fails, with the reason last.
+    # A second Mk1 section, U3, whose angle does not reproduce; U1's does.
+    U3 = "AB12_1a-s1"
+    _keep = {p: open(p, encoding="utf-8").read()
+             for p in (P5.FOCUS_CSV, P5.MANIFEST_CSV, P5.RF.marker_paths("Mk1")["index"])}
+    _add = {P5.FOCUS_CSV: f"{U3},AB12,Mk1,0.65\n",
+            P5.MANIFEST_CSV: f"{U3},AB12_1a.czi,0\n",
+            P5.RF.marker_paths("Mk1")["index"]: f"{U3},section,0,0,0\n"}
+    for _p, _line in _add.items():
+        with open(_p, "a", encoding="utf-8") as fh:
+            fh.write(_line)
+    open(os.path.join(P5.OVERVIEW_DIR, "AB12", "Mk1", U3 + "_DAPI.png"), "wb").close()
+    turned_csv = os.path.join(MK.root, "roi_regions_turned.csv")
+    _wcsv(turned_csv,
+          [{"scene_uid": u, "marker": "Mk1", "roi_kind": "roi", "region": "R1",
+            "seed_n": "1", "sec_x": "128", "sec_y": "128", "sec_r": "10",
+            "sec_poly": ""} for u in (U1, U3)], _RCOLS)
+
+    def _turned(src, report=None, **kw):
+        if report is not None:
+            report.update(dict(REP, angle=7.0) if U3 in src else REP)
+        return np.zeros((256, 256), np.uint8)
+
+    _saved = (P5.RF.reformat, P5.scene_rects, sys.argv)
+    _buf = _io.StringIO()
+    try:
+        P5.RF.reformat = _turned
+        P5.scene_rects = lambda path: {0: (100, 200, 1000, 1000)}
+        sys.argv = ["05a_roi_geometry.py", turned_csv, "--all-sections"]
+        with _ctx.redirect_stdout(_buf):
+            _rc = P5.main()
+    finally:
+        P5.RF.reformat, P5.scene_rects, sys.argv = _saved
+        for _p, _text in _keep.items():
+            with open(_p, "w", encoding="utf-8") as fh:
+                fh.write(_text)
+    _last = [ln for ln in _buf.getvalue().splitlines() if ln.strip()][-1]
+    chk("a section dropped for an angle mismatch fails the run", _rc, 1)
+    chk("...it is listed with its reason",
+        "SKIPPED 1" in _buf.getvalue() and "!= recorded" in _buf.getvalue(), True)
+    chk("...and the run says so as its last line",
+        _last.startswith("!! 1 Mk1 section(s) with ROIs NOT PLACED"), True)
+    chk("...the section that was placed still has its box",
+        _uids(P5.box_csv("Mk1")), [U1])
+
 
 print()
 print("--- multiplex: each marker's boxes carry the marker they were placed for ---")

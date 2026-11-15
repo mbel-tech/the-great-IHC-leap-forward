@@ -92,6 +92,30 @@ PLATE_DIR = AT.plate_dir(CONFIG)
 QC_CSV = os.path.join(OUT_ROOT, "qc", "focus.csv")
 REFORMAT_DIR = os.path.join(OUT_ROOT, "reformatted")
 
+
+def overview_um_px(row):
+    """Micrometres per overview pixel for one focus.csv row.
+
+    The row's own `um_px` - 01 writes the scale each overview was actually
+    exported at - else the study's `overview_target_um_per_px`. 04f, 04g and
+    04i used to carry the LS study's 5.20 as a literal, so for a study exported
+    at another overview scale every area gate (2.5 mm2 of tissue, 1.2 mm2 of
+    artifact) and every "shared physical grid" was off by the square of the
+    ratio, and nothing said so. One helper, here because all three already
+    load this module, so the fallback cannot drift between them.
+    """
+    try:
+        v = float((row or {}).get("um_px") or "")
+        if v > 0:
+            return v
+    except (TypeError, ValueError):
+        pass
+    v = CONFIG.get("overview_target_um_per_px")
+    if not v:
+        raise SystemExit("no overview scale: focus.csv has no um_px for this "
+                         "section and the config sets no overview_target_um_per_px")
+    return float(v)
+
 # The naming rule, borrowed rather than restated. ls_paths owns it; this
 # module is one of its callers. See marker_paths below for what still is not
 # routed through it and why.
@@ -1068,6 +1092,19 @@ def main():
               f"so no later stage can pick them up")
     print("NEXT: 04c_atlas_match.py")
     print("=" * 72)
+    # A KEPT SECTION THAT DID NOT SURVIVE FAILS THE RUN. The banners above say
+    # so, but the app runs this in process and shows it done on None, so a
+    # final reformat that dropped sections the operator chose to keep looked
+    # complete. The index is written - it is the truth about what survived -
+    # and the failure is what makes someone read the list. Printed last,
+    # because app/runner.py shows the last line printed as the reason.
+    # Excluded sections that got no picture are not counted: they were never
+    # going into the analysis (report_excluded_failures).
+    if lost or unaccounted:
+        print(f"!! {len(lost)} kept section(s) did not survive and "
+              f"{len(unaccounted)} are unaccounted for (see above): this "
+              f"reformat is not complete. Fix the cause and run it again.")
+        return 1
 
 
 def report_excluded_failures(excl_failed):
@@ -1117,4 +1154,4 @@ def preview(rows, sec_dir, plate_dir, n):
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

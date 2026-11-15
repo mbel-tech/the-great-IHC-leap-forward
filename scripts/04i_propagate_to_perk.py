@@ -75,8 +75,8 @@ OVERRIDE_KEYS = ["perk_scene_uid", "pcna_scene_uid", "animal", "extra_rotation",
                  "excluded", "align_iou", "final_iou_256", "flip_margin", "confidence",
                  "reason", "source", "derived_as"]
 
-PHYS_DS = 4           # downsample both overviews by this -> 20.8 um/px, shared
-CANVAS = 320          # px on the shared physical grid; ~6.7 mm across
+PHYS_DS = 4           # the shared grid is this many overview pixels -> 20.8 um/px on LS
+CANVAS = 320          # px on the shared physical grid; ~6.7 mm across on LS
 COARSE = 3.0          # degrees, first pass over the full circle
 FINE = 1.0
 # Below this alignment IoU the two masks genuinely disagree and the transfer
@@ -90,6 +90,13 @@ _SPEC = importlib.util.spec_from_file_location(
     "reformat_mod", os.path.join(os.path.dirname(os.path.abspath(__file__)), "04a_reformat.py"))
 _RF = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(_RF)
+
+# The shared physical grid's pixel, in um: PHYS_DS of the study's configured
+# overview pixels. A choice of working resolution, not a claim about any
+# image - each overview is brought onto it from its OWN scale (focus.csv's
+# um_px), in physical_mask. Both passes used to be downsampled by PHYS_DS
+# alike, which is a shared grid only while both were exported at one scale.
+PHYS_UM = PHYS_DS * _RF.overview_um_px(None)
 
 _lsio = importlib.util.spec_from_file_location(
     "_lsio", os.path.join(os.path.dirname(os.path.abspath(__file__)), "ls_io.py"))
@@ -135,7 +142,7 @@ SOURCE_UID_COL = f"{LP.slug(SOURCE_MARKER)}_scene_uid"
 TARGET_UID_COL = f"{LP.slug(TARGET_MARKER)}_scene_uid"
 
 
-def physical_mask(png_path, canvas):
+def physical_mask(png_path, canvas, um_px=None):
     """Tissue mask on a shared PHYSICAL grid, centred on its own centroid.
 
     **Not the reformatted mask, and that distinction is the whole point.** The
@@ -146,15 +153,27 @@ def physical_mask(png_path, canvas):
     first attempt did exactly that and reached a median IoU of 0.548 with flips
     winning a third of the time, which is what a failed match looks like.
 
-    Both overviews are at a verified 5.20 um/px, so downsampling both by the same
-    factor puts them on a common physical grid where only rotation and
-    translation are free.
+    Each overview is brought from its own scale (`um_px`, focus.csv's; the
+    study's overview scale when not given) to PHYS_UM, which puts both on a
+    common physical grid where only rotation and translation are free. This
+    used to downsample both by PHYS_DS, on the strength of both being at "a
+    verified 5.20 um/px" - true of the LS study only, and of two passes only
+    while both were exported at one scale. A whole-number step is still taken
+    by striding, exactly as before; any other is a resize.
     """
     try:
         img = Image.open(png_path).convert("L")
     except OSError:
         return None
-    a = np.asarray(img).astype(np.float32)[::PHYS_DS, ::PHYS_DS]
+    step = PHYS_UM / (um_px or _RF.overview_um_px(None))
+    k = int(round(step))
+    if k >= 1 and abs(step - k) < 1e-6:
+        a = np.asarray(img).astype(np.float32)[::k, ::k]
+    else:
+        w, h = img.size
+        a = np.asarray(img.resize((max(1, int(round(w / step))),
+                                   max(1, int(round(h / step)))),
+                                  Image.BILINEAR)).astype(np.float32)
     m = _RF.tissue_mask(a, light_background=False)
     if m is None:
         return None
@@ -262,7 +281,7 @@ def physical_to_squashed(angle, w, h):
 
 
 def derive_rotation(p_source, p_target, total_source, curated_mask=None,
-                    source_flip=False):
+                    source_flip=False, um_source=None, um_target=None):
     """The correction 04a needs for one target scan. None if either has no mask.
 
     `source_flip` is the operator's flip on the curated section (`manual_flip`
@@ -289,9 +308,12 @@ def derive_rotation(p_source, p_target, total_source, curated_mask=None,
     1174x1404 the best any rotation can reach is 0.66. So it is reported
     against nothing, as a per-section number to compare with its neighbours,
     not gated.
+
+    `um_source` / `um_target` are each overview's own pixel size (focus.csv's
+    um_px): the two passes need not have been exported at one scale.
     """
-    m_source = physical_mask(p_source, CANVAS)
-    m_target = physical_mask(p_target, CANVAS)
+    m_source = physical_mask(p_source, CANVAS, um_source)
+    m_target = physical_mask(p_target, CANVAS, um_target)
     if m_source is None or m_target is None:
         return None
     try:
@@ -478,10 +500,11 @@ def main():
     excluded = {r["scene_uid"] for r in csv.DictReader(open(
         os.path.join(REFORMAT_DIR, "excluded_sections.csv"), encoding="utf-8"))}
 
-    chan = {}
+    chan, um_px = {}, {}
     with open(os.path.join(OUT_ROOT, "qc", "focus.csv"), newline="", encoding="utf-8") as fh:
         for r in csv.DictReader(fh):
             chan[r["scene_uid"]] = (r["animal"], r["marker_channel"])
+            um_px[r["scene_uid"]] = _RF.overview_um_px(r)
 
     rows, n_excl, n_nopair, failed, n_flip = [], 0, 0, 0, 0
     todo = list(kept.items())
@@ -543,7 +566,8 @@ def main():
         # reads as unflipped, which is what such an index was.
         src_flip = (meta.get("manual_flip") or "0").strip() == "1"
         d = derive_rotation(p_source, p_target, float(meta["angle"]), curated,
-                            source_flip=src_flip)
+                            source_flip=src_flip, um_source=um_px.get(uid),
+                            um_target=um_px.get(u_target))
         if d is None:
             failed += 1
             continue

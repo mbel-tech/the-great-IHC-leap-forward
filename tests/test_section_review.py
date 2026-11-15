@@ -225,8 +225,14 @@ def test_excluded_render_failure_is_not_lost():
                     "--render-excluded", "--preview", "0"]
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            RF.main()
+            rc = RF.main()
         text = out.getvalue()
+        # A kept section that vanished is a failed run, not a banner on a
+        # finished one: the app runs this in process and shows None as done.
+        chk("...and the run fails for the lost kept section", rc, 1)
+        said = [ln for ln in text.splitlines() if ln.strip()]
+        chk("...with the reason as its last line",
+            bool(said) and "kept section(s) did not survive" in said[-1], True)
         with open(paths["lost"], newline="", encoding="utf-8") as fh:
             lost = [r["scene_uid"] for r in csv.DictReader(fh)]
         made += [paths["lost"], paths["index"], paths["excluded"]]

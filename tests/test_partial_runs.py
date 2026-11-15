@@ -157,7 +157,13 @@ with temp_study(acquisition={"layout": "paired", "markers": ["Mk1", "Mk2"]}) as 
             rc = P5.main()
     finally:
         sys.argv = saved
-    chk("a trial with an unplaceable section returns 0", rc, 0)
+    # The section it could not place is one of the two it was told to place,
+    # so the trial fails for it (Task 11); the sections beyond --limit are
+    # never counted.
+    chk("a trial with an unplaceable section among its N returns 1", rc, 1)
+    chk("...the reason is its last line",
+        [ln for ln in said.getvalue().splitlines() if ln.strip()][-1].startswith(
+            "!! 1 Mk1 section(s) with ROIs NOT PLACED"), True)
     chk("...and lists it as skipped",
         "SKIPPED 1" in said.getvalue() and "AB12_1a-s0x" in said.getvalue(), True)
     chk("...still without touching the real boxes", text(box), full_box)
@@ -223,7 +229,7 @@ with temp_study() as st:
             os.path.join(d, u + "_DAPI.png"))
     # The detector is not what is under test: every section is tissue, clean.
     G.load_tissue = lambda im: np.ones(im.shape, bool)
-    G.detect = lambda im, tis: (np.zeros(im.shape, np.uint8), [])
+    G.detect = lambda im, tis, mm_px: (np.zeros(im.shape, np.uint8), [])
 
     chk("04g full run finishes", run_main(G, ["04g", "--marker", marker]), None)
     out = G.summary_csv(marker)
@@ -240,6 +246,86 @@ with temp_study() as st:
     for sid in ("artifact_pcna", "artifact_perk"):
         chk(f"a trial summary alone does not make {sid} done",
             done(sid, st.out_root, [marker], "multiplex"), False)
+
+print()
+print("--- 04g: a section it could not redo fails the run, and loses its old mask ---")
+
+with temp_study() as st:
+    G = load_stage("04g_artifact_mask.py", name="lsstage_04g_skip")
+    marker = G.MARKERS[0]
+    uids = [f"LS01_s01a_sc{i:02d}" for i in range(3)]
+    # The second section's overview was exported at twice the LS scale; the
+    # third has no overview at all.
+    write(G.QC_CSV, [{"scene_uid": u, "animal": "LS01", "section_order": str(i),
+                      "marker_channel": marker, "saturated_fraction": "0",
+                      "um_px": ("10.40" if i == 1 else "5.20")}
+                     for i, u in enumerate(uids)])
+    write(G._RF.marker_paths(marker)["index"],
+          [{"id": u, "kind": "section", "animal": "LS01", "section_order": str(i)}
+           for i, u in enumerate(uids)])
+    d = os.path.join(G.OVERVIEW_DIR, "LS01", marker)
+    os.makedirs(d, exist_ok=True)
+    for u in uids[:2]:
+        Image.fromarray(np.full((40, 40), 100, np.uint8)).save(
+            os.path.join(d, u + "_DAPI.png"))
+    # A mask from an earlier run, for the section this run cannot redo.
+    os.makedirs(G.MASK_DIR, exist_ok=True)
+    stale = os.path.join(G.MASK_DIR, uids[2] + "_artifact.png")
+    Image.fromarray(np.ones((40, 40), np.uint8)).save(stale)
+    G.load_tissue = lambda im: np.ones(im.shape, bool)
+    seen = {}
+
+    def _detect(im, tis, mm_px):
+        seen[len(seen)] = mm_px
+        return np.zeros(im.shape, np.uint8), []
+    G.detect = _detect
+
+    buf = io.StringIO()
+    saved = sys.argv
+    sys.argv = ["04g", "--marker", marker]
+    try:
+        with contextlib.redirect_stdout(buf):
+            rc = G.main()
+    finally:
+        sys.argv = saved
+    said = [ln for ln in buf.getvalue().splitlines() if ln.strip()]
+    chk("04g with a section it could not mask returns 1", rc, 1)
+    chk("...the reason is its last line",
+        bool(said) and "1 section(s) NOT MASKED" in said[-1], True)
+    chk("...and the section is named", uids[2] in buf.getvalue(), True)
+    chk("its mask from an earlier run is removed, not left looking current",
+        os.path.exists(stale), False)
+    rows = {r["scene_uid"]: r for r in read(G.summary_csv(marker))}
+    chk("the sections it did mask are written", sorted(rows), uids[:2])
+    # 40x40 px of tissue: 0.0433 mm2 at 5.20 um/px, four times that at 10.40.
+    chk("tissue area uses the section's own um_px (5.20)",
+        rows[uids[0]]["tissue_mm2"], "0.043")
+    chk("...and (10.40), not a literal 5.20",
+        rows[uids[1]]["tissue_mm2"], "0.173")
+    chk("the detector gets each section's own pixel size, in mm",
+        [round(v, 5) for v in seen.values()], [0.0052, 0.0104])
+
+    # The same run narrowed to the two sections that can be done is complete.
+    rc = run_main(G, ["04g", "--marker", marker, "--limit", "2"])
+    chk("a --limit trial is not failed for sections it was told not to do", rc, None)
+
+    # The area gates are physical. One bright, smooth disc of 112 px in
+    # granular tissue, the same pixels at three scales: its area follows the
+    # square of the scale, and the 1 px specks that are noise at 5.20 um/px
+    # (0.00003 mm2) clear MIN_OBJ_MM2 at 20.8 (0.00043 mm2).
+    G2 = load_stage("04g_artifact_mask.py", name="lsstage_04g_gate")
+    rng = np.random.default_rng(0)
+    im = rng.normal(100, 25, (200, 200)).astype(np.float32)
+    yy, xx = np.mgrid[:200, :200]
+    im[(yy - 100) ** 2 + (xx - 100) ** 2 < 36] = 250.0
+    tis = np.ones(im.shape, bool)
+    at = {mm: G2.detect(im, tis, mm)[1] for mm in (5.20e-3, 10.4e-3, 20.8e-3)}
+    chk("the disc is one object at 5.20 um/px, its area in mm2 at that scale",
+        [round(r["area_mm2"], 6) for r in at[5.20e-3]], [round(112 * 5.20e-3 ** 2, 6)])
+    chk("...four times the area at 10.4 um/px",
+        [round(r["area_mm2"], 6) for r in at[10.4e-3]], [round(112 * 10.4e-3 ** 2, 6)])
+    chk("...and at 20.8 um/px single-pixel specks clear the physical minimum",
+        len(at[20.8e-3]) > 1, True)
 
 # ---------------------------------------------------------------- 01 / 01k
 

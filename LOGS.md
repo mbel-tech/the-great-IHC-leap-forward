@@ -9,6 +9,35 @@ where things landed, not which plausible-looking route was tried and abandoned, 
 
 ---
 
+## 2026-11-15 - Study-agnostic stages that fail honestly (04a / 04e / 04f / 04g / 04i / 04o / 05a)
+
+**Changed:** no stage converts an overview area with a literal pixel size any more.
+`04a_reformat.overview_um_px` gives a section's own `um_px` from `qc/focus.csv`, else the config's
+`overview_target_um_per_px`; 04f (tissue areas), 04g (object gates, now `MIN_OBJ_MM2`, and the
+summary's areas) and 04i (the shared physical grid, now `PHYS_UM`, which each pass reaches from its
+own scale) use it. 04e finds a section in whichever marker's section directory holds it
+(`section_dirs`, the same rule as 05c and 06g). A run that skipped work it was asked to do now
+names it and returns 1 with the reason as its last line, 05c's pattern: 04a (a kept section lost
+or unaccounted), 04e (missing picture or plate, elastix / transformix failure, no seeds), 04f
+(overview unreadable), 04g (overview missing or no tissue; the section's old `_artifact.png` is
+removed), 04o (a composite not built; a marker with no colour) and 05a (a section with ROIs it
+could not place, angle mismatch included). A `--limit` trial counts only the sections it was told
+to do. Checks in `tests/test_section_review.py`, `test_partial_runs.py`,
+`test_proposed_exclusions.py`, `test_propagate_frames.py`, `test_rgb_per_marker.py`,
+`test_roi_geometry.py` and `test_wullimann_registration.py`.
+
+**Why:** found on review (REVIEW.md rules 2 and 6). Under `paired`, 04e looked in `sections/`
+only, so the second marker's landmark export ended "nothing refined". `UM_PX = 5.20e-3` in 04f and
+04g, and 04i's equal downsampling of both passes, put every area gate in the wrong place for a
+study exported at another overview scale. Each of the skips above ended in success, so the app
+showed the stage done; 04g also left a stale mask from an earlier run that 04a and 05c read as
+current.
+
+**Cost:** Run all remaining now stops at these stages when a section is skipped, where it went on
+before; on the LS drive 04e's plain run fails for the 17 plate ids that have no reformatted image
+(QC only, not a stage). At the LS scale every number is unchanged: the 15 px object minimum is
+the same cut as 0.0004 mm2, and 04i still strides by 4.
+
 ## 2026-11-15 - The curation chain keeps hand decisions (04a / 04f / 04i)
 
 **Changed:** `04i_propagate_to_perk` keeps hand corrections in the overrides file. Each row now

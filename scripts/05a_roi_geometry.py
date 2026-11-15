@@ -1130,7 +1130,9 @@ def _place_marker(marker, regions, plates, args, only=None):
             for uid, why in skipped[:10]:
                 print(f"    {uid}: {why}")
         print("=" * 72)
-        return 0
+        # Only the N sections the trial was told to place can be skipped
+        # here; the rest were never asked for, and are no failure.
+        return not_placed(marker, skipped)
 
     # Keep the export these boxes were built from, beside them.
     #
@@ -1181,7 +1183,27 @@ def _place_marker(marker, regions, plates, args, only=None):
         for uid, why in skipped[:10]:
             print(f"    {uid}: {why}")
     print("=" * 72)
-    return 0
+    return not_placed(marker, skipped)
+
+
+def not_placed(marker, skipped):
+    """1, with the reason as the last line printed, when sections were skipped.
+
+    A section in `skipped` has ROIs the operator drew and no box: its angle
+    did not reproduce, its overview or scene rectangle is missing, or it has
+    no row to place it from. "SKIPPED n" used to be the whole of it and the
+    run returned 0, so the app showed 05a done and 05c then measured a study
+    with those sections silently missing. The boxes that were placed are
+    written and stay; this only makes the gap a failure someone has to read.
+    Sections left out by the analysis-set rule (no background disc) are not
+    in `skipped` - that is the curation's own decision, printed by build().
+    """
+    if not skipped:
+        return 0
+    print(f"!! {len(skipped)} {marker} section(s) with ROIs NOT PLACED (see "
+          f"SKIPPED above): their ROIs have no boxes, so 05c would not measure "
+          f"them. Fix the cause and run this again.")
+    return 1
 
 
 if __name__ == "__main__":

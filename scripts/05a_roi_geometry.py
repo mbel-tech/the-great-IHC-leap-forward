@@ -541,6 +541,11 @@ def build(regions_csv, limit=None, plates_csv=None, require_background=True,
     # such filter: another marker's uid never matches one of these.
     if marker is not None:
         regions = [r for r in regions if (r.get("marker") or "").strip() == marker]
+    # THE MARKER THESE BOXES ARE FOR, which is the one this run is placing -
+    # `marker` when main() split a several-marker export, else the one
+    # use_marker() pointed the paths at. Captured here, before the index loop
+    # below rebinds a name of the same spelling.
+    placing = marker if marker is not None else MARKER
     plates = load_csv(plates_csv) if (plates_csv and os.path.exists(plates_csv)) else []
 
     if require_background:
@@ -573,8 +578,8 @@ def build(regions_csv, limit=None, plates_csv=None, require_background=True,
     # every marker, so this reads it once per marker and overwrites each id
     # with itself - harmless, and cheaper than a special case that could drift.
     index = {}
-    for marker in MARKERS:
-        p = RF.marker_paths(marker)["index"]
+    for _m in MARKERS:
+        p = RF.marker_paths(_m)["index"]
         if os.path.exists(p):
             for r in load_csv(p):
                 if r["kind"] == "section":
@@ -647,12 +652,25 @@ def build(regions_csv, limit=None, plates_csv=None, require_background=True,
                                  f"match scene rect {exp_w}x{exp_h} at {um_px} um/px"))
             continue
 
+        # The `marker` column every row below carries, and 06a's join key.
+        # Under `paired` a section belongs to one marker and focus.csv says
+        # which, so that is kept exactly as it was. Under `multiplex` focus.csv
+        # has ONE row per scan and its `marker_channel` is the scan's second
+        # channel - the same marker for every pass. Stamping that put the first
+        # marker's name on every marker's boxes: roi_boxes_<second>.csv said
+        # <first> on every row, 06a.split_by_marker pooled both files into one
+        # group, and the second marker's nuclei had no discs. The directory the
+        # overview is read from above stays focus.csv's; only the label is the
+        # run's.
+        stamp = (f["marker_channel"] if LAYOUT == CH.LAYOUT_PAIRED
+                 else placing)
+
         g2o = grid_to_overview(rep)
         M = affine_from(lambda u, v: (lambda p: (rx + p[0] * scale,
                                                  ry + p[1] * scale))(g2o(u, v)))
 
         geom_rows.append({
-            "scene_uid": uid, "animal": f["animal"], "marker": f["marker_channel"],
+            "scene_uid": uid, "animal": f["animal"], "marker": stamp,
             "czi_file": czi, "scene_index": si,
             "scene_x": rx, "scene_y": ry, "scene_w": rw, "scene_h": rh,
             "overview_um_px": um_px, "native_um_px": BASE_PX_UM,
@@ -712,7 +730,7 @@ def build(regions_csv, limit=None, plates_csv=None, require_background=True,
             # there would put a number in a column 06a reads as an area.
             ax_a, ax_b = ellipse_axes(M, sr) if poly is None else (None, None)
             box_rows.append({
-                "scene_uid": uid, "animal": f["animal"], "marker": f["marker_channel"],
+                "scene_uid": uid, "animal": f["animal"], "marker": stamp,
                 "roi_kind": r.get("roi_kind") or "roi",
                 "region": r.get("region", ""), "seed_n": r.get("seed_n", ""),
                 "sec_x": sx, "sec_y": sy, "sec_r": sr,

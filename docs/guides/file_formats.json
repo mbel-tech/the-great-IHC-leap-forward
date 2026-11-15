@@ -3708,7 +3708,7 @@
      "name": "in_analysis_set",
      "type": "0/1",
      "units": "",
-     "meaning": "From 04j."
+     "meaning": "From 04j, for this row's marker."
     },
     {
      "name": "censored_fraction_in_tissue",
@@ -3792,13 +3792,13 @@
      "name": "n_rois",
      "type": "int",
      "units": "",
-     "meaning": "Regions curated on it."
+     "meaning": "Regions curated on it for this row's marker."
     },
     {
      "name": "n_nuclei",
      "type": "int",
      "units": "",
-     "meaning": "Nuclei measured in it."
+     "meaning": "Nuclei measured in it for this row's marker."
     }
    ]
   },

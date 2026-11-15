@@ -275,10 +275,17 @@ def rgb_dirs(marker):
 
 
 def count_nuclei():
-    """scene_uid -> nuclei measured. Streamed: the file is ~110 MB.
+    """(scene_uid, marker) -> nuclei measured. Streamed: the file is ~110 MB.
 
-    csv.reader and column 0, not DictReader - this needs one field and building
-    a dict per row would be ~900,000 of them for a count.
+    csv.reader and two columns, not DictReader - this needs two fields and
+    building a dict per row would be ~900,000 of them for a count.
+
+    PER MARKER, for the reason count_rois gives: under `multiplex` every
+    marker's nuclei carry the same uid, and a count by uid alone made a section
+    measured for one marker read as measured for all. Under `paired` a uid has
+    one marker, so the count is the one it always was. A file with no `marker`
+    column (none has been written without one, but the column is looked up, not
+    assumed) counts under "", which `_per_marker` falls back to.
     """
     path = os.path.join(RESULTS, "roi_nuclei.csv")
     out = Counter()
@@ -286,15 +293,22 @@ def count_nuclei():
         return out
     with open(path, newline="", encoding="utf-8") as fh:
         rd = csv.reader(fh)
-        next(rd, None)
+        head = next(rd, None) or []
+        mi = head.index("marker") if "marker" in head else None
         for row in rd:
             if row:
-                out[row[0]] += 1
+                out[(row[0], row[mi] if mi is not None else "")] += 1
     return out
 
 
+def _per_marker(table, uid, marker):
+    """`table[(uid, marker)]`, or the marker-less entry an old file gives."""
+    v = table.get((uid, marker))
+    return v if v is not None else table.get((uid, ""))
+
+
 def count_rois():
-    """scene_uid -> discs placed, over EVERY marker's box file.
+    """(scene_uid, marker) -> discs placed, over EVERY marker's box file.
 
     The names come from ls_paths, which holds 05a's rule rather than restating
     it: `roi_boxes_<marker>.csv`, with the pre-2026-09-01 `roi_boxes.csv`
@@ -313,14 +327,20 @@ def count_rois():
     `section_dir` below that it must not pull the image stack in to answer a
     question about a filename.
 
-    Scene uids are disjoint across the markers of a paired study - they are
-    separate acquisitions - so this is a union, not a merge. A file that is not
-    there is recorded by `load` rather than passed over.
+    KEYED BY (scene_uid, marker). Scene uids are disjoint across the markers
+    of a paired study - they are separate acquisitions - so under `paired` the
+    marker adds nothing and this is the union it always was. Under `multiplex`
+    every marker's file names the SAME uids, and a count by uid alone summed
+    both markers' discs onto the section: 2 discs for one marker and 3 for the
+    other read as 5, and a section curated for one marker read as curated for
+    both. The marker is the FILE's, not the row's `marker` column, for the
+    same reason the file is per marker at all. A file that is not there is
+    recorded by `load` rather than passed over.
     """
     out = Counter()
     for m in MARKERS:
         for r in load(NAMES.read("roi_boxes", m)):
-            out[r["scene_uid"]] += 1
+            out[(r["scene_uid"], m)] += 1
     return out
 
 
@@ -355,9 +375,16 @@ def main():
             art[r["scene_uid"]] = r
 
     cand = {r["uid"]: r for r in rel("exclusion_candidates.csv")}
+    # Keyed by (scene_uid, marker), and read back by the row's own marker.
+    # Under `paired` that is the same lookup as before: ANALYSIS_MARKERS is the
+    # measured pass alone and only its rows can match. Under `multiplex` every
+    # marker's set names the same uids, and the `update` that was here kept
+    # whichever marker came last - so a row showed another marker's 04j
+    # verdict under its own name, censored out where its own set kept it.
     aset = {}
     for m in ANALYSIS_MARKERS:
-        aset.update({r["scene_uid"]: r for r in load(NAMES.read("analysis_set", m))})
+        aset.update({(r["scene_uid"], m): r
+                     for r in load(NAMES.read("analysis_set", m))})
 
     # The pairing, and the two columns it is keyed on. 04m owns both - it does
     # the same join over the same file - so they are imported rather than
@@ -381,7 +408,7 @@ def main():
         f = focus.get(uid, {})
         k = keep.get(uid)
         e = excl.get(uid)
-        a = aset.get(uid)
+        a = aset.get((uid, mk))
 
         # The measured pass's exclusion reason is always "partner excluded by
         # the operator" - the real one is on the partner's side, reached
@@ -433,9 +460,11 @@ def main():
 
         # The furthest point this section reached. Ordered most-advanced first,
         # so a measured section reads as measured rather than as reformatted.
-        if n_nuc.get(uid):
+        nuc_here = _per_marker(n_nuc, uid, mk) or 0
+        roi_here = n_roi.get((uid, mk), 0)
+        if nuc_here:
             status = "measured"
-        elif n_roi.get(uid):
+        elif roi_here:
             status = "curated"
         elif e:
             status = "excluded"
@@ -502,7 +531,7 @@ def main():
             # already wrong.
             "censor_img": f"../censor/{uid}_censor.png" if os.path.exists(
                 os.path.join(CENSOR_DIR, uid + "_censor.png")) else "",
-            "n_rois": n_roi.get(uid, 0), "n_nuclei": n_nuc.get(uid, 0),
+            "n_rois": roi_here, "n_nuclei": nuc_here,
         })
 
     rows.sort(key=lambda r: (r["animal"], r["marker"],

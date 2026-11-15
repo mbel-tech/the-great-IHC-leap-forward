@@ -9,6 +9,29 @@ where things landed, not which plausible-looking route was tried and abandoned, 
 
 ---
 
+## 2026-11-15 - Boxes carry the marker they were placed for; multiplex bookkeeping per marker
+
+**Changed:** `05a_roi_geometry` stamps each box and geometry row with the marker the run is placing
+under `multiplex`, instead of `focus.csv`'s `marker_channel`; under `paired` it still stamps
+`marker_channel`, which is the section's own marker. `04p_section_provenance` keys the 04j analysis
+set, the disc count and the nuclei count by (scene_uid, marker) and reads each row's values for that
+row's marker. `06c_excel_dataset`'s coverage sheet counts a section as measured for a marker only
+when 06a has rows for that (section, marker). New checks: a multiplex section placed for two
+markers in `tests/test_roi_geometry.py` (through 05a and 06a), the per-marker verdict and counts in
+`tests/test_section_provenance.py`, and per-marker coverage in `tests/test_roi_dataset.py`.
+
+**Why:** found on review (REVIEW.md rule 5). A multiplex scan has one `focus.csv` row, whose
+`marker_channel` is the first marker, so every marker's `roi_boxes_<m>.csv` said the first marker on
+every row. 06a then put both files' boxes in one group and stopped on the second marker's nuclei as
+having no discs. 04p showed the last marker's 04j verdict on every row and added both markers'
+discs and nuclei together. 06c reported a marker 05c had never run on as fully measured.
+
+**Cost:** under multiplex 04p still writes one row per scan, labelled with the manifest's marker, so
+that row now shows only that marker's verdict and counts. The other markers' verdicts are not in
+the table; a row per (scan, marker) would need 04l's Review pane, which looks rows up by scene_uid
+alone, to change as well. 04o is unchanged: under multiplex it still finds sections for the first
+marker only (see the task report).
+
 ## 2026-11-15 - Partial and trial runs never replace a complete output
 
 **Changed:** a narrowed run no longer writes over the stage's complete table. `05a --limit N`

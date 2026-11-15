@@ -203,6 +203,11 @@ def main(argv=None):
     # would otherwise silently under-report coverage, which is the one thing
     # this sheet exists to state.
     measured = {r["scene_uid"] for r in meas}
+    # The same, per (section, MARKER), for the coverage sheet. Under `multiplex`
+    # every marker's boxes plan the same uids, so a section measured for one
+    # marker is NOT measured for the others - see the coverage loop below.
+    # Under `paired` a uid has one marker and the two sets say the same thing.
+    measured_mk = {(r["scene_uid"], r["marker"]) for r in meas}
     nuc_secs = set()
     with open(NUCLEI_CSV, encoding="utf-8") as fh:
         rd = csv.reader(fh)
@@ -439,17 +444,23 @@ def main(argv=None):
     # Coverage is per (animal, MARKER): pooling the two would report one
     # percentage for a pERK pass that is finished and a PCNA one that has not
     # started, which is the one question this sheet exists to answer.
+    #
+    # And "measured" is per marker too. It was `pl & measured`, a set of uids,
+    # which under `multiplex` - where every marker plans the same uids - made
+    # the first marker's finished pass read as every marker's: 2/2 for a marker
+    # 05c had never been run on.
     coverage = []
     for an, mk in sorted({(b["animal"], b["marker"]) for b in boxes},
                          key=lambda t: (NM.natural_key(t[0]), t[1])):
         pl = {b["scene_uid"] for b in boxes
               if b["animal"] == an and b["marker"] == mk}
+        done = sum(1 for u in pl if (u, mk) in measured_mk)
         coverage.append({
             "sample": an, "marker": mk, "treatment": groups.get(an, ""),
             "environment": envs.get(an, ""),
-            "sections_measured": len(pl & measured),
+            "sections_measured": done,
             "sections_planned": len(pl),
-            "percent": round(100 * len(pl & measured) / len(pl), 1) if pl else "",
+            "percent": round(100 * done / len(pl), 1) if pl else "",
         })
 
     write_workbook(args.out, (("by_roi", by_roi), ("by_disc", by_disc),

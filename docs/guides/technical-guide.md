@@ -3436,7 +3436,7 @@ Every scanned section, both markers, and what each stage decided about it. A joi
 | `qc_source` | text |  | `exclusion_candidates` or `reason_string`. |
 | `n_artifact_objects` | int |  | From 04g. |
 | `artifact_pct_of_tissue` | float | % | From 04g. |
-| `in_analysis_set` | 0/1 |  | From 04j. |
+| `in_analysis_set` | 0/1 |  | From 04j, for this row's marker. |
 | `censored_fraction_in_tissue` | float |  | From 04j. |
 | `censor_reason` | text |  | From 04j. |
 | `reformatted` | 0/1 |  | 1 when 04a made its 256 picture. |
@@ -3450,8 +3450,8 @@ Every scanned section, both markers, and what each stage decided about it. A joi
 | `mask_img` | path |  | The artifact mask. |
 | `tissue_img` | path |  | The tissue mask (`--tissue-masks`). |
 | `censor_img` | path |  | The clipped-pixel mask. |
-| `n_rois` | int |  | Regions curated on it. |
-| `n_nuclei` | int |  | Nuclei measured in it. |
+| `n_rois` | int |  | Regions curated on it for this row's marker. |
+| `n_nuclei` | int |  | Nuclei measured in it for this row's marker. |
 
 #### `curation/ls_roi_curator_v1.json`
 

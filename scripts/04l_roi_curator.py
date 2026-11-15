@@ -72,6 +72,12 @@ Interaction
   be worth quantifying before anyone has landmarked it, so it sets no other flag
   and is reported on its own. "favourites only" narrows the strip to that subset.
 
+  **`q` flags a section as hard to attribute** - one whose region boundaries
+  or atlas level are hard to call, worth a second look or a second opinion.
+  Like a favourite it is orthogonal to everything else and sets no other flag;
+  the strip draws it with a dashed orange edge, `roi_plates.csv` carries it in
+  its own `difficult` column, and "difficult only" narrows the strip to it.
+
   **The plate and the section step independently.** The up/down arrows move
   through sections and leave the plate where it is; left/right moves the plate.
   Consecutive sections are at neighbouring levels, so the plate rarely needs to
@@ -1015,11 +1021,12 @@ canvas{display:block;width:100%;height:100%;object-fit:contain;cursor:crosshair;
 .btn-region,.btn-guide{--c:#1a7f37;--b:#4ac26b;--onbg:#dafbe1;--ont:#116329}
 .btn-edit  {--c:#0a7280;--b:#56c2cf;--onbg:#e0f7fa;--ont:#0a7280}
 .btn-shot  {--c:#9a5b00;--b:#e0a54a;--onbg:#fff8ec;--ont:#9a5b00}
-.btn-plate,.btn-rot,.btn-fav,.btn-excl,.btn-kill,.btn-bg,.btn-region,.btn-guide,
+.btn-hard  {--c:#953800;--b:#fb8f44;--onbg:#fff1e5;--ont:#762c00}
+.btn-plate,.btn-rot,.btn-fav,.btn-hard,.btn-excl,.btn-kill,.btn-bg,.btn-region,.btn-guide,
 .btn-edit,.btn-shot{color:var(--c);border-color:var(--b)}
-.btn-plate:hover,.btn-rot:hover,.btn-fav:hover,.btn-excl:hover,.btn-kill:hover,.btn-bg:hover,
+.btn-plate:hover,.btn-rot:hover,.btn-fav:hover,.btn-hard:hover,.btn-excl:hover,.btn-kill:hover,.btn-bg:hover,
 .btn-region:hover,.btn-guide:hover,.btn-edit:hover,.btn-shot:hover{border-color:var(--c)}
-.mode-on,.fav-on,.kill-on,.bg-on,.reg-on,.guide-on{background:var(--onbg,#ddf4ff) !important;
+.mode-on,.fav-on,.hard-on,.kill-on,.bg-on,.reg-on,.guide-on{background:var(--onbg,#ddf4ff) !important;
        color:var(--ont,#0550ae) !important;border-color:var(--c,#0969da) !important}
 /* Disabled, but never FAINT. Shotgun spends most of its life disabled - a page
    opened from disk cannot build a deck at all, which is the normal way this
@@ -1091,6 +1098,9 @@ canvas{display:block;width:100%;height:100%;object-fit:contain;cursor:crosshair;
 .cell.plateonly{border-color:#0969da;background:#ddf4ff}
 .cell.noroi{border-color:#bfc6ce;opacity:.55}
 .cell.fav{box-shadow:inset 0 0 0 2px #9a6700}
+/* Hard to attribute: an OUTLINE, so it never competes with the border (status)
+   or the box-shadow (favourite / active) - all three can be on at once. */
+.cell.hard{outline:2px dashed #bc4c00;outline-offset:1px}
 .cell.excl{border-color:#cf222e;opacity:.5}
 .cell.excl img{filter:grayscale(1)}
 /* Reinstated in Review mode: curatable now, but NOT in the index until 04a runs
@@ -1222,6 +1232,7 @@ canvas{display:block;width:100%;height:100%;object-fit:contain;cursor:crosshair;
   <label class="chk">Marker
     <select id="marker" onchange="onMarker(); this.blur()"></select></label>
   <label class="chk"><input type="checkbox" id="favOnly" onchange="render(); this.blur()">favourites only</label>
+  <label class="chk"><input type="checkbox" id="hardOnly" onchange="render(); this.blur()">difficult only</label>
   <label class="chk"><input type="checkbox" id="hideExcl" onchange="render(); this.blur()">hide excluded</label>
   <span class="grow"></span>
   <span class="counts">
@@ -1230,6 +1241,7 @@ canvas{display:block;width:100%;height:100%;object-fit:contain;cursor:crosshair;
     <span class="row" style="color:#0969da"><b id="nassign" style="color:inherit"></b> plate only</span>
     <span class="row"><b id="nnoroi"></b> no ROI</span>
     <span class="row" style="color:#9a6700"><b id="nfav" style="color:inherit"></b> &#9733; favourite</span>
+    <span class="row" style="color:#bc4c00"><b id="nhard" style="color:inherit"></b> difficult</span>
     <span class="row" style="color:#cf222e"><b id="nexcl" style="color:inherit"></b> excluded</span>
   </span>
   <span class="deliver">
@@ -1347,6 +1359,8 @@ canvas{display:block;width:100%;height:100%;object-fit:contain;cursor:crosshair;
   <nav id="rail" aria-label="Tools">
     <div class="grp"><h3>This section</h3>
       <button id="favBtn" class="btn-fav" data-k="f" onclick="toggleFav()">Favourite</button>
+      <button id="hardBtn" class="btn-hard" data-k="q" onclick="toggleHard()"
+              title="Flag this section as hard to attribute (q)">Hard to attribute</button>
       <button id="noroiBtn" class="btn-excl" onclick="toggleNoRoi()">No ROI here</button>
       <button id="exclBtn" class="btn-kill" data-k="x" onclick="toggleExcl()">Exclude</button></div>
     <div class="grp"><h3>Atlas plate</h3>
@@ -1459,6 +1473,7 @@ canvas{display:block;width:100%;height:100%;object-fit:contain;cursor:crosshair;
       <div><kbd>+</kbd> <kbd>-</kbd> <kbd>0</kbd> zoom in / out / fit<br>
         <kbd>a</kbd> assign plate<br>
         <kbd>f</kbd> favourite<br>
+        <kbd>q</kbd> flag as hard to attribute<br>
         <kbd>x</kbd> exclude this section<br>
         <kbd>d</kbd> background disc mode<br>
         <kbd>&larr;</kbd> <kbd>&rarr;</kbd> previous / next plate<br>
@@ -1482,6 +1497,7 @@ canvas{display:block;width:100%;height:100%;object-fit:contain;cursor:crosshair;
     <p style="color:var(--fg)"><span style="color:#6639ba">purple</span> registered &middot;
       <span style="color:#0969da">blue</span> plate only &middot;
       <span style="color:#9a6700">gold edge</span> favourite &middot;
+      <span style="color:#bc4c00">dashed orange</span> hard to attribute &middot;
       <span style="color:#bf3989">pink</span> background disc &middot;
       faded = no ROI &middot; red = excluded. Everything autosaves.</p>
   </div>
@@ -1816,7 +1832,7 @@ function resolvePlate(rec, plates){
 // filters the store on every load, so a section curated ENTIRELY with polygons
 // and no landmarks would have been thrown away as an empty record the next time
 // the page opened.
-const hasRoiWork  = r => !!r && !!(r.assigned || r.fav || r.excl || r.noroi
+const hasRoiWork  = r => !!r && !!(r.assigned || r.fav || r.hard || r.excl || r.noroi
                                    || (r.pairs && r.pairs.length)
                                    || (r.polys && r.polys.length));
 const hasDecision = r => hasRoiWork(r) || !!(r && (r.rot || r.rev));
@@ -1983,6 +1999,7 @@ const inScope = () => DATA.filter(d=>d.animal===el("animal").value
 // written to roi_plates.csv with excluded=1.
 const rows = () => inScope()
   .filter(d => !el("favOnly").checked || S[d.uid]?.fav)
+  .filter(d => !el("hardOnly")?.checked || S[d.uid]?.hard)
   .filter(d => !el("hideExcl").checked || !isExcl(d.uid))
   .sort((a,b)=>a.order-b.order);
 // `assigned` is set only by a real slider move or an explicit button, never by
@@ -3761,6 +3778,8 @@ function status(){
   el("assignBtn").classList.toggle("mode-on", !!sa.assigned);
   el("favBtn").textContent = sa.fav ? "Favourite ★" : "Favourite";
   el("favBtn").classList.toggle("fav-on", !!sa.fav);
+  el("hardBtn").textContent = sa.hard ? "Hard to attribute ⚑" : "Hard to attribute";
+  el("hardBtn").classList.toggle("hard-on", !!sa.hard);
   el("exclBtn").textContent = sa.excl ? "Excluded ✕" : "Exclude";
   el("exclBtn").classList.toggle("kill-on", !!sa.excl);
   // Two facts now, not three: is the tool open, and what is drawn. There is no
@@ -3846,6 +3865,14 @@ function toggleFav(){
   if(!active) return;
   undoMark(active, "favourite");
   const s=st(active); s.fav=!s.fav; save(); paintCell(active); status();
+}
+// HARD TO ATTRIBUTE flags a section whose regions or level are hard to call -
+// for a second look or a second opinion. Orthogonal like the favourite: it sets
+// no other flag, and the export carries it in its own column.
+function toggleHard(){
+  if(!active) return;
+  undoMark(active, "hard to attribute");
+  const s=st(active); s.hard=!s.hard; save(); paintCell(active); status();
 }
 function toggleNoRoi(){
   if(!active) return;
@@ -3989,7 +4016,7 @@ function cellClass(uid){
              : isDone(uid) ? "done" : isNoRoi(uid) ? "noroi"
              : isPlateOnly(uid) ? "plateonly" : "";
   const cls = isReinstated(uid) ? (base + " reinstated").trim() : base;
-  return S[uid]?.fav ? cls + " fav" : cls;
+  return ((S[uid]?.fav ? cls + " fav" : cls) + (S[uid]?.hard ? " hard" : "")).trim();
 }
 function cellTag(uid){
   const s=S[uid], n=nRoi(uid);
@@ -4010,6 +4037,7 @@ function counts(){
   // the list length the moment "favourites only" is ticked
   el("nfav").textContent    = inScope().filter(d=>S[d.uid]?.fav).length;
   el("nexcl").textContent   = inScope().filter(d=>isExcl(d.uid)).length;
+  if(el("nhard")) el("nhard").textContent = inScope().filter(d=>S[d.uid]?.hard).length;
 }
 // Update ONE strip cell. Every interaction used to rebuild all 87 cells and
 // reload their images, which is why it felt slow even when it was not recursing.
@@ -4118,8 +4146,8 @@ function emptyNote(){
   const a = el("animal").value, m = el("marker").value;
   // The two checkboxes hid everything there is. Said first and plainly,
   // because it is the one cause the operator made a moment ago and can undo.
-  if(inScope().length) return `Nothing matches these filters. Untick <b>favourites only</b>`
-                            + ` or <b>hide excluded</b>.`;
+  if(inScope().length) return `Nothing matches these filters. Untick <b>favourites only</b>,`
+                            + ` <b>difficult only</b> or <b>hide excluded</b>.`;
   const mine = DATA.filter(d => d.animal === a);
   if(!mine.length) return `<b>${a}</b> has no sections in this page at all.`;
   const label = {}; MARKERS.forEach(k => label[k.id] = k.label);
@@ -4268,6 +4296,7 @@ addEventListener("keydown", e=>{
   else if(e.key==="0"){ secFit(); e.preventDefault(); }
   else if(e.key==="a" || e.key==="A"){ markAssigned(); }
   else if(e.key==="f" || e.key==="F"){ toggleFav(); }
+  else if(e.key==="q" || e.key==="Q"){ toggleHard(); }
   else if(e.key==="x" || e.key==="X"){ toggleExcl(); }
   // One key, whichever thing was placed last - vertex, then region, then
   // landmark. See undoZ.
@@ -4321,7 +4350,9 @@ function exportCsv(){
              "plate_fp","plate_px","plate_verified",
              "plate_has_seeds","n_landmarks","n_background","transform","status",
              "favorite","view_rotation_deg",
-             "excluded"]];
+             "excluded",
+             // Appended, like every new column: readers index by header.
+             "difficult"]];
   // seed_n / seed_region say whether a landmark was placed against a numbered
   // atlas seed (guided) or free-clicked, and which one. A guided pair is the
   // operator asserting a region position, so the spline reproduces it exactly
@@ -4378,7 +4409,8 @@ function exportCsv(){
     const excl = isExcl(d.uid);
     const status = excl ? "excluded"
                  : s.noroi ? "no_roi" : n>=3 ? "registered"
-                 : chosen ? "plate_only" : "favourite_only";
+                 : chosen ? "plate_only"
+                 : (s.hard && !s.fav) ? "difficult_only" : "favourite_only";
     // Blank rather than plate_001 when no plate was ever chosen - otherwise a
     // favourite with no assignment reads as a deliberate call on plate_001.
     //
@@ -4428,7 +4460,7 @@ function exportCsv(){
              chosen?(s.verified||""):"",
              chosen?(P.labelled?1:0):"", n, nBg, T?T.kind:"", status,
              s.fav?1:0, (s.rot||0).toFixed(1),
-             excl?1:0]);
+             excl?1:0, s.hard?1:0]);
     // Gate on the landmarks themselves, NOT on status - a section that was
     // landmarked and then excluded still has that work, and keying this on
     // status would silently drop it from both files the moment the exclude
@@ -5977,7 +6009,7 @@ function revAct(act){
   // Undo means undo. A record this call invented, carrying nothing but the
   // exclusion the pipeline already decided, says nothing the pipeline has not
   // said - and roi_plates.csv reports sections the OPERATOR touched.
-  if(!act && mine && !e.assigned && !e.fav && !e.noroi && !e.pairs.length
+  if(!act && mine && !e.assigned && !e.fav && !e.hard && !e.noroi && !e.pairs.length
      && !e.rot){
     delete S[revSel];
   }

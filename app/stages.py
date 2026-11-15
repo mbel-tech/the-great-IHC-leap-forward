@@ -862,6 +862,15 @@ STAGES = [
                 "such a file is nuclear / stardist / nucleus-shaped - there was "
                 "no other route - and 06a's Abercrombie gate reads them."),
 
+    Stage("roi_area", "06j  Backfill the usable area of each ROI", "Repair older outputs",
+          script="06j_backfill_roi_area.py",
+          outputs=["results/roi_box_status.csv"],
+          needs=["detect"],
+          blurb="For sections measured before 05c recorded it: the share of "
+                "each ROI's outline that is on the tissue and off the artifact "
+                "mask, which 06a divides the counts by. Reads no CZI. Run 06a "
+                "again afterwards."),
+
 ]
 
 BY_ID = {s.sid: s for s in STAGES}

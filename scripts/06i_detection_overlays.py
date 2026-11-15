@@ -629,8 +629,8 @@ def scene_record(prep, uid, marker, boxes, ident, fp, meas):
     """(index row, strip lines) of a section's scene picture.
 
     Totals are over its ROIs - roi_kind "roi", not background discs - from
-    the counts drawn; a box too small for 05c to segment has no outlines and
-    adds 06a's row for it (0). `meas` is {roi_index: roi_measurements row}.
+    the counts drawn; a box with no outlines adds 06a's row for it, and one
+    05c did not segment (too small, say) has no row either and is left out. `meas` is {roi_index: roi_measurements row}.
     The total % positive is blank ("n/a" on the strip) wherever 06a withholds
     the fraction (denominator_withheld_reason: segmented on the marker
     itself), as each ROI's is.
@@ -641,7 +641,11 @@ def scene_record(prep, uid, marker, boxes, ident, fp, meas):
             continue
         c = prep["counts_by_roi"].get(bi)
         if c is None:
-            m = meas.get(bi, {})
+            m = meas.get(bi)
+            if m is None:
+                # Not segmented by 05c (results/roi_box_status.csv), so 06a
+                # has no row for it: not a count of zero, and not in a total.
+                continue
             frac = m.get("frac_positive", "")
             c = {"n_counted": _num(m.get("n_nuclei", 0)) or 0,
                  "n_positive": (_num(m.get("n_positive", 0)) or 0

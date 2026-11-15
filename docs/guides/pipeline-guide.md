@@ -1468,6 +1468,12 @@ geometry it was measured on. A resume decides from that log:
 The shape each region was measured on is also written to `results/roi_measured_geometry.csv`, which
 is what lets 06a catch a region that has moved.
 
+What happened to each region is written to `results/roi_box_status.csv`: whether it was segmented
+at all (a box under 8 px a side, or a crop with no intensity range, is not), and the share of its
+outline that is on the tissue and off the artifact mask. 06a leaves a region that was not
+segmented out of the dataset instead of reporting it as zero, and divides every count by the usable
+share of the area.
+
 As each section is finished, its detection overlay crops (one picture per region and background
 disc, see [06i](#stage-detection_overlays)) are drawn from the pixels just read, on a separate
 thread, so detection does not wait for them. A picture that cannot be written is reported and
@@ -1800,6 +1806,25 @@ nuclei. On an older table the three answers are not unknown — the pipeline had
 object back then, and it was the counterstain — so this step writes that reading in rather than
 leaving a reader to assume it. It reads the whole table, adds the three columns to every row at once,
 and refuses a table whose columns it does not recognise. Running it twice changes nothing.
+
+## 06j  Backfill the usable area of each ROI {#stage-roi_area}
+
+*`scripts/06j_backfill_roi_area.py` → `results/roi_box_status.csv`*
+
+Works out, for regions measured before the detection step recorded it, how much of each region's
+outline is tissue that a nucleus could have been counted on.
+
+Nuclei found on an artifact or off the tissue are left out of every count. The area a count is
+divided by has to lose the same ground, or a region lying half over a ventricle, the glass or a
+masked fold reads at about half its true density. Newer runs of the detection step record that
+share for every region as they measure it. For older results this step takes it from the tissue
+and artifact masks as they are now, for every marker, without opening a slide or measuring anything
+again. It changes no existing file. Build the per-region table (06a) and the spreadsheets again
+afterwards: the areas and every density change.
+
+It cannot add whether each region was segmented at all, because that was not recorded at the time:
+a region the detection step skipped as too small stays in such a dataset as a count of zero until
+its section is measured again.
 
 \newpage
 

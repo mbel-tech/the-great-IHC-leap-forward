@@ -819,6 +819,91 @@ def _run_06a_on(tmp, stem, npath, bpath):
         G6A.NUCLEI_CSV, G6A.MEAS_CSV, G6A.SPEC_CSV, G5.all_boxes = keep
 
 
+def box_status_check(tmp):
+    """05c's box status reaches the numbers: a box NOT segmented is left out,
+    and a count is divided by the usable share of the outline.
+
+    Both were silent. A box 05c could not segment wrote no nuclei, as an empty
+    one does, and came out as n = 0 and a density of 0.0. And the nuclei on an
+    artifact or off the tissue were dropped while the area stayed the whole
+    outline, so a disc half over a ventricle read at half its density.
+    """
+    nuc, boxes = [], []
+    boxes.append(box("Q1", "roi", "Dm"))            # 1: half usable
+    boxes.append(box("Q1", "roi", "Vv"))            # 2: not segmented
+    boxes.append(box("Q1", "roi", "Dl"))            # 3: no usable fraction
+    boxes.append(box("Q1", "background", "__background__"))   # 4
+    nid = 0
+    for idx, region in ((1, "Dm"), (3, "Dl")):
+        for _ in range(4):
+            nid += 1
+            nuc.append(nucleus("Q1", "roi", region, idx, nid, 200.0))
+    for v in BG_S1:
+        nid += 1
+        nuc.append(nucleus("Q1", "background", "__background__", 4, nid, v))
+    npath = os.path.join(tmp, "st_nuclei.csv")
+    bpath = os.path.join(tmp, "st_boxes.csv")
+    spath = os.path.join(tmp, "st_status.csv")
+    for path, cols, rows in ((npath, NUC_COLS, nuc), (bpath, BOX_COLS, boxes)):
+        with open(path, "w", newline="", encoding="utf-8") as fh:
+            w = csv.DictWriter(fh, fieldnames=cols)
+            w.writeheader()
+            w.writerows(rows)
+    with open(spath, "w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(["scene_uid", "marker", "roi_index", "segmented",
+                    "not_segmented_reason", "usable_area_fraction",
+                    "area_judged_on"])
+        w.writerow(["Q1", "AF568", 1, 1, "", "0.5", "overview"])
+        w.writerow(["Q1", "AF568", 2, 0, "the box is 4 x 90 px", "1.0", "overview"])
+        w.writerow(["Q1", "AF568", 3, "", "", "", ""])
+        w.writerow(["Q1", "AF568", 4, 1, "", "1.0", "overview"])
+
+    def run(status):
+        keep = G6A.STATUS_CSV
+        G6A.STATUS_CSV = status
+        try:
+            return _run_06a_on(tmp, "st", npath, bpath)
+        finally:
+            G6A.STATUS_CSV = keep
+
+    rc, plain = run(os.path.join(tmp, "no_such_status.csv"))
+    chk("no status record: 06a exits 0", rc, 0)
+    chk("...and every box has a row, as before", len(plain), 4)
+    whole = {r["roi_index"]: r for r in plain}
+    chk("...over the whole outline",
+        whole["1"]["roi_area_um2"], whole["1"]["roi_outline_area_um2"])
+    chk("...with no usable fraction to show",
+        whole["1"]["roi_usable_area_fraction"], "")
+
+    rc, meas = run(spath)
+    chk("with a status record: 06a exits 0", rc, 0)
+    by = {r["roi_index"]: r for r in meas}
+    chk("a box 05c did not segment has NO row (it is not a zero)",
+        sorted(by), ["1", "3", "4"])
+    chk("...and the others keep their own index", by["3"]["region"], "Dl")
+    chk("half the outline usable: half the area",
+        round(float(by["1"]["roi_area_um2"])
+              / float(by["1"]["roi_outline_area_um2"]), 3), 0.5)
+    # Densities are printed to 0.1, so they are checked against the area in
+    # the row and not as a ratio of two rounded numbers.
+    chk("...so the density is the count over the usable area",
+        by["1"]["profile_density_per_mm2"],
+        round(4 / float(by["1"]["roi_area_mm2"]), 1))
+    chk("...which is not the density over the whole outline",
+        by["1"]["profile_density_per_mm2"] != whole["1"]["profile_density_per_mm2"],
+        True)
+    chk("...the positive density rises with it",
+        float(by["1"]["positive_density_per_mm2"])
+        > float(whole["1"]["positive_density_per_mm2"]), True)
+    chk("...and the count is the same count",
+        by["1"]["n_nuclei"], whole["1"]["n_nuclei"])
+    chk("the fraction is in the row", by["1"]["roi_usable_area_fraction"], "0.5")
+    chk("a blank fraction is the whole outline",
+        (by["3"]["roi_area_um2"], by["3"]["roi_usable_area_fraction"]),
+        (whole["3"]["roi_area_um2"], ""))
+
+
 def multiplex_join_check(tmp):
     """Under `multiplex` the join must be per MARKER, not per section position.
 
@@ -1032,6 +1117,9 @@ def main():
         # ---- which under `multiplex` means per marker, not per position
         multiplex_join_check(tmp)
         multiplex_unmeasured_check(tmp)
+
+        # ---- what 05c says about each box reaches the area and the rows
+        box_status_check(tmp)
 
         # ---- and the whole nuclei table is never held at once
         memory_check(tmp)

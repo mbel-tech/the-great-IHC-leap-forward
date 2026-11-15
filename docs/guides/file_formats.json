@@ -4971,6 +4971,59 @@
    ]
   },
   {
+   "path": "results/roi_box_status.csv",
+   "names": [
+    "roi_box_status.csv"
+   ],
+   "writer": "05c_detect_rois.py",
+   "what": "What happened to each region when it was measured: whether it was segmented at all, and the share of its outline that is usable tissue. 06a leaves out a region that was not segmented and divides counts by the usable share of the area.",
+   "columns_from": "05c_detect_rois.py:STATUS_COLUMNS",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye name, as declared in the study."
+    },
+    {
+     "name": "roi_index",
+     "type": "int",
+     "units": "",
+     "meaning": "Row in roi_boxes."
+    },
+    {
+     "name": "segmented",
+     "type": "int",
+     "units": "",
+     "meaning": "1 if the box was segmented, 0 if not (too small, no intensity range). Blank on a row added by the 06j repair: it was not recorded."
+    },
+    {
+     "name": "not_segmented_reason",
+     "type": "text",
+     "units": "",
+     "meaning": "Why not, when `segmented` is 0."
+    },
+    {
+     "name": "usable_area_fraction",
+     "type": "float",
+     "units": "",
+     "meaning": "Share of the region's outline that is on the tissue and off the artifact mask, 0 to 1. Blank when it could not be taken."
+    },
+    {
+     "name": "area_judged_on",
+     "type": "text",
+     "units": "",
+     "meaning": "`overview` when both masks were read at the overview's 5.2 µm/px, `grid` when either was read from the 256 grid copy."
+    }
+   ]
+  },
+  {
    "path": "results/roi_colocalisation.csv",
    "names": [
     "roi_colocalisation.csv"
@@ -5376,13 +5429,25 @@
      "name": "roi_area_um2",
      "type": "float",
      "units": "µm²",
-     "meaning": "Region area on the slide."
+     "meaning": "Area of the region that is usable tissue: its outline on the slide times roi_usable_area_fraction (the whole outline where that is blank). What every density divides by."
     },
     {
      "name": "roi_area_mm2",
      "type": "float",
      "units": "mm²",
      "meaning": "The same."
+    },
+    {
+     "name": "roi_outline_area_um2",
+     "type": "float",
+     "units": "µm²",
+     "meaning": "Area of the region's whole outline on the slide."
+    },
+    {
+     "name": "roi_usable_area_fraction",
+     "type": "float",
+     "units": "",
+     "meaning": "From roi_box_status.csv: the share of the outline on the tissue and off the artifact mask. Blank where 05c recorded none."
     },
     {
      "name": "n_nuclei",

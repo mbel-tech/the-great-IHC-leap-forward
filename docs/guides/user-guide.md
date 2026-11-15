@@ -542,13 +542,14 @@ For PCNA, only the positive density is reported; see *PCNA: counted on its own c
 
 ### Repair older outputs
 
-Three tools fix results files written by older versions of the pipeline. They are not part of a normal run. Each backs the file up first, and **Report only** (`--dry-run`) says what would change without writing.
+Four tools fix results written by older versions of the pipeline. They are not part of a normal run. The first three back the results file up first, and **Report only** (`--dry-run`) says what would change without writing. The fourth changes no existing file: it adds one, and the per-region table has to be built again after it.
 
 | Tool | Use it when |
 | --- | --- |
 | 06f Recompute the censored flag | A results file was written before detection flagged clipped nuclei itself |
 | 06g Flag nuclei off the section | A results file was written before detection flagged nuclei found on bare glass |
 | 06h Backfill segmentation provenance | A results file lacks the columns saying which channel and method found each object |
+| 06j Backfill the usable area of each ROI | The per-region step says some discs have no recorded usable area. Densities are then per area of tissue under the region, not per area of its whole outline |
 
 ## 8. Results: unblinding, spreadsheets and figures
 

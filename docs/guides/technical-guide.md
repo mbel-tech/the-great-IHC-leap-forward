@@ -769,6 +769,7 @@ The full table, generated from the code:
 | `recensor` | 06f Recompute the censored flag | Repair older outputs | `06f_recensor_nuclei.py` | detect, saturation_raw | `results/_pre_06f_backup` | none |  | yes |
 | `off_tissue` | 06g Flag nuclei off the section | Repair older outputs | `06g_flag_off_tissue.py` | detect | `results/_pre_06g_backup` | none |  | yes |
 | `seg_provenance` | 06h Backfill segmentation provenance | Repair older outputs | `06h_backfill_provenance.py` | detect | `results/_pre_06h_backup` | none |  | yes |
+| `roi_area` | 06j Backfill the usable area of each ROI | Repair older outputs | `06j_backfill_roi_area.py` | detect | `results/roi_box_status.csv` | none |  | yes |
 <!-- /tables:stages -->
 
 `scripts/run_all.sh` is the same order for the command line, as fifteen numbered steps from the manifest to
@@ -1638,6 +1639,15 @@ nucleus-shaped, because there was no other route then. It refuses any header but
 columns in order, and rewrites every row or none. The column list and fill values are imported from 05c.
 Run 06g first on a 20-column file. A 05c resume onto an old file does the same backfill itself.
 
+### `06j_backfill_roi_area.py`
+
+Stage `roi_area` (Repair older outputs). Runs `05c_detect_rois.py --marker <m> --backfill-status` for
+every marker that has boxes: for each measured section with no rows in `results/roi_box_status.csv` it
+writes the share of each ROI's outline that is on the tissue and off the artifact mask, sampled on a
+regular grid of native pixels (at most 250,000 points a box) through the same mask lookups that flag a
+nucleus `off_tissue` or `artifact`. Reads no CZI, loads no model, changes no existing file; `segmented`
+is left blank on these rows. 06a then divides counts by the usable area. Run 06a to 6d again afterwards.
+
 ### `06i_detection_overlays.py`
 
 Stage `detection_overlays`. Pictures of every nucleus found, positives filled in, for checking the
@@ -2046,6 +2056,7 @@ straight from `sys.argv`) without running it. A script with no options says "(no
 | `05c_detect_rois.py` | `--marker` | `_default` | which marker's boxes to measure (default <_default>). Appends to the same roi_nuclei.csv - the markers have disjoint sections. Choices: G5.MARKERS. |
 | `05c_detect_rois.py` | `--force` | off | redo finished sections |
 | `05c_detect_rois.py` | `--no-overlays` | off | do not draw the ROI and background-disc crops into detection_overlays/ as sections are measured (06i can draw them later) |
+| `05c_detect_rois.py` | `--backfill-status` | off | measure nothing: add the usable area of each ROI (results/roi_box_status.csv) for sections measured before this stage recorded it, from the masks as they are now, so 06a divides their counts by the tissue the outline covers and not the whole outline |
 | `06a_roi_dataset.py` | (none) |  |  |
 | `06b_join_sampling.py` | `--xlsx` | `DEFAULT_XLSX` |  |
 | `06c_excel_dataset.py` | `--out` | `XLSX` |  |
@@ -2071,6 +2082,7 @@ straight from `sys.argv`) without running it. A script with no options says "(no
 | `06i_detection_overlays.py` | `--limit` |  | only the first N sections of each marker |
 | `06i_detection_overlays.py` | `--force` | off | redraw sections whose inputs have not changed (and the crops 05c drew) |
 | `06i_detection_overlays.py` | `--workers` | `0` | whole-scene pictures drawn at once, each only when there is memory for it (default 0: half the cores, at most 4 - <DEFAULT_WORKERS> here) |
+| `06j_backfill_roi_area.py` | (none) |  |  |
 | `atlas_pdf.py` | (none) |  |  |
 | `atlas_polygons.py` | (none) |  |  |
 | `atlas_registry.py` | (none) |  |  |
@@ -3704,6 +3716,23 @@ The shape each region was measured on, so 06a can tell when a region was moved a
 | `sec_poly` | text |  | As in roi_boxes. |
 | `area_um2` | float | µm² | As in roi_boxes. |
 
+#### `results/roi_box_status.csv`
+
+What happened to each region when it was measured: whether it was segmented at all, and the share of its outline that is usable tissue. 06a leaves out a region that was not segmented and divides counts by the usable share of the area.
+
+- **Written by:** 05c_detect_rois.py
+- **Read by:** 06a_roi_dataset.py
+
+| Column | Type | Units | Meaning |
+|------------|------|------|---------------------------|
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
+| `marker` | text |  | The marker's dye name, as declared in the study. |
+| `roi_index` | int |  | Row in roi_boxes. |
+| `segmented` | int |  | 1 if the box was segmented, 0 if not (too small, no intensity range). Blank on a row added by the 06j repair: it was not recorded. |
+| `not_segmented_reason` | text |  | Why not, when `segmented` is 0. |
+| `usable_area_fraction` | float |  | Share of the region's outline that is on the tissue and off the artifact mask, 0 to 1. Blank when it could not be taken. |
+| `area_judged_on` | text |  | `overview` when both masks were read at the overview's 5.2 µm/px, `grid` when either was read from the 256 grid copy. |
+
 #### `results/roi_colocalisation.csv`
 
 Multiplex studies only: which object of one marker overlaps which of another.
@@ -3825,8 +3854,10 @@ One row per region and background disc per section: counts, positives and densit
 | `plate_id` | text |  | Blank (kept for older readers). |
 | `sec_x` | float | px (256 frame) | From roi_boxes. |
 | `sec_y` | float | px (256 frame) | From roi_boxes. |
-| `roi_area_um2` | float | µm² | Region area on the slide. |
+| `roi_area_um2` | float | µm² | Area of the region that is usable tissue: its outline on the slide times roi_usable_area_fraction (the whole outline where that is blank). What every density divides by. |
 | `roi_area_mm2` | float | mm² | The same. |
+| `roi_outline_area_um2` | float | µm² | Area of the region's whole outline on the slide. |
+| `roi_usable_area_fraction` | float |  | From roi_box_status.csv: the share of the outline on the tissue and off the artifact mask. Blank where 05c recorded none. |
 | `n_nuclei` | int |  | Nuclei kept (not on an artifact, not off tissue). |
 | `n_positive` | int |  | Of those, positive: marker_median above the cut, or censored. Blank with no cut. |
 | `frac_positive` | float |  | n_positive / n_nuclei; blank where withheld. |

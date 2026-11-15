@@ -670,7 +670,11 @@ with temp_study(acquisition=PAIRED) as study:
     rowsb = [r for r in index.values() if r["scene_uid"] == B and r["roi_index"] == "1"]
     lb = OV.crop_lines(rowsb[0])
     chk("section B (2 background nuclei) has no cut in 06a",
-        [r["section_positivity_cut"] for r in meas if r["scene_uid"] == B], ["", "", ""])
+        [r["section_positivity_cut"] for r in meas if r["scene_uid"] == B], ["", ""])
+    # Its third box is 4 px wide: 05c does not segment it and says so in
+    # roi_box_status.csv, and 06a leaves it out instead of reporting n = 0.
+    chk("...and the box too small to segment has no 06a row",
+        sorted(r["roi_index"] for r in meas if r["scene_uid"] == B), ["1", "2"])
     chk("...its strip says 'no cut: too few background nuclei'",
         "no cut: too few background nuclei" in lb[1], True)
     chk("...and its index cut is blank", rowsb[0]["cut"], "")

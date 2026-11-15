@@ -9,6 +9,35 @@ where things landed, not which plausible-looking route was tried and abandoned, 
 
 ---
 
+## 2026-11-15 - Densities are per area of usable tissue; an unsegmented ROI is not a zero
+
+**Changed:** 05c writes `results/roi_box_status.csv`, one row per ROI: whether the box was segmented,
+and the share of its outline that is on the tissue and off the artifact mask
+(`usable_area_fraction`). 06a multiplies the ROI area by that share, adds `roi_outline_area_um2` and
+`roi_usable_area_fraction` to `roi_measurements.csv`, and leaves a box 05c did not segment out of the
+dataset. `06j_backfill_roi_area.py` (Measure > Repairs for older results) adds the area for sections
+already measured, from the masks, without reading a CZI.
+
+**Why:** two things found on review. 06a dropped every nucleus flagged `artifact` or `off_tissue` and
+then divided what was left by the whole outline, so a disc half over a ventricle or under a masked
+fold read at about half its density. The bias is region-correlated - Vv, Vd and POA are
+periventricular - which is the kind that survives into a result looking like anatomy. And a box 05c
+skipped before segmenting (under 8 px a side, a crop with no intensity range) wrote no rows, exactly
+as a box segmented and found empty does, so 06a published it as n = 0 and a density of 0.0.
+
+**How the area is taken:** points on a regular grid of native pixels over the box (at most 250,000),
+each mapped to the grid and tested against the ROI shape by the rule that counts a nucleus, then
+against the tissue and artifact masks by the lookups that flag one: the overview-frame mask at the
+point's own position where there is one, the 256 copy where not. `area_judged_on` says which.
+
+**Cost:** every density in an existing study changes once 06j and 06a are re-run, upward, and only
+for ROIs that overlap glass, a ventricle or an artifact mask. Until 06j is run 06a divides by the
+whole outline as before and says how many discs that applies to. The backfill uses the masks as they
+are now, not as they were when the section was measured, and cannot say whether an old box was
+segmented: that column is blank on backfilled rows and such a box stays a zero until re-measured.
+
+---
+
 ## 2026-10-14 - One rotation step: the rotation curator is removed
 
 **Changed:** removed `scripts/04d_rotation_curator.py`, `scripts/04h_symmetry_axis.py` and their

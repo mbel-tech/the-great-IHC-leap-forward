@@ -175,8 +175,8 @@ MEASURE = Screen(
          ["tune_detection", "detect", "roi_dataset"]),
         ("Repairs for older results",
          "Only for a results file written by an older version of the pipeline. "
-         "Each one backs the file up before changing it.",
-         ["recensor", "off_tissue", "seg_provenance"]),
+         "Each one that changes a file backs it up first.",
+         ["recensor", "off_tissue", "seg_provenance", "roi_area"]),
     ],
     role="Press Run all remaining and leave it. Detection takes hours; you can stop "
          "and resume.",
@@ -244,7 +244,7 @@ SCREENS = {s.sid: s for s in STEPS + EXTRA}
 
 #: Shown on Measure but never part of Run all remaining: each brings a file an
 #: older version wrote up to date, and is run by hand when that is the case.
-REPAIRS = {"recensor", "off_tissue", "seg_provenance"}
+REPAIRS = {"recensor", "off_tissue", "seg_provenance", "roi_area"}
 
 #: Pictures for looking at that nothing downstream reads. Rendering every scene
 #: (or drawing every nucleus over it) takes long, so they get their own Run
@@ -379,6 +379,9 @@ PLAIN = {
     "recensor": "Recomputes the saturation flag on an older results file.",
     "off_tissue": "Flags nuclei outside the tissue on an older results file.",
     "seg_provenance": "Adds missing detection details to an older results file.",
+    "roi_area": "Works out how much of each region is usable tissue, for results "
+                "measured before that was recorded, so densities are per area of "
+                "tissue. Build the per-region table again afterwards.",
     "roi_dataset": "Turns the nuclei into per-region numbers: how many cells, how many are "
                    "positive, per square millimetre. Still blind.",
     "join_sampling": "Unblinds: joins each animal to its treatment group from the sampling "

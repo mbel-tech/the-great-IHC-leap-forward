@@ -101,6 +101,37 @@ GEOMETRY_CHANGED_CSV = os.path.join(RESULTS, "roi_geometry_changed.csv")
 #: 05c's log of the sections it finished (05c's DONE_LOG). A section measured
 #: and found empty has no nucleus rows, and this is the only place it shows.
 DONE_LOG = os.path.join(RESULTS, "roi_nuclei_sections_done.csv")
+#: 05c's record of what happened to each box (05c's STATUS_CSV): whether it
+#: was segmented, and the share of its outline that is usable tissue. See
+#: load_status.
+STATUS_CSV = os.path.join(RESULTS, "roi_box_status.csv")
+
+
+def load_status(path):
+    """{(scene_uid, marker, roi_index): (segmented, fraction, reason)} from
+    05c's box status record; {} when there is none.
+
+    `segmented` is False only where 05c says the box was not segmented. Such
+    a box wrote no nuclei for the same reason an empty one does, and is not a
+    count of zero: the emit loop leaves it out. Blank (a backfilled row) reads
+    as segmented, which is what this stage assumed of every box before.
+
+    `fraction` is the share of the outline on the tissue and off the artifact
+    mask, or None where 05c could not say. The nuclei dropped above as
+    artifact or off_tissue were on the rest of the outline, so the count is
+    divided by this share of the area and not by all of it.
+    """
+    if not os.path.exists(path):
+        return {}
+    out = {}
+    with open(path, newline="", encoding="utf-8") as fh:
+        for r in csv.DictReader(fh):
+            f = r.get("usable_area_fraction", "")
+            out[(r["scene_uid"], r.get("marker", ""), int(r["roi_index"]))] = (
+                r.get("segmented") != "0",
+                float(f) if f not in ("", None) else None,
+                r.get("not_segmented_reason", ""))
+    return out
 
 
 def measured_empty(path, have):
@@ -630,6 +661,8 @@ def main(argv=None):
     h_all = st.mean(d_all) if d_all else 0.0
     del d_all
 
+    status = load_status(STATUS_CSV)
+    not_segmented, no_fraction = [], 0
     rows, spec = [], []
     for uid in sorted(uids):
         cut = cuts.get(uid)
@@ -641,7 +674,25 @@ def main(argv=None):
                 continue
             for i, b in enumerate(mboxes, 1):
                 here = by_idx.get((uid, mk, i))
-                area = roi_area_um2(b)
+                segmented, usable_frac, why_not = status.get(
+                    (uid, mk, i), (True, None, ""))
+                if not segmented:
+                    # NOT A ZERO. 05c did not segment this box (too small, a
+                    # crop with no intensity range), so there is no count to
+                    # report; a row with n = 0 would be averaged into its
+                    # animal as an empty region.
+                    not_segmented.append((uid, mk, i, b["region"], why_not))
+                    continue
+                outline = roi_area_um2(b)
+                # THE AREA A NUCLEUS COULD HAVE BEEN COUNTED ON. Nuclei on an
+                # artifact or off the tissue were dropped above, so dividing
+                # what is left by the whole outline reads a disc half over a
+                # ventricle at half its density. No record (measured before
+                # 05c kept one) is the whole outline, as it always was.
+                if usable_frac is None:
+                    no_fraction += 1
+                area = (outline * usable_frac if usable_frac is not None
+                        else outline)
                 n_nuc = len(here.v) if here else 0
                 usable = ([v for v, c in zip(here.v, here.cen) if not c]
                           if here else [])
@@ -690,6 +741,13 @@ def main(argv=None):
                     "plate_id": "", "sec_x": b["sec_x"], "sec_y": b["sec_y"],
                     "roi_area_um2": round(area, 1),
                     "roi_area_mm2": round(area / 1e6, 6),
+                    # The outline as drawn, and the share of it the two areas
+                    # above are: blank where 05c recorded none and the area is
+                    # the whole outline.
+                    "roi_outline_area_um2": round(outline, 1),
+                    "roi_usable_area_fraction": (
+                        round(usable_frac, 4) if usable_frac is not None
+                        else ""),
                     "n_nuclei": n_nuc,
                     "n_positive": n_pos,
                     "frac_positive": LO.frac_positive(n_pos, n_nuc, cut,
@@ -792,6 +850,17 @@ def main(argv=None):
 
     print("=" * 72)
     print(f"{len(real)} ROIs and {len(rows) - len(real)} background discs -> {MEAS_CSV}")
+    if not_segmented:
+        print(f"  !! {len(not_segmented)} ROI(s) were not segmented by 05c and "
+              f"are LEFT OUT, not reported as zero: "
+              + "; ".join(f"{u} [{m}] roi {i} {reg}: {why}"
+                          for u, m, i, reg, why in not_segmented[:5])
+              + (" ..." if len(not_segmented) > 5 else ""))
+    if no_fraction:
+        print(f"  !! {no_fraction} of {len(rows)} discs have no recorded "
+              f"usable area, so their densities are over the WHOLE outline, "
+              f"tissue or not. Run 06j_backfill_roi_area.py (in the app: "
+              f"Measure > Repairs for older results), then this stage again.")
     print(f"{len(spec)} sections -> {SPEC_CSV}")
     # ONE BLOCK PER MARKER. This stage runs once for both, and all three of
     # these numbers are per marker. An h RANGE spanning two markers is not a

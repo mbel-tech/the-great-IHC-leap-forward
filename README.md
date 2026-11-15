@@ -367,6 +367,13 @@ marker's mean, median and 90th percentile over that nucleus's own pixels. Everyt
 arithmetic on a table, so changing your mind about where positivity falls costs a re-run of 06a,
 not a re-read of 130 CZI scenes.
 
+**Density is per area of usable tissue.** 06a drops nuclei flagged artifact or off-tissue, so it
+divides by the share of the ROI outline that is on the tissue and off the artifact mask, which 05c
+records per ROI in `results/roi_box_status.csv` (`roi_usable_area_fraction` in
+`roi_measurements.csv`; the whole outline is kept beside it). A study measured before 05c recorded
+it gets the areas from `06j_backfill_roi_area.py`, with no re-detection. An ROI 05c could not
+segment is left out of the dataset, not reported as zero.
+
 **06a owns every per-ROI number.** 6c and 6d group and format its output; they do not re-derive
 it. They used to, and the two implementations had drifted — 06a computes Abercrombie's `h` per
 (marker, region) as `config` declares, the copy in 06c computed it per (animal, region), and

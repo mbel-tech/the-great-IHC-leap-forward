@@ -96,6 +96,25 @@ MASK_MARKERS = OV.MASK_MARKERS
 KEYS = OV.SAT_RAW_KEYS
 
 
+#: The `ceiling` of a kept row whose section this run could not measure.
+FAILED_CEILING = "failed"
+
+
+def is_current(row, ceilings):
+    """True when a saturation_raw.csv row was measured against the clip
+    ceiling the manifest records for its file today.
+
+    --force is how a changed ceiling is applied, and a forced run that stops
+    part way keeps the rows it did not reach (they are still the best record
+    there is). Without the stamp the next plain run resumed straight past
+    them, measured against the old ceiling. A row with no `ceiling` predates
+    the stamp and counts as current, so an existing study is not re-measured
+    wholesale on the first run after this change.
+    """
+    have = (row.get("ceiling") or "").strip()
+    return have == "" or have == str(OV.ceiling_for(ceilings, row.get("file", "")))
+
+
 def measure(czidoc, rect, fields, zoom, *, scene):
     """The raw planes for both channels, and the marker as the field corrects it.
 
@@ -266,10 +285,18 @@ def main():
             "clipping mask would be written. Check acquisition.markers in %s."
             % (list(MASK_MARKERS), OV.CONFIG_PATH))
 
-    rows, done = [], set()
-    if os.path.exists(OUT_CSV) and not args.force:
+    # The existing rows are read on EVERY run, --force included, and kept by
+    # uid: a section measured now replaces its own row and every other row
+    # stays. --force used to start from an empty list, so `--force --limit N`
+    # checkpointed N rows over the whole saturation_raw.csv (and merged only
+    # those N into focus.csv), and 04j then called every other section
+    # unmeasured. --force decides what is measured again, not what survives.
+    by_uid, done = {}, set()
+    if os.path.exists(OUT_CSV):
         with open(OUT_CSV, newline="", encoding="utf-8") as fh:
-            rows = list(csv.DictReader(fh))
+            by_uid = {r["scene_uid"]: r for r in csv.DictReader(fh)}
+    if by_uid and not args.force:
+        rows = list(by_uid.values())
         # A row counts as done only if the mask its marker now calls for is
         # actually on disk. Without this, widening MASK_MARKERS would resume
         # straight past every section it was widened to cover.
@@ -280,11 +307,16 @@ def main():
                 continue
             keep.append(r)
         remeasure = len(rows) - len(keep)
-        rows = keep
-        done = {r["scene_uid"] for r in rows}
+        by_uid = {r["scene_uid"]: r for r in keep}
+        # Kept is not done: a row measured against another ceiling stays in
+        # the file until this run measures it again, or drops it on failure.
+        done = {u for u, r in by_uid.items() if is_current(r, ceilings)}
         print("resuming: %d sections already measured" % len(done))
         if remeasure:
             print("  %d measured rows have no mask yet and will be redone" % remeasure)
+        if len(by_uid) - len(done):
+            print("  %d rows were measured against another clip ceiling and will "
+                  "be redone" % (len(by_uid) - len(done)))
 
     by_file = {}
     for r in scenes:
@@ -292,6 +324,20 @@ def main():
             by_file.setdefault(r["file"], []).append(r)
     total = sum(len(v) for v in by_file.values())
     print("%d sections to measure across %d files" % (total, len(by_file)))
+
+    # A section this run tried and could not measure keeps any row it had -
+    # it is still the best number there is, and dropping it would make 04j
+    # call the section unmeasured, every section at once when the drive is
+    # unplugged - but the row is marked FAILED_CEILING so it never reads as
+    # current: the next run retries it, and this run exits 1 naming it.
+    stale_kept = []
+
+    def lose(lost):
+        for r in lost:
+            row = by_uid.get(r["scene_uid"])
+            if row is not None:
+                row["ceiling"] = FAILED_CEILING
+                stale_kept.append(r["scene_uid"])
 
     measured = failed = 0
     t0 = time.time()
@@ -301,7 +347,9 @@ def main():
         path = os.path.join(SOURCE_DIR, fname)
         if not os.path.exists(path):
             failed += len(rs)
+            lose(rs)
             continue
+        measured_here = set()
         try:
             with pyczi.open_czi(path) as czidoc:
                 rects = czidoc.scenes_bounding_rectangle
@@ -311,24 +359,28 @@ def main():
                     s = int(r["scene_index"])
                     if s not in rects:
                         failed += 1
+                        lose([r])
                         continue
                     ceiling = OV.ceiling_for(ceilings, fname)
                     dapi_raw, mark_raw, corrected = measure(
                         czidoc, rects[s], fields, zoom, scene=s)
-                    rows.append(OV.raw_clip_record(
+                    by_uid[r["scene_uid"]] = OV.raw_clip_record(
                         r, fname, rects[s], s, zoom, dapi_raw, mark_raw,
-                        corrected, ceiling))
+                        corrected, ceiling)
                     measured += 1
+                    measured_here.add(r["scene_uid"])
         except Exception as exc:  # noqa: BLE001 - one bad file must not kill the run
             print("\n  !! %s: %s" % (fname, exc))
             failed += len(rs)
+            lose([r for r in rs if r["scene_uid"] not in measured_here])
 
         # Checkpoint per file, like 01_overviews.py, for the same reason.
-        IO.atomic_write_csv(OUT_CSV, rows, KEYS)
+        IO.atomic_write_csv(OUT_CSV, list(by_uid.values()), KEYS)
         rate = measured / max(time.time() - t0, 1e-9)
         print("\r  measured %d/%d  failed %d  (%.1f/s, %.1f min)"
               % (measured, total, failed, rate, (time.time() - t0) / 60), end="")
     print()
+    rows = list(by_uid.values())
     IO.atomic_write_csv(OUT_CSV, rows, KEYS)
 
     # summarise() prints the whole summary. A second, older copy of it used to
@@ -344,8 +396,20 @@ def main():
     # masks behind it, and 04j then called every section unmeasured.
     if not rows:
         return 1
+    # A forced run that measured nothing still fails, now that it keeps the
+    # earlier rows: it was asked to measure again and did not, which is the
+    # same "drive not mounted" a fresh run reports above.
+    if args.force and not measured:
+        print("nothing measured - is the source drive mounted? The earlier "
+              "rows are kept, marked to be measured again.")
+        return 1
     if not args.no_merge:
         merge_into_focus(rows)
+    if stale_kept:
+        print("%d section(s) could not be measured again and keep their earlier "
+              "row, marked to be retried: %s" % (len(stale_kept),
+                                                 ", ".join(stale_kept[:10])))
+        return 1
     if args.native_sample:
         print()
         print("measuring the resolution-dilution factor on %d sections ..." % args.native_sample)

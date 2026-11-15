@@ -48,6 +48,7 @@ import argparse
 import csv
 import json
 import os
+import shutil
 
 import numpy as np
 from PIL import Image
@@ -68,12 +69,14 @@ OVERVIEW_DIR = os.path.join(OUT_ROOT, "overviews")
 REFORMAT_DIR = os.path.join(OUT_ROOT, "reformatted")
 SEC_DIR = os.path.join(REFORMAT_DIR, "sections")
 PAIRS_CSV = os.path.join(OUT_ROOT, "pairs.csv")
+# `source` and `derived_as` are what lets a re-run keep a hand correction; see
+# merge_hand_rows.
 OVERRIDE_KEYS = ["perk_scene_uid", "pcna_scene_uid", "animal", "extra_rotation", "flip",
                  "excluded", "align_iou", "final_iou_256", "flip_margin", "confidence",
-                 "reason"]
+                 "reason", "source", "derived_as"]
 
-PHYS_DS = 4           # downsample both overviews by this -> 20.8 um/px, shared
-CANVAS = 320          # px on the shared physical grid; ~6.7 mm across
+PHYS_DS = 4           # the shared grid is this many overview pixels -> 20.8 um/px on LS
+CANVAS = 320          # px on the shared physical grid; ~6.7 mm across on LS
 COARSE = 3.0          # degrees, first pass over the full circle
 FINE = 1.0
 # Below this alignment IoU the two masks genuinely disagree and the transfer
@@ -88,10 +91,26 @@ _SPEC = importlib.util.spec_from_file_location(
 _RF = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(_RF)
 
+# The shared physical grid's pixel, in um: PHYS_DS of the study's configured
+# overview pixels. A choice of working resolution, not a claim about any
+# image - each overview is brought onto it from its OWN scale (focus.csv's
+# um_px), in physical_mask. Both passes used to be downsampled by PHYS_DS
+# alike, which is a shared grid only while both were exported at one scale.
+PHYS_UM = PHYS_DS * _RF.overview_um_px(None)
+
 _lsio = importlib.util.spec_from_file_location(
     "_lsio", os.path.join(os.path.dirname(os.path.abspath(__file__)), "ls_io.py"))
 IO = importlib.util.module_from_spec(_lsio)
 _lsio.loader.exec_module(IO)
+
+# 04q's backup naming, imported rather than restated: one rule for what a
+# curation file's backups are called, `<name>.<YYYYMMDD-HHMMSS>.backup`.
+_SPEC_Q = importlib.util.spec_from_file_location(
+    "import_curation_mod",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "04q_import_curation.py"))
+_IQ = importlib.util.module_from_spec(_SPEC_Q)
+_SPEC_Q.loader.exec_module(_IQ)
+backup_path = _IQ.backup_path
 
 # The pass being propagated ONTO: the one that does not own the unsuffixed
 # names. 04i is paired-only (ls_layouts.RESTRICTED), so there are exactly two
@@ -123,7 +142,7 @@ SOURCE_UID_COL = f"{LP.slug(SOURCE_MARKER)}_scene_uid"
 TARGET_UID_COL = f"{LP.slug(TARGET_MARKER)}_scene_uid"
 
 
-def physical_mask(png_path, canvas):
+def physical_mask(png_path, canvas, um_px=None):
     """Tissue mask on a shared PHYSICAL grid, centred on its own centroid.
 
     **Not the reformatted mask, and that distinction is the whole point.** The
@@ -134,15 +153,27 @@ def physical_mask(png_path, canvas):
     first attempt did exactly that and reached a median IoU of 0.548 with flips
     winning a third of the time, which is what a failed match looks like.
 
-    Both overviews are at a verified 5.20 um/px, so downsampling both by the same
-    factor puts them on a common physical grid where only rotation and
-    translation are free.
+    Each overview is brought from its own scale (`um_px`, focus.csv's; the
+    study's overview scale when not given) to PHYS_UM, which puts both on a
+    common physical grid where only rotation and translation are free. This
+    used to downsample both by PHYS_DS, on the strength of both being at "a
+    verified 5.20 um/px" - true of the LS study only, and of two passes only
+    while both were exported at one scale. A whole-number step is still taken
+    by striding, exactly as before; any other is a resize.
     """
     try:
         img = Image.open(png_path).convert("L")
     except OSError:
         return None
-    a = np.asarray(img).astype(np.float32)[::PHYS_DS, ::PHYS_DS]
+    step = PHYS_UM / (um_px or _RF.overview_um_px(None))
+    k = int(round(step))
+    if k >= 1 and abs(step - k) < 1e-6:
+        a = np.asarray(img).astype(np.float32)[::k, ::k]
+    else:
+        w, h = img.size
+        a = np.asarray(img.resize((max(1, int(round(w / step))),
+                                   max(1, int(round(h / step)))),
+                                  Image.BILINEAR)).astype(np.float32)
     m = _RF.tissue_mask(a, light_background=False)
     if m is None:
         return None
@@ -249,8 +280,19 @@ def physical_to_squashed(angle, w, h):
     return float(np.degrees(np.arctan2(w * np.sin(r), h * np.cos(r)))) % 360.0
 
 
-def derive_rotation(p_source, p_target, total_source, curated_mask=None):
+def derive_rotation(p_source, p_target, total_source, curated_mask=None,
+                    source_flip=False, um_source=None, um_target=None):
     """The correction 04a needs for one target scan. None if either has no mask.
+
+    `source_flip` is the operator's flip on the curated section (`manual_flip`
+    in reformat_index.csv). It is not a correction 04i decides - see `align()`
+    on why a flip is never derived - but one the target has to CARRY: the two
+    scans are one section, so if the operator mirrored one of them the other
+    must be mirrored too or the hemispheres swap between the passes. It is
+    applied to the goal the way 04a applies it, after the rotation, and the
+    target is aligned mirrored too: a rotation cannot turn a shape into its
+    mirror image. `final_iou_256` reformats the target with the same flip,
+    because the curated mask on disk is the flipped one.
 
     `total_source` is the TOTAL rotation 04a applied to the CURATED scan
     (automatic plus the operator's correction), from reformat_index.csv, in
@@ -266,9 +308,12 @@ def derive_rotation(p_source, p_target, total_source, curated_mask=None):
     1174x1404 the best any rotation can reach is 0.66. So it is reported
     against nothing, as a per-section number to compare with its neighbours,
     not gated.
+
+    `um_source` / `um_target` are each overview's own pixel size (focus.csv's
+    um_px): the two passes need not have been exported at one scale.
     """
-    m_source = physical_mask(p_source, CANVAS)
-    m_target = physical_mask(p_target, CANVAS)
+    m_source = physical_mask(p_source, CANVAS, um_source)
+    m_target = physical_mask(p_target, CANVAS, um_target)
     if m_source is None or m_target is None:
         return None
     try:
@@ -284,8 +329,19 @@ def derive_rotation(p_source, p_target, total_source, curated_mask=None):
     total_source_phys = squashed_to_physical(total_source, w_source, h_source)
     goal = ndimage.rotate(m_source.astype(np.uint8), total_source_phys, order=0,
                           reshape=False) > 0
-    # `deg` is the same direction, on the slide, in the target scan's frame.
-    deg, score, flip_margin = align(m_target, goal)
+    if source_flip:
+        # 04a's order: rotate, THEN mirror left-right. The target is mirrored
+        # the same way before aligning, and the angle found for the mirrored
+        # target is turned back into one for the unmirrored scan - 04a rotates
+        # the scan and then mirrors it. ndimage.rotate moves a direction a to
+        # a - A and a left-right mirror moves it to 180 - a, so
+        # mirror(rotate(T, A)) == rotate(mirror(T), -A): the angle is negated.
+        goal = goal[:, ::-1]
+        deg_m, score, flip_margin = align(m_target[:, ::-1], goal)
+        deg = (-deg_m) % 360.0
+    else:
+        # `deg` is the same direction, on the slide, in the target scan's frame.
+        deg, score, flip_margin = align(m_target, goal)
 
     # 04a will apply its own automatic angle to the target scan, in that scan's
     # squashed frame, so the correction it needs is the difference between the
@@ -299,7 +355,8 @@ def derive_rotation(p_source, p_target, total_source, curated_mask=None):
 
     final_iou = None
     if curated_mask is not None:
-        done = _RF.reformat(p_target, light_background=False, extra_angle=extra)
+        done = _RF.reformat(p_target, light_background=False, extra_angle=extra,
+                            flip=bool(source_flip))
         if done is not None:
             final_iou = mask_iou(done[1], curated_mask)
     return {"extra": extra, "deg": deg, "auto_target": auto_target,
@@ -319,6 +376,108 @@ def output_path(limit):
         return OUT_CSV
     root, ext = os.path.splitext(OUT_CSV)
     return f"{root}.trial{limit}{ext}"
+
+
+# ------------------------------------------------------------ hand rows
+#
+# The overrides file is ALSO a hand-kept file: the operator corrects a
+# rotation or an exclusion in it directly (the LS study's `perk_overrides.csv`
+# is 82,893 bytes of that), and nothing else in the pipeline writes it. A full
+# run used to rewrite it from derived rows alone, so every correction typed
+# into it was gone after the next run, with nothing said.
+#
+# Nothing in the old columns tells a hand row from a derived one - `reason`
+# and `confidence` are empty on both - so each row now says what it is:
+# `source` (`derived` / `manual`) and `derived_as`, the decision 04i wrote into
+# the row. A person editing the file does not touch those two, so a row whose
+# decision no longer equals its own `derived_as` was edited and is manual. That
+# is what makes a changed DERIVATION (the curated pass re-curated, a better
+# alignment) distinguishable from a changed ROW: comparing against this run's
+# derivation alone would read the first as a hand edit and freeze it forever.
+
+def _norm(v):
+    """One spelling per value, so `12`, `12.0` and ` 12` are one decision."""
+    s = ("" if v is None else str(v)).strip()
+    try:
+        return f"{float(s):g}"
+    except ValueError:
+        return s
+
+
+def decision_of(row):
+    """The part of a row 04a acts on (plus the pairing), as one string."""
+    # The uid is text and compared as text; only the numbers are normalised,
+    # and an empty number is 0, which is how 04a reads it.
+    pair = str(row.get("pcna_scene_uid") or "").strip()
+    return ";".join([f"pcna_scene_uid={pair}"]
+                    + [f"{k}={_norm(row.get(k)) or '0'}"
+                       for k in ("extra_rotation", "flip", "excluded")])
+
+
+def merge_hand_rows(derived, existing):
+    """This run's derived rows with the existing file's hand rows kept.
+
+    Returns (rows, n_kept). An existing row is MANUAL when it says so, when
+    its decision differs from its own `derived_as`, or - for a file written
+    before rows were marked - when it differs from this run's derivation for
+    that section or this run derived nothing for it. That last rule keeps a
+    legacy row that may be stale rather than dropping one that may be hand
+    work; the run says how many it kept, and deleting a row hands that
+    section back to 04i.
+
+    A hand row replaces the derived row for its section in place; `derived_as`
+    is updated to what 04i would say now, so the difference stays visible.
+    """
+    by_uid = {r["perk_scene_uid"]: r for r in derived}
+    manual = {}
+    for r in existing:
+        uid = (r.get("perk_scene_uid") or "").strip()
+        if not uid:
+            continue
+        src = (r.get("source") or "").strip()
+        mark = (r.get("derived_as") or "").strip()
+        if src == "manual":
+            hand = True
+        elif src == "derived" and mark:
+            hand = decision_of(r) != mark
+        else:
+            fresh = by_uid.get(uid)
+            hand = fresh is None or decision_of(r) != decision_of(fresh)
+        if hand:
+            row = {k: r.get(k, "") for k in OVERRIDE_KEYS}
+            row["source"] = "manual"
+            if uid in by_uid:
+                row["derived_as"] = by_uid[uid]["derived_as"]
+            manual.setdefault(uid, []).append(row)
+    out = []
+    for r in derived:
+        out.extend(manual.pop(r["perk_scene_uid"], [r]))
+    for rows in manual.values():
+        out.extend(rows)
+    n_kept = sum(1 for r in out if r["source"] == "manual")
+    return out, n_kept
+
+
+def _as_text(rows, keys):
+    """Rows as the CSV writer would spell them, for a did-anything-change test."""
+    return [[("" if r.get(k) is None else str(r.get(k))) for k in keys] for r in rows]
+
+
+def write_overrides(path, rows):
+    """Write the full overrides file, backing up the old one first when this
+    changes it. Returns (written, backup path or None). Nothing is written when
+    nothing changed: an identical backup buries the one that matters, as 04q
+    found."""
+    bak = None
+    if os.path.exists(path):
+        with open(path, newline="", encoding="utf-8") as fh:
+            old = list(csv.reader(fh))
+        if old and old[0] == OVERRIDE_KEYS and old[1:] == _as_text(rows, OVERRIDE_KEYS):
+            return False, None
+        bak = backup_path(path)
+        shutil.copy2(path, bak)
+    IO.atomic_write_csv(path, rows, OVERRIDE_KEYS)
+    return True, bak
 
 
 def main():
@@ -341,12 +500,13 @@ def main():
     excluded = {r["scene_uid"] for r in csv.DictReader(open(
         os.path.join(REFORMAT_DIR, "excluded_sections.csv"), encoding="utf-8"))}
 
-    chan = {}
+    chan, um_px = {}, {}
     with open(os.path.join(OUT_ROOT, "qc", "focus.csv"), newline="", encoding="utf-8") as fh:
         for r in csv.DictReader(fh):
             chan[r["scene_uid"]] = (r["animal"], r["marker_channel"])
+            um_px[r["scene_uid"]] = _RF.overview_um_px(r)
 
-    rows, n_excl, n_nopair, failed = [], 0, 0, 0
+    rows, n_excl, n_nopair, failed, n_flip = [], 0, 0, 0, 0
     todo = list(kept.items())
     if args.limit:
         todo = todo[: args.limit]
@@ -364,6 +524,7 @@ def main():
                          # the operator's 82,893-byte overrides file. A
                          # rename here is a data change, not a rename.
                          "reason": "PCNA partner excluded by the operator"})
+            rows[-1].update(source="derived", derived_as=decision_of(rows[-1]))
             n_excl += 1
 
     # 2. Rotations, re-derived by aligning to the curated source mask.
@@ -399,40 +560,72 @@ def main():
         curated = np.load(mp).astype(bool) if os.path.exists(mp) else None
 
         # `angle` in reformat_index is the TOTAL rotation 04a applied to the
-        # curated scan - automatic plus the operator's correction.
-        d = derive_rotation(p_source, p_target, float(meta["angle"]), curated)
+        # curated scan - automatic plus the operator's correction - and
+        # `manual_flip` is the operator's flip, which 04a applied after it.
+        # An index written before 04a recorded the flip has no column; that
+        # reads as unflipped, which is what such an index was.
+        src_flip = (meta.get("manual_flip") or "0").strip() == "1"
+        d = derive_rotation(p_source, p_target, float(meta["angle"]), curated,
+                            source_flip=src_flip, um_source=um_px.get(uid),
+                            um_target=um_px.get(u_target))
         if d is None:
             failed += 1
             continue
+        n_flip += int(src_flip)
         score = d["align_iou"]
         rows.append({"perk_scene_uid": u_target, "pcna_scene_uid": uid,
                      "animal": animal_target,
-                     "extra_rotation": int(round(d["extra"])), "flip": 0,
+                     "extra_rotation": int(round(d["extra"])), "flip": int(src_flip),
                      "excluded": 0, "align_iou": round(score, 4),
                      "final_iou_256": ("" if d["final_iou_256"] is None
                                        else round(d["final_iou_256"], 4)),
                      "flip_margin": round(d["flip_margin"], 4),
                      "confidence": "low" if score < IOU_MIN else "high",
-                     "reason": ""})
+                     "reason": "", "source": "derived"})
+        rows[-1]["derived_as"] = decision_of(rows[-1])
         if (i % 50) == 0:
             print(f"\r  aligned {i}/{len(todo)}", end="")
     print(f"\r  aligned {len(todo)} sections            ")
 
     out_csv = output_path(args.limit)
-    IO.atomic_write_csv(out_csv, rows, OVERRIDE_KEYS)
+    n_kept, written, bak = 0, True, None
+    if out_csv == OUT_CSV:
+        # A full run: the real file, which may hold hand corrections. They are
+        # merged back in, and the old file is backed up before it changes.
+        existing = []
+        if os.path.exists(OUT_CSV):
+            with open(OUT_CSV, newline="", encoding="utf-8") as fh:
+                existing = list(csv.DictReader(fh))
+        derived = rows
+        rows, n_kept = merge_hand_rows(derived, existing)
+        written, bak = write_overrides(OUT_CSV, rows)
+    else:
+        # A trial goes beside the real file and never replaces it, so there is
+        # nothing in it to keep and nothing to back up.
+        derived = rows
+        IO.atomic_write_csv(out_csv, rows, OVERRIDE_KEYS)
 
-    live = [r for r in rows if not r["excluded"] and r["align_iou"] != ""]
+    # The statistics below describe what 04i DERIVED; a hand row is not a
+    # measurement.
+    live = [r for r in derived if not r["excluded"] and r["align_iou"] != ""]
     s = np.array([r["align_iou"] for r in live], dtype=float)
     hi = sum(1 for r in live if r["confidence"] == "high")
     fm = np.array([r["flip_margin"] for r in live], dtype=float)
     print()
     print("=" * 74)
-    print(f"{len(rows)} rows -> {out_csv}")
+    print(f"{len(rows)} rows -> {out_csv}"
+          + ("" if written else "  (unchanged, not rewritten)"))
     if out_csv != OUT_CSV:
         print(f"  (--limit trial: {OUT_CSV} is untouched; run without --limit "
               f"to write it)")
+    if bak:
+        print(f"  backed up the previous file -> {os.path.basename(bak)}")
+    if out_csv == OUT_CSV:
+        print(f"  kept {n_kept} hand-edited row(s) from the existing file "
+              f"(source=manual; delete a row to hand it back to 04i)")
     print(f"  exclusions transferred : {n_excl}")
     print(f"  rotations derived      : {len(live)}")
+    print(f"  operator flips carried : {n_flip}")
     print(f"  curated sections with no {TARGET_MARKER} partner : {n_nopair}")
     print(f"  failed to reformat     : {failed}")
     if len(s):
@@ -451,8 +644,9 @@ def main():
             print("  two 256-px silhouettes are different shapes even when the angle is right.")
         print(f"  mirrored-would-score-better on {int((fm > 0).sum())} section(s), "
               f"by a median of {np.median(fm[fm > 0]) if (fm > 0).any() else 0:.4f} IoU")
-        print("  Flipping is measured but never applied: two scans of one slide cannot")
-        print("  be mirrored, and a spurious flip would swap the hemispheres.")
+        print("  Flipping is measured but never derived: two scans of one slide cannot")
+        print("  be mirrored, and a spurious flip would swap the hemispheres. A flip the")
+        print("  operator made on the curated section is carried, not derived.")
         print()
         print("  This is a shape alignment between two images of the SAME physical")
         print("  section, so a low IoU means the pairing is wrong, not that the tissue")

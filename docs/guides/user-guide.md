@@ -286,7 +286,7 @@ Prepare reads the slides, checks them, builds the atlas, and turns every section
 
 Many stages share these switches under **Options**:
 
-- **Only the first N sections** (`--limit`): for a quick trial run. 0 means all. Use it on a new study to check the settings before the full run.
+- **Only the first N sections** (`--limit`): for a quick trial run. 0 means all. Use it on a new study to check the settings before the full run. A trial never replaces a complete result: a stage that writes one table writes the trial beside it (for example `roi_boxes_<marker>.trial5.csv`), and the stage does not show as done from a trial alone. Stages that keep one row per section add the trial's sections and keep every other row.
 - **Redo … already done** (`--force`): normally finished work is skipped. You rarely need it: a stage made from something that has changed since shows *Out of date*, and its next run redoes everything by itself (section 10). Turn it on to redo a stage the app does not check, then turn it off again.
 - **Include excluded sections**: also makes pictures or masks of excluded sections, so the curator's Review can show them.
 
@@ -643,6 +643,7 @@ It makes the same plan as that screen's **Run all remaining**, with the Options 
 | Red rows on the Slides tab | File names do not fit the naming pattern | Fix the pattern with **Set up from an example…** on *Slide file names*, or rename the files |
 | Fewer sections than expected | Unmatched file names, or an incomplete copy | Check the Slides tab and the 00b result |
 | Run all remaining stops at a stage | That stage failed, or it waits for a curator | Read the screen's note and **Show log**. A waiting stage names the curator to export. |
+| A stage fails with *N section(s) NOT MASKED / MEASURED / BUILT / PLACED …* | The stage could not do some sections it was asked to (an overview missing, no tissue outline, a region whose angle no longer matches). What it could do is kept | **Show log** names the sections and why. Fix the cause and press **Run** again |
 | "Finish Set up" on the Next up card | A required setting is empty, or the Slides tab is not done | The card names each Set up card and the settings it lacks, and what is left on the Slides tab (read the slides, file names that don't fit the rule, markers to name); open Set up and do those |
 | A curator's decisions are ignored | You did not press **Export** | Open the curator and press Export (in the ROI curator, Done: export and go to Measure does it for you) |
 | Curation made in a browser is missing | Browser work is stored in that browser only | **Tools > Migrate browser curation**, or **Bring in browser exports** |

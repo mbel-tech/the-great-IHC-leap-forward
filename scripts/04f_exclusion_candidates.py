@@ -18,7 +18,8 @@ Two failure modes, kept separate
 -------------------------------
 
 **`no_tissue` - largest connected tissue component below 2.5 mm2.** Measured on
-the source overview at a known 5.20 um/px, so it is a physical size rather than
+the source overview at its own recorded scale (focus.csv's `um_px`; 5.20 um/px
+on the LS study), so it is a physical size rather than
 a fraction of a hand-drawn scan box. A section reduced to debris has no piece of
 any real size, whatever threshold you pick, because specks are physically small.
 On hand-labelled examples the separation was clean: 0.8-1.9 mm2 for debris-only
@@ -134,8 +135,53 @@ def source_png(animal, uid, chan):
                         uid + "_DAPI.png")
 QC_CSV = os.path.join(OUT_ROOT, "qc", "focus.csv")
 REPORT_DIR = os.path.join(OUT_ROOT, "qc", "exclusion")
+# The source pass's canonical exclusion list, named by 04a's own rule - the
+# same pass whose unsuffixed index this stage walks.
+EXCLUDED_CSV = _RF.marker_paths(_RF.DEFAULT_MARKER)["excluded"]
 
-UM_PX = 5.20e-3        # mm per pixel in the overviews - verified constant, all 222 files
+
+def carry_excluded(indexed):
+    """Rows of the previous `exclusion_candidates.csv` for sections that are
+    already excluded and no longer in the index - unchanged.
+
+    This stage measures what `reformat_index.csv` holds, and after a final
+    `04a --apply-overrides` that index no longer holds the sections it
+    excluded. For a study with no override file, 04a takes its exclusions FROM
+    this file - so a re-run that measured only the index wrote those sections
+    out of it, and the next final reformat put them silently back into the
+    analysis. Nothing errored; the candidates file just got shorter.
+
+    Carried, not re-measured: the row is the record of why the section was
+    proposed, and the decision built on it was already taken. A section that
+    is neither indexed nor excluded has nothing to carry it and is dropped as
+    before, and one with no previous row has nothing to carry (its exclusion
+    lives in the override file or section_review.csv, which persist).
+    """
+    try:
+        with open(EXCLUDED_CSV, newline="", encoding="utf-8") as fh:
+            excluded = {r["scene_uid"] for r in csv.DictReader(fh)}
+        with open(CANDIDATES_CSV, newline="", encoding="utf-8") as fh:
+            prior = list(csv.DictReader(fh))
+    except OSError:
+        return []
+    return [r for r in prior if r.get("uid") in excluded and r["uid"] not in indexed]
+
+
+def _order_key(r):
+    """Sort key over measured rows (ints) and carried ones (strings as read)."""
+    def num(v):
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return 0
+    return (-num(r["proposed"]), r["animal"], num(r["section_order"]))
+
+# NO PIXEL SIZE HERE. Areas are converted with each section's own scale -
+# focus.csv's `um_px`, through 04a.overview_um_px. This was the literal
+# `UM_PX = 5.20e-3`, "verified constant, all 222 files" - of the LS study. For
+# a study exported at another overview scale the 2.5 mm2 cut below then fell at
+# a different physical size, and sections were proposed (or kept) for tissue
+# they did not have.
 PIECE_MIN_MM2 = 0.5    # a "piece" of tissue rather than a speck
 
 # Rule 1 - not enough tissue. Placed inside the gap that separated hand-labelled
@@ -150,7 +196,7 @@ LARGEST_MIN_MM2 = 2.5
 FOCUS_MIN = 0.070
 
 
-def measure(path):
+def measure(path, um_px):
     """Physical geometry of the tissue in one overview.
 
     Uses `04a_reformat.tissue_mask` rather than a threshold of its own. Two
@@ -174,11 +220,12 @@ def measure(path):
     w, h = img.size
     work = np.asarray(img.resize((WORK, WORK), Image.BILINEAR)).astype(np.float32)
 
-    # One work pixel covers (w/WORK) x (h/WORK) source pixels, and the source
-    # pixel size is a verified constant across all 222 files. So this is a
-    # physical area, not a fraction of a hand-drawn scan box.
-    px_mm2 = (w * h / float(WORK * WORK)) * UM_PX ** 2
-    frame_mm2 = round(w * h * UM_PX ** 2, 1)
+    # One work pixel covers (w/WORK) x (h/WORK) source pixels, and `um_px` is
+    # the source's own pixel size. So this is a physical area, not a fraction
+    # of a hand-drawn scan box.
+    mm_px = um_px / 1000.0
+    px_mm2 = (w * h / float(WORK * WORK)) * mm_px ** 2
+    frame_mm2 = round(w * h * mm_px ** 2, 1)
 
     mask = tissue_mask(work, light_background=False)
     if mask is None:
@@ -207,10 +254,11 @@ def main():
     args = ap.parse_args()
     os.makedirs(REPORT_DIR, exist_ok=True)
 
-    chan, focus = {}, {}
+    chan, focus, um_px = {}, {}, {}
     with open(QC_CSV, newline="", encoding="utf-8") as fh:
         for r in csv.DictReader(fh):
             chan[r["scene_uid"]] = r["marker_channel"]
+            um_px[r["scene_uid"]] = _RF.overview_um_px(r)
             try:
                 focus[r["scene_uid"]] = float(r["focus_score"])
             except (KeyError, ValueError):
@@ -220,10 +268,15 @@ def main():
         index = [r for r in csv.DictReader(fh) if r["kind"] == "section"]
 
     rows = []
+    # Sections this run could not measure. A silent `continue` once: a section
+    # never measured is never proposed, and the candidates file just came out
+    # shorter with the stage showing done.
+    unmeasured = []
     for i, r in enumerate(index):
         src = source_png(r["animal"], r["id"], chan)
-        m = measure(src)
+        m = measure(src, um_px.get(r["id"]) or _RF.overview_um_px(None))
         if m is None:
+            unmeasured.append(r["id"])
             continue
         m.update(uid=r["id"], animal=r["animal"], section_order=int(r["section_order"]),
                  focus_score=round(focus.get(r["id"], float("nan")), 4))
@@ -256,6 +309,8 @@ def main():
         r["reason"] = "; ".join(t for _, t in cls)
 
     n_prop = sum(r["proposed"] for r in rows)
+    # --survey proposes nothing and writes its own file, so it carries nothing.
+    carried = [] if args.survey else carry_excluded({r["id"] for r in index})
 
     print()
     print("=" * 74)
@@ -287,16 +342,33 @@ def main():
         print("These are PROPOSALS, pre-marked in the curator and reversible with a")
         print("right-click. The export records auto vs manual, so how often the")
         print("proposal was wrong stays measurable rather than assumed.")
+        print()
+        print(f"carried {len(carried)} already-excluded section(s) unchanged from the "
+              f"previous {os.path.basename(CANDIDATES_CSV)}")
+        if carried:
+            print("  they are in excluded_sections.csv but not in reformat_index.csv,")
+            print("  because a final reformat left them out; dropping them here would")
+            print("  put them back into the analysis at the next final reformat")
     print("=" * 74)
 
     out = output_path(args.survey)
     os.makedirs(os.path.dirname(out), exist_ok=True)
     keys = ["uid", "animal", "section_order", "proposed", "artifact_class", "reason",
             "largest_mm2", "total_mm2", "n_pieces", "focus_score", "frame_mm2"]
-    IO.atomic_write_csv(out, sorted(rows, key=lambda r: (-r["proposed"], r["animal"], r["section_order"])), keys)
+    IO.atomic_write_csv(out, sorted(rows + carried, key=_order_key), keys)
     print(f"wrote {out}")
 
     montage(rows, args.montage)
+    # A SKIPPED SECTION FAILS THE RUN - 05c's rule. What was measured is
+    # written; printed last, because app/runner.py shows the last line printed
+    # as the reason.
+    if unmeasured:
+        print(f"  could not read the overview of: {', '.join(unmeasured[:10])}"
+              + (f" ... and {len(unmeasured) - 10} more" if len(unmeasured) > 10 else ""))
+        print(f"!! {len(unmeasured)} section(s) NOT MEASURED (overview missing or "
+              f"unreadable), so never proposed: this stage is not complete. Run "
+              f"01_overviews.py for them and run it again.")
+        return 1
 
 
 def montage(rows, n):
@@ -344,4 +416,4 @@ def montage(rows, n):
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

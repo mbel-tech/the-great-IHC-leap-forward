@@ -49,6 +49,10 @@ reason the suffix exists:
                                    bounding box
     reformatted/roi_regions_used_<MARKER>.csv  the export these came from
 
+`--limit N` places the first N sections only and writes them to
+`roi_geometry_<MARKER>.trialN.csv` / `roi_boxes_<MARKER>.trialN.csv` beside
+the real pair, which it leaves as it was (see trial_path).
+
 The marker is read from the export's own `marker` column, not passed in. An
 export carrying both markers (the curator's normal output for a paired study)
 is placed one marker at a time, each into its own files.
@@ -142,6 +146,22 @@ def box_csv(marker):
     return os.path.join(REFORMAT_DIR, f"roi_boxes_{marker}.csv")
 
 
+def trial_path(path, limit):
+    """Where a `--limit N` run writes instead of `path`: `<name>.trialN.csv`.
+
+    A trial places the first N sections only. Written over the real file it
+    would replace every other section's boxes with nothing - 05c then measures
+    N sections, 06a reports the rest as never curated, and the app shows the
+    stage as done because the file exists. 04i's `--limit` already writes its
+    trial beside the real file; this is the same rule. The trial name is not
+    one any reader or the app's done check looks for.
+    """
+    if not limit:
+        return path
+    root, ext = os.path.splitext(path)
+    return f"{root}.trial{limit}{ext}"
+
+
 def resolve_paths(marker):
     """The pair to READ for this marker, preferring the suffixed files."""
     g, b = geom_csv(marker), box_csv(marker)
@@ -174,6 +194,34 @@ def use_marker(marker):
     return MARKER
 
 
+def refuse_stale_markers(path, marker, rows):
+    """Stop when a multiplex box file holds rows that name another marker.
+
+    Until 2026-11-15 build() stamped every multiplex box with focus.csv's one
+    `marker_channel`, so a study placed before then still has a
+    roi_boxes_<second>.csv whose every row says <first>. Nothing else compares
+    a row's marker with its file's, and both readers trust the row: 06a's
+    split_by_marker would pool those rows with the first marker's real discs,
+    and 05c reads the plane `plane_index_for(row marker)` names - the first
+    marker's pixels, written out as the first marker's nuclei. Refused rather
+    than relabelled: whether a stale file's discs are still the curation is
+    for a fresh 05a run to say, not for a reader to assume.
+
+    Under `paired` a section belongs to one marker and the row's marker is the
+    scan's own, so this checks nothing there.
+    """
+    if LAYOUT != CH.LAYOUT_MULTIPLEX:
+        return
+    found = sorted({(r.get("marker") or "").strip() for r in rows})
+    if found and found != [marker]:
+        raise SystemExit(
+            f"{path} is {marker}'s box file, but its rows name the marker(s) "
+            f"{found}. It was written before 05a stamped each box with the "
+            f"marker it was placed for, so its discs would be joined to the "
+            f"wrong marker. Re-run 05a_roi_geometry.py --marker {marker} to "
+            f"rewrite it.")
+
+
 def all_boxes():
     """Every marker's boxes, concatenated, for stages that span both.
 
@@ -189,6 +237,7 @@ def all_boxes():
         if not os.path.exists(p):
             continue
         rows = load_csv(p)
+        refuse_stale_markers(p, m, rows)
         for r in rows:
             u = r["scene_uid"]
             # THE DISJOINTNESS IS CHECKED, NOT ASSUMED - under `paired`. 06a
@@ -521,6 +570,11 @@ def build(regions_csv, limit=None, plates_csv=None, require_background=True,
     # such filter: another marker's uid never matches one of these.
     if marker is not None:
         regions = [r for r in regions if (r.get("marker") or "").strip() == marker]
+    # THE MARKER THESE BOXES ARE FOR, which is the one this run is placing -
+    # `marker` when main() split a several-marker export, else the one
+    # use_marker() pointed the paths at. Captured here, before the index loop
+    # below rebinds a name of the same spelling.
+    placing = marker if marker is not None else MARKER
     plates = load_csv(plates_csv) if (plates_csv and os.path.exists(plates_csv)) else []
 
     if require_background:
@@ -553,8 +607,8 @@ def build(regions_csv, limit=None, plates_csv=None, require_background=True,
     # every marker, so this reads it once per marker and overwrites each id
     # with itself - harmless, and cheaper than a special case that could drift.
     index = {}
-    for marker in MARKERS:
-        p = RF.marker_paths(marker)["index"]
+    for _m in MARKERS:
+        p = RF.marker_paths(_m)["index"]
         if os.path.exists(p):
             for r in load_csv(p):
                 if r["kind"] == "section":
@@ -627,12 +681,25 @@ def build(regions_csv, limit=None, plates_csv=None, require_background=True,
                                  f"match scene rect {exp_w}x{exp_h} at {um_px} um/px"))
             continue
 
+        # The `marker` column every row below carries, and 06a's join key.
+        # Under `paired` a section belongs to one marker and focus.csv says
+        # which, so that is kept exactly as it was. Under `multiplex` focus.csv
+        # has ONE row per scan and its `marker_channel` is the scan's second
+        # channel - the same marker for every pass. Stamping that put the first
+        # marker's name on every marker's boxes: roi_boxes_<second>.csv said
+        # <first> on every row, 06a.split_by_marker pooled both files into one
+        # group, and the second marker's nuclei had no discs. The directory the
+        # overview is read from above stays focus.csv's; only the label is the
+        # run's.
+        stamp = (f["marker_channel"] if LAYOUT == CH.LAYOUT_PAIRED
+                 else placing)
+
         g2o = grid_to_overview(rep)
         M = affine_from(lambda u, v: (lambda p: (rx + p[0] * scale,
                                                  ry + p[1] * scale))(g2o(u, v)))
 
         geom_rows.append({
-            "scene_uid": uid, "animal": f["animal"], "marker": f["marker_channel"],
+            "scene_uid": uid, "animal": f["animal"], "marker": stamp,
             "czi_file": czi, "scene_index": si,
             "scene_x": rx, "scene_y": ry, "scene_w": rw, "scene_h": rh,
             "overview_um_px": um_px, "native_um_px": BASE_PX_UM,
@@ -692,7 +759,7 @@ def build(regions_csv, limit=None, plates_csv=None, require_background=True,
             # there would put a number in a column 06a reads as an area.
             ax_a, ax_b = ellipse_axes(M, sr) if poly is None else (None, None)
             box_rows.append({
-                "scene_uid": uid, "animal": f["animal"], "marker": f["marker_channel"],
+                "scene_uid": uid, "animal": f["animal"], "marker": stamp,
                 "roi_kind": r.get("roi_kind") or "roi",
                 "region": r.get("region", ""), "seed_n": r.get("seed_n", ""),
                 "sec_x": sx, "sec_y": sy, "sec_r": sr,
@@ -1042,8 +1109,30 @@ def _place_marker(marker, regions, plates, args, only=None):
     # Written to the SUFFIXED pair always, even when the legacy unsuffixed file
     # is what was read: the point is that a second marker cannot overwrite the
     # first, and that only holds once both live under their own names.
-    for path, rows in ((geom_csv(marker), geom), (box_csv(marker), boxes)):
+    #
+    # A --limit run writes its pair beside the real one (trial_path) and stops
+    # there: the archived export below describes the REAL boxes, and a trial
+    # that replaced it would leave the record naming an export the boxes on
+    # disk were not built from.
+    geom_out = trial_path(geom_csv(marker), args.limit)
+    box_out = trial_path(box_csv(marker), args.limit)
+    for path, rows in ((geom_out, geom), (box_out, boxes)):
         IO.atomic_write_csv(path, rows, list(rows[0].keys()))
+    if args.limit:
+        print("=" * 72)
+        print(f"--limit trial: {len(geom)} sections -> {geom_out}")
+        print(f"               {len(boxes)} ROIs     -> {box_out}")
+        print(f"  {os.path.basename(box_csv(marker))} is untouched; run without "
+              f"--limit to write it")
+        # A trial is for finding problems, so it names what it skipped too.
+        if skipped:
+            print(f"  SKIPPED {len(skipped)}:")
+            for uid, why in skipped[:10]:
+                print(f"    {uid}: {why}")
+        print("=" * 72)
+        # Only the N sections the trial was told to place can be skipped
+        # here; the rest were never asked for, and are no failure.
+        return not_placed(marker, skipped)
 
     # Keep the export these boxes were built from, beside them.
     #
@@ -1094,7 +1183,27 @@ def _place_marker(marker, regions, plates, args, only=None):
         for uid, why in skipped[:10]:
             print(f"    {uid}: {why}")
     print("=" * 72)
-    return 0
+    return not_placed(marker, skipped)
+
+
+def not_placed(marker, skipped):
+    """1, with the reason as the last line printed, when sections were skipped.
+
+    A section in `skipped` has ROIs the operator drew and no box: its angle
+    did not reproduce, its overview or scene rectangle is missing, or it has
+    no row to place it from. "SKIPPED n" used to be the whole of it and the
+    run returned 0, so the app showed 05a done and 05c then measured a study
+    with those sections silently missing. The boxes that were placed are
+    written and stay; this only makes the gap a failure someone has to read.
+    Sections left out by the analysis-set rule (no background disc) are not
+    in `skipped` - that is the curation's own decision, printed by build().
+    """
+    if not skipped:
+        return 0
+    print(f"!! {len(skipped)} {marker} section(s) with ROIs NOT PLACED (see "
+          f"SKIPPED above): their ROIs have no boxes, so 05c would not measure "
+          f"them. Fix the cause and run this again.")
+    return 1
 
 
 if __name__ == "__main__":

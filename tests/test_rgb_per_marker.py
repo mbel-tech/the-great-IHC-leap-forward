@@ -242,5 +242,77 @@ with temp_study(acquisition=MULTIPLEX) as study:
     chk("an empty index stops the stage", raised.startswith("SystemExit"), True)
     chk("...saying there is nothing to composite", "no Mk1 sections to composite" in raised, True)
 
+print()
+print("--- a composite not built, or a marker with no colour, fails the run ---")
+
+
+def run_04o_rc(O, marker):
+    """run_04o, but keeping main()'s return value and what it printed."""
+    import contextlib
+    import io
+
+    def fake_reformat(dapi, companion=None, **_kw):
+        img = np.asarray(Image.open(dapi).convert("L"))
+        comp = np.asarray(Image.open(companion).convert("L"))
+        return img, None, 0.0, None, None, comp
+
+    saved_argv, saved_rf = sys.argv, O.RF.reformat
+    sys.argv = ["04o_section_rgb.py", "--marker", marker, "--all", "--thumbs",
+                "--source", "overview"]
+    O.RF.reformat = fake_reformat
+    out = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out):
+            rc = O.main()
+    finally:
+        sys.argv, O.RF.reformat = saved_argv, saved_rf
+    return rc, [ln for ln in out.getvalue().splitlines() if ln.strip()]
+
+
+with temp_study(acquisition=MULTIPLEX) as study:
+    O = load_stage("04o_section_rgb.py", name="lsstage_04o_missing")
+    out = study.out_root
+    gone = "S2"
+    write_csv(os.path.join(out, "reformatted", "reformat_index.csv"),
+              ["id", "kind", "animal"],
+              [{"id": u, "kind": "section", "animal": "AB12"} for u in (UID, gone)])
+    write_csv(os.path.join(out, "qc", "focus.csv"),
+              ["scene_uid", "marker_channel", "animal"],
+              [{"scene_uid": u, "marker_channel": "Mk1", "animal": "AB12"}
+               for u in (UID, gone)])
+    d = os.path.join(out, "overviews", "AB12", "Mk1")
+    os.makedirs(d, exist_ok=True)
+    # Only UID has overviews; `gone` has none.
+    Image.fromarray(np.full((SIDE, SIDE), 40, np.uint8)).save(
+        os.path.join(d, UID + "_DAPI.png"))
+    Image.fromarray(np.full((SIDE, SIDE), 200, np.uint8)).save(
+        os.path.join(d, UID + "_MARK.png"))
+    rc, said = run_04o_rc(O, "Mk1")
+    chk("a section whose composite could not be built fails the run", rc, 1)
+    chk("...the reason is the last line",
+        bool(said) and "1 Mk1 composite(s) NOT BUILT" in said[-1], True)
+    chk("...the one that could be built is on disk",
+        os.path.exists(os.path.join(O.rgb_dir("Mk1"), UID + ".png")), True)
+
+# The first two markers shown get red and green by default; a third with no
+# `display.colours` entry is what the colour map leaves out.
+THREE = {"layout": "multiplex", "channels": MULTIPLEX["channels"] + [
+    {"name": "Mk3", "role": "marker", "czi_name": "AF488", "index": 3,
+     "segment": "nuclear"}]}
+with temp_study(acquisition=THREE) as study:
+    O = load_stage("04o_section_rgb.py", name="lsstage_04o_nocolour")
+    out = study.out_root
+    write_csv(os.path.join(out, "reformatted", "reformat_index.csv"),
+              ["id", "kind", "animal"], [{"id": UID, "kind": "section", "animal": "AB12"}])
+    write_csv(os.path.join(out, "qc", "focus.csv"),
+              ["scene_uid", "marker_channel", "animal"],
+              [{"scene_uid": UID, "marker_channel": "Mk3", "animal": "AB12"}])
+    chk("the third marker has no colour in this study",
+        "Mk3" in O.MARKER_COLOURS, False)
+    rc, said = run_04o_rc(O, "Mk3")
+    chk("a marker with no colour fails the run, not returns as done", rc, 1)
+    chk("...saying so as its last line",
+        bool(said) and "no Mk3 composite was built" in said[-1], True)
+
 print("ALL PASS" if not failures else f"{len(failures)} FAILED")
 sys.exit(1 if failures else 0)

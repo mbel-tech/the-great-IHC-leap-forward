@@ -303,6 +303,61 @@ with temp_study(acquisition={"layout": "multiplex", "channels": [
     chk("...and every declared marker's analysis set applies",
         P4.ANALYSIS_MARKERS, ["Mk1", "Mk2"])
 
+    print()
+    print("--- multiplex: the verdict and the counts are the row's marker's ---")
+    # Every marker's analysis set, box file and nuclei name the SAME uid under
+    # multiplex. `aset.update` over the markers kept whichever came last, so
+    # the Mk1 row showed Mk2's 04j verdict - here, censored out when Mk1's own
+    # set keeps it. count_rois and count_nuclei summed both markers' discs and
+    # nuclei onto the one uid, so one marker measured read as both.
+    ref = P4.REFORMAT_DIR
+    write_csv(os.path.join(ref, "Mk1_analysis_set.csv"), ASET_COLS,
+              [{"scene_uid": "S1", "in_analysis_set": "1",
+                "censored_fraction_in_tissue": "0.001", "reason": ""}])
+    write_csv(os.path.join(ref, "Mk2_analysis_set.csv"), ASET_COLS,
+              [{"scene_uid": "S1", "in_analysis_set": "0",
+                "censored_fraction_in_tissue": "0.4",
+                "reason": "40% of pixels at the 16-bit ceiling"}])
+    MBOX = ["scene_uid", "marker", "roi_index"]
+    write_csv(os.path.join(ref, "roi_boxes_Mk1.csv"), MBOX,
+              [{"scene_uid": "S1", "marker": "Mk1", "roi_index": i}
+               for i in (1, 2)])
+    write_csv(os.path.join(ref, "roi_boxes_Mk2.csv"), MBOX,
+              [{"scene_uid": "S1", "marker": "Mk2", "roi_index": i}
+               for i in (1, 2, 3)])
+    write_csv(os.path.join(P4.RESULTS, "roi_nuclei.csv"),
+              ["scene_uid", "animal", "marker", "roi_index"],
+              [{"scene_uid": "S1", "animal": "AB12", "marker": mk,
+                "roi_index": 1} for mk in ["Mk2"] * 7])
+    sys.argv = ["04p_section_provenance.py"]
+    try:
+        P4.main()
+    finally:
+        sys.argv = saved_argv
+    with open(P4.OUT_CSV, newline="", encoding="utf-8") as fh:
+        prov = {r["scene_uid"]: r for r in csv.DictReader(fh)}
+    s1 = prov["S1"]
+    chk("the row is the scan's marker", s1["marker"], "Mk1")
+    chk("...and carries that marker's own 04j verdict, not the last one read",
+        [s1["in_analysis_set"], s1["censored_fraction_in_tissue"],
+         s1["censor_reason"]], ["1", "0.001", ""])
+    chk("...that marker's discs only, not both files' summed",
+        s1["n_rois"], "2")
+    # Only Mk2 has been measured. The Mk1 row is curated, not measured: Mk2's
+    # nuclei say nothing about whether Mk1 was ever run.
+    chk("...and that marker's nuclei only", s1["n_nuclei"], "0")
+    chk("...so its status is its own", s1["status"], "curated")
+
+    # The disc count keys by the ROW's marker, as 06a's split_by_marker does,
+    # so the two count the same discs under the same marker. A stale
+    # roi_boxes_Mk2.csv whose rows say Mk1 (05a and 05c refuse it) is counted
+    # here under Mk1, where 06a would also put it - not under the file's Mk2.
+    write_csv(os.path.join(ref, "roi_boxes_Mk2.csv"), MBOX,
+              [{"scene_uid": "S1", "marker": "Mk1", "roi_index": i}
+               for i in (1, 2, 3)])
+    chk("count_rois keys a disc by its row's marker, as 06a does",
+        dict(P4.count_rois()), {("S1", "Mk1"): 5})
+
 print()
 print("ALL PASS" if not failures else f"{len(failures)} FAILED")
 sys.exit(1 if failures else 0)

@@ -92,6 +92,30 @@ PLATE_DIR = AT.plate_dir(CONFIG)
 QC_CSV = os.path.join(OUT_ROOT, "qc", "focus.csv")
 REFORMAT_DIR = os.path.join(OUT_ROOT, "reformatted")
 
+
+def overview_um_px(row):
+    """Micrometres per overview pixel for one focus.csv row.
+
+    The row's own `um_px` - 01 writes the scale each overview was actually
+    exported at - else the study's `overview_target_um_per_px`. 04f, 04g and
+    04i used to carry the LS study's 5.20 as a literal, so for a study exported
+    at another overview scale every area gate (2.5 mm2 of tissue, 1.2 mm2 of
+    artifact) and every "shared physical grid" was off by the square of the
+    ratio, and nothing said so. One helper, here because all three already
+    load this module, so the fallback cannot drift between them.
+    """
+    try:
+        v = float((row or {}).get("um_px") or "")
+        if v > 0:
+            return v
+    except (TypeError, ValueError):
+        pass
+    v = CONFIG.get("overview_target_um_per_px")
+    if not v:
+        raise SystemExit("no overview scale: focus.csv has no um_px for this "
+                         "section and the config sets no overview_target_um_per_px")
+    return float(v)
+
 # The naming rule, borrowed rather than restated. ls_paths owns it; this
 # module is one of its callers. See marker_paths below for what still is not
 # routed through it and why.
@@ -907,6 +931,12 @@ def main():
     n_excluded = 0
     n_rendered = 0
     lost = []
+    # Excluded sections whose look-at-only picture could not be made. Kept
+    # apart from `lost`, which is the list of sections the operator chose to
+    # KEEP that vanished anyway: an excluded section was never going into the
+    # analysis, and putting it there named a deliberate exclusion as an
+    # unexplained loss and inflated the one alarm that matters.
+    excl_failed = []
     no_mask = []
     for i, r in enumerate(secs):
         # Excluded sections are kept out of the INDEX rather than filtered
@@ -936,7 +966,8 @@ def main():
         # failed mask removed a section from the analysis with no record at all -
         # indistinguishable from a deliberate exclusion.
         if not os.path.exists(src):
-            lost.append((r["scene_uid"], "overview PNG missing"))
+            (excl_failed if is_excl else lost).append(
+                (r["scene_uid"], "overview PNG missing"))
             continue
         extra, flip = overrides.get(r["scene_uid"], (0.0, False))
         # A rejected mask means this section reformats UNMASKED even with
@@ -955,7 +986,8 @@ def main():
         out = reformat(src, light_background=False, extra_angle=extra, flip=flip,
                        artifact=art, censor=cen)
         if out is None:
-            lost.append((r["scene_uid"], "no tissue mask could be formed"))
+            (excl_failed if is_excl else lost).append(
+                (r["scene_uid"], "no tissue mask could be formed"))
             continue
         img, mask, angle, amask, cmask = out
         Image.fromarray(img).save(os.path.join(sec_dir, r["scene_uid"] + ".png"))
@@ -1013,6 +1045,7 @@ def main():
         print()
         print("=" * 72)
         print(f"--only: rendered {n_rendered} excluded section(s); index left alone")
+        report_excluded_failures(excl_failed)
         return
 
     out_csv = paths["index"]
@@ -1051,6 +1084,7 @@ def main():
             print(f"    ... and {len(lost) - 15} more")
         print(f"  full list: {path}")
         print("!" * 74)
+    report_excluded_failures(excl_failed)
     if n_excluded:
         print(f"excluded {n_excluded} section(s) marked as too damaged in the curator;")
         print(f"  the list is in {paths['excluded']}")
@@ -1058,6 +1092,38 @@ def main():
               f"so no later stage can pick them up")
     print("NEXT: 04c_atlas_match.py")
     print("=" * 72)
+    # A KEPT SECTION THAT DID NOT SURVIVE FAILS THE RUN. The banners above say
+    # so, but the app runs this in process and shows it done on None, so a
+    # final reformat that dropped sections the operator chose to keep looked
+    # complete. The index is written - it is the truth about what survived -
+    # and the failure is what makes someone read the list. Printed last,
+    # because app/runner.py shows the last line printed as the reason.
+    # Excluded sections that got no picture are not counted: they were never
+    # going into the analysis (report_excluded_failures).
+    if lost or unaccounted:
+        print(f"!! {len(lost)} kept section(s) did not survive and "
+              f"{len(unaccounted)} are unaccounted for (see above): this "
+              f"reformat is not complete. Fix the cause and run it again.")
+        return 1
+
+
+def report_excluded_failures(excl_failed):
+    """Say which excluded sections got no picture, in their own words.
+
+    Not an error and not `lost`: the section stays excluded and out of the
+    index either way. What is missing is the picture the Review mode would
+    show, so the operator cannot look at it to decide on reinstating it - which
+    is worth saying, but must not read as a kept section going missing.
+    """
+    if not excl_failed:
+        return
+    print()
+    print(f"{len(excl_failed)} excluded section(s) could not be rendered for "
+          f"Review mode (still excluded; nothing is lost from the analysis):")
+    for uid, why in excl_failed[:15]:
+        print(f"    {uid:<24} {why}")
+    if len(excl_failed) > 15:
+        print(f"    ... and {len(excl_failed) - 15} more")
 
 
 def preview(rows, sec_dir, plate_dir, n):
@@ -1088,4 +1154,4 @@ def preview(rows, sec_dir, plate_dir, n):
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

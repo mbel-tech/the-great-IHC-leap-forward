@@ -284,7 +284,7 @@ SPEC = [
     Key("overview_target_um_per_px", "float",
         "Resolution the per-section overviews are exported at.",
         required=True, default=5.2, materialise=True,
-        consumers=["01_overviews", "01_overviews.groovy"]),
+        consumers=["01_overviews", "01_overviews.groovy", "04f", "04g", "04i"]),
 
     Key("curation_render.source", "str",
         "Where the curation composites take their pixels from.",

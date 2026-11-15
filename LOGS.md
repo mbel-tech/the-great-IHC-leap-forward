@@ -9,6 +9,128 @@ where things landed, not which plausible-looking route was tried and abandoned, 
 
 ---
 
+## 2026-11-15 - Study-agnostic stages that fail honestly (04a / 04e / 04f / 04g / 04i / 04o / 05a)
+
+**Changed:** no stage converts an overview area with a literal pixel size any more.
+`04a_reformat.overview_um_px` gives a section's own `um_px` from `qc/focus.csv`, else the config's
+`overview_target_um_per_px`; 04f (tissue areas), 04g (object gates, now `MIN_OBJ_MM2`, and the
+summary's areas) and 04i (the shared physical grid, now `PHYS_UM`, which each pass reaches from its
+own scale) use it. 04e finds a section in whichever marker's section directory holds it
+(`section_dirs`, the same rule as 05c and 06g). A run that skipped work it was asked to do now
+names it and returns 1 with the reason as its last line, 05c's pattern: 04a (a kept section lost
+or unaccounted), 04e (missing picture or plate, elastix / transformix failure, no seeds), 04f
+(overview unreadable), 04g (overview missing or no tissue; the section's old `_artifact.png` is
+removed), 04o (a composite not built; a marker with no colour) and 05a (a section with ROIs it
+could not place, angle mismatch included). A `--limit` trial counts only the sections it was told
+to do. Checks in `tests/test_section_review.py`, `test_partial_runs.py`,
+`test_proposed_exclusions.py`, `test_propagate_frames.py`, `test_rgb_per_marker.py`,
+`test_roi_geometry.py` and `test_wullimann_registration.py`.
+
+**Why:** found on review (REVIEW.md rules 2 and 6). Under `paired`, 04e looked in `sections/`
+only, so the second marker's landmark export ended "nothing refined". `UM_PX = 5.20e-3` in 04f and
+04g, and 04i's equal downsampling of both passes, put every area gate in the wrong place for a
+study exported at another overview scale. Each of the skips above ended in success, so the app
+showed the stage done; 04g also left a stale mask from an earlier run that 04a and 05c read as
+current.
+
+**Cost:** Run all remaining now stops at these stages when a section is skipped, where it went on
+before; on the LS drive 04e's plain run fails for the 17 plate ids that have no reformatted image
+(QC only, not a stage). At the LS scale every number is unchanged: the 15 px object minimum is
+the same cut as 0.0004 mm2, and 04i still strides by 4.
+
+## 2026-11-15 - The curation chain keeps hand decisions (04a / 04f / 04i)
+
+**Changed:** `04i_propagate_to_perk` keeps hand corrections in the overrides file. Each row now
+carries `source` (`derived` / `manual`) and `derived_as` (the pairing, rotation, flip and exclusion
+04i wrote); a full run keeps a row marked manual, or one whose values no longer equal its
+`derived_as`, in place of the derived row, says how many it kept, and copies the old file to
+`<name>.<YYYYMMDD-HHMMSS>.backup` (04q's `backup_path`, imported) before changing it. A run that
+changes nothing does not rewrite the file. In a file written before these columns, a row that
+differs from this run's derivation, or that 04i did not derive, is kept as manual. 04i also carries
+the curated section's `manual_flip`: the goal mask is mirrored after rotating, as 04a does, the
+target is aligned mirrored and the angle turned back, the derived row gets `flip` = 1, and
+`final_iou_256` reformats the partner with the flip. `04f_exclusion_candidates` carries the
+previous row, unchanged, for a section in `excluded_sections.csv` that is no longer in
+`reformat_index.csv`, and says how many. `04a_reformat --render-excluded` reports an excluded
+section that cannot be rendered in its own count, not in `lost_sections`. Checks in
+`tests/test_propagate_frames.py`, `tests/test_proposed_exclusions.py` and
+`tests/test_section_review.py`.
+
+**Why:** found on review (REVIEW.md rule 4). A full 04i run rewrote `perk_overrides.csv` from
+derived rows only, so a correction typed into it was lost; a section the operator flipped got a
+partner in the mirror frame (hemispheres swapped between the passes) and its `final_iou_256` was
+measured against the flipped mask unflipped. After a final 04a, a re-run of 04f dropped the
+excluded sections from `exclusion_candidates.csv`, and for a study with no override file the next
+final reformat put them back into the analysis. 04a called an excluded section's failed picture a
+kept section that "did not survive".
+
+**Cost:** two more columns in the overrides file. A legacy file's rows that are stale (not hand
+edits) are kept as manual on the first run until someone deletes them; the run prints the count.
+A carried 04f row is not re-measured, so a changed threshold does not reach it.
+
+## 2026-11-15 - Boxes carry the marker they were placed for; multiplex bookkeeping per marker
+
+**Changed:** `05a_roi_geometry` stamps each box and geometry row with the marker the run is placing
+under `multiplex`, instead of `focus.csv`'s `marker_channel`; under `paired` it still stamps
+`marker_channel`, which is the section's own marker. `04p_section_provenance` keys the 04j analysis
+set, the disc count and the nuclei count by (scene_uid, marker) and reads each row's values for that
+row's marker. `06c_excel_dataset`'s coverage sheet counts a section as measured for a marker only
+when 06a has rows for that (section, marker). New checks: a multiplex section placed for two
+markers in `tests/test_roi_geometry.py` (through 05a and 06a), the per-marker verdict and counts in
+`tests/test_section_provenance.py`, and per-marker coverage in `tests/test_roi_dataset.py`.
+After review: under `multiplex`, 05a's `all_boxes` and 05c stop on a `roi_boxes_<m>.csv` whose
+rows name another marker (a file written before this fix) and say to re-run 05a for that marker.
+05c's resume counts only `--marker`'s own rows as measured, so the second marker's first run
+measures every section instead of inheriting the first marker's. 06c no longer calls a section that
+06a reports with zero nuclei (measured and found empty) inconsistent. 04p counts discs by each
+row's marker, as 06a does. Covered in `tests/test_detect_resume.py` too.
+
+**Why:** found on review (REVIEW.md rule 5). A multiplex scan has one `focus.csv` row, whose
+`marker_channel` is the first marker, so every marker's `roi_boxes_<m>.csv` said the first marker on
+every row. 06a then put both files' boxes in one group and stopped on the second marker's nuclei as
+having no discs. 04p showed the last marker's 04j verdict on every row and added both markers'
+discs and nuclei together. 06c reported a marker 05c had never run on as fully measured.
+
+**Cost:** under multiplex 04p still writes one row per scan, labelled with the manifest's marker, so
+that row now shows only that marker's verdict and counts. The other markers' verdicts are not in
+the table; a row per (scan, marker) would need 04l's Review pane, which looks rows up by scene_uid
+alone, to change as well. 04o is unchanged: under multiplex it still finds sections for the first
+marker only (see the task report). A multiplex study placed before this fix has to re-run 05a
+for every marker but the first before 06a, 06c or 05c will read its boxes.
+
+## 2026-11-15 - Partial and trial runs never replace a complete output
+
+**Changed:** a narrowed run no longer writes over the stage's complete table. `05a --limit N`
+writes `roi_geometry_<marker>.trialN.csv` / `roi_boxes_<marker>.trialN.csv` beside the real pair
+and archives no export; `04g --limit N` writes `artifact_summary[_<marker>].trialN.csv`; `04n --tier
+X` writes `roi_worklist.X.csv` (and `--tier` now only accepts the three tier names, because it is
+part of a file name). `01_overviews` and `01k_saturation_raw` read their existing rows on every run,
+`--force` included, and a section measured now replaces only its own row, so `--force --limit N`
+keeps every other section in `focus.csv` / `saturation_raw.csv`. Kept is not done: `focus.csv` rows
+now carry `display_ranges_id` (a short hash of the ranges the PNGs were drawn with) and
+`saturation_raw.csv` rows `ceiling` (the clip ceiling measured against), and a plain run resumes past
+a row only while its stamp matches, so a forced run that resampled the ranges or applied a new
+ceiling and stopped part way is finished by the next plain run. Rows from before the stamp are blank
+and count as current, so an existing study is not re-exported wholesale. A section that fails keeps
+its row marked `failed` and is retried by the next run (01 keeps it in `overview_failures.csv`, 01k
+exits 1). `01 --force --limit N` no longer resamples the study-wide `display_ranges.json`.
+`05a --limit` lists skipped sections like a full run. The trial names are registered in
+`file_formats.json`. None of the trial names is one the app's Done check looks for. New suite
+`tests/test_partial_runs.py` drives all five stages (stand-ins for the CZI reader, the reformat and
+the detector).
+
+**Why:** found on review (REVIEW.md rule 4). Each of these atomically replaced the full table with
+the subset, and the stage then read as done on a fraction of the study: 05c measured N sections'
+boxes, 04j called every section missing from `saturation_raw.csv` unmeasured, and a one-tier
+worklist dropped the held-out sections from the record 04l and 04o filter themselves. 04i's
+`--limit` already wrote a `.trialN` file; this applies the same rule.
+
+**Cost:** a trial no longer moves the stage forward: after a trial the stage still shows as not
+done until a full run. A forced 01/01k run whose section fails now keeps that section's earlier row
+(marked `failed`, retried next run) instead of dropping it, so 04j keeps censoring it with the
+earlier measurement until it is measured again. Two new columns. A first review of this change
+caught the original version keeping rows that then read as done.
+
 ## 2026-11-15 - The curator page suites run without a study, and so in CI
 
 **Changed:** new `tests/_curator_study.py` writes a small synthetic study (six animals LS101-LS106,

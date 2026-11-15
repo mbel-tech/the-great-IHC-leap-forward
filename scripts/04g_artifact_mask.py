@@ -51,6 +51,7 @@ rather than guessed at.
 
 Run:  python 04g_artifact_mask.py --preview 8     # look before committing
       python 04g_artifact_mask.py
+      python 04g_artifact_mask.py --limit 20   # trial: writes artifact_summary*.trial20.csv
 """
 
 import sys
@@ -102,7 +103,12 @@ SUMMARY_KEYS = ["scene_uid", "animal", "section_order", "excluded", "tissue_mm2"
                 "saturated_fraction", "saturated_fraction_raw"]
 REPORT_DIR = os.path.join(OUT_ROOT, "qc", "artifacts")
 
-UM_PX = 5.20e-3
+# NO PIXEL SIZE HERE. Every area below is in mm2 and is converted with the
+# section's own scale - focus.csv's `um_px`, through 04a.overview_um_px - not
+# with a literal. This was `UM_PX = 5.20e-3`, the LS study's overview scale,
+# so for a study exported at any other scale every object area, the 1.2 mm2
+# anatomy gate and the tissue and measurable areas in the summary were wrong by
+# the square of the ratio, and nothing said so.
 
 # Label values written into the mask PNG. 0 is clean.
 LBL_COMPACT = 1     # air bubble / antibody aggregate
@@ -125,7 +131,8 @@ GROW_ITERS = 25             # 130 um - bounds growth so it cannot flood the tiss
 # Sweeping further (p85/15, p80/20) kept adding area without a reason to.
 HALO_PCTL = 90.0
 HALO_ITERS = 10
-MIN_OBJ_PX = 15             # ~0.0004 mm2; below this it is noise
+# ~0.0004 mm2 (15 px at 5.20 um/px - the same cut there); below this it is noise
+MIN_OBJ_MM2 = 4.0e-4
 MAX_OBJ_MM2 = 1.2           # above this it is not an artifact, it is anatomy
 ELONGATION_SPLIT = 3.0      # bbox aspect ratio dividing compact from elongated
 FILL_SPLIT = 0.55           # area / bbox area; a curved fibre is low, a disc is high
@@ -141,8 +148,13 @@ def texture(im):
     return ndimage.uniform_filter(np.abs(im - ndimage.median_filter(im, size=3)), size=9)
 
 
-def detect(im, tis):
-    """Return (label image, per-object records)."""
+def detect(im, tis, mm_px):
+    """Return (label image, per-object records).
+
+    `mm_px` is this overview's pixel size in mm (04a.overview_um_px / 1000):
+    the area gates are physical, so they need the section's own scale.
+    """
+    px_mm2 = mm_px ** 2
     core = ndimage.binary_erosion(tis, np.ones((2 * RIM_ERODE_PX + 1,) * 2))
     if core.sum() < 500:
         return np.zeros(im.shape, np.uint8), []
@@ -181,13 +193,13 @@ def detect(im, tis):
     for i, sl in enumerate(ndimage.find_objects(labels), 1):
         m = labels[sl] == i
         area = int(m.sum())
-        if area * UM_PX ** 2 > MAX_OBJ_MM2:
+        if area * px_mm2 > MAX_OBJ_MM2:
             # Growth escaped - almost certainly along the bright tissue rim.
             # Fall back to the seed for this object rather than dropping it,
             # so a real artifact is still partly masked and the rim is not.
             m = m & seed[sl]
             area = int(m.sum())
-        if area < MIN_OBJ_PX:
+        if area * px_mm2 < MIN_OBJ_MM2:
             continue
         h, w = m.shape
         elong = max(h, w) / max(min(h, w), 1)
@@ -198,7 +210,7 @@ def detect(im, tis):
         lbl = LBL_ELONGATED if (elong >= ELONGATION_SPLIT or fill < FILL_SPLIT) else LBL_COMPACT
         region = out[sl]
         region[m] = lbl
-        records.append({"label": lbl, "area_mm2": area * UM_PX ** 2,
+        records.append({"label": lbl, "area_mm2": area * px_mm2,
                         "elongation": round(float(elong), 2), "fill": round(float(fill), 2)})
 
     # Halo pass. New pixels inherit the label of the nearest existing one, so an
@@ -219,11 +231,11 @@ def detect(im, tis):
             for i, sl in enumerate(ndimage.find_objects(labels2), 1):
                 m = labels2[sl] == i
                 a = int(m.sum())
-                if a < MIN_OBJ_PX:
+                if a * px_mm2 < MIN_OBJ_MM2:
                     continue
                 vals = out[sl][m]
                 records.append({"label": int(np.bincount(vals).argmax()),
-                                "area_mm2": a * UM_PX ** 2})
+                                "area_mm2": a * px_mm2})
     return out, records
 
 
@@ -315,6 +327,24 @@ def summary_csv(marker):
     return os.path.join(MASK_DIR, f"artifact_summary_{marker}.csv")
 
 
+def output_path(marker, limit):
+    """Where this run's summary goes: summary_csv(marker), or for `--limit N`
+    `<name>.trialN.csv` beside it.
+
+    04p reads the summary as the record of every masked section, and the app
+    counts the stage done when it exists. A trial on the first N sections
+    written over it dropped every other section's artifact numbers from that
+    record, with the stage still showing done. Same rule as 04i's --limit. The masks a trial
+    writes are the ones a full run writes for those sections, so only the
+    table needs to go aside.
+    """
+    out = summary_csv(marker)
+    if not limit:
+        return out
+    root, ext = os.path.splitext(out)
+    return f"{root}.trial{limit}{ext}"
+
+
 def build_parser():
     """The parser, built separately so a test can read the marker default off
     it. The default is not a detail: it selects which pass gets masked."""
@@ -389,10 +419,13 @@ def main():
     os.makedirs(MASK_DIR, exist_ok=True)
     os.makedirs(REPORT_DIR, exist_ok=True)
 
-    chan, satur, satur_raw = {}, {}, {}
+    chan, satur, satur_raw, um_px = {}, {}, {}, {}
     with open(QC_CSV, newline="", encoding="utf-8") as fh:
         for r in csv.DictReader(fh):
             chan[r["scene_uid"]] = r["marker_channel"]
+            # The scale this section's overview was exported at; see
+            # 04a.overview_um_px.
+            um_px[r["scene_uid"]] = _RF.overview_um_px(r)
             try:
                 satur[r["scene_uid"]] = float(r["saturated_fraction"])
             except (KeyError, ValueError):
@@ -415,6 +448,11 @@ def main():
         index = index[: args.limit]
 
     rows, previews = [], []
+    # Sections this run was asked to mask and could not. Both used to be a
+    # silent `continue`: the summary came out shorter, the stage showed done,
+    # and the section's `_artifact.png` from an earlier run stayed on disk
+    # looking like this run's answer - 04a and 05c read it as current.
+    not_masked = []
     for i, r in enumerate(index):
         go, write_masks = run_plan(args.preview, len(previews))
         if not go:
@@ -422,12 +460,19 @@ def main():
         uid = r["id"]
         src = os.path.join(OVERVIEW_DIR, r["animal"], chan.get(uid, args.marker), uid + "_DAPI.png")
         if not os.path.exists(src):
+            not_masked.append((uid, "overview PNG missing"))
+            if write_masks:
+                drop_stale_mask(uid)
             continue
         im = np.asarray(Image.open(src).convert("L")).astype(np.float32)
         tis = load_tissue(im)
         if tis is None:
+            not_masked.append((uid, "no tissue mask could be formed"))
+            if write_masks:
+                drop_stale_mask(uid)
             continue
-        mask, recs = detect(im, tis)
+        mm_px = _RF.overview_um_px({"um_px": um_px.get(uid)}) / 1000.0
+        mask, recs = detect(im, tis, mm_px)
 
         # Written per section rather than batched: this drive has dropped writes
         # mid-run before, and a partial run should cost minutes, not the lot.
@@ -435,7 +480,7 @@ def main():
             with IO.atomic_save(os.path.join(MASK_DIR, uid + "_artifact.png")) as tmp:
                 Image.fromarray(mask).save(tmp, format="PNG")
 
-        tissue_mm2 = float(tis.sum()) * UM_PX ** 2
+        tissue_mm2 = float(tis.sum()) * mm_px ** 2
         rows.append(summary_row(uid, r, recs, tissue_mm2, satur, satur_raw))
         if args.preview and len(previews) < args.preview and recs:
             previews.append((uid, im, tis, mask))
@@ -445,6 +490,7 @@ def main():
     # A preview that found no artifact in its first few sections reports; only
     # a full run with nothing masked is a missing-input error.
     if not rows and not args.preview:
+        report_not_masked(not_masked)
         raise SystemExit("nothing masked - run 01_overviews.py first, or "
                          "04a_reformat.py when running without --include-excluded")
 
@@ -453,7 +499,7 @@ def main():
         if args.preview:
             return
 
-    out = summary_csv(args.marker)
+    out = output_path(args.marker, args.limit)
     IO.atomic_write_csv(out, rows, SUMMARY_KEYS)
 
     pct = np.array([r["artifact_pct_of_tissue"] for r in rows])
@@ -461,6 +507,9 @@ def main():
     print()
     print("=" * 74)
     print(f"{len(rows)} sections -> {out}")
+    if args.limit:
+        print(f"  (--limit trial: {os.path.basename(summary_csv(args.marker))} is "
+              f"untouched; run without --limit to write it)")
     print(f"  masks written to {MASK_DIR}/<uid>_artifact.png  "
           f"(0 clean, {LBL_COMPACT} compact, {LBL_ELONGATED} elongated)")
     print(f"  sections with >=1 artifact : {aff} ({100 * aff / len(rows):.0f}%)")
@@ -479,6 +528,40 @@ def main():
     print("resolution) and channel-specific antibody aggregates (would need the")
     print("marker channel, which would break the blinding).")
     print("=" * 74)
+    # A SKIPPED SECTION FAILS THE RUN - 05c's rule. What was masked is
+    # written and stays; the failure is what makes someone look at the list.
+    # Printed last, because app/runner.py shows the last line printed as the
+    # reason. A --limit trial counts only the sections it was told to do.
+    if not_masked:
+        report_not_masked(not_masked)
+        print(f"!! {len(not_masked)} section(s) NOT MASKED (see above; any "
+              f"earlier mask of theirs was removed): this stage is not "
+              f"complete. Fix the cause and run it again.")
+        return 1
+
+
+def drop_stale_mask(uid):
+    """Remove `uid`'s mask from an earlier run, when this run could not redo it.
+
+    Left in place it reads as this run's answer: 04a --mask-artifacts blanks
+    it, 05c flags nuclei under it, and the summary - which no longer lists the
+    section - is the only thing that disagrees. Gone, 04a reports the section
+    as having no mask, which is the truth.
+    """
+    p = os.path.join(MASK_DIR, uid + "_artifact.png")
+    if os.path.exists(p):
+        os.remove(p)
+
+
+def report_not_masked(not_masked):
+    """Name the sections this run could not mask, and why."""
+    if not not_masked:
+        return
+    print(f"  {len(not_masked)} section(s) could not be masked:")
+    for uid, why in not_masked[:15]:
+        print(f"    {uid:<24} {why}")
+    if len(not_masked) > 15:
+        print(f"    ... and {len(not_masked) - 15} more")
 
 
 def overlay(previews):
@@ -510,4 +593,4 @@ def overlay(previews):
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

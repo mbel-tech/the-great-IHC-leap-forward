@@ -1,5 +1,5 @@
 {
- "_about": "Every file the pipeline writes or reads. Hand-kept; tests/test_technical_guide.py checks it against the code and docs/make_technical_tables.py turns it into the guide's file tables.",
+ "_about": "Every file the pipeline writes or reads. Hand-kept; tests/test_technical_guide.py checks it against the code and docs/make_technical_tables.py turns it into the guide's file tables. Trial files: a narrowed run (`--limit N`, 04n's `--tier X`) never writes over a complete table; it writes `<name>.trialN.csv` (or `roi_worklist.<tier>.csv`) beside it, listed under that table's `names`.",
  "files": [
   {
    "path": "manifest/manifest_files.csv",
@@ -889,6 +889,12 @@
      "type": "text",
      "units": "",
      "meaning": "Which library decoded the pixels (always `pylibCZIrw`)."
+    },
+    {
+     "name": "display_ranges_id",
+     "type": "text",
+     "units": "",
+     "meaning": "Which `display_ranges.json` this section's PNGs were drawn with (a short hash of it), or `failed` when the last run could not export the section again. A run resumes past a row only while this matches the current ranges; blank on rows written before the stamp, which count as current."
     }
    ]
   },
@@ -1038,6 +1044,12 @@
      "type": "text",
      "units": "",
      "meaning": "Which library decoded the pixels (always `pylibCZIrw`)."
+    },
+    {
+     "name": "ceiling",
+     "type": "integer",
+     "units": "counts",
+     "meaning": "The clip ceiling this row was measured against, or `failed` when the last run could not measure the section again. 01k resumes past a row only while this matches the manifest's ceiling for the file; blank on rows written before the stamp, which count as current."
     }
    ]
   },
@@ -2702,7 +2714,9 @@
    "path": "artifacts/artifact_summary[_<marker>].csv",
    "names": [
     "artifact_summary.csv",
-    "artifact_summary_{marker}.csv"
+    "artifact_summary_{marker}.csv",
+    "artifact_summary.trial{N}.csv",
+    "artifact_summary_{marker}.trial{N}.csv"
    ],
    "writer": "04g_artifact_mask.py",
    "what": "One row per section: how much of the tissue 04g masked as artifact, by kind. Under a paired study the geometry-source marker (the second declared) has the unsuffixed name and the other marker `_<marker>`; under multiplex there is one file (see `ls_paths`).",
@@ -2792,7 +2806,8 @@
      "units": "",
      "meaning": "From focus.csv, for reference."
     }
-   ]
+   ],
+   "format": "`--limit N` writes `<name>.trialN.csv`. A trial run writes beside this file and never over it; nothing reads the trial file and the app's Done check does not count it."
   },
   {
    "path": "artifacts/<scene_uid>_artifact.png",
@@ -3004,7 +3019,9 @@
    "path": "reformatted/rotation_overrides[_<marker>].csv",
    "names": [
     "rotation_overrides.csv",
-    "perk_overrides.csv"
+    "perk_overrides.csv",
+    "rotation_overrides.trial{N}.csv",
+    "perk_overrides.trial{N}.csv"
    ],
    "writer": "04i_propagate_to_perk.py (the second scan of a paired study); older studies carry the removed rotation curator's export",
    "what": "Per section: the rotation and exclusion carried onto the second scan. The LS study keeps its old name, `perk_overrides.csv`, through `ls_paths.LEGACY`.",
@@ -3038,7 +3055,7 @@
      "name": "flip",
      "type": "0/1",
      "units": "",
-     "meaning": "1 to mirror."
+     "meaning": "1 to mirror; carried from the curated section's manual_flip."
     },
     {
      "name": "excluded",
@@ -3075,8 +3092,21 @@
      "type": "text",
      "units": "",
      "meaning": "Why, in words."
+    },
+    {
+     "name": "source",
+     "type": "text",
+     "units": "",
+     "meaning": "`derived` (written by 04i) or `manual` (a hand correction a re-run keeps)."
+    },
+    {
+     "name": "derived_as",
+     "type": "text",
+     "units": "",
+     "meaning": "The decision 04i derived for this row (pairing, rotation, flip, excluded). A row whose values differ from it was edited by hand."
     }
-   ]
+   ],
+   "format": "`--limit N` writes `<name>.trialN.csv`. A trial run writes beside this file and never over it; nothing reads the trial file and the app's Done check does not count it. A full run keeps rows marked `manual` or edited away from their `derived_as`, and backs the old file up to `<name>.<YYYYMMDD-HHMMSS>.backup` before changing it."
   },
   {
    "path": "reformatted/section_review.csv",
@@ -3422,7 +3452,8 @@
   {
    "path": "reformatted/roi_worklist.csv",
    "names": [
-    "roi_worklist.csv"
+    "roi_worklist.csv",
+    "roi_worklist.{tier}.csv"
    ],
    "writer": "04n_roi_worklist.py",
    "what": "The ROI curation queue, in an order where any first part is a usable dataset.",
@@ -3506,7 +3537,8 @@
      "units": "mm²",
      "meaning": "Carried."
     }
-   ]
+   ],
+   "format": "`--tier X` writes that tier alone to `roi_worklist.X.csv`. A trial run writes beside this file and never over it; nothing reads the trial file and the app's Done check does not count it."
   },
   {
    "path": "reformatted/<composite folder>_render.csv",
@@ -3708,7 +3740,7 @@
      "name": "in_analysis_set",
      "type": "0/1",
      "units": "",
-     "meaning": "From 04j."
+     "meaning": "From 04j, for this row's marker."
     },
     {
      "name": "censored_fraction_in_tissue",
@@ -3792,13 +3824,13 @@
      "name": "n_rois",
      "type": "int",
      "units": "",
-     "meaning": "Regions curated on it."
+     "meaning": "Regions curated on it for this row's marker."
     },
     {
      "name": "n_nuclei",
      "type": "int",
      "units": "",
-     "meaning": "Nuclei measured in it."
+     "meaning": "Nuclei measured in it for this row's marker."
     }
    ]
   },
@@ -4212,7 +4244,8 @@
    "path": "reformatted/roi_geometry_<marker>.csv",
    "names": [
     "roi_geometry_{marker}.csv",
-    "roi_geometry.csv"
+    "roi_geometry.csv",
+    "roi_geometry_{marker}.trial{N}.csv"
    ],
    "writer": "05a_roi_geometry.py",
    "what": "One row per curated section: the six reformat steps 04a took, and the one affine map they compose to. The LS study's AF568 file keeps its old name `roi_geometry.csv`.",
@@ -4424,13 +4457,15 @@
      "units": "",
      "meaning": "Ratio of the map's two singular values; 1.0 would keep a circle a circle."
     }
-   ]
+   ],
+   "format": "`--limit N` writes `<name>.trialN.csv`. A trial run writes beside this file and never over it; nothing reads the trial file and the app's Done check does not count it."
   },
   {
    "path": "reformatted/roi_boxes_<marker>.csv",
    "names": [
     "roi_boxes_{marker}.csv",
-    "roi_boxes.csv"
+    "roi_boxes.csv",
+    "roi_boxes_{marker}.trial{N}.csv"
    ],
    "writer": "05a_roi_geometry.py",
    "what": "One row per region or background disc: its outline carried onto the CZI, the box 05c reads, and its true area. 06a joins nuclei to this file by position.",
@@ -4570,7 +4605,8 @@
      "units": "px (256 frame)",
      "meaning": "The outline as exported."
     }
-   ]
+   ],
+   "format": "`--limit N` writes `<name>.trialN.csv`. A trial run writes beside this file and never over it; nothing reads the trial file and the app's Done check does not count it."
   },
   {
    "path": "reformatted/roi_regions_used_<marker>.csv",

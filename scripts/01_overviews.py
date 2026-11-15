@@ -29,6 +29,7 @@ Run:  <root>/work/czienv/Scripts/python.exe 01_overviews.py
 
 import argparse
 import csv
+import hashlib
 import json
 import os
 import sys
@@ -81,7 +82,10 @@ SAT_RAW_KEYS = [
     "rect_x", "rect_y", "rect_w", "rect_h",
     "saturated_fraction_raw", "saturated_fraction_dapi_raw",
     "saturated_fraction_corrected", "raw_over_corrected",
-    "mask_path", "tilefield_applied", "reader"]
+    "mask_path", "tilefield_applied", "reader",
+    # The clip ceiling this row was measured against. 01k resumes past a row
+    # only while the ceiling is still the same (01k.is_current).
+    "ceiling"]
 
 SAMPLE_SECTIONS = 120
 SEED = 20260811
@@ -99,7 +103,17 @@ QC_KEYS = ["scene_uid", "file", "animal", "slide", "variant", "marker_channel",
            "tissue_threshold", "tissue_fraction", "tissue_area_mm2", "tissue_mean",
            "background_mean", "contrast", "focus_score", "saturated_fraction",
            "saturated_fraction_raw", "saturated_fraction_dapi_raw",
-           "tilefield_applied", "reader"]
+           "tilefield_applied", "reader",
+           # Which display_ranges.json this section's PNGs were drawn with
+           # (ranges_id). Resume skips a row only while it still matches - see
+           # is_current.
+           "display_ranges_id"]
+
+#: The display_ranges_id of a row whose section failed in a run that had
+#: already replaced it, e.g. a forced re-export. The row is kept - focus.csv
+#: is the list of what was scanned - but it never reads as current, so the
+#: next run retries the section and reports it again if it still fails.
+FAILED_ID = "failed"
 
 
 # ---------------------------------------------------------------- image helpers
@@ -284,6 +298,7 @@ def raw_clip_record(r, fname, rect, s, zoom, dapi_raw, mark_raw, mark_corrected,
         # The mask and the _raw columns are measured before the field.
         "tilefield_applied": 0,
         "reader": "pylibCZIrw",
+        "ceiling": ceiling,
     }
 
 
@@ -302,6 +317,22 @@ def record_failures(failures, fname, rows, reason):
     for r in rows:
         failures.append({**{k: r.get(k, "") for k in FAILURE_KEYS},
                          "file": fname, "reason": reason})
+
+
+def mark_failed(qc_rows, failures):
+    """focus.csv's rows, with every section that failed this run marked so it
+    is retried. Returns the rows as a list, ready for write_qc.
+
+    A section kept from an earlier run that this run tried and could not
+    export - a forced re-export that hit a broken file - would otherwise keep
+    a row that reads as done: the next plain run skipped it, rewrote
+    overview_failures.csv without it, and the failure was gone.
+    """
+    for f in failures:
+        row = qc_rows.get(f["scene_uid"])
+        if row is not None:
+            row["display_ranges_id"] = FAILED_ID
+    return list(qc_rows.values())
 
 
 def write_sat_raw(by_uid):
@@ -361,6 +392,31 @@ def sample_display_ranges(scenes, fields, zoom, force):
     return ranges
 
 
+def ranges_id(ranges):
+    """A short fingerprint of the display ranges, stamped on every focus.csv
+    row as `display_ranges_id`.
+
+    The ranges are frozen for the whole study so that brightness differences
+    between sections are real. That only holds while every section's PNGs were
+    drawn with the same ranges, and a forced re-export that resamples them and
+    stops part way - a crash, a dropped drive - leaves the rest drawn with the
+    old ones. The stamp is how the next run tells those rows apart.
+    """
+    blob = json.dumps(ranges, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha1(blob.encode("utf-8")).hexdigest()[:12]
+
+
+def is_current(row, rid):
+    """True when this focus.csv row can be resumed past.
+
+    A row with no stamp was written before the stamp existed. It counts as
+    current, so an existing study is not re-exported wholesale on the first
+    run after this change; a `--force` run stamps everything.
+    """
+    have = row.get("display_ranges_id") or ""
+    return have == "" or have == rid
+
+
 def channel_range(ranges, name):
     """(lo, hi) for a channel, or a clear stop when display_ranges.json predates it."""
     if name not in ranges:
@@ -369,14 +425,38 @@ def channel_range(ranges, name):
     return ranges[name]["lo"], ranges[name]["hi"]
 
 
+def load_qc():
+    """focus.csv as uid -> row, in file order, or empty when there is none yet.
+
+    Read on EVERY run, --force included. --force decides which sections are
+    exported again, not which rows survive: a forced run that stops early -
+    `--force --limit N`, a crash, a drive dropped - used to checkpoint its N
+    fresh rows over the whole file, and every other section vanished from
+    focus.csv, which every later stage reads as the list of what was scanned.
+    A section exported now replaces its own row; the rest stay as they were,
+    the same rule write_sat_raw's rows already follow.
+
+    Kept is not the same as done: a kept row drawn with other display ranges,
+    or one whose section failed (FAILED_ID), is exported again by the next
+    run. See is_current.
+    """
+    if not os.path.exists(QC_CSV):
+        return {}
+    with open(QC_CSV, newline="", encoding="utf-8") as fh:
+        return {r["scene_uid"]: r for r in csv.DictReader(fh)}
+
+
 def export(scenes, fields, ranges, ceilings, zoom, limit, force):
+    qc_rows = load_qc()
+    rid = ranges_id(ranges)
     done_uids = set()
-    qc_rows = []
-    if os.path.exists(QC_CSV) and not force:
-        with open(QC_CSV, newline="", encoding="utf-8") as fh:
-            qc_rows = list(csv.DictReader(fh))
-        done_uids = {r["scene_uid"] for r in qc_rows}
+    if qc_rows and not force:
+        done_uids = {u for u, r in qc_rows.items() if is_current(r, rid)}
         print(f"resuming: {len(done_uids)} sections already exported")
+        stale = len(qc_rows) - len(done_uids)
+        if stale:
+            print(f"  {stale} kept row(s) were drawn with other display ranges "
+                  f"or failed last time, and will be exported again")
 
     by_file = {}
     for r in scenes:
@@ -463,7 +543,7 @@ def export(scenes, fields, ranges, ceilings, zoom, limit, force):
                     Image.fromarray(m8).save(os.path.join(out_dir, f"{uid}_MARK.png"))
                     Image.fromarray(rgb).save(os.path.join(out_dir, f"{uid}_RGB.png"))
 
-                    qc_rows.append({
+                    qc_rows[uid] = {
                         "scene_uid": uid, "file": fname, "animal": r["animal"],
                         "slide": r["slide"], "variant": r["variant"],
                         "marker_channel": marker, "scene_index": s,
@@ -486,7 +566,8 @@ def export(scenes, fields, ranges, ceilings, zoom, limit, force):
                         "saturated_fraction_dapi_raw": f"{sat_dapi_raw:.6f}",
                         "tilefield_applied": int(bool(fields)),
                         "reader": "pylibCZIrw",
-                    })
+                        "display_ranges_id": rid,
+                    }
                     exported += 1
                     done_here.add(uid)
         except Exception as exc:  # noqa: BLE001 - one bad file must not kill the run
@@ -498,14 +579,14 @@ def export(scenes, fields, ranges, ceilings, zoom, limit, force):
 
         # Checkpoint per file: this runs unattended against an external drive
         # that has already dropped writes once.
-        write_qc(qc_rows)
+        write_qc(mark_failed(qc_rows, failures))
         write_sat_raw(sat_raw)
         rate = exported / max(time.time() - t0, 1e-9)
         print(f"\r  exported {exported}/{total}  failed {failed}  "
               f"({rate:.1f}/s, {(time.time() - t0) / 60:.1f} min)", end="")
 
     print()
-    write_qc(qc_rows)
+    write_qc(mark_failed(qc_rows, failures))
     write_sat_raw(sat_raw)
     os.makedirs(QC_DIR, exist_ok=True)
     IO.atomic_write_csv(FAILURES_CSV, failures, FAILURE_KEYS)
@@ -526,7 +607,17 @@ def main():
     fields = load_tile_fields()
     ceilings = load_ceilings()
 
-    ranges = sample_display_ranges(scenes, fields, zoom, args.force)
+    # A narrowed run does not resample the study-wide display ranges. They are
+    # the one input every section's PNGs share, and `--force --limit N` used to
+    # resample them from the whole study and then redraw N sections with them -
+    # leaving every other section drawn with ranges that no longer exist.
+    # --force --limit redraws N sections with the ranges already on disk;
+    # resampling is what a full --force run is for.
+    resample = args.force and not args.limit
+    if args.force and args.limit and os.path.exists(RANGES_PATH):
+        print(f"--limit: keeping {os.path.basename(RANGES_PATH)} as it is; "
+              f"run --force without --limit to resample it")
+    ranges = sample_display_ranges(scenes, fields, zoom, resample)
     exported, failed, total_rows = export(scenes, fields, ranges, ceilings, zoom, args.limit, args.force)
 
     print()

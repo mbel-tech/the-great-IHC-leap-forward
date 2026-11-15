@@ -130,6 +130,7 @@ def main():
         shutil.rmtree(tmp, ignore_errors=True)
 
     test_select_only()
+    test_excluded_render_failure_is_not_lost()
 
     print()
     print("ALL PASS" if not fails else f"{fails} FAILED")
@@ -175,6 +176,79 @@ def test_select_only():
         except SystemExit:
             chk("@file is guarded too", True, True)
     finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_excluded_render_failure_is_not_lost():
+    """`--render-excluded`: an EXCLUDED section whose picture cannot be made is
+    its own count, not a `lost` one.
+
+    `lost_sections.csv` and its banner say "NOT excluded but still did not
+    survive" - sections the operator chose to KEEP that vanished anyway. An
+    excluded section was never going into the analysis; failing to draw its
+    look-at-only picture used to land it in that list, which both inflated the
+    alarm and named a deliberate exclusion as an unexplained loss.
+    """
+    import contextlib
+    import io
+    tmp = tempfile.mkdtemp(prefix="lsrend_")
+    keep = (RF.PLATE_DIR, RF.REVIEW_CSV, sys.argv)
+    paths = RF.marker_paths(RF.DEFAULT_MARKER)
+    made = []
+    try:
+        # No plates and no review: only the two sections below are in play.
+        RF.PLATE_DIR = os.path.join(tmp, "plates")
+        os.makedirs(RF.PLATE_DIR)
+        with open(os.path.join(RF.PLATE_DIR, "plates.csv"), "w", newline="",
+                  encoding="utf-8") as fh:
+            fh.write("plate_id,image_file\n")
+        RF.REVIEW_CSV = os.path.join(tmp, "absent.csv")
+        excl, kept = "EX_s01b_sc01", "KP_s01b_sc02"
+        os.makedirs(os.path.dirname(RF.QC_CSV), exist_ok=True)
+        with open(RF.QC_CSV, "w", newline="", encoding="utf-8") as fh:
+            w = csv.DictWriter(fh, fieldnames=["scene_uid", "animal",
+                                               "marker_channel", "section_order"])
+            w.writeheader()
+            for i, u in enumerate((excl, kept)):
+                w.writerow({"scene_uid": u, "animal": u[:2],
+                            "marker_channel": RF.DEFAULT_MARKER, "section_order": i})
+        os.makedirs(os.path.dirname(paths["overrides"]), exist_ok=True)
+        with open(paths["overrides"], "w", newline="", encoding="utf-8") as fh:
+            w = csv.DictWriter(fh, fieldnames=["scene_uid", "extra_rotation", "flip",
+                                               "excluded", "decision", "reason"])
+            w.writeheader()
+            w.writerow({"scene_uid": excl, "extra_rotation": 0, "flip": 0,
+                        "excluded": 1, "decision": "manual", "reason": "torn"})
+        made += [RF.QC_CSV, paths["overrides"]]
+        # Neither overview exists, so both fail to render.
+        sys.argv = ["04a", "--marker", RF.DEFAULT_MARKER, "--apply-overrides",
+                    "--render-excluded", "--preview", "0"]
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = RF.main()
+        text = out.getvalue()
+        # A kept section that vanished is a failed run, not a banner on a
+        # finished one: the app runs this in process and shows None as done.
+        chk("...and the run fails for the lost kept section", rc, 1)
+        said = [ln for ln in text.splitlines() if ln.strip()]
+        chk("...with the reason as its last line",
+            bool(said) and "kept section(s) did not survive" in said[-1], True)
+        with open(paths["lost"], newline="", encoding="utf-8") as fh:
+            lost = [r["scene_uid"] for r in csv.DictReader(fh)]
+        made += [paths["lost"], paths["index"], paths["excluded"]]
+        chk("render-excluded: a kept section that failed is lost", kept in lost, True)
+        chk("...an excluded one that failed is NOT", excl in lost, False)
+        chk("...the lost banner counts only the kept one",
+            "1 section(s) were NOT excluded" in text, True)
+        chk("...the excluded failure has its own count",
+            "1 excluded section(s) could not be rendered" in text, True)
+        tail = text.split("could not be rendered", 1)
+        chk("...and is named", len(tail) == 2 and excl in tail[1], True)
+    finally:
+        RF.PLATE_DIR, RF.REVIEW_CSV, sys.argv = keep
+        for p in made:
+            if os.path.exists(p):
+                os.remove(p)
         shutil.rmtree(tmp, ignore_errors=True)
 
 

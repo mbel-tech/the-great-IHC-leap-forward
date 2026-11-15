@@ -1005,6 +1005,99 @@ def multiplex_unmeasured_check(tmp):
         [g for g in got if g[0] == "X1"],
         [("X1", "M1", "background", str(len(BG_S1))), ("X1", "M1", "roi", "3")])
 
+    # ...and 06c accepts that measured-empty section. X2 has 06a rows (zeros,
+    # from the done log) and no row in roi_nuclei.csv - there was nothing to
+    # write - and 06c's consistency check called that "not from the same run"
+    # and returned 1 for any study with one such section.
+    try:
+        G6C = load("g6c_mxun", "06c_excel_dataset.py")
+        from openpyxl import load_workbook
+    except Exception as exc:                                   # noqa: BLE001
+        print(f"skip  06c measured-empty ({exc})")
+        return
+    G6C.NUCLEI_CSV = npath
+    G6C.MEAS_CSV = os.path.join(tmp, "mxun_measurements.csv")
+    G6C.G5.all_boxes = lambda: G6C.G5.load_csv(bpath)
+    G6C.animal_environment = lambda: {}
+    out = os.path.join(tmp, "mxun_dataset.xlsx")
+    chk("06c: a section measured and found empty is not 'inconsistent'",
+        G6C.main(["--out", out]), 0)
+    rows = list(load_workbook(out)["coverage"].values)
+    cov = [dict(zip(rows[0], r)) for r in rows[1:]]
+    chk("...and counts as measured for its marker",
+        sorted((c["marker"], c["sections_measured"]) for c in cov),
+        [("M1", 2), ("M2", 0)])
+
+    # A section 06a reports WITH nuclei that roi_nuclei.csv does not hold is
+    # still the real inconsistency, and still a stop.
+    meas_rows = G5.load_csv(G6C.MEAS_CSV)
+    for r in meas_rows:
+        if r["scene_uid"] == "X2" and r["roi_kind"] == "roi":
+            r["n_nuclei"] = "4"
+    bad = os.path.join(tmp, "mxun_bad_measurements.csv")
+    with open(bad, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=list(meas_rows[0]))
+        w.writeheader()
+        w.writerows(meas_rows)
+    G6C.MEAS_CSV = bad
+    chk("...while a section 06a counts nuclei in and the nuclei file lacks "
+        "is still refused", G6C.main(["--out", out]), 1)
+
+
+def multiplex_coverage_check(tmp):
+    """06c's coverage sheet: under `multiplex`, measured is per MARKER.
+
+    It counted a section as measured by its scene_uid alone. Both markers plan
+    the same uids, so M1's two measured sections made M2 read 2/2 - a pass
+    finished that was never started, on the one sheet that exists to say what
+    is still missing. X1 and X2 both have M1 nuclei; M2 was never run.
+    """
+    try:
+        G6C = load("g6c_mxcov", "06c_excel_dataset.py")
+        from openpyxl import load_workbook
+    except Exception as exc:                                   # noqa: BLE001
+        print(f"skip  06c multiplex coverage ({exc})")
+        return
+    nuc, boxes, nid = [], [], 0
+    for uid in ("X1", "X2"):
+        for mk in ("M1", "M2"):
+            boxes.append(dict(box(uid, "roi", "Dm"), marker=mk))
+            boxes.append(dict(box(uid, "background", "__background__"),
+                              marker=mk))
+        for j in range(3):
+            nid += 1
+            nuc.append(dict(nucleus(uid, "roi", "Dm", 1, nid, 200.0),
+                            marker="M1"))
+        for v in BG_S1:
+            nid += 1
+            nuc.append(dict(nucleus(uid, "background", "__background__", 2,
+                                    nid, v), marker="M1"))
+    npath = os.path.join(tmp, "mxcov_nuclei.csv")
+    bpath = os.path.join(tmp, "mxcov_boxes.csv")
+    for path, cols, rows in ((npath, NUC_COLS, nuc), (bpath, BOX_COLS, boxes)):
+        with open(path, "w", newline="", encoding="utf-8") as fh:
+            w = csv.DictWriter(fh, fieldnames=cols)
+            w.writeheader()
+            w.writerows(rows)
+    rc, meas = _run_06a_on(tmp, "mxcov", npath, bpath)
+    chk("multiplex coverage: 06a exits 0", rc, 0)
+    chk("...and reports M1 on both sections, M2 on neither",
+        sorted({(r["scene_uid"], r["marker"]) for r in meas}),
+        [("X1", "M1"), ("X2", "M1")])
+
+    G6C.NUCLEI_CSV = npath
+    G6C.MEAS_CSV = os.path.join(tmp, "mxcov_measurements.csv")
+    G6C.G5.all_boxes = lambda: G6C.G5.load_csv(bpath)
+    G6C.animal_environment = lambda: {}
+    out = os.path.join(tmp, "mxcov_dataset.xlsx")
+    chk("multiplex coverage: 06c exits 0", G6C.main(["--out", out]), 0)
+    rows = list(load_workbook(out)["coverage"].values)
+    cov = [dict(zip(rows[0], r)) for r in rows[1:]]
+    chk("multiplex coverage: each marker counts its own measured sections",
+        sorted((c["marker"], c["sections_measured"], c["sections_planned"])
+               for c in cov),
+        [("M1", 2, 2), ("M2", 0, 2)])
+
 
 # A second antibody's background, some fifty times the first's - the gap
 # between two markers imaged on one section is of this order in practice.
@@ -1318,6 +1411,7 @@ def main():
         # ---- which under `multiplex` means per marker, not per position
         multiplex_join_check(tmp)
         multiplex_unmeasured_check(tmp)
+        multiplex_coverage_check(tmp)
         # ...and so is the positivity cut
         multiplex_cut_check(tmp)
 

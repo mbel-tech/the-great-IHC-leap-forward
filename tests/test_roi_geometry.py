@@ -449,7 +449,9 @@ def _boxes_under(layout, rows_by_marker):
         G5.resolve_paths = real_resolve
 
 
-both = {"A": list(COLLIDE), "B": list(COLLIDE)}
+# Each file's rows name that file's marker, as 05a writes them: under
+# `multiplex` all_boxes() refuses a file whose rows name another marker.
+both = {m: [dict(r, marker=m) for r in COLLIDE] for m in ("A", "B")}
 chk("paired: a shared uid is still a hard stop",
     _raises(lambda: _boxes_under("paired", both), SystemExit), True)
 chk("multiplex: a shared uid is the expected state",
@@ -700,6 +702,199 @@ with temp_study(acquisition={"layout": "paired",
     chk("--marker absent from the export is still refused", _rc, 1)
     with open(P5.box_csv("Mk2"), encoding="utf-8") as fh:
         chk("...without touching Mk2's boxes", fh.read() == _sentinel, True)
+
+    # A section with ROIs whose angle does not reproduce is SKIPPED: no box,
+    # so 05c never measures it. That printed "SKIPPED 1" and returned 0, and
+    # the app showed 05a done. Now the run fails, with the reason last.
+    # A second Mk1 section, U3, whose angle does not reproduce; U1's does.
+    U3 = "AB12_1a-s1"
+    _keep = {p: open(p, encoding="utf-8").read()
+             for p in (P5.FOCUS_CSV, P5.MANIFEST_CSV, P5.RF.marker_paths("Mk1")["index"])}
+    _add = {P5.FOCUS_CSV: f"{U3},AB12,Mk1,0.65\n",
+            P5.MANIFEST_CSV: f"{U3},AB12_1a.czi,0\n",
+            P5.RF.marker_paths("Mk1")["index"]: f"{U3},section,0,0,0\n"}
+    for _p, _line in _add.items():
+        with open(_p, "a", encoding="utf-8") as fh:
+            fh.write(_line)
+    open(os.path.join(P5.OVERVIEW_DIR, "AB12", "Mk1", U3 + "_DAPI.png"), "wb").close()
+    turned_csv = os.path.join(MK.root, "roi_regions_turned.csv")
+    _wcsv(turned_csv,
+          [{"scene_uid": u, "marker": "Mk1", "roi_kind": "roi", "region": "R1",
+            "seed_n": "1", "sec_x": "128", "sec_y": "128", "sec_r": "10",
+            "sec_poly": ""} for u in (U1, U3)], _RCOLS)
+
+    def _turned(src, report=None, **kw):
+        if report is not None:
+            report.update(dict(REP, angle=7.0) if U3 in src else REP)
+        return np.zeros((256, 256), np.uint8)
+
+    _saved = (P5.RF.reformat, P5.scene_rects, sys.argv)
+    _buf = _io.StringIO()
+    try:
+        P5.RF.reformat = _turned
+        P5.scene_rects = lambda path: {0: (100, 200, 1000, 1000)}
+        sys.argv = ["05a_roi_geometry.py", turned_csv, "--all-sections"]
+        with _ctx.redirect_stdout(_buf):
+            _rc = P5.main()
+    finally:
+        P5.RF.reformat, P5.scene_rects, sys.argv = _saved
+        for _p, _text in _keep.items():
+            with open(_p, "w", encoding="utf-8") as fh:
+                fh.write(_text)
+    _last = [ln for ln in _buf.getvalue().splitlines() if ln.strip()][-1]
+    chk("a section dropped for an angle mismatch fails the run", _rc, 1)
+    chk("...it is listed with its reason",
+        "SKIPPED 1" in _buf.getvalue() and "!= recorded" in _buf.getvalue(), True)
+    chk("...and the run says so as its last line",
+        _last.startswith("!! 1 Mk1 section(s) with ROIs NOT PLACED"), True)
+    chk("...the section that was placed still has its box",
+        _uids(P5.box_csv("Mk1")), [U1])
+
+
+print()
+print("--- multiplex: each marker's boxes carry the marker they were placed for ---")
+# Under `multiplex` one scan carries every marker, so focus.csv has ONE row per
+# section and its `marker_channel` is the scan's second channel - one marker,
+# the same for every pass. build() stamped each box and geometry row with that
+# column instead of the marker the run was placing, so roi_boxes_Mk2.csv came
+# out with every row saying Mk1. all_boxes() then handed 06a two files' worth
+# of Mk1 boxes on the one uid, split_by_marker() put all of them in Mk1's
+# group, and Mk2's nuclei had no discs - the pooling 05a's guard comment says
+# the per-marker files prevent.
+with temp_study(acquisition={"layout": "multiplex", "channels": [
+        {"name": "DAPI", "role": "nuclear", "czi_name": "DAPI", "index": 0},
+        {"name": "Mk1", "role": "marker", "czi_name": "AF568", "index": 1,
+         "segment": "nuclear"},
+        {"name": "Mk2", "role": "marker", "czi_name": "AF647", "index": 2,
+         "segment": "nuclear"}]}) as MX:
+    X5 = load_stage("05a_roi_geometry.py", name="lsstage_05a_mx")
+    chk("the temp study is multiplex with two markers",
+        (X5.LAYOUT, list(X5.MARKERS)), ("multiplex", ["Mk1", "Mk2"]))
+
+    UX = "AB12_1a-s0"
+    # One focus row, as 01 writes it for a multiplex scan: the manifest's one
+    # marker_channel, which is the first marker.
+    _wcsv(X5.FOCUS_CSV,
+          [{"scene_uid": UX, "animal": "AB12", "marker_channel": "Mk1",
+            "um_px": "0.65"}],
+          ["scene_uid", "animal", "marker_channel", "um_px"])
+    _wcsv(X5.MANIFEST_CSV,
+          [{"scene_uid": UX, "file": "AB12_1a.czi", "scene_index": "0"}],
+          ["scene_uid", "file", "scene_index"])
+    _wcsv(X5.RF.marker_paths("Mk1")["index"],
+          [{"id": UX, "kind": "section", "angle": "0",
+            "manual_rotation": "0", "manual_flip": "0"}],
+          ["id", "kind", "angle", "manual_rotation", "manual_flip"])
+    _d = os.path.join(X5.OVERVIEW_DIR, "AB12", "Mk1")
+    os.makedirs(_d, exist_ok=True)
+    open(os.path.join(_d, UX + "_DAPI.png"), "wb").close()
+
+    # Mk1 has one disc and its background; Mk2 two discs and its background,
+    # so a pooled file shows in a count as well as in a key.
+    _mx_rows = []
+    for _mk, _regions in (("Mk1", ["R1"]), ("Mk2", ["R1", "R2"])):
+        for _i, _rg in enumerate(_regions):
+            _mx_rows.append({"scene_uid": UX, "marker": _mk, "roi_kind": "roi",
+                             "region": _rg, "seed_n": str(_i + 1),
+                             "sec_x": str(100 + 20 * _i), "sec_y": "128",
+                             "sec_r": "10", "sec_poly": ""})
+        _mx_rows.append({"scene_uid": UX, "marker": _mk,
+                         "roi_kind": "background", "region": "__background__",
+                         "seed_n": "", "sec_x": "40", "sec_y": "40",
+                         "sec_r": "10", "sec_poly": ""})
+    mx_csv = os.path.join(MX.root, "roi_regions_mx.csv")
+    _wcsv(mx_csv, _mx_rows, ["scene_uid", "marker", "roi_kind", "region",
+                             "seed_n", "sec_x", "sec_y", "sec_r", "sec_poly"])
+
+    _saved = (X5.RF.reformat, X5.scene_rects, sys.argv)
+    _buf = _io.StringIO()
+    try:
+        X5.RF.reformat = _Reformat()
+        X5.scene_rects = lambda path: {0: (100, 200, 1000, 1000)}
+        sys.argv = ["05a_roi_geometry.py", mx_csv, "--all-sections"]
+        with _ctx.redirect_stdout(_buf):
+            _rc = X5.main()
+    finally:
+        X5.RF.reformat, X5.scene_rects, sys.argv = _saved
+    chk("multiplex: 05a places both markers and returns 0", _rc, 0)
+
+    def _marks(path):
+        if not os.path.exists(path):
+            return None
+        return sorted(r["marker"] for r in X5.load_csv(path))
+
+    chk("roi_boxes_Mk1.csv says Mk1 on every row",
+        _marks(X5.box_csv("Mk1")), ["Mk1", "Mk1"])
+    chk("roi_boxes_Mk2.csv says Mk2 on every row, not the scan's Mk1",
+        _marks(X5.box_csv("Mk2")), ["Mk2", "Mk2", "Mk2"])
+    chk("...and so does each marker's geometry row",
+        (_marks(X5.geom_csv("Mk1")), _marks(X5.geom_csv("Mk2"))),
+        (["Mk1"], ["Mk2"]))
+
+    # 06a over both files: each marker gets its own discs, numbered from 1 in
+    # its own file, so each marker's nuclei land on that marker's ROI.
+    X6 = load_stage("06a_roi_dataset.py", name="lsstage_06a_mx")
+    _groups = X6.split_by_marker([b for b in X6.G5.all_boxes()
+                                  if b["scene_uid"] == UX])
+    chk("06a splits the section into one group per marker",
+        sorted((m, len(bs)) for m, bs in _groups.items()),
+        [("Mk1", 2), ("Mk2", 3)])
+
+    _NCOLS = ["scene_uid", "animal", "marker", "roi_kind", "region", "seed_n",
+              "roi_index", "nucleus_id", "czi_x", "czi_y", "sec_x", "sec_y",
+              "area_um2", "equiv_diam_um", "dapi_mean", "marker_mean",
+              "marker_median", "marker_p90", "censored", "artifact"]
+    _nuc, _nid = [], 0
+    for _mk, _layout in (("Mk1", [(1, "roi", "R1", 3), (2, "background",
+                                                        "__background__", 5)]),
+                         ("Mk2", [(1, "roi", "R1", 4), (2, "roi", "R2", 2),
+                                  (3, "background", "__background__", 5)])):
+        for _idx, _kind, _rg, _n in _layout:
+            for _j in range(_n):
+                _nid += 1
+                _v = 100.0 + 10 * _j if _kind == "background" else 500.0
+                _nuc.append({"scene_uid": UX, "animal": "AB12", "marker": _mk,
+                             "roi_kind": _kind, "region": _rg, "seed_n": "1",
+                             "roi_index": _idx, "nucleus_id": _nid,
+                             "czi_x": 0, "czi_y": 0, "sec_x": 128,
+                             "sec_y": 128, "area_um2": 50,
+                             "equiv_diam_um": 10, "dapi_mean": 1000,
+                             "marker_mean": _v, "marker_median": _v,
+                             "marker_p90": _v, "censored": 0, "artifact": 0})
+    _wcsv(X6.NUCLEI_CSV, _nuc, _NCOLS)
+    _buf = _io.StringIO()
+    try:
+        with _ctx.redirect_stdout(_buf):
+            _rc6 = X6.main([])
+    except SystemExit as exc:
+        _rc6 = f"SystemExit: {exc}"
+    chk("06a over both markers' boxes exits 0", _rc6, 0)
+    _meas = X6.G5.load_csv(X6.MEAS_CSV) if os.path.exists(X6.MEAS_CSV) else []
+    chk("...with each marker's own discs and nuclei",
+        sorted((r["marker"], r["roi_index"], r["region"], r["n_nuclei"])
+               for r in _meas),
+        [("Mk1", "1", "R1", "3"), ("Mk1", "2", "__background__", "5"),
+         ("Mk2", "1", "R1", "4"), ("Mk2", "2", "R2", "2"),
+         ("Mk2", "3", "__background__", "5")])
+
+    # A box file written before this fix still says Mk1 on every row of
+    # roi_boxes_Mk2.csv, and stays on the drive until 05a is re-run for Mk2.
+    # all_boxes() refuses it, naming the file and what its rows say, instead
+    # of handing 06a Mk1-labelled rows to pool with the real Mk1 discs.
+    _good = X5.load_csv(X5.box_csv("Mk2"))
+    _stale = [dict(b, marker="Mk1") for b in _good]
+    X5.IO.atomic_write_csv(X5.box_csv("Mk2"), _stale, list(_stale[0]))
+    try:
+        X5.all_boxes()
+        _said = "accepted"
+    except SystemExit as exc:
+        _said = str(exc)
+    chk("multiplex: a stale roi_boxes_Mk2.csv (rows say Mk1) is refused",
+        "roi_boxes_Mk2.csv" in _said and "['Mk1']" in _said
+        and "--marker Mk2" in _said, True)
+    X5.IO.atomic_write_csv(X5.box_csv("Mk2"), _good, list(_good[0]))
+    chk("...and the rewritten file is read again",
+        len(X5.all_boxes()), 5)
 
 
 print()

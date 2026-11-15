@@ -52,7 +52,6 @@ Run:  python 04a_atlas_extract.py
 """
 
 import sys
-import csv
 import importlib.util
 import io
 import json
@@ -82,6 +81,7 @@ if _HERE not in sys.path:
 # lines copy-pasted into every stage.
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
 import ls_progress as PG  # noqa: E402
+import ls_io as IO  # noqa: E402
 
 ATLAS_PDF = CONFIG["atlas_pdf"]
 OUT_DIR = os.path.join(CONFIG["out_root"], "atlas", "plates")
@@ -570,11 +570,9 @@ def _write_csv(path, rows):
     if not rows:
         print(f"  (nothing to write for {os.path.basename(path)})")
         return
-    keys = list(rows[0].keys())
-    with open(path, "w", newline="", encoding="utf-8") as fh:
-        writer = csv.DictWriter(fh, fieldnames=keys)
-        writer.writeheader()
-        writer.writerows(rows)
+    # Atomic: plates.csv and seeds.csv are what every later atlas stage
+    # trusts, and a half-written one looks like an atlas with fewer plates.
+    IO.atomic_write_csv(path, rows, list(rows[0].keys()))
     print(f"  wrote {os.path.basename(path)}  ({len(rows)} rows)")
 
 

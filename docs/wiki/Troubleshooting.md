@@ -35,13 +35,14 @@
 
 ## Repairing older results files
 
-Three tools under *Repairs for older results* on the **Measure** screen fix results files written by older versions. They are not part of a normal run. Each backs the file up first, and **Report only** says what would change without writing.
+Four tools under *Repairs for older results* on the **Measure** screen fix results written by older versions. They are not part of a normal run. The first three back the results file up first, and **Report only** says what would change without writing. The fourth adds a file and changes none; build the per-region table again after it.
 
 | Tool | Use it when |
 | --- | --- |
 | 06f Recompute the censored flag | A results file was written before detection flagged clipped nuclei itself |
 | 06g Flag nuclei off the section | A results file was written before detection flagged nuclei on bare glass |
 | 06h Backfill segmentation provenance | A results file lacks the columns saying which channel and method found each object |
+| 06j Backfill the usable area of each ROI | The per-region step says some discs have no recorded usable area |
 
 ## Still stuck
 

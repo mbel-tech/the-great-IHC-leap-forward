@@ -548,7 +548,9 @@ def zero_found_check():
         rc, _ = _run_main(_FakeModel(), "--force")
     finally:
         G5C.needs_shared_norm, G5C.section_range = saved
-    chk("a no_norm skip completes", rc, 0)
+    # Exit 1, not 0: the app runs 05c in process and shows a stage done on 0,
+    # so a run that left a section unmeasured looked complete.
+    chk("a no_norm skip fails the run", rc, 1)
     logged = G5C.read_done_log(G5C.DONE_LOG, marker) or set()
     chk("...and is NOT logged done", uid in logged, False)
     rc, reads = _run_main(_FakeModel())
@@ -560,6 +562,184 @@ def zero_found_check():
 print()
 print("--- a section measured and found empty ---")
 zero_found_check()
+
+
+def no_tissue_mask_check():
+    """A section with no tissue mask is skipped, and the run says it failed.
+
+    Without 04a's `<uid>_mask.npy` there is no telling a nucleus on the section
+    from one on the glass, so 05c skips the section. It used to return 0 all
+    the same, and the app - which runs 05c in process and reads only the
+    return value - showed the stage done with the section never measured.
+    """
+    try:
+        import pylibCZIrw.czi  # noqa: F401
+    except ImportError:                                          # noqa: BLE001
+        print("   (pylibCZIrw is not installed - main() cannot be driven)")
+        return
+    import contextlib
+    import io
+    uid, marker = "AB12_1a-s0", G5C.G5.MARKER
+    mask = os.path.join(G5C.REFORMAT_DIR, "sections", f"{uid}_mask.npy")
+    aside = mask + ".aside"
+    os.replace(mask, aside)
+    out = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out):
+            rc, reads = _run_main(_FakeModel(), "--force")
+    finally:
+        os.replace(aside, mask)
+    chk("a section with no tissue mask fails the run", rc, 1)
+    chk("...and is not read at all", reads, 0)
+    chk("...writes no nucleus rows",
+        [r for r in read(G5C.NUCLEI_CSV) if r["scene_uid"] == uid], [])
+    chk("...and no status rows",
+        [r for r in read(G5C.STATUS_CSV) if r["scene_uid"] == uid], [])
+    logged = G5C.read_done_log(G5C.DONE_LOG, marker) or set()
+    chk("...and is NOT logged done", uid in logged, False)
+    said = [ln.strip() for ln in out.getvalue().splitlines() if ln.strip()]
+    last = said[-1] if said else ""
+    # app/runner.py shows the last line printed as the failure message.
+    chk("...the last line says how many were not measured",
+        "1 section(s) NOT MEASURED" in last, True)
+    chk("...and that the stage is not complete", "not complete" in last, True)
+    rc, reads = _run_main(_FakeModel())
+    chk("with the mask back, the resume measures it and completes",
+        (rc, reads > 0), (0, True))
+    logged = G5C.read_done_log(G5C.DONE_LOG, marker) or set()
+    chk("...and then it is logged done", uid in logged, True)
+
+
+print()
+print("--- a section with no tissue mask ---")
+no_tissue_mask_check()
+
+
+def usable_area_check():
+    """The share of an ROI's outline a nucleus could be counted on.
+
+    06a drops nuclei flagged artifact or off_tissue; the area it divides by
+    has to lose the same ground. The map is the identity here, so native px
+    are grid indices: a disc of radius 40 about grid (128, 128) in a 97 px
+    box, with the masks laid over known halves of it.
+    """
+    Minv = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+    # The curator stores pixel edges; find the stored centre that lands on
+    # grid index 128 whatever the offset is.
+    g0 = float(G5C.G5.curator_to_grid(0.0, 0.0)[0])
+    c = 128.0 - g0
+    b = {"sec_x": c, "sec_y": c, "sec_r": 40, "sec_poly": "",
+         "czi_x0": 80, "czi_y0": 80, "czi_w": 97, "czi_h": 97}
+    full = np.ones((256, 256), bool)
+    left = full.copy()
+    left[:, 128:] = False
+
+    frac, how = G5C.usable_area_fraction(b, Minv, full, None, None, None)
+    chk("all tissue, no artifact mask: the whole outline", round(frac, 3), 1.0)
+    chk("...judged on the grid (no overview-frame mask)", how, "grid")
+    frac, _ = G5C.usable_area_fraction(b, Minv, left, None, None, None)
+    chk("tissue under the left half only: about half", abs(frac - 0.5) < 0.02, True)
+    frac, _ = G5C.usable_area_fraction(b, Minv, full, None, left, None)
+    chk("an artifact over the left half: about half", abs(frac - 0.5) < 0.02, True)
+    frac, _ = G5C.usable_area_fraction(b, Minv, left, None, left, None)
+    chk("tissue only where the artifact is: none", frac, 0.0)
+    frac, _ = G5C.usable_area_fraction(b, Minv, ~full, None, None, None)
+    chk("no tissue at all: none", frac, 0.0)
+
+    # The overview-frame masks are read at the point's own position: mask
+    # pixel p sits at scene_x + p * k.
+    ov_full = (np.ones((64, 64), bool), 0.0, 0.0, 4.0)
+    ov_left = (np.zeros((64, 64), bool), 0.0, 0.0, 4.0)
+    ov_left[0][:, :32] = True                       # native x < 126
+    frac, how = G5C.usable_area_fraction(b, Minv, full, ov_left, None, None)
+    chk("the overview mask decides where there is one", abs(frac - 0.5) < 0.05, True)
+    chk("...and says so", how, "overview")
+    frac, how = G5C.usable_area_fraction(b, Minv, full, ov_full, left, None)
+    chk("an artifact with only its grid copy is 'grid'", how, "grid")
+
+    # The same rule that flags a nucleus: a point is usable exactly when the
+    # loop would have kept a centroid there.
+    pts = [(100.0, 128.0), (150.0, 128.0), (128.0, 100.0), (-5.0, 3.0)]
+    one = [bool(G5C.overview_hit(ov_left, x, y)) for x, y in pts]
+    many = G5C.overview_hits(ov_left, np.array([p[0] for p in pts]),
+                             np.array([p[1] for p in pts])).tolist()
+    chk("overview_hits agrees with overview_hit point for point", many, one)
+
+    frac, how = G5C.usable_area_fraction(dict(b, czi_w=0), Minv, full, None,
+                                         None, None)
+    chk("a box with no pixels has no fraction", (frac, how), (None, ""))
+
+    rows = G5C.status_rows("U", [dict(b, marker="M"), dict(b, marker="M")],
+                           {2: "the box is 4 x 90 px"}, Minv, full, None,
+                           None, None)
+    chk("status rows: one per box, numbered from 1",
+        [(r[0], r[1], r[2]) for r in rows], [("U", "M", 1), ("U", "M", 2)])
+    chk("...segmented, and the one that was not, with its reason",
+        [(r[3], r[4]) for r in rows], [(1, ""), (0, "the box is 4 x 90 px")])
+    chk("...each with its usable fraction", [float(r[5]) for r in rows], [1.0, 1.0])
+
+
+print()
+print("--- the usable area of an ROI ---")
+usable_area_check()
+
+
+def status_written_check():
+    """main() leaves a status row for every box of a section it measures,
+    and --backfill-status adds the area for a section that has none."""
+    try:
+        import pylibCZIrw.czi  # noqa: F401
+    except ImportError:                                          # noqa: BLE001
+        print("   (pylibCZIrw is not installed - main() cannot be driven)")
+        return
+    uid, marker = "AB12_1a-s0", G5C.G5.MARKER
+    rc, _ = _run_main(_FakeModel(), "--force")
+    chk("a forced run completes", rc, 0)
+    rows = [r for r in read(G5C.STATUS_CSV) if r["scene_uid"] == uid]
+    chk("one status row for the section's one box",
+        [(r["marker"], r["roi_index"], r["segmented"]) for r in rows],
+        [(marker, "1", "1")])
+    # This fixture's box (300, 400) lies off its own shape (grid 128, r 50,
+    # identity map), so no sample is inside it: no fraction, and 06a then
+    # divides by the whole outline. usable_area_check() has the real cases.
+    chk("...and no fraction for a box that misses its own shape",
+        rows[0]["usable_area_fraction"] if rows else None, "")
+    rc, _ = _run_main(_FakeModel(), "--force")
+    chk("forcing it again replaces the row, never doubles it",
+        len([r for r in read(G5C.STATUS_CSV) if r["scene_uid"] == uid]), 1)
+
+    # A section measured before the record existed: no file at all.
+    os.remove(G5C.STATUS_CSV)
+    rc, reads = _run_main(_FakeModel(), "--backfill-status")
+    chk("--backfill-status completes and reads no CZI", (rc, reads), (0, 0))
+    rows = [r for r in read(G5C.STATUS_CSV) if r["scene_uid"] == uid]
+    chk("...adds the section's row", len(rows), 1)
+    chk("...leaves `segmented` blank: it was not recorded",
+        rows[0]["segmented"] if rows else None, "")
+    rc, _ = _run_main(_FakeModel(), "--backfill-status")
+    chk("...and a second backfill adds nothing",
+        len([r for r in read(G5C.STATUS_CSV) if r["scene_uid"] == uid]), 1)
+
+    # 06j is that same backfill for every marker that has boxes: the repair
+    # the app runs. Handed this suite's 05c, so it works on this study.
+    J = load("_j6", "06j_backfill_roi_area.py")
+    J._load = lambda *a: G5C
+    os.remove(G5C.STATUS_CSV)
+    chk("06j completes", J.main(), 0)
+    chk("...and writes the section's row",
+        [r["scene_uid"] for r in read(G5C.STATUS_CSV)], [uid])
+    saved = G5C.NUCLEI_CSV
+    G5C.NUCLEI_CSV = saved + ".absent"
+    try:
+        chk("06j with nothing measured is a failure, not a quiet success",
+            J.main(), 1)
+    finally:
+        G5C.NUCLEI_CSV = saved
+
+
+print()
+print("--- the box status record ---")
+status_written_check()
 
 
 class _OneNucleusModel:

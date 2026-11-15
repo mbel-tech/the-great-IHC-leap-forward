@@ -238,6 +238,166 @@ def geometry_rows(uid, boxes):
     return [[uid, b["marker"], bi] + [b.get(f, "") for f in GEOMETRY_FIELDS]
             for bi, b in enumerate(boxes, 1)]
 
+
+#: What happened to each box, one row per (section, marker, ROI): whether it
+#: was segmented at all, and how much of its outline is tissue a nucleus could
+#: have been counted on.
+#:
+#: Both answer something roi_nuclei.csv cannot. A box that was NOT segmented
+#: (under 8 px a side, a flat crop StarDist would abort on) writes no rows,
+#: exactly as a box segmented and found empty does, and 06a published both as
+#: n = 0 and a density of 0.0. And 06a drops every nucleus flagged artifact or
+#: off_tissue while dividing by the whole outline, so a disc half on a
+#: ventricle or under an artifact mask read at half its real density.
+#: `usable_area_fraction` is the share of the outline that is on the tissue
+#: and off the artifact mask, judged by the same masks and the same lookups
+#: that flag the nuclei (see usable_area_fraction); 06a multiplies the area by
+#: it.
+#:
+#: Written and dropped with GEOMETRY_CSV, section by section. A section
+#: measured before this file existed has no row: 06a then divides by the whole
+#: outline, as it always did, and says how many; --backfill-status adds the
+#: area for those from the masks as they are now (`segmented` stays blank
+#: there: it was not recorded).
+STATUS_CSV = os.path.join(RESULTS, "roi_box_status.csv")
+STATUS_COLUMNS = ["scene_uid", "marker", "roi_index", "segmented",
+                  "not_segmented_reason", "usable_area_fraction",
+                  "area_judged_on"]
+
+#: At most this many sample points per box when the usable area is taken. A
+#: 1.2 Mpx box is then sampled every 3 native px (2 um), against masks whose
+#: cells are 8 native px or more.
+AREA_SAMPLES = 250_000
+
+
+def overview_hits(ov, X, Y):
+    """overview_hit over arrays: the same rounding, the same bounds."""
+    m, rx, ry, k = ov
+    ix = np.rint((X - rx) / k).astype(np.int64)
+    iy = np.rint((Y - ry) / k).astype(np.int64)
+    ok = (iy >= 0) & (iy < m.shape[0]) & (ix >= 0) & (ix < m.shape[1])
+    out = np.zeros(X.shape, bool)
+    out[ok] = m[iy[ok], ix[ok]]
+    return out
+
+
+def grid_hits(m, gx, gy):
+    """The measurement loop's `inb` over arrays: the 256-grid mask at each
+    point's rounded cell, False off the grid or with no mask."""
+    out = np.zeros(gx.shape, bool)
+    if m is None:
+        return out
+    ix = np.rint(gx).astype(np.int64)
+    iy = np.rint(gy).astype(np.int64)
+    ok = (iy >= 0) & (iy < m.shape[0]) & (ix >= 0) & (ix < m.shape[1])
+    out[ok] = np.asarray(m, bool)[iy[ok], ix[ok]]
+    return out
+
+
+def usable_area_fraction(b, Minv, tis, tis_ov, art, art_ov):
+    """(fraction, judged_on): the share of box `b`'s ROI outline that is on
+    the tissue and off the artifact mask, or (None, "") for a box with no
+    pixels or no sample inside its shape.
+
+    A nucleus is kept by 06a when it is not `off_tissue` and not `artifact`.
+    This asks the same two questions of evenly spaced points over the box, by
+    the rule the measurement loop asks them of a centroid: the overview-frame
+    mask at the point's native position where there is one, the 256-grid copy
+    where there is not. So the area a count is divided by is the area a
+    nucleus could have been counted on, and not the glass, the ventricle or
+    the masked fold the outline also covers.
+
+    `judged_on` is "overview" when both questions were answered at the
+    overview's resolution (no artifact mask counts: there is nothing coarser
+    to fall back on), "grid" when either fell back to the 256 grid.
+    """
+    x0, y0 = int(b["czi_x0"]), int(b["czi_y0"])
+    w, h = int(b["czi_w"]), int(b["czi_h"])
+    if w < 1 or h < 1:
+        return None, ""
+    step = max(1, int(np.ceil(np.sqrt(w * h / AREA_SAMPLES))))
+    off = (step - 1) / 2.0
+    X, Y = np.meshgrid(x0 + off + np.arange(0, w, step, dtype=float),
+                       y0 + off + np.arange(0, h, step, dtype=float))
+    gx, gy = G5.apply_affine(Minv, X, Y)
+    inside = np.asarray(grid_inside(b)(gx, gy), bool)
+    n_in = int(inside.sum())
+    if not n_in:
+        return None, ""
+    on_tis = (overview_hits(tis_ov, X, Y) if tis_ov is not None
+              else grid_hits(tis, gx, gy))
+    is_art = (overview_hits(art_ov, X, Y) if art_ov is not None
+              else grid_hits(art, gx, gy))
+    usable = int((inside & on_tis & ~is_art).sum())
+    fine = tis_ov is not None and (art is None or art_ov is not None)
+    return usable / n_in, "overview" if fine else "grid"
+
+
+def status_rows(uid, boxes, not_segmented, Minv, tis, tis_ov, art, art_ov,
+                segmented_known=True):
+    """STATUS_CSV rows for one section's boxes, numbered as the ROI loop does.
+
+    `not_segmented` is {roi_index: reason} for the boxes the loop skipped
+    before segmenting. `segmented_known` False leaves that column blank: the
+    backfill, which was not there when the section was measured."""
+    out = []
+    for bi, b in enumerate(boxes, 1):
+        frac, how = usable_area_fraction(b, Minv, tis, tis_ov, art, art_ov)
+        why = not_segmented.get(bi, "")
+        out.append([uid, b["marker"], bi,
+                    "" if not segmented_known else int(not why), why,
+                    "" if frac is None else repr(round(frac, 6)), how])
+    return out
+
+
+def section_masks(uid, g):
+    """(tis, tis_ov, art, art_ov) for one section, as the measurement loop
+    reads them. `tis` None means the section has no tissue mask at all."""
+    art = mask_at(uid, "artifact")
+    art_ov = overview_artifact(uid, g) if art is not None else None
+    tis = mask_at(uid, "mask")
+    tis_ov = overview_tissue(uid, g) if tis is not None else None
+    return tis, tis_ov, art, art_ov
+
+
+def backfill_status(marker, uids, by_sec, geom):
+    """Add STATUS_CSV rows for measured sections of `marker` that have none.
+
+    Only the usable area, from the masks and boxes as they are NOW: whether a
+    box was segmented was not recorded when these sections were measured, so
+    that column is left blank and 06a goes on reporting such a box as it
+    did. Reads no CZI and loads no model. Returns (added, skipped) section
+    counts; a section with no tissue mask or no geometry row is skipped.
+    """
+    have = set()
+    exists = os.path.exists(STATUS_CSV)
+    if exists:
+        check_header(STATUS_CSV, STATUS_COLUMNS)
+        have = {r["scene_uid"] for r in G5.load_csv(STATUS_CSV)
+                if r.get("marker") == marker}
+    rows, added, skipped = [], 0, []
+    for uid in sorted(set(uids) - have):
+        g = geom.get(uid)
+        tis, tis_ov, art, art_ov = section_masks(uid, g) if g else (None,) * 4
+        if g is None or tis is None:
+            skipped.append(uid)
+            continue
+        M = np.array([[float(g["m00"]), float(g["m01"]), float(g["m02"])],
+                      [float(g["m10"]), float(g["m11"]), float(g["m12"])]])
+        rows += status_rows(uid, by_sec[uid], {}, G5.invert_affine(M),
+                            tis, tis_ov, art, art_ov, segmented_known=False)
+        added += 1
+    if rows:
+        with open(STATUS_CSV, "a" if exists else "w", newline="",
+                  encoding="utf-8") as fh:
+            w = csv.writer(fh)
+            if not exists:
+                w.writerow(STATUS_COLUMNS)
+            w.writerows(rows)
+            fh.flush()
+            os.fsync(fh.fileno())
+    return added, skipped
+
 BASE_PX_UM = CONFIG["pixel_size_um"]
 DAPI_C = CONFIG["channels"]["dapi_index"]
 MARK_C = CONFIG["channels"]["marker_index"]
@@ -548,7 +708,8 @@ def section_range(doc, boxes, marker, scene):
     return lo, hi, len(crops)
 
 
-def segment_box(doc, b, scene, model, min_area_px, section_norm, partners=()):
+def segment_box(doc, b, scene, model, min_area_px, section_norm, partners=(),
+                why=None):
     """Read one box and segment it, exactly as the measurement loop does.
 
     Returns {labels, seg_img, dapi, mark, planes, report, seg_on, backend,
@@ -561,14 +722,24 @@ def segment_box(doc, b, scene, model, min_area_px, section_norm, partners=()):
     the same read, the same plane, the same thresholds - rather than a second
     copy of this block drifting from the first. Everything it uses is passed
     in, so it runs without main().
+
+    `why`, when given a list, takes the reason for a None: the measurement
+    loop records it (STATUS_CSV), so 06a can tell a box that was not
+    segmented from one segmented and found empty.
     """
+    def refuse(reason):
+        if why is not None:
+            why.append(reason)
+        return None
+
     x0, y0 = int(b["czi_x0"]), int(b["czi_y0"])
     bw, bh = int(b["czi_w"]), int(b["czi_h"])
     if bw < 8 or bh < 8:
-        return None
+        return refuse(f"the box is {bw} x {bh} px, under 8 px a side")
     marker = b["marker"]
     if needs_shared_norm(marker) and marker not in section_norm:
-        return None
+        return refuse("the section has no intensity range to share between "
+                      "its crops")
     # One read call, so every plane of this ROI comes off the same scene
     # rectangle. A partner's plane is only in here when this run owns that
     # pair; for every study that exists it is not.
@@ -579,7 +750,8 @@ def segment_box(doc, b, scene, model, min_area_px, section_norm, partners=()):
     dapi = planes["dapi"].astype(np.float32)
     mark = planes["mark"].astype(np.float32)
     if dapi.ndim != 2 or dapi.shape != mark.shape:
-        return None
+        return refuse(f"the planes did not come back one 2-D shape "
+                      f"({dapi.shape} and {mark.shape})")
     # WHICH PLANE IS SEGMENTED is the study's declaration, and under
     # `segment: own` it is the marker's OWN channel - which is the plane
     # already read as `mark`, because the channel a marker is measured on and
@@ -605,7 +777,7 @@ def segment_box(doc, b, scene, model, min_area_px, section_norm, partners=()):
         # not segmented - like one under 8 px - rather than "measured, empty".
         print(f"  {b['scene_uid']} {b.get('roi_kind', 'roi')} {b.get('region', '')}: "
               f"not segmented - {exc}")
-        return None
+        return refuse(str(exc))
     return {"labels": labels, "seg_img": seg_img, "dapi": dapi, "mark": mark,
             "planes": planes, "report": report,
             "seg_on": segment_plane_for(marker), "backend": seg_backend,
@@ -1786,6 +1958,12 @@ def main():
                     help="do not draw the ROI and background-disc crops into "
                          "detection_overlays/ as sections are measured "
                          "(06i can draw them later)")
+    ap.add_argument("--backfill-status", action="store_true",
+                    help="measure nothing: add the usable area of each ROI "
+                         "(results/roi_box_status.csv) for sections measured "
+                         "before this stage recorded it, from the masks as "
+                         "they are now, so 06a divides their counts by the "
+                         "tissue the outline covers and not the whole outline")
     args = ap.parse_args()
 
     G5.use_marker(args.marker)
@@ -1929,6 +2107,20 @@ def main():
     if exists and not args.force:
         done = set(measured) - changed
         print(f"resuming: {len(done)} {args.marker} sections already measured")
+    if args.backfill_status:
+        added, skipped = backfill_status(args.marker, measured - changed,
+                                         by_sec, geom)
+        print(f"{added} {args.marker} section(s) given their usable ROI area "
+              f"-> {STATUS_CSV}")
+        if changed:
+            print(f"  ({len(changed)} section(s) whose boxes changed are not "
+                  f"measured by this run and get no area from it: detection "
+                  f"measures them again and records it then)")
+        if skipped:
+            print(f"!! {len(skipped)} section(s) have no tissue mask or no "
+                  f"geometry row now, and were left out: {skipped[:5]}")
+            return 1
+        return 0
     todo = [u for u in sorted(by_sec) if u not in done]
     if args.order == "balanced":
         todo = balanced_order(todo, done)
@@ -2108,6 +2300,18 @@ def main():
     if not geo_exists:
         gw.writerow(GEOMETRY_COLUMNS)
 
+    # The box status record, by the same rule again.
+    status_exists = os.path.exists(STATUS_CSV)
+    if status_exists:
+        check_header(STATUS_CSV, STATUS_COLUMNS)
+        drop_rows(STATUS_CSV, args.marker, redo)
+    sfh = open(STATUS_CSV, "a" if status_exists else "w", newline="",
+               encoding="utf-8")
+    sw = csv.writer(sfh)
+    if not status_exists:
+        sw.writerow(STATUS_COLUMNS)
+    total_unseg = 0
+
     fh = open(NUCLEI_CSV, "a" if exists else "w", newline="", encoding="utf-8")
     w = csv.writer(fh)
     dfh = open(DONE_LOG, "a" if exists else "w", newline="", encoding="utf-8")
@@ -2187,6 +2391,8 @@ def main():
             norm_rows = []
             section_norm = {}
             outlines = {}
+            # {roi_index: why} for the boxes not segmented - see STATUS_CSV.
+            not_segmented = {}
             # Each box's marker plane as read, for the crops (CropDrawer).
             marks = {}
             # Keeping decoded tiles: neighbouring ROIs, the second read a shared
@@ -2216,9 +2422,13 @@ def main():
                 for bi, b in enumerate(by_sec[uid], 1):
                     marker = b["marker"]
                     partners = coloc_by_marker.get(marker, ())
+                    why_not = []
                     seg = segment_box(doc, b, int(g["scene_index"]), model,
-                                      min_area_px, section_norm, partners)
+                                      min_area_px, section_norm, partners,
+                                      why=why_not)
                     if seg is None:
+                        not_segmented[bi] = (why_not[0] if why_not
+                                             else "not segmented")
                         continue
                     x0, y0 = int(b["czi_x0"]), int(b["czi_y0"])
                     labels, seg_img = seg["labels"], seg["seg_img"]
@@ -2339,6 +2549,12 @@ def main():
             save_outlines(args.marker, uid, outlines)
             gw.writerows(geometry_rows(uid, by_sec[uid]))
             gfh.flush()
+            # With the geometry and before the nuclei, for the same reason:
+            # never nuclei whose boxes say nothing about themselves.
+            sw.writerows(status_rows(uid, by_sec[uid], not_segmented, Minv,
+                                     tis, tis_ov, art, art_ov))
+            sfh.flush()
+            total_unseg += len(not_segmented)
             w.writerows(rows)
             fh.flush()
             # On disk before the section is logged as whole - see DONE_LOG.
@@ -2422,6 +2638,7 @@ def main():
             drawer.close()
     fh.close()
     gfh.close()
+    sfh.close()
     dfh.close()
     if cfh is not None:
         cfh.close()
@@ -2437,6 +2654,11 @@ def main():
               f"intensity range to share between their crops: "
               f"{[(u, m) for u, m, _ in no_norm[:5]]}")
         print(f"   first reason: {no_norm[0][2]}")
+    if total_unseg:
+        print(f"!! {total_unseg} ROI(s) were NOT SEGMENTED (too small, or a "
+              f"crop with no intensity range). They are not counts of zero: "
+              f"06a leaves them out. One row each, with the reason -> "
+              f"{STATUS_CSV}")
     if coloc_wanted:
         print(f"{total_rel} co-localisation pairs -> {COLOC_CSV}")
     if total_bg:
@@ -2465,6 +2687,22 @@ def main():
         print("   Rerun 04a_reformat.py (and 05a_roi_geometry.py if its rows "
               "predate the scene rectangle), then this.")
     warn_no_artifact(no_artifact, "were measured")
+    # A SKIPPED SECTION FAILS THE RUN. The app runs this stage in process and
+    # shows it done on 0, so a run that left sections unmeasured - no tissue
+    # mask, or no intensity range to share - used to look complete, with the
+    # warnings above scrolled past. What was measured stays measured and
+    # logged: nothing is rolled back, and the resume does only what is left.
+    # ROIs not segmented inside a measured section are NOT counted here: their
+    # section was measured, each has its row in STATUS_CSV, and 06a leaves
+    # them out. Printed last, because app/runner.py shows the last line printed
+    # as the failure message.
+    unmeasured = set(no_tissue_mask) | {u for u, _, _ in no_norm}
+    if unmeasured:
+        print(f"!! {len(unmeasured)} section(s) NOT MEASURED (no tissue mask, "
+              f"or no intensity range - see above): this stage is not "
+              f"complete. Fix the cause and run it again; it measures only "
+              f"what is left.")
+        return 1
     return 0
 
 

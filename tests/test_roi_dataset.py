@@ -772,23 +772,26 @@ def memory_check(tmp):
         per < 200, True)
 
 
-def multiplex_fixture(tmp, stem, markers=("M1", "M2"), drop_boxes_for=None):
+def multiplex_fixture(tmp, stem, markers=("M1", "M2"), drop_boxes_for=None,
+                      bg=(BG_S1, BG_S1), roi_value=(200.0, 200.0)):
     """ONE section carrying BOTH markers - what a `multiplex` study images.
 
     05a's uid-collision guard is a hard stop under `paired` and deliberately
     relaxed under `multiplex`, so all_boxes() then returns both markers' boxes
     under the SAME scene_uid. The two markers get a different number of ROI
     nuclei here so that pooling them is visible in a count, not only in a key.
+    `bg` and `roi_value` are per marker, so a check can give the two markers
+    background levels as different as two antibodies' really are.
     """
     nuc, boxes, nid = [], [], 0
-    for mk, n_roi in zip(markers, (3, 2)):
+    for mk, n_roi, mbg, mroi in zip(markers, (3, 2), bg, roi_value):
         if mk != drop_boxes_for:
             boxes.append(dict(box("X1", "roi", "Dm"), marker=mk))
             boxes.append(dict(box("X1", "background", "__background__"), marker=mk))
         for j in range(n_roi):
             nid += 1
-            nuc.append(dict(nucleus("X1", "roi", "Dm", 1, nid, 200.0), marker=mk))
-        for v in BG_S1:
+            nuc.append(dict(nucleus("X1", "roi", "Dm", 1, nid, mroi), marker=mk))
+        for v in mbg:
             nid += 1
             nuc.append(dict(nucleus("X1", "background", "__background__", 2, nid, v),
                             marker=mk))
@@ -817,6 +820,91 @@ def _run_06a_on(tmp, stem, npath, bpath):
         return rc, G5.load_csv(G6A.MEAS_CSV)
     finally:
         G6A.NUCLEI_CSV, G6A.MEAS_CSV, G6A.SPEC_CSV, G5.all_boxes = keep
+
+
+def box_status_check(tmp):
+    """05c's box status reaches the numbers: a box NOT segmented is left out,
+    and a count is divided by the usable share of the outline.
+
+    Both were silent. A box 05c could not segment wrote no nuclei, as an empty
+    one does, and came out as n = 0 and a density of 0.0. And the nuclei on an
+    artifact or off the tissue were dropped while the area stayed the whole
+    outline, so a disc half over a ventricle read at half its density.
+    """
+    nuc, boxes = [], []
+    boxes.append(box("Q1", "roi", "Dm"))            # 1: half usable
+    boxes.append(box("Q1", "roi", "Vv"))            # 2: not segmented
+    boxes.append(box("Q1", "roi", "Dl"))            # 3: no usable fraction
+    boxes.append(box("Q1", "background", "__background__"))   # 4
+    nid = 0
+    for idx, region in ((1, "Dm"), (3, "Dl")):
+        for _ in range(4):
+            nid += 1
+            nuc.append(nucleus("Q1", "roi", region, idx, nid, 200.0))
+    for v in BG_S1:
+        nid += 1
+        nuc.append(nucleus("Q1", "background", "__background__", 4, nid, v))
+    npath = os.path.join(tmp, "st_nuclei.csv")
+    bpath = os.path.join(tmp, "st_boxes.csv")
+    spath = os.path.join(tmp, "st_status.csv")
+    for path, cols, rows in ((npath, NUC_COLS, nuc), (bpath, BOX_COLS, boxes)):
+        with open(path, "w", newline="", encoding="utf-8") as fh:
+            w = csv.DictWriter(fh, fieldnames=cols)
+            w.writeheader()
+            w.writerows(rows)
+    with open(spath, "w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(["scene_uid", "marker", "roi_index", "segmented",
+                    "not_segmented_reason", "usable_area_fraction",
+                    "area_judged_on"])
+        w.writerow(["Q1", "AF568", 1, 1, "", "0.5", "overview"])
+        w.writerow(["Q1", "AF568", 2, 0, "the box is 4 x 90 px", "1.0", "overview"])
+        w.writerow(["Q1", "AF568", 3, "", "", "", ""])
+        w.writerow(["Q1", "AF568", 4, 1, "", "1.0", "overview"])
+
+    def run(status):
+        keep = G6A.STATUS_CSV
+        G6A.STATUS_CSV = status
+        try:
+            return _run_06a_on(tmp, "st", npath, bpath)
+        finally:
+            G6A.STATUS_CSV = keep
+
+    rc, plain = run(os.path.join(tmp, "no_such_status.csv"))
+    chk("no status record: 06a exits 0", rc, 0)
+    chk("...and every box has a row, as before", len(plain), 4)
+    whole = {r["roi_index"]: r for r in plain}
+    chk("...over the whole outline",
+        whole["1"]["roi_area_um2"], whole["1"]["roi_outline_area_um2"])
+    chk("...with no usable fraction to show",
+        whole["1"]["roi_usable_area_fraction"], "")
+
+    rc, meas = run(spath)
+    chk("with a status record: 06a exits 0", rc, 0)
+    by = {r["roi_index"]: r for r in meas}
+    chk("a box 05c did not segment has NO row (it is not a zero)",
+        sorted(by), ["1", "3", "4"])
+    chk("...and the others keep their own index", by["3"]["region"], "Dl")
+    chk("half the outline usable: half the area",
+        round(float(by["1"]["roi_area_um2"])
+              / float(by["1"]["roi_outline_area_um2"]), 3), 0.5)
+    # Densities are printed to 0.1, so they are checked against the area in
+    # the row and not as a ratio of two rounded numbers.
+    chk("...so the density is the count over the usable area",
+        by["1"]["profile_density_per_mm2"],
+        round(4 / float(by["1"]["roi_area_mm2"]), 1))
+    chk("...which is not the density over the whole outline",
+        by["1"]["profile_density_per_mm2"] != whole["1"]["profile_density_per_mm2"],
+        True)
+    chk("...the positive density rises with it",
+        float(by["1"]["positive_density_per_mm2"])
+        > float(whole["1"]["positive_density_per_mm2"]), True)
+    chk("...and the count is the same count",
+        by["1"]["n_nuclei"], whole["1"]["n_nuclei"])
+    chk("the fraction is in the row", by["1"]["roi_usable_area_fraction"], "0.5")
+    chk("a blank fraction is the whole outline",
+        (by["3"]["roi_area_um2"], by["3"]["roi_usable_area_fraction"]),
+        (whole["3"]["roi_area_um2"], ""))
 
 
 def multiplex_join_check(tmp):
@@ -916,6 +1004,204 @@ def multiplex_unmeasured_check(tmp):
     chk("...and M1's measured section keeps its nuclei",
         [g for g in got if g[0] == "X1"],
         [("X1", "M1", "background", str(len(BG_S1))), ("X1", "M1", "roi", "3")])
+
+
+# A second antibody's background, some fifty times the first's - the gap
+# between two markers imaged on one section is of this order in practice.
+BG_M2 = [4900.0, 5000.0, 5100.0, 5200.0, 5300.0]   # median 5100, MAD 100
+CUT_M2 = 5100.0 + 3.0 * 1.4826 * 100.0            # 5544.78
+
+
+def multiplex_cut_check(tmp):
+    """Under `multiplex` the positivity cut is per (section, MARKER).
+
+    Both markers' background discs sit on the one scene_uid, and the cut was
+    keyed by scene_uid alone - so their background nuclei were pooled into
+    ONE cut. With one marker's background near 100 and the other's near
+    5,000, that cut landed between the two at about 13,000 and called every
+    nucleus of BOTH markers negative: a complete, plausible, wrong dataset.
+    The fixture's ROI values are chosen so each marker's own cut calls them
+    positive and the pooled one does not.
+    """
+    npath, bpath = multiplex_fixture(tmp, "mxcut", bg=(BG_S1, BG_M2),
+                                     roi_value=(200.0, 6000.0))
+    rc, meas = _run_06a_on(tmp, "mxcut", npath, bpath)
+    chk("multiplex cut: 06a exits 0", rc, 0)
+    roi = {r["marker"]: r for r in meas if r["roi_kind"] == "roi"}
+    close("multiplex cut: the first marker's cut is from its own background",
+          float(roi["M1"]["section_positivity_cut"] or "nan"), round(CUT_S1, 1),
+          0.05)
+    close("...and the second marker's from its own",
+          float(roi["M2"]["section_positivity_cut"] or "nan"), round(CUT_M2, 1),
+          0.05)
+    chk("...each counted on its own background nuclei only",
+        (roi["M1"]["section_bg_nuclei"], roi["M2"]["section_bg_nuclei"]),
+        (str(len(BG_S1)), str(len(BG_M2))))
+    chk("...so the first marker's 3 nuclei at 200 are positive",
+        roi["M1"]["n_positive"], "3")
+    chk("...and the second marker's 2 at 6,000 are positive",
+        roi["M2"]["n_positive"], "2")
+    chk("...with each marker's own background level",
+        (roi["M1"]["section_bg_level"], roi["M2"]["section_bg_level"]),
+        ("100.0", "5100.0"))
+
+    spec = G5.load_csv(os.path.join(tmp, "mxcut_specificity.csv"))
+    chk("multiplex cut: one specificity row per (section, marker)",
+        sorted((s["scene_uid"], s["marker"]) for s in spec),
+        [("X1", "M1"), ("X1", "M2")])
+    sp = {s["marker"]: s for s in spec}
+    chk("...each from that marker's background discs only",
+        [(m, sp[m]["n_discs"], sp[m]["bg_nuclei"]) for m in sorted(sp)],
+        [("M1", "1", str(len(BG_S1))), ("M2", "1", str(len(BG_M2)))])
+    chk("...and that marker's cut",
+        [sp[m]["positivity_cut"] for m in sorted(sp)],
+        [str(round(CUT_S1, 1)), str(round(CUT_M2, 1))])
+
+    cuts = G5.load_csv(os.path.join(tmp, os.path.basename(G6A.CUTS_CSV)))
+    got = {r["marker"]: float(r["cut"]) for r in cuts if r["scene_uid"] == "X1"}
+    chk("multiplex cut: positivity_cuts.csv has one row per marker",
+        sorted(got), ["M1", "M2"])
+    close("...the first marker's own cut", got.get("M1", float("nan")), CUT_S1)
+    close("...and the second marker's own, a different one",
+          got.get("M2", float("nan")), CUT_M2)
+
+    # ...and 06c's by_section sheet, which took a section's cut by scene_uid
+    # alone: the last row's marker won, and the section showed ONE cut, under
+    # one marker's name, with both markers' nuclei summed beside it.
+    try:
+        G6C = load("g6c_mx", "06c_excel_dataset.py")
+        from openpyxl import load_workbook
+    except Exception as exc:                                   # noqa: BLE001
+        print(f"skip  06c multiplex by_section ({exc})")
+        return
+    G6C.NUCLEI_CSV = npath
+    G6C.MEAS_CSV = os.path.join(tmp, "mxcut_measurements.csv")
+    G6C.G5.all_boxes = lambda: G6C.G5.load_csv(bpath)
+    G6C.animal_environment = lambda: {}
+    out = os.path.join(tmp, "mxcut_dataset.xlsx")
+    chk("multiplex cut: 06c exits 0", G6C.main(["--out", out]), 0)
+    rows = list(load_workbook(out)["by_section"].values)
+    sec = [dict(zip(rows[0], r)) for r in rows[1:]]
+    chk("...06c by_section has one row per (section, marker)",
+        sorted((r["scene_uid"], r["marker"]) for r in sec),
+        [("X1", "M1"), ("X1", "M2")])
+    chk("...each with that marker's own cut and nuclei",
+        sorted((r["marker"], str(r["positivity_cut"]), r["n_roi_nuclei"],
+                r["n_background_nuclei"]) for r in sec),
+        [("M1", str(round(CUT_S1, 1)), 3, len(BG_S1)),
+         ("M2", str(round(CUT_M2, 1)), 2, len(BG_M2))])
+
+
+# ---- the leave-one-disc-out false-positive rate, worked by hand
+#
+# Two background discs on one section, each with at least 5 usable nuclei:
+#   A (roi_index 2): 10, 20, 30, 40, 50, and one CENSORED nucleus (value 1).
+#   B (roi_index 3): 100, 110, 120, 130, 140, 500.
+# In-sample, the cut is taken from all 11 usable values pooled:
+#   median 100; |x - 100| = 90 80 70 60 50 0 10 20 30 40 400, median 50
+#   cut = 100 + 3 * 1.4826 * 50 = 322.39
+#   above it: 500, plus the censored one (positive by rule) -> 2 of 12.
+# Leave A out, cut from B only:
+#   median (120 + 130) / 2 = 125; |x - 125| = 25 15 5 5 15 375, median 15
+#   cut = 125 + 3 * 1.4826 * 15 = 191.717
+#   A against it: 10..50 are all below, the censored one is positive -> 1 of 6
+#   (the censored nucleus is in the numerator AND the denominator, as it is
+#   in the in-sample rate; it is only left out of the values a cut is taken
+#   from).
+# Leave B out, cut from A's five usable values only:
+#   median 30; |x - 30| = 20 10 0 10 20, median 10
+#   cut = 30 + 3 * 1.4826 * 10 = 74.478
+#   B against it: all six are above -> 6 of 6.
+# Summed: 7 false positives over 12 nuclei = 0.5833.
+LOO_A = [10.0, 20.0, 30.0, 40.0, 50.0]
+LOO_B = [100.0, 110.0, 120.0, 130.0, 140.0, 500.0]
+LOO_COLS = NUC_COLS + ["off_tissue", "segmented_on", "nucleus_shaped"]
+
+
+def loo_check(tmp):
+    """detector_specificity.csv carries an OUT-OF-SAMPLE false-positive rate.
+
+    The existing rate counts background nuclei above a cut fitted to those
+    same nuclei: the tail of its own distribution, not an independent check.
+    Leaving each background disc out of the cut it is then counted against
+    is. Four sections, all AF568 on the counterstain except the last:
+      L1  two qualifying background discs (the worked example above)
+      L2  one background disc                          -> blank
+      L3  two background discs, one with 4 usable      -> blank
+      L4  as L1, but segmented on the marker itself    -> blank (withheld)
+    """
+    nuc, boxes, nid = [], [], 0
+
+    def add(uid, kind, region, idx, value, cen=0, seg_on="nuclear"):
+        nonlocal nid
+        nid += 1
+        nuc.append(dict(nucleus(uid, kind, region, idx, nid, value, cen=cen),
+                        off_tissue=0, segmented_on=seg_on, nucleus_shaped="1"))
+
+    for uid, seg_on in (("L1", "nuclear"), ("L4", "AF568")):
+        boxes += [box(uid, "roi", "Dm"),
+                  box(uid, "background", "__background__"),
+                  box(uid, "background", "__background__")]
+        add(uid, "roi", "Dm", 1, 400.0, seg_on=seg_on)
+        for v in LOO_A:
+            add(uid, "background", "__background__", 2, v, seg_on=seg_on)
+        add(uid, "background", "__background__", 2, 1.0, cen=1, seg_on=seg_on)
+        for v in LOO_B:
+            add(uid, "background", "__background__", 3, v, seg_on=seg_on)
+    boxes += [box("L2", "roi", "Dm"), box("L2", "background", "__background__")]
+    add("L2", "roi", "Dm", 1, 400.0)
+    for v in LOO_A + LOO_B:
+        add("L2", "background", "__background__", 2, v)
+    boxes += [box("L3", "roi", "Dm"),
+              box("L3", "background", "__background__"),
+              box("L3", "background", "__background__")]
+    add("L3", "roi", "Dm", 1, 400.0)
+    for v in LOO_A:
+        add("L3", "background", "__background__", 2, v)
+    for v in LOO_B[:4]:
+        add("L3", "background", "__background__", 3, v)
+    # ...plus two censored on the short disc: counted, but not usable, so it
+    # still holds only 4 values a cut could be taken from.
+    for _ in range(2):
+        add("L3", "background", "__background__", 3, 9.0, cen=1)
+
+    npath = os.path.join(tmp, "loo_nuclei.csv")
+    bpath = os.path.join(tmp, "loo_boxes.csv")
+    for path, cols, rows in ((npath, LOO_COLS, nuc), (bpath, BOX_COLS, boxes)):
+        with open(path, "w", newline="", encoding="utf-8") as fh:
+            w = csv.DictWriter(fh, fieldnames=cols)
+            w.writeheader()
+            w.writerows(rows)
+    rc, _ = _run_06a_on(tmp, "loo", npath, bpath)
+    chk("leave-one-out: 06a exits 0", rc, 0)
+    spec = G5.load_csv(os.path.join(tmp, "loo_specificity.csv"))
+    sp = {s["scene_uid"]: s for s in spec}
+    chk("leave-one-out: a specificity row per section", sorted(sp),
+        ["L1", "L2", "L3", "L4"])
+    cols = list(spec[0]) if spec else []
+    want = ["false_positive_rate", "loo_false_positives", "loo_nuclei",
+            "loo_false_positive_rate"]
+    i = cols.index("false_positive_rate") if "false_positive_rate" in cols else 0
+    chk("...three columns right after false_positive_rate",
+        cols[i:i + 4], want)
+    l1 = sp.get("L1", {})
+    # The in-sample numbers are unchanged by this.
+    chk("L1 in-sample: 2 of 12 above the pooled cut",
+        (l1.get("bg_false_positives"), l1.get("bg_nuclei"),
+         l1.get("false_positive_rate")), ("2", "12", "0.1667"))
+    chk("L1 leave-one-disc-out: 1 + 6 false positives over 6 + 6 nuclei",
+        (l1.get("loo_false_positives"), l1.get("loo_nuclei"),
+         l1.get("loo_false_positive_rate")), ("7", "12", "0.5833"))
+    blank = ("", "", "")
+    for uid, why in (("L2", "one background disc"),
+                     ("L3", "only one disc with 5 usable nuclei"),
+                     ("L4", "a marker segmented on itself")):
+        s = sp.get(uid, {})
+        chk(f"{uid} ({why}): leave-one-out is blank",
+            (s.get("loo_false_positives"), s.get("loo_nuclei"),
+             s.get("loo_false_positive_rate")), blank)
+    chk("L4's in-sample rate is withheld too, for the same reason",
+        sp.get("L4", {}).get("false_positive_rate"), "")
 
 
 def main():
@@ -1032,6 +1318,14 @@ def main():
         # ---- which under `multiplex` means per marker, not per position
         multiplex_join_check(tmp)
         multiplex_unmeasured_check(tmp)
+        # ...and so is the positivity cut
+        multiplex_cut_check(tmp)
+
+        # ---- the background discs also give an out-of-sample rate
+        loo_check(tmp)
+
+        # ---- what 05c says about each box reaches the area and the rows
+        box_status_check(tmp)
 
         # ---- and the whole nuclei table is never held at once
         memory_check(tmp)

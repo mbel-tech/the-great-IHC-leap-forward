@@ -54,6 +54,15 @@
 # Series 1 gets an F test; series 2 adds Tukey compact-letter display above the
 # scatters.
 #
+# TEN ROIS ARE TEN TESTS. Each caption prints, beside its raw p, the
+# Benjamini-Hochberg p across every ROI of the same series, measure and marker
+# (per term), and the tests behind those captions are written to
+# results/ROI_plots/roi_tests_<series>.csv, suffixed per marker like the series
+# folders (roi, measure, term, F, df, p, p_bh).
+# That is why each measure is walked twice: once to collect every ROI's tests,
+# once to draw - a figure cannot be captioned with an adjustment until the
+# family it belongs to is complete.
+#
 # Every PNG is packed into results/ROI_figures.pptx, one per slide.
 #
 # Run:  Rscript analysis/plot_roi_figures.R
@@ -315,6 +324,19 @@ base_theme <- theme_minimal(base_size = BASE) +
 message(sprintf("\n  writing %d ROIs x 2 series x %d measures",
                 nlevels(animal$ROI), length(MEASURES)))
 
+# The tests behind the captions, one table per series across measures. A
+# measure that is skipped leaves no rows, and a run that tests nothing still
+# writes the header, so the file on disk always describes THIS run.
+EMPTY_TESTS <- data.frame(roi = character(0), measure = character(0), NO_TESTS,
+                          stringsAsFactors = FALSE)
+TESTS <- list(treatment = EMPTY_TESTS, production_phase = EMPTY_TESTS)
+TESTS <- lapply(TESTS, add_bh)
+# One ROI's adjusted p by term, the shape stat_treatment / stat_group4 take.
+bh_for <- function(bh, roi) {
+  i <- bh$roi == roi
+  stats::setNames(bh$p_bh[i], bh$term[i])
+}
+
 # The measure loop is OUTSIDE the ROI loop, so `value` is set once per measure
 # and every figure in a series is drawn from the same column. Rows with no value
 # for that measure drop HERE and not globally: 06c leaves positivity blank for
@@ -331,10 +353,36 @@ for (M in MEASURES) {
   message(sprintf("  %s: %d animal x ROI rows", M$key, nrow(animal_m)))
   report_n(animal_m, sprintf("one point = one animal (%s)", M$key))
 
-  for (roi in levels(animal_m$ROI)) {
+  roi_rows <- function(roi) {
     d <- animal_m[animal_m$ROI == roi, ]
-    if (!nrow(d)) next
     d$environment <- droplevels(d$environment)
+    d
+  }
+
+  # ---- first pass: every ROI's tests, then BH within each term -------------
+  # The fits are refitted in the drawing pass below rather than carried over;
+  # they are least squares on a dozen rows, and refitting keeps the caption
+  # built in one place (roi_stats.R) from one call.
+  raw1 <- raw4 <- list(EMPTY_TESTS)
+  for (roi in levels(animal_m$ROI)) {
+    d <- roi_rows(roi)
+    if (!nrow(d)) next
+    t1 <- stat_treatment(d)$tests
+    t4 <- stat_group4(d)$tests
+    if (nrow(t1)) raw1[[length(raw1) + 1]] <-
+      data.frame(roi = roi, measure = M$key, t1, stringsAsFactors = FALSE)
+    if (nrow(t4)) raw4[[length(raw4) + 1]] <-
+      data.frame(roi = roi, measure = M$key, t4, stringsAsFactors = FALSE)
+  }
+  bh1 <- add_bh(do.call(rbind, raw1))
+  bh4 <- add_bh(do.call(rbind, raw4))
+  TESTS$treatment <- rbind(TESTS$treatment, bh1)
+  TESTS$production_phase <- rbind(TESTS$production_phase, bh4)
+
+  # ---- second pass: draw ----------------------------------------------------
+  for (roi in levels(animal_m$ROI)) {
+    d <- roi_rows(roi)
+    if (!nrow(d)) next
     # sample keeps ALL its levels so the shape scale stays identical across
     # figures; drop = TRUE on the scale keeps absent animals out of the legend.
     top <- max(d$value, na.rm = TRUE)
@@ -401,7 +449,7 @@ for (M in MEASURES) {
     cap_note <- if (is.null(M$cap)) NULL else c(M$cap, fp_note)
 
     # ---- series 1: treatment ------------------------------------------------
-    st1 <- stat_treatment(d)
+    st1 <- stat_treatment(d, p_adj = bh_for(bh1, roi))
     p1 <- ggplot(d, aes(x = treatment, y = value, colour = treatment,
                         fill = treatment)) +
       geom_jitter(width = 0.16, height = 0, size = PT, stroke = 1.1,
@@ -422,7 +470,7 @@ for (M in MEASURES) {
            width = 9.5, height = 8.0, dpi = 200, bg = "white")
 
     # ---- series 2: the four groups -----------------------------------------
-    st4 <- stat_group4(d)
+    st4 <- stat_group4(d, p_adj = bh_for(bh4, roi))
 
     # LETTERS ONLY WHEN THEY SEPARATE SOMETHING. If Tukey puts every group in the
     # same class the display is four identical "a"s, which is a legend, a
@@ -472,6 +520,19 @@ for (M in MEASURES) {
            width = 12.0, height = 8.4, dpi = 200, bg = "white")
   }   # per ROI
 }   # per measure
+
+# Written to a temporary name and renamed, so a run that dies half way leaves
+# the previous table rather than a truncated one. file.rename replaces an
+# existing file on Windows as well.
+for (s in names(TESTS)) {
+  path <- file.path(outdir, sprintf("roi_tests_%s%s.csv", s, sfx))
+  tmp <- paste0(path, ".tmp")
+  utils::write.csv(TESTS[[s]][, c("roi", "measure", "term", "F", "df", "p", "p_bh")],
+                   tmp, row.names = FALSE)
+  if (!file.rename(tmp, path)) stop("could not replace ", path)
+  message(sprintf("  %d test%s -> %s", nrow(TESTS[[s]]),
+                  if (nrow(TESTS[[s]]) == 1) "" else "s", path))
+}
 
 pngs <- unlist(lapply(dirs, list.files, pattern = "\\.png$", full.names = TRUE))
 message(sprintf("  %d PNGs written", length(pngs)))

@@ -23,7 +23,6 @@ Run:  python 01e_tile_geometry.py                  # a sample of files
       python 01e_tile_geometry.py --all
 """
 
-import csv
 import glob
 import json
 import os
@@ -40,6 +39,7 @@ if _HERE not in sys.path:
 # the whole process. Imported, not re-implemented: this block used to be four
 # lines copy-pasted into every stage.
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
+import ls_io as IO  # noqa: E402
 
 SOURCE_DIR = CONFIG["source_dir"]
 OUT_ROOT = CONFIG["out_root"]
@@ -200,15 +200,18 @@ def main():
               f"{summary['n_tiles_total']:>5} tiles  pitch {summary['pitch_x_px']} x {summary['pitch_y_px']} px")
 
     if not all_rows:
+        # A failure, not an empty success. Every file missing (drive not
+        # mounted), unreadable or empty lands here, and returning None let the
+        # app record the stage as done with no tile_geometry.csv behind it.
         print("nothing measured")
-        return
+        return 1
 
     os.makedirs(QC_DIR, exist_ok=True)
     out = os.path.join(QC_DIR, "tile_geometry.csv")
-    with open(out, "w", newline="", encoding="utf-8") as fh:
-        writer = csv.DictWriter(fh, fieldnames=list(all_rows[0].keys()))
-        writer.writeheader()
-        writer.writerows(all_rows)
+    # Through a temp file and a swap: the done check trusts this file's
+    # presence, so a crash mid-write must leave the previous copy, not half
+    # of a new one.
+    IO.atomic_write_csv(out, all_rows, list(all_rows[0].keys()))
 
     px = [r["pitch_x_px"] for r in all_rows if r["pitch_x_px"] != ""]
     py = [r["pitch_y_px"] for r in all_rows if r["pitch_y_px"] != ""]
@@ -232,7 +235,8 @@ def main():
     print("are the exact values, and they are what the correction must use.")
     print(f"wrote {out}")
     print("=" * 72)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

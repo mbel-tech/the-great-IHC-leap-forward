@@ -637,10 +637,10 @@ is stated. Because $h$ is similar between groups, the correction acts close to a
 multiplier and barely moves the group contrast; what it changes is whether a density can be
 quoted as cells per mm² at all. It is a reporting fix, not a statistical one.
 
-Alongside the per-ROI table the stage writes a per-section detector specificity table carrying
-the background nucleus count, the background area, the false-positive count and rate, the
-background level and spread, and the positivity cut — so the cut applied to each section and the
-evidence for it travel together.
+Alongside the per-ROI table the stage writes a detector specificity table, one row per section
+and marker, carrying the background nucleus count, the background area, the false-positive count
+and rate, the background level and spread, and the positivity cut — so the cut applied to each
+section and the evidence for it travel together.
 
 **One stage owns every per-ROI number.** Later stages group and format this output; they do not
 re-derive it. They used to, and the two implementations had drifted — the Abercrombie $h$ was

@@ -9,6 +9,180 @@ where things landed, not which plausible-looking route was tried and abandoned, 
 
 ---
 
+## 2026-11-15 - Statistics that do not depend on term order, and a multiplicity column
+
+**Changed:** `analysis/roi_stats.R` reads every F line from `emmeans::joint_tests()` for both `lm`
+and `lmer` fits (marginal, Type III-style tests; lmer df asked for as Satterthwaite explicitly),
+in place of `anova()`. The caption format, the `df too low to interpret` flag and the `p`
+attribute are unchanged; F, df1 and df2 now ride along as attributes too. In `stat_group4()` the
+overall p used for the two-group asterisk is the omnibus F of `value ~ group4` (the fit the letters
+already came from) instead of the smallest of the three term p values. Where a group has no animals
+the full fit is rank-deficient and `joint_tests()` errors, so the two main effects are then read
+from the additive model `treatment + environment`, the interaction line says "not estimable" and
+one caption line says the main effects came from the additive model. `analysis/plot_roi_figures.R`
+walks each measure twice: once to collect every ROI's tests, then BH-adjusts them per term across
+the ROIs of that series, measure and marker (`p.adjust(p, "BH")`), and draws each caption with the
+adjusted p beside the raw one (`p = 0.012, BH-adjusted 0.048`). The tests are written to
+`results/ROI_plots/roi_tests_<series><marker suffix>.csv` (roi, measure, term, F, df, p, p_bh) via a
+temp file and rename. New check: `Rscript analysis/tests/test_roi_stats.R`.
+
+**Why:** found on review. `anova()` on an `lm` is sequential, so on the 3/2/3/3 cells the F for
+treatment in `treatment * environment` changed with the order of the terms, while the `lmer` branch
+(lmerTest) was already Type III, so the two branches were testing different hypotheses. A minimum of
+three p values is not the p value of any test. And nothing accounted for the number of regions
+tested.
+
+**Cost:** treatment and production-phase p values in the four-group figures change wherever cells
+are unbalanced, and ROIs with an empty group now report additive-model main effects where they used
+to report sequential ones. The asterisk still uses the raw p. The figure pass now fits every model
+twice; with a dozen rows per ROI this is negligible. `joint_tests()` rounds F to four significant
+figures, so the F column in the CSV is rounded too (p is not). The R figures stay switched off in the
+app.
+
+---
+
+## 2026-11-15 - An out-of-sample false-positive rate
+
+**Changed:** `detector_specificity.csv` (06a) gains three columns after `false_positive_rate`:
+`loo_false_positives`, `loo_nuclei` and `loo_false_positive_rate` (4 decimals). For a (section,
+marker) with two or more background discs that each hold at least `CUT_MIN_NUCLEI` (5) usable
+nuclei - kept and not censored - each such disc in turn is counted against the cut
+(`ls_overlay.section_cut`) formed from the usable values of the section's other background discs,
+by `ls_overlay.is_positive`, censored nuclei positive and in the denominator as in the in-sample
+rate; the counts are summed over discs. Blank with fewer than two such discs, or where
+`false_positive_rate` is withheld (a marker segmented on itself). 06a's console prints, per marker,
+the median leave-one-disc-out rate and on how many sections it was formed. The module docstring and
+the README "Quantification" section now say the existing rate is in-sample. No existing number
+changes.
+
+**Why:** found on review. `false_positive_rate` counts a section's background nuclei above a cut
+fitted to those same nuclei, so it describes the tail of their own distribution; the README and
+06a's docstring called it the only independent check on the cut, which it is not.
+
+**Cost:** the out-of-sample rate exists only on sections with two adequately populated background
+discs, so it may be blank on many; the console says how many. A disc with fewer than 5 usable
+nuclei is never left out itself but still feeds the cuts the other discs are counted against.
+
+---
+
+## 2026-11-15 - Early stages write atomically and fail honestly
+
+**Changed:** these stage outputs, which were written in place with `open(path, "w")` now go through
+`ls_io.atomic_write_csv` (a temp file swapped in by `os.replace`): `qc/tile_geometry.csv` (01e),
+`saturation_<marker><suffix>.csv` (01g), 01b's pick list, 01i's review sheet, 04a's lost-sections
+file, `plate_boxes.csv` (04a3b, still copied to the `_prev` file first), 04a_atlas_extract's
+`plates.csv`, `seeds.csv`, `text_labels.csv`, `legend_by_page.csv` and `gaps.csv`,
+`atlas_proposals.csv` (04b), `roi_regions_refined.csv` and `registration_quality.csv` (04e), and
+05b's `detection_tuning.csv`; 05b's `detection_tuning.md` goes through `ls_io.atomic_save`. Columns,
+column order and row order are unchanged. `01e_tile_geometry.py` returns 1 when it measured
+nothing and 0 on success, and ends `raise SystemExit(main())`. `01k_saturation_raw.py` returns 1
+when no section has a raw clipping record after the run (every CZI missing or failing), 0 otherwise,
+and ends the same way. A new suite, `tests/test_atomic_outputs.py`, walks the AST of these eleven
+scripts and fails on any text-mode `open(..., "w")` not on its allow-list (04b's curator HTML,
+04e's elastix point files in a temp directory).
+
+**Why:** found on review (REVIEW.md rules 2 and 3). The app's done check trusts these files'
+presence, so a crash mid-write left a truncated CSV that read as a finished stage. 01e printed
+"nothing measured" and returned None, and 01k printed "is the source drive mounted?" and returned
+None, so an unmounted drive was recorded as a successful run.
+
+**Cost:** a run of 01e or 01k against an absent drive now shows as failed in the app rather than
+done. A stray `<file>.tmp` can be left beside an output if the process is killed mid-write; the
+previous output is untouched.
+
+---
+
+## 2026-11-15 - Importing curator exports never discards curation
+
+**Changed:** `04q_import_curation.py --write` merges into this study's entry in
+`curation/ls_roi_curator_v1.json`: a section the export holds takes the export's record, a section
+only the stored state holds is kept as it was, and the report counts and names the kept ones (ten,
+then "and N more"). A new `--replace` drops them, as `--write` used to; the app's Import does not
+pass it. Each write that changes an existing file first copies it to
+`ls_roi_curator_v1.json.<YYYYMMDD-HHMMSS>.backup` (a counter on a clash); nothing overwrites or
+prunes those. An import that changes nothing writes nothing and adds no backup. The file is written
+through `ls_jsonio.write_json_atomic`. Other studies' entries are carried through, as before.
+
+**Why:** found on review (REVIEW.md rule 4). The app's **Bring in browser exports** runs 04q with
+`--write`, which replaced the study's whole entry with the export: sections a browser session had
+not touched were printed as "ONLY ON DISK, would be lost" and then lost. The single `.backup` was
+overwritten by the next import, and the file was written in place, so a crash could truncate it.
+
+**Cost:** an import that is meant to forget sections now needs `--replace` on the command line.
+Backups accumulate in `curation/` until someone removes them. The seed is now written indented with
+each study's records on one line, instead of as a single line; every reader parses it as JSON.
+
+---
+
+## 2026-11-15 - 05c exits non-zero when it skipped sections
+
+**Changed:** `05c_detect_rois.py` returns 1 when any section was skipped for want of a tissue mask
+(`<uid>_mask.npy`) or of a shared intensity range, after writing, closing and reporting everything
+as before. Its last line says how many sections were not measured and that the stage is not
+complete. Measured sections stay measured and logged done; a resume measures only what is left.
+ROIs not segmented inside a measured section (`roi_box_status.csv`) do not fail the run.
+
+**Why:** found on review (REVIEW.md rule 2). The app runs stages in process and shows a stage done
+on 0, so a run that left sections unmeasured looked complete, with the warning scrolled past in the
+log. `app/runner.py` shows the last printed line as the failure message.
+
+**Cost:** a run with skipped sections now shows as failed in the app and stops **Run all
+remaining** at 05c, where it used to carry on to 06a with those sections missing. Nothing else
+calls 05c's `main()` for a measuring run: 06j uses `--backfill-status`, which returns before this,
+and 06e only counts sections on disk.
+
+---
+
+## 2026-11-15 - The positivity cut is per (section, marker)
+
+**Changed:** 06a keys a section's background values, its positivity cut and its background level by
+`(scene_uid, marker)` instead of `scene_uid`. Every row's `section_positivity_cut`,
+`section_bg_level`, `section_bg_spread`, `section_bg_nuclei` and `n_positive`, the Abercrombie h of a
+marker segmented on its own channel, `positivity_cuts.csv` and `detector_specificity.csv` now read
+that marker's own cut, and `detector_specificity.csv` has one row per (section, marker) with a cut,
+from that marker's background discs only. 06c's `by_section` sheet is one row per (section, marker)
+with that marker's cut and counts. 05c's crop drawing, 06d and 06i already worked per marker.
+
+**Why:** found on review. Under `multiplex` both markers share the section's uid, so their background
+nuclei were pooled into one cut. With one marker's background near 100 and the other's near 5,000
+the cut came out above 13,000 for both, and nuclei of either marker that their own background calls
+positive were counted negative. The specificity row lumped both markers under the first one's name,
+and 06c showed whichever marker's cut came last.
+
+**Cost:** none under `paired`, where a section has one marker and every number is unchanged. A
+`multiplex` study's positive counts, cuts and specificity change once 06a and 06c are re-run.
+
+---
+
+## 2026-11-15 - Densities are per area of usable tissue; an unsegmented ROI is not a zero
+
+**Changed:** 05c writes `results/roi_box_status.csv`, one row per ROI: whether the box was segmented,
+and the share of its outline that is on the tissue and off the artifact mask
+(`usable_area_fraction`). 06a multiplies the ROI area by that share, adds `roi_outline_area_um2` and
+`roi_usable_area_fraction` to `roi_measurements.csv`, and leaves a box 05c did not segment out of the
+dataset. `06j_backfill_roi_area.py` (Measure > Repairs for older results) adds the area for sections
+already measured, from the masks, without reading a CZI.
+
+**Why:** two things found on review. 06a dropped every nucleus flagged `artifact` or `off_tissue` and
+then divided what was left by the whole outline, so a disc half over a ventricle or under a masked
+fold read at about half its density. The bias is region-correlated - Vv, Vd and POA are
+periventricular - which is the kind that survives into a result looking like anatomy. And a box 05c
+skipped before segmenting (under 8 px a side, a crop with no intensity range) wrote no rows, exactly
+as a box segmented and found empty does, so 06a published it as n = 0 and a density of 0.0.
+
+**How the area is taken:** points on a regular grid of native pixels over the box (at most 250,000),
+each mapped to the grid and tested against the ROI shape by the rule that counts a nucleus, then
+against the tissue and artifact masks by the lookups that flag one: the overview-frame mask at the
+point's own position where there is one, the 256 copy where not. `area_judged_on` says which.
+
+**Cost:** every density in an existing study changes once 06j and 06a are re-run, upward, and only
+for ROIs that overlap glass, a ventricle or an artifact mask. Until 06j is run 06a divides by the
+whole outline as before and says how many discs that applies to. The backfill uses the masks as they
+are now, not as they were when the section was measured, and cannot say whether an old box was
+segmented: that column is blank on backfilled rows and such a box stays a zero until re-measured.
+
+---
+
 ## 2026-10-14 - One rotation step: the rotation curator is removed
 
 **Changed:** removed `scripts/04d_rotation_curator.py`, `scripts/04h_symmetry_axis.py` and their

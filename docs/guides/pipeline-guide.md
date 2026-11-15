@@ -1214,8 +1214,14 @@ exported files are therefore the only route the work takes, and a drawn polygon 
 file anywhere.
 
 This step reads the three exported tables back and rebuilds the curator's working state from them,
-so work done in any browser reaches the application. The previous state is backed up before anything
-is written.
+so work done in any browser reaches the application. The import merges: a section the export holds
+takes the export's record, being the more recent decision about it, and a section only the saved state
+holds is kept as it is. An export holds only what one browser session touched, so replacing the saved
+state with it would drop every decision about the sections that session did not open. The report names
+the sections kept. `--replace` drops them instead, for an operator who means it; the application never
+passes it. Before anything changes, the previous file is copied beside itself under a dated name
+(`ls_roi_curator_v1.json.<date-time>.backup`); no import overwrites an earlier backup, and nothing
+deletes them. The file itself is replaced in one step, so an interrupted import leaves the previous one.
 
 Every curator page opened from the same place shares one browser store, and two studies (a pilot and the
 main study, say) easily share section names. So each study's curation is filed under its own folder, and
@@ -1468,6 +1474,12 @@ geometry it was measured on. A resume decides from that log:
 The shape each region was measured on is also written to `results/roi_measured_geometry.csv`, which
 is what lets 06a catch a region that has moved.
 
+What happened to each region is written to `results/roi_box_status.csv`: whether it was segmented
+at all (a box under 8 px a side, or a crop with no intensity range, is not), and the share of its
+outline that is on the tissue and off the artifact mask. 06a leaves a region that was not
+segmented out of the dataset instead of reporting it as zero, and divides every count by the usable
+share of the area.
+
 As each section is finished, its detection overlay crops (one picture per region and background
 disc, see [06i](#stage-detection_overlays)) are drawn from the pixels just read, on a separate
 thread, so detection does not wait for them. A picture that cannot be written is reported and
@@ -1553,9 +1565,10 @@ constant multiplier and barely moves the group contrast — **it is a reporting 
 one.** What it changes is whether a density can honestly be quoted as cells per square millimetre at
 all.
 
-Alongside the per-region table, the step writes a per-section detector specificity table carrying the
-background count, area, false-positive count and rate, the background level and spread, and the cut
-applied — so the threshold used on each section and the evidence for it travel together.
+Alongside the per-region table, the step writes a detector specificity table, one row per section and
+marker, carrying the background count, area, false-positive count and rate, the background level and
+spread, and the cut applied — so the threshold used on each section and the evidence for it travel
+together.
 
 > **In the code** — `scripts/06a_roi_dataset.py`
 >
@@ -1800,6 +1813,25 @@ nuclei. On an older table the three answers are not unknown — the pipeline had
 object back then, and it was the counterstain — so this step writes that reading in rather than
 leaving a reader to assume it. It reads the whole table, adds the three columns to every row at once,
 and refuses a table whose columns it does not recognise. Running it twice changes nothing.
+
+## 06j  Backfill the usable area of each ROI {#stage-roi_area}
+
+*`scripts/06j_backfill_roi_area.py` → `results/roi_box_status.csv`*
+
+Works out, for regions measured before the detection step recorded it, how much of each region's
+outline is tissue that a nucleus could have been counted on.
+
+Nuclei found on an artifact or off the tissue are left out of every count. The area a count is
+divided by has to lose the same ground, or a region lying half over a ventricle, the glass or a
+masked fold reads at about half its true density. Newer runs of the detection step record that
+share for every region as they measure it. For older results this step takes it from the tissue
+and artifact masks as they are now, for every marker, without opening a slide or measuring anything
+again. It changes no existing file. Build the per-region table (06a) and the spreadsheets again
+afterwards: the areas and every density change.
+
+It cannot add whether each region was segmented at all, because that was not recorded at the time:
+a region the detection step skipped as too small stays in such a dataset as a count of zero until
+its section is measured again.
 
 \newpage
 

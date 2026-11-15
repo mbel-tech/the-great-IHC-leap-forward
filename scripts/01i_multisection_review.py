@@ -41,6 +41,7 @@ if _HERE not in sys.path:
 # as every other stage. Reading the repo's config.json directly here ignored
 # the study the app or a suite had pointed at.
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
+import ls_io as IO  # noqa: E402
 
 OUT_ROOT = CONFIG["out_root"]
 OVERVIEW_DIR = os.path.join(OUT_ROOT, "overviews")
@@ -141,10 +142,8 @@ def main():
     keys = ["scene_uid", "animal", "slide", "marker_channel", "n_blobs", "blob_boxes",
             "separation_ratio", "size_ratio", "blob_area_frac", "tissue_area_mm2",
             "n_sections"]
-    with open(REVIEW_CSV, "w", newline="", encoding="utf-8") as fh:
-        w = csv.DictWriter(fh, fieldnames=keys, extrasaction="ignore")
-        w.writeheader()
-        w.writerows(candidates)
+    # Atomic: --fit reads this file back as the operator's review sheet.
+    IO.atomic_write_csv(REVIEW_CSV, candidates, keys)
 
     # Render the most ambiguous first: those where the blobs are similar in size
     # and well separated are the ones a rule is most likely to get wrong.

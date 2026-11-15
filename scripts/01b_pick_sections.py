@@ -28,6 +28,7 @@ if _HERE not in sys.path:
 # lines copy-pasted into every stage.
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
 import ls_naming as NM  # noqa: E402
+import ls_io as IO  # noqa: E402
 
 SOURCE_DIR = CONFIG["source_dir"]
 OUT_ROOT = CONFIG["out_root"]
@@ -98,11 +99,13 @@ def main():
             unique.append(r)
 
     os.makedirs(os.path.dirname(OUT_CSV), exist_ok=True)
-    with open(OUT_CSV, "w", newline="", encoding="utf-8") as fh:
-        writer = csv.writer(fh)
-        writer.writerow(["file", "scene", "scene_uid", "animal", "marker_channel"])
-        for r in sorted(unique, key=lambda r: (r["file"], int(r["scene_index"]))):
-            writer.writerow([r["file"], r["scene_index"], r["scene_uid"], r["animal"], r["marker_channel"]])
+    # Atomic, so a crash mid-write cannot leave a short pick list that the
+    # done check takes for a finished one. Same columns, same order.
+    out_rows = [{"file": r["file"], "scene": r["scene_index"], "scene_uid": r["scene_uid"],
+                 "animal": r["animal"], "marker_channel": r["marker_channel"]}
+                for r in sorted(unique, key=lambda r: (r["file"], int(r["scene_index"])))]
+    IO.atomic_write_csv(OUT_CSV, out_rows,
+                        ["file", "scene", "scene_uid", "animal", "marker_channel"])
 
     by_marker = defaultdict(int)
     by_animal = defaultdict(int)

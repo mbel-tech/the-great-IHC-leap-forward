@@ -17,15 +17,23 @@ is *produced by* clipped pixels pinned at 65,535 dragging the mean up. That is
 information loss, not a gain difference. The per-section cut is still the right
 choice; the reason is section-to-section variation, not two batches.
 
-Robust rather than a percentile, and this is the point: a percentile would fix
-the false-positive rate by construction and destroy the only independent check
-available. With a spread based cut, how many background nuclei land above it is
-a MEASUREMENT.
+Robust rather than a percentile: a percentile would fix the false-positive rate
+by construction. With a spread based cut, how many background nuclei land above
+it is at least not set by the rule. **But it is not independent, and this text
+used to say it was:** the cut is fitted to those same nuclei, so the share above
+it (`false_positive_rate`) is IN-SAMPLE - the tail of the distribution the cut
+came from. The independent check is the leave-one-disc-out rate
+(`loo_false_positive_rate`): each background disc counted against the cut the
+section's OTHER background discs give, by the same rule. It needs two discs of
+at least CUT_MIN_NUCLEI usable nuclei each and is blank otherwise - and a cut
+itself can rest on as few as CUT_MIN_NUCLEI (5) nuclei; `section_bg_nuclei` in
+roi_measurements.csv is how many a section's cut was taken from.
 
 **What the background discs then report.** The same detector over tissue called
-empty is a false-positive rate, per section and per animal. It is not a negative
-control - the primary antibody is on that tissue - so it measures non-specific
-binding plus autofluorescence, not zero.
+empty is a false-positive rate, per section and per animal - in-sample and, where
+it can be formed, out of sample. It is not a negative control - the primary
+antibody is on that tissue - so it measures non-specific binding plus
+autofluorescence, not zero.
 
 **Abercrombie.** Sections are 14 um and imaged in one plane, so what is counted
 is nuclear PROFILES: a nucleus straddling the cut face still appears in the
@@ -101,6 +109,37 @@ GEOMETRY_CHANGED_CSV = os.path.join(RESULTS, "roi_geometry_changed.csv")
 #: 05c's log of the sections it finished (05c's DONE_LOG). A section measured
 #: and found empty has no nucleus rows, and this is the only place it shows.
 DONE_LOG = os.path.join(RESULTS, "roi_nuclei_sections_done.csv")
+#: 05c's record of what happened to each box (05c's STATUS_CSV): whether it
+#: was segmented, and the share of its outline that is usable tissue. See
+#: load_status.
+STATUS_CSV = os.path.join(RESULTS, "roi_box_status.csv")
+
+
+def load_status(path):
+    """{(scene_uid, marker, roi_index): (segmented, fraction, reason)} from
+    05c's box status record; {} when there is none.
+
+    `segmented` is False only where 05c says the box was not segmented. Such
+    a box wrote no nuclei for the same reason an empty one does, and is not a
+    count of zero: the emit loop leaves it out. Blank (a backfilled row) reads
+    as segmented, which is what this stage assumed of every box before.
+
+    `fraction` is the share of the outline on the tissue and off the artifact
+    mask, or None where 05c could not say. The nuclei dropped above as
+    artifact or off_tissue were on the rest of the outline, so the count is
+    divided by this share of the area and not by all of it.
+    """
+    if not os.path.exists(path):
+        return {}
+    out = {}
+    with open(path, newline="", encoding="utf-8") as fh:
+        for r in csv.DictReader(fh):
+            f = r.get("usable_area_fraction", "")
+            out[(r["scene_uid"], r.get("marker", ""), int(r["roi_index"]))] = (
+                r.get("segmented") != "0",
+                float(f) if f not in ("", None) else None,
+                r.get("not_segmented_reason", ""))
+    return out
 
 
 def measured_empty(path, have):
@@ -416,6 +455,46 @@ class _Disc:
         self.segon_own = None           # ...and of the first own-channel row
 
 
+def leave_one_disc_out(discs):
+    """(false positives, nuclei) counted out of sample, or None.
+
+    `discs` is one section's background discs for one marker (a _Disc each,
+    or None for a disc with no kept nuclei). The section's cut is fitted to
+    its own background nuclei, so how many of THOSE land above it describes
+    the tail of the distribution the cut came from - an in-sample number. This
+    is the independent one: each disc in turn is left out, the cut is formed
+    from the usable values of every OTHER disc by the same rule
+    (ls_overlay.section_cut), and the left-out disc's nuclei are counted
+    against it with the same positivity rule the in-sample rate uses. Summed
+    over discs.
+
+    "Usable" is what the cut is taken from - kept and not censored. A
+    censored nucleus is still positive by LO.is_positive and still a nucleus,
+    so it is in the left-out disc's numerator and denominator exactly as it is
+    in the in-sample rate.
+
+    A disc is left out only when it holds CUT_MIN_NUCLEI usable values of its
+    own, and the rate needs two such discs, so that every disc left out is
+    counted against a cut that includes at least one disc which could have
+    given a cut on its own - not one stitched together from slivers. A
+    thinner disc still feeds the cuts the others are counted
+    against - its values are as usable there as in the in-sample cut.
+    """
+    usable = [[v for v, c in zip(d.v, d.cen) if not c] if d else []
+              for d in discs]
+    qual = [i for i, u in enumerate(usable) if len(u) >= LO.CUT_MIN_NUCLEI]
+    if len(qual) < 2:
+        return None
+    fp = n = 0
+    for i in qual:
+        cut = LO.section_cut([v for j, u in enumerate(usable) if j != i
+                              for v in u])
+        d = discs[i]
+        fp += sum(1 for v, c in zip(d.v, d.cen) if LO.is_positive(v, c, cut))
+        n += len(d.v)
+    return fp, n
+
+
 def main(argv=None):
     # argv is accepted and ignored: this stage has no flags, and taking it
     # lets 06e call every stage the same way instead of branching on a label.
@@ -473,7 +552,10 @@ def main(argv=None):
     # the same order. The marker is in the key because it is in 05c's
     # numbering; see split_by_marker.
     by_idx = {}
-    bg_by = collections.defaultdict(lambda: array("d"))    # uid -> bg values
+    # (uid, marker) -> background values. PER MARKER: under `multiplex` both
+    # markers' background discs sit on the one scene_uid, and pooling them put
+    # one antibody's background into the other's cut (see the cut below).
+    bg_by = collections.defaultdict(lambda: array("d"))
     # (marker, region) -> diameters
     diam_by = collections.defaultdict(lambda: array("d"))
     d_by_marker = collections.defaultdict(lambda: array("d"))
@@ -545,7 +627,7 @@ def main(argv=None):
             own_by[mk] = own_by.get(mk, False) or own
             if r["roi_kind"] == "background":
                 if not cen:
-                    bg_by[uid].append(v)
+                    bg_by[(uid, mk)].append(v)
             elif not own:
                 diam_by[(mk, r["region"])].append(d)
 
@@ -580,13 +662,21 @@ def main(argv=None):
 
     # ---- the per-section cut, from that section's own background discs
     # (ls_overlay.section_cut: median + 3 * 1.4826 * MAD, none under 5 values.)
+    #
+    # PER (SECTION, MARKER). Under `paired` a section has one marker and this
+    # is the per-section cut unchanged. Under `multiplex` both markers share
+    # the section's uid, and a cut keyed by uid alone pooled their background
+    # nuclei: with one marker's background near 100 and the other's near
+    # 5,000 the pooled cut came out above 13,000 and called nuclei of BOTH
+    # markers negative - a complete, plausible, wrong dataset. A cut is a
+    # property of one antibody's background on one section, never of two.
     cuts, bgstat = {}, {}
-    for uid, bg in bg_by.items():
+    for key, bg in bg_by.items():
         got = LO.background_stats(bg)
         if got is None:
             continue
-        cuts[uid] = LO.section_cut(bg)
-        bgstat[uid] = got
+        cuts[key] = LO.section_cut(bg)
+        bgstat[key] = got
 
     # ---- h for Abercrombie, measured per region and marker
     #
@@ -598,9 +688,9 @@ def main(argv=None):
     # objects are not counted either.
     pos_by_marker = collections.defaultdict(lambda: array("d"))
     for (uid, mk, _), disc in by_idx.items():
-        if disc.kind == "background" or uid not in cuts:
+        if disc.kind == "background" or (uid, mk) not in cuts:
             continue
-        cut = cuts[uid]
+        cut = cuts[(uid, mk)]
         for v, d, c, o in zip(disc.v, disc.d, disc.cen, disc.own):
             if o and LO.is_positive(v, c, cut):
                 diam_by[(mk, disc.region)].append(d)
@@ -630,18 +720,40 @@ def main(argv=None):
     h_all = st.mean(d_all) if d_all else 0.0
     del d_all
 
+    status = load_status(STATUS_CSV)
+    not_segmented, no_fraction = [], 0
     rows, spec = [], []
     for uid in sorted(uids):
-        cut = cuts.get(uid)
         # PER MARKER, so `i` restarts at 1 for each one - which is how 05c
         # numbered them. Under `paired` there is exactly one group per section
         # and this is the old single loop unchanged.
         for mk, mboxes in split_by_marker(box_by.get(uid, [])).items():
             if (uid, mk) not in measured:
                 continue
+            # This marker's cut and background on this section - see the cut.
+            cut = cuts.get((uid, mk))
+            bgs = bgstat.get((uid, mk))
             for i, b in enumerate(mboxes, 1):
                 here = by_idx.get((uid, mk, i))
-                area = roi_area_um2(b)
+                segmented, usable_frac, why_not = status.get(
+                    (uid, mk, i), (True, None, ""))
+                if not segmented:
+                    # NOT A ZERO. 05c did not segment this box (too small, a
+                    # crop with no intensity range), so there is no count to
+                    # report; a row with n = 0 would be averaged into its
+                    # animal as an empty region.
+                    not_segmented.append((uid, mk, i, b["region"], why_not))
+                    continue
+                outline = roi_area_um2(b)
+                # THE AREA A NUCLEUS COULD HAVE BEEN COUNTED ON. Nuclei on an
+                # artifact or off the tissue were dropped above, so dividing
+                # what is left by the whole outline reads a disc half over a
+                # ventricle at half its density. No record (measured before
+                # 05c kept one) is the whole outline, as it always was.
+                if usable_frac is None:
+                    no_fraction += 1
+                area = (outline * usable_frac if usable_frac is not None
+                        else outline)
                 n_nuc = len(here.v) if here else 0
                 usable = ([v for v, c in zip(here.v, here.cen) if not c]
                           if here else [])
@@ -690,6 +802,13 @@ def main(argv=None):
                     "plate_id": "", "sec_x": b["sec_x"], "sec_y": b["sec_y"],
                     "roi_area_um2": round(area, 1),
                     "roi_area_mm2": round(area / 1e6, 6),
+                    # The outline as drawn, and the share of it the two areas
+                    # above are: blank where 05c recorded none and the area is
+                    # the whole outline.
+                    "roi_outline_area_um2": round(outline, 1),
+                    "roi_usable_area_fraction": (
+                        round(usable_frac, 4) if usable_frac is not None
+                        else ""),
                     "n_nuclei": n_nuc,
                     "n_positive": n_pos,
                     "frac_positive": LO.frac_positive(n_pos, n_nuc, cut,
@@ -713,53 +832,72 @@ def main(argv=None):
                                                  if (cut is not None and area) else ""),
                     "marker_median_of_roi": (round(st.median(usable), 1)
                                              if usable else ""),
-                    "section_bg_level": round(bgstat[uid][0], 1) if uid in bgstat else "",
-                    "section_bg_spread": round(bgstat[uid][1], 1) if uid in bgstat else "",
-                    "section_bg_nuclei": bgstat[uid][2] if uid in bgstat else 0,
+                    "section_bg_level": round(bgs[0], 1) if bgs else "",
+                    "section_bg_spread": round(bgs[1], 1) if bgs else "",
+                    "section_bg_nuclei": bgs[2] if bgs else 0,
                     "section_positivity_cut": round(cut, 1) if cut is not None else "",
                     "n_censored": sum(here.cen) if here else 0,
                 }
                 rows.append(row)
 
-        # what the background discs report about the detector, per section
-        bgrows = [r for r in rows if r["scene_uid"] == uid
-                  and r["roi_kind"] == "background"]
-        if bgrows and cut is not None:
-            tot_n = sum(r["n_nuclei"] for r in bgrows)
-            tot_p = sum(r["n_positive"] for r in bgrows)
-            tot_a = sum(r["roi_area_mm2"] for r in bgrows)
-            dens = [r["profile_density_per_mm2"] for r in bgrows
-                    if r["profile_density_per_mm2"] != ""]
-            spec.append({
-                "scene_uid": uid, "animal": bgrows[0]["animal"],
-                "marker": bgrows[0]["marker"],
-                "n_discs": len(bgrows), "bg_nuclei": tot_n,
-                "bg_area_mm2": round(tot_a, 6),
-                "bg_nuclei_per_mm2": round(tot_n / tot_a, 1) if tot_a else "",
-                "bg_false_positives": tot_p,
-                # The rate's denominator is every object the detector chose to
-                # find in empty tissue. For a counterstain that is "nuclei",
-                # whatever their brightness; for a marker segmented on itself
-                # it is "blobs StarDist outlined on noise", which depends on
-                # how sensitive StarDist happens to be and not on the antibody.
-                # So the rate is withheld there, and the per-area count of
-                # false positives - which has no such denominator - stands in.
-                "false_positive_rate": (round(tot_p / tot_n, 4)
-                                        if (tot_n and not bgrows[0][
-                                            "denominator_withheld_reason"])
-                                        else ""),
-                "bg_false_positives_per_mm2": (round(tot_p / tot_a, 1)
-                                               if tot_a else ""),
-                "denominator_withheld_reason": bgrows[0][
-                    "denominator_withheld_reason"],
-                "bg_level": round(bgstat[uid][0], 1),
-                "bg_spread": round(bgstat[uid][1], 1),
-                "positivity_cut": round(cut, 1),
-                # Disagreement between discs on one section is heterogeneous
-                # autofluorescence, and is worth seeing before it is averaged.
-                "disc_density_spread": (round(max(dens) - min(dens), 1)
-                                        if len(dens) > 1 else 0),
-            })
+            # what the background discs report about the detector, per
+            # section and marker: this marker's discs only, against this
+            # marker's cut. Under `multiplex` a section's other marker has
+            # background discs of its own, and lumping them in would report
+            # one antibody's false positives under the other's name.
+            bgrows = [r for r in rows if r["scene_uid"] == uid
+                      and r["marker"] == mk and r["roi_kind"] == "background"]
+            if bgrows and cut is not None:
+                tot_n = sum(r["n_nuclei"] for r in bgrows)
+                tot_p = sum(r["n_positive"] for r in bgrows)
+                tot_a = sum(r["roi_area_mm2"] for r in bgrows)
+                dens = [r["profile_density_per_mm2"] for r in bgrows
+                        if r["profile_density_per_mm2"] != ""]
+                no_denom = bgrows[0]["denominator_withheld_reason"]
+                # The out-of-sample rate, over the same discs the in-sample
+                # one sums, and withheld where it is: see leave_one_disc_out.
+                loo = (None if no_denom else leave_one_disc_out(
+                    [by_idx.get((uid, mk, r["roi_index"])) for r in bgrows]))
+                spec.append({
+                    "scene_uid": uid, "animal": bgrows[0]["animal"],
+                    "marker": bgrows[0]["marker"],
+                    "n_discs": len(bgrows), "bg_nuclei": tot_n,
+                    "bg_area_mm2": round(tot_a, 6),
+                    "bg_nuclei_per_mm2": (round(tot_n / tot_a, 1)
+                                          if tot_a else ""),
+                    "bg_false_positives": tot_p,
+                    # The rate's denominator is every object the detector
+                    # chose to find in empty tissue. For a counterstain that
+                    # is "nuclei", whatever their brightness; for a marker
+                    # segmented on itself it is "blobs StarDist outlined on
+                    # noise", which depends on how sensitive StarDist happens
+                    # to be and not on the antibody. So the rate is withheld
+                    # there, and the per-area count of false positives -
+                    # which has no such denominator - stands in.
+                    #
+                    # IN-SAMPLE: these nuclei are the ones the cut was fitted
+                    # to. The loo_ columns after it are the out-of-sample
+                    # check; blank with fewer than two background discs of
+                    # CUT_MIN_NUCLEI usable nuclei each.
+                    "false_positive_rate": (round(tot_p / tot_n, 4)
+                                            if (tot_n and not no_denom)
+                                            else ""),
+                    "loo_false_positives": loo[0] if loo else "",
+                    "loo_nuclei": loo[1] if loo else "",
+                    "loo_false_positive_rate": (round(loo[0] / loo[1], 4)
+                                                if loo and loo[1] else ""),
+                    "bg_false_positives_per_mm2": (round(tot_p / tot_a, 1)
+                                                   if tot_a else ""),
+                    "denominator_withheld_reason": no_denom,
+                    "bg_level": round(bgs[0], 1),
+                    "bg_spread": round(bgs[1], 1),
+                    "positivity_cut": round(cut, 1),
+                    # Disagreement between discs on one section is
+                    # heterogeneous autofluorescence, and is worth seeing
+                    # before it is averaged.
+                    "disc_density_spread": (round(max(dens) - min(dens), 1)
+                                            if len(dens) > 1 else 0),
+                })
 
     real = [r for r in rows if r["roi_kind"] == "roi"]
     # One row per (section, marker) that was counted against a cut, from the
@@ -767,13 +905,13 @@ def main(argv=None):
     # does. Header only when no section has a cut; gone with the rest below
     # when there is nothing at all.
     exact = sorted({(r["scene_uid"], r["marker"]) for r in rows
-                    if r["scene_uid"] in cuts})
+                    if (r["scene_uid"], r["marker"]) in cuts})
     # Beside whichever roi_measurements.csv is written, so the two always
     # describe the same run.
     cuts_csv = os.path.join(os.path.dirname(MEAS_CSV), os.path.basename(CUTS_CSV))
     if rows:
         IO.atomic_write_csv(cuts_csv,
-                            [{"scene_uid": u, "marker": m, "cut": repr(cuts[u])}
+                            [{"scene_uid": u, "marker": m, "cut": repr(cuts[(u, m)])}
                              for u, m in exact], CUTS_COLUMNS)
     elif os.path.exists(cuts_csv):
         os.remove(cuts_csv)
@@ -792,6 +930,17 @@ def main(argv=None):
 
     print("=" * 72)
     print(f"{len(real)} ROIs and {len(rows) - len(real)} background discs -> {MEAS_CSV}")
+    if not_segmented:
+        print(f"  !! {len(not_segmented)} ROI(s) were not segmented by 05c and "
+              f"are LEFT OUT, not reported as zero: "
+              + "; ".join(f"{u} [{m}] roi {i} {reg}: {why}"
+                          for u, m, i, reg, why in not_segmented[:5])
+              + (" ..." if len(not_segmented) > 5 else ""))
+    if no_fraction:
+        print(f"  !! {no_fraction} of {len(rows)} discs have no recorded "
+              f"usable area, so their densities are over the WHOLE outline, "
+              f"tissue or not. Run 06j_backfill_roi_area.py (in the app: "
+              f"Measure > Repairs for older results), then this stage again.")
     print(f"{len(spec)} sections -> {SPEC_CSV}")
     # ONE BLOCK PER MARKER. This stage runs once for both, and all three of
     # these numbers are per marker. An h RANGE spanning two markers is not a
@@ -803,7 +952,7 @@ def main(argv=None):
     markers = sorted({r["marker"] for r in rows}) or [""]
     for mk in markers:
         m_uids = uids_by_marker.get(mk, set())
-        m_cuts = [u for u in cuts if u in m_uids]
+        m_cuts = [u for u, m in cuts if m == mk and u in m_uids]
         m_hs = {k: v for k, v in hs.items() if k[0] == mk}
         m_spec = [s for s in spec if s["marker"] == mk]
         head = f"  [{mk}] " if len(markers) > 1 else "  "
@@ -838,7 +987,17 @@ def main(argv=None):
             print(f"{head}false-positive rate : median {st.median(fp)*100:.1f}%, "
                   f"range {min(fp)*100:.1f}-{max(fp)*100:.1f}%   "
                   f"(measured on {sum(s['bg_nuclei'] for s in m_spec)} "
-                  f"background nuclei)")
+                  f"background nuclei; IN-SAMPLE, the cut is fitted to them)")
+            # Beside it, the out-of-sample one, and on how many sections:
+            # it needs two background discs of CUT_MIN_NUCLEI usable nuclei,
+            # so it can be on far fewer sections than the rate above.
+            fp_loo = [s["loo_false_positive_rate"] for s in m_spec
+                      if s["loo_false_positive_rate"] != ""]
+            print(f"{head}leave-one-disc-out  : "
+                  + (f"median {st.median(fp_loo)*100:.1f}%, "
+                     if fp_loo else "")
+                  + f"on {len(fp_loo)} of {len(fp)} sections   (needs >=2 "
+                  f"background discs of >={LO.CUT_MIN_NUCLEI} usable nuclei)")
     print("=" * 72)
     return 0
 

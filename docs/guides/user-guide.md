@@ -449,7 +449,7 @@ This is the main curation job, and the only stop in a normal run. For each secti
 
 ### Curation done in a web browser
 
-The curator pages also work in an ordinary browser (run `serve_curators.bat`). Work done there lives in that browser only. To bring it into the app, either press **Bring in browser exports** to import its exported CSV files, or use **Tools > Migrate browser curation > Import curation state** to move the whole curation state.
+The curator pages also work in an ordinary browser (run `serve_curators.bat`). Work done there lives in that browser only. To bring it into the app, either press **Bring in browser exports** to import its exported CSV files (sections the export does not include keep what the app already had, and the previous state is kept as a dated backup in the `curation` folder), or use **Tools > Migrate browser curation > Import curation state** to move the whole curation state.
 
 ## 7. Measure: counting nuclei in your regions
 
@@ -472,6 +472,8 @@ Measure puts your regions back onto the original slides, finds every nucleus ins
 | 06a Per-region dataset | Turns nuclei into per-region numbers: how many cells, how many positive, per mm² | `results/roi_measurements.csv`, `results/detector_specificity.csv` |  |
 
 **Pictures as it goes.** As each section is measured, 05c also draws that section's detection overlay pictures: one per region and one per background disc, every nucleus it found drawn over the marker channel, coloured by whether it was counted positive. They go to `detection_overlays/<marker>/<animal>/` and are listed in `detection_overlays/index_05c.csv`, so you can check the counts by eye long before detection finishes. They are drawn while StarDist works on the next section, and a picture that cannot be written is noted but never stops detection or changes a count. **Do not draw detection overlays** in its Options skips them. Results' *Check detection* adds the whole-scene pictures (section 8). The older **Save check pictures** (`--qc`) is separate: it writes one DAPI picture per region to `qc/roi_detections/`, green counted, red found but outside the region.
+
+**When 05c skips a section, it shows as failed.** A section with no tissue outline from the reformat (04a), or whose marker has no brightness range to share between its regions, is skipped rather than measured. Everything else is measured and kept, but the stage then shows as failed with *N section(s) NOT MEASURED … this stage is not complete*, and the log above names the sections and why. Fix the cause (usually: run the reformat for them) and press **Run** again; it measures only the sections that are left. Regions too small to segment do not fail the stage: they are listed in `results/roi_box_status.csv` and left out of the dataset.
 
 ![A detection overlay picture of one region: positives filled magenta, negatives outlined cyan, nuclei outside the region yellow, with the counts and colour key in the strip above](img/user-guide/14-overlay-crop.png)
 
@@ -542,13 +544,14 @@ For PCNA, only the positive density is reported; see *PCNA: counted on its own c
 
 ### Repair older outputs
 
-Three tools fix results files written by older versions of the pipeline. They are not part of a normal run. Each backs the file up first, and **Report only** (`--dry-run`) says what would change without writing.
+Four tools fix results written by older versions of the pipeline. They are not part of a normal run. The first three back the results file up first, and **Report only** (`--dry-run`) says what would change without writing. The fourth changes no existing file: it adds one, and the per-region table has to be built again after it.
 
 | Tool | Use it when |
 | --- | --- |
 | 06f Recompute the censored flag | A results file was written before detection flagged clipped nuclei itself |
 | 06g Flag nuclei off the section | A results file was written before detection flagged nuclei found on bare glass |
 | 06h Backfill segmentation provenance | A results file lacks the columns saying which channel and method found each object |
+| 06j Backfill the usable area of each ROI | The per-region step says some discs have no recorded usable area. Densities are then per area of tissue under the region, not per area of its whole outline |
 
 ## 8. Results: unblinding, spreadsheets and figures
 

@@ -685,7 +685,8 @@ STAGES = [
           needs=["roi_curator"],
           blurb="Turns roi_plates / roi_landmarks / roi_regions back into the "
                 "curator's seed state, so work exported from a browser reaches "
-                "the app. Backs up the previous seed first."),
+                "the app. Merges: sections the export does not hold are kept, "
+                "and the previous seed is kept beside it as a dated backup."),
 
     Stage("level_curator", "04k  Level curator (superseded)", "Normalisation and curation",
           script="04k_level_curator.py",
@@ -861,6 +862,15 @@ STAGES = [
                 "roi_nuclei.csv written before 05c recorded them. Every row in "
                 "such a file is nuclear / stardist / nucleus-shaped - there was "
                 "no other route - and 06a's Abercrombie gate reads them."),
+
+    Stage("roi_area", "06j  Backfill the usable area of each ROI", "Repair older outputs",
+          script="06j_backfill_roi_area.py",
+          outputs=["results/roi_box_status.csv"],
+          needs=["detect"],
+          blurb="For sections measured before 05c recorded it: the share of "
+                "each ROI's outline that is on the tissue and off the artifact "
+                "mask, which 06a divides the counts by. Reads no CZI. Run 06a "
+                "again afterwards."),
 
 ]
 

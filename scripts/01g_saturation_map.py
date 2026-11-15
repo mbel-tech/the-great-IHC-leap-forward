@@ -65,6 +65,7 @@ if _HERE not in sys.path:
 # lines copy-pasted into every stage.
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
 import ls_channels as CH  # noqa: E402
+import ls_io as IO  # noqa: E402
 
 MARKERS = list(CH.marker_names(CONFIG))
 
@@ -329,8 +330,8 @@ def main():
 
     path = os.path.join(REPORT_DIR, f"saturation_{args.marker}{suffix}.csv")
     keys = sorted({k for r in results for k in r})
-    with open(path, "w", newline="", encoding="utf-8") as fh:
-        w = csv.DictWriter(fh, fieldnames=keys); w.writeheader(); w.writerows(results)
+    # Atomic: a half-written table here would read as a finished census.
+    IO.atomic_write_csv(path, results, keys)
     print(f"\nwrote {path}")
 
     if samples:

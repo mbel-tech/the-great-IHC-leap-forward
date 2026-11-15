@@ -43,6 +43,7 @@ if _HERE not in sys.path:
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
 import ls_atlas as AT  # noqa: E402
 import atlas_polygons as AP  # noqa: E402
+import ls_io as IO  # noqa: E402
 
 OUT_ROOT = CONFIG["out_root"]
 REFORMAT_DIR = os.path.join(OUT_ROOT, "reformatted")
@@ -460,10 +461,9 @@ def run_from_landmarks(itk, args):
     if not out_rows:
         raise SystemExit("nothing refined")
     out = os.path.join(REG_DIR, "roi_regions_refined.csv")
-    with open(out, "w", newline="", encoding="utf-8") as fh:
-        w = csv.DictWriter(fh, fieldnames=list(out_rows[0].keys()))
-        w.writeheader()
-        w.writerows(out_rows)
+    # Atomic: a crash mid-write must not leave a partial table that reads
+    # as a finished refinement.
+    IO.atomic_write_csv(out, out_rows, list(out_rows[0].keys()))
 
     print()
     print("=" * 74)
@@ -590,10 +590,7 @@ def main():
         raise SystemExit("nothing registered")
 
     out = os.path.join(REG_DIR, "registration_quality.csv")
-    with open(out, "w", newline="", encoding="utf-8") as fh:
-        w = csv.DictWriter(fh, fieldnames=list(results[0].keys()))
-        w.writeheader()
-        w.writerows(results)
+    IO.atomic_write_csv(out, results, list(results[0].keys()))
 
     pre = [float(x["match_score"]) for x in results]
     post = [x["post_reg_iou"] for x in results]

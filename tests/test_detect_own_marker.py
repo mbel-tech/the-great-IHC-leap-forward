@@ -110,8 +110,11 @@ def read_rows(path):
         return list(csv.DictReader(fh))
 
 
-def drive(D5, marker, uid, planes, xs, force=False):
-    """Run 05c.main() over one section with one ROI at each x in `xs`."""
+def drive(D5, marker, uid, planes, xs, force=False, want_rc=0):
+    """Run 05c.main() over one section with one ROI at each x in `xs`.
+
+    `want_rc` 1 for a run that skips the section: 05c then exits 1, so the
+    app does not show a stage with an unmeasured section as done."""
     D5.G5.use_marker(marker)
     os.makedirs(D5.REFORMAT_DIR, exist_ok=True)
     geom = {"scene_uid": uid, "animal": "AB12", "marker": marker,
@@ -149,8 +152,8 @@ def drive(D5, marker, uid, planes, xs, force=False):
         rc = D5.main()
     finally:
         pyczi.open_czi, D5.load_model, sys.argv = saved
-    if rc != 0:
-        raise SystemExit(f"05c.main() returned {rc} for {marker}")
+    if rc != want_rc:
+        raise SystemExit(f"05c.main() returned {rc} for {marker}, want {want_rc}")
     return fake, model, read_rows(D5.NUCLEI_CSV)
 
 
@@ -260,7 +263,8 @@ with temp_study(acquisition=PAIRED_OWN) as study:
     D5 = load_stage("05c_detect_rois.py")
     flat = np.full((H, W), 300.0)
     planes = {(0, 100): flat, (1, 100): flat}
-    fake, model, rows = drive(D5, "AF488", "AB12_3a-s0", planes, [100])
+    fake, model, rows = drive(D5, "AF488", "AB12_3a-s0", planes, [100],
+                             want_rc=1)
     chk("the model was never run", len(model.calls), 0)
     chk("no rows were written", len(rows), 0)
     chk("no range was recorded", read_rows(D5.NORM_CSV), [])

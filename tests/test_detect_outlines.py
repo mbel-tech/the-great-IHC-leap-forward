@@ -126,7 +126,7 @@ def box(uid, marker, x, kind="roi", w=W):
             "sec_r": str(R), "sec_poly": ""}
 
 
-def drive(D5, marker, sections, planes, extra=(), masked=None):
+def drive(D5, marker, sections, planes, extra=(), masked=None, want_rc=0):
     """Run 05c.main() over `sections` ({uid: [box, ...]})."""
     D5.G5.use_marker(marker)
     os.makedirs(D5.REFORMAT_DIR, exist_ok=True)
@@ -162,8 +162,8 @@ def drive(D5, marker, sections, planes, extra=(), masked=None):
         rc = D5.main()
     finally:
         pyczi.open_czi, D5.load_model, sys.argv = saved
-    if rc != 0:
-        raise SystemExit(f"05c.main() returned {rc} for {marker}")
+    if rc != want_rc:
+        raise SystemExit(f"05c.main() returned {rc} for {marker}, want {want_rc}")
     return fake, model, read_rows(D5.NUCLEI_CSV)
 
 
@@ -314,7 +314,7 @@ with temp_study(acquisition=PAIRED) as study:
     print()
     print("--- a redone section that is then skipped loses its old npz ---")
     drive(D5, MARKER, {A: sec_boxes(A), B: sec_boxes(B)}, PLANES,
-          extra=["--force", "--limit", "1"], masked={B})
+          extra=["--force", "--limit", "1"], masked={B}, want_rc=1)
     chk("A (no tissue mask now) has no npz", os.path.exists(pa), False)
     chk("B still has its npz", os.path.exists(pb_), True)
 

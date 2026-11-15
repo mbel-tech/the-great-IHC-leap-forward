@@ -1001,8 +1001,12 @@ the raw clipping measurement.
 - **Settings:** `pixel_size_um`, `overview_target_um_per_px`, `acquisition`, `display`.
 - **Failure and re-run:** resumable: a section whose PNGs exist is skipped unless `--force`. `--force`
   chooses what is exported again, not which rows survive: a section exported now replaces its own
-  `focus.csv` row and every other row stays, so `--force --limit N` cannot shrink the file. A section
-  that cannot be read is a row in `overview_failures.csv`, not a stop. Needs a Python with pylibCZIrw.
+  `focus.csv` row and every other row stays, so `--force --limit N` cannot shrink the file. Kept is not
+  done: each row records the display ranges it was drawn with (`display_ranges_id`), and a run resumes
+  past a row only while that matches, so a forced run that resampled the ranges and stopped part way is
+  finished by the next plain run. `--force --limit N` does not resample the ranges. A section that
+  cannot be read is a row in `overview_failures.csv`, not a stop; a kept row for it is marked `failed`
+  and retried by the next run. Needs a Python with pylibCZIrw.
 
 ### `01a_flatfield.groovy`
 
@@ -1134,7 +1138,10 @@ itself, and measures how much downsampling dilutes it.
   is above 0.1 % of the frame.
 - **Failure and re-run:** a backfill: a section that already has its raw row is skipped unless `--force`.
   A forced run replaces only the rows it measures, so `--force --limit N` keeps every other section's
-  row; a forced run that measures nothing exits 1. Writes go through `ls_io`, which retries over a vanished drive.
+  row. Each row records the clip ceiling it was measured against (`ceiling`), and a row whose ceiling no
+  longer matches the manifest is measured again. A section that cannot be measured keeps its row,
+  marked `failed` so the next run retries it, and the run exits 1; so does a forced run that measures
+  nothing. Writes go through `ls_io`, which retries over a vanished drive.
 
 ### `01l_scene_renders.py`
 
@@ -2617,6 +2624,7 @@ One row per exported section: the quality numbers every later stage reads. Measu
 | `saturated_fraction_dapi_raw` | float |  | The same for DAPI. |
 | `tilefield_applied` | 0/1 |  | 1 when the tile correction from 01f was applied before measuring. |
 | `reader` | text |  | Which library decoded the pixels (always `pylibCZIrw`). |
+| `display_ranges_id` | text |  | Which `display_ranges.json` this section's PNGs were drawn with (a short hash of it), or `failed` when the last run could not export the section again. A run resumes past a row only while this matches the current ranges; blank on rows written before the stamp, which count as current. |
 
 #### `qc/saturation_raw.csv`
 
@@ -2650,6 +2658,7 @@ One row per section: clipping on the raw plane, and where its mask is. 04j censo
 | `mask_path` | path |  | The clipped-pixel mask, `qc/censor_raw/<scene_uid>_clipped.png`, relative to the output folder. |
 | `tilefield_applied` | 0/1 |  | 1 when the tile correction from 01f was applied before measuring. |
 | `reader` | text |  | Which library decoded the pixels (always `pylibCZIrw`). |
+| `ceiling` | integer | counts | The clip ceiling this row was measured against, or `failed` when the last run could not measure the section again. 01k resumes past a row only while this matches the manifest's ceiling for the file; blank on rows written before the stamp, which count as current. |
 
 #### `qc/overview_failures.csv`
 
@@ -3167,6 +3176,7 @@ One row per section: how much of the tissue 04g masked as artifact, by kind. Und
 
 - **Written by:** 04g_artifact_mask.py
 - **Read by:** a person
+- **Format:** `--limit N` writes `<name>.trialN.csv`. A trial run writes beside this file and never over it; nothing reads the trial file and the app's Done check does not count it.
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
@@ -3264,6 +3274,7 @@ Per section: the rotation and exclusion carried onto the second scan. The LS stu
 
 - **Written by:** 04i_propagate_to_perk.py (the second scan of a paired study); older studies carry the removed rotation curator's export
 - **Read by:** ls_bundle.py
+- **Format:** `--limit N` writes `<name>.trialN.csv`. A trial run writes beside this file and never over it; nothing reads the trial file and the app's Done check does not count it.
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
@@ -3371,6 +3382,7 @@ The ROI curation queue, in an order where any first part is a usable dataset.
 
 - **Written by:** 04n_roi_worklist.py
 - **Read by:** 04l_roi_curator.py, 04o_section_rgb.py
+- **Format:** `--tier X` writes that tier alone to `roi_worklist.X.csv`. A trial run writes beside this file and never over it; nothing reads the trial file and the app's Done check does not count it.
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
@@ -3553,6 +3565,7 @@ One row per curated section: the six reformat steps 04a took, and the one affine
 
 - **Written by:** 05a_roi_geometry.py
 - **Read by:** 06a_roi_dataset.py
+- **Format:** `--limit N` writes `<name>.trialN.csv`. A trial run writes beside this file and never over it; nothing reads the trial file and the app's Done check does not count it.
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
@@ -3597,6 +3610,7 @@ One row per region or background disc: its outline carried onto the CZI, the box
 
 - **Written by:** 05a_roi_geometry.py
 - **Read by:** a person
+- **Format:** `--limit N` writes `<name>.trialN.csv`. A trial run writes beside this file and never over it; nothing reads the trial file and the app's Done check does not count it.
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|

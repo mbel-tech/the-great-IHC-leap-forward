@@ -40,8 +40,16 @@ and archives no export; `04g --limit N` writes `artifact_summary[_<marker>].tria
 X` writes `roi_worklist.X.csv` (and `--tier` now only accepts the three tier names, because it is
 part of a file name). `01_overviews` and `01k_saturation_raw` read their existing rows on every run,
 `--force` included, and a section measured now replaces only its own row, so `--force --limit N`
-keeps every other section in `focus.csv` / `saturation_raw.csv`. A forced 01k that measures nothing
-still exits 1. None of the trial names is one the app's Done check looks for. New suite
+keeps every other section in `focus.csv` / `saturation_raw.csv`. Kept is not done: `focus.csv` rows
+now carry `display_ranges_id` (a short hash of the ranges the PNGs were drawn with) and
+`saturation_raw.csv` rows `ceiling` (the clip ceiling measured against), and a plain run resumes past
+a row only while its stamp matches, so a forced run that resampled the ranges or applied a new
+ceiling and stopped part way is finished by the next plain run. Rows from before the stamp are blank
+and count as current, so an existing study is not re-exported wholesale. A section that fails keeps
+its row marked `failed` and is retried by the next run (01 keeps it in `overview_failures.csv`, 01k
+exits 1). `01 --force --limit N` no longer resamples the study-wide `display_ranges.json`.
+`05a --limit` lists skipped sections like a full run. The trial names are registered in
+`file_formats.json`. None of the trial names is one the app's Done check looks for. New suite
 `tests/test_partial_runs.py` drives all five stages (stand-ins for the CZI reader, the reformat and
 the detector).
 
@@ -53,7 +61,9 @@ worklist dropped the held-out sections from the record 04l and 04o filter themse
 
 **Cost:** a trial no longer moves the stage forward: after a trial the stage still shows as not
 done until a full run. A forced 01/01k run whose section fails now keeps that section's earlier row
-instead of dropping it (the failure is still reported, and 01 still exits 1 on it).
+(marked `failed`, retried next run) instead of dropping it, so 04j keeps censoring it with the
+earlier measurement until it is measured again. Two new columns. A first review of this change
+caught the original version keeping rows that then read as done.
 
 ## 2026-11-15 - The curator page suites run without a study, and so in CI
 

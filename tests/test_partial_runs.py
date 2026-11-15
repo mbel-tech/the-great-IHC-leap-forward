@@ -145,6 +145,23 @@ with temp_study(acquisition={"layout": "paired", "markers": ["Mk1", "Mk2"]}) as 
         os.path.basename(tbox), "roi_boxes_Mk1.trial1.csv")
     chk("...holding the one trial section", len(read(tgeom)), 1)
 
+    # A trial is for finding problems, so it names what it skipped too.
+    write(trial_regions, read(regions)[:1] + [dict(read(regions)[0],
+                                                   scene_uid="AB12_1a-s0x")])
+    said = io.StringIO()
+    saved = sys.argv
+    sys.argv = ["05a", trial_regions, "--all-sections", "--marker", "Mk1",
+                "--limit", "2"]
+    try:
+        with contextlib.redirect_stdout(said):
+            rc = P5.main()
+    finally:
+        sys.argv = saved
+    chk("a trial with an unplaceable section returns 0", rc, 0)
+    chk("...and lists it as skipped",
+        "SKIPPED 1" in said.getvalue() and "AB12_1a-s0x" in said.getvalue(), True)
+    chk("...still without touching the real boxes", text(box), full_box)
+
     os.remove(box)
     os.remove(geom)
     chk("trial files alone do not make 05a done",
@@ -265,64 +282,175 @@ class _PyCzi:
 print()
 print("--- 01 --force --limit: every other section keeps its focus.csv row ---")
 
+
+def quiet(fn, *a):
+    with contextlib.redirect_stdout(io.StringIO()):
+        return fn(*a)
+
+
 with temp_study() as st:
     sys.modules["pylibCZIrw"] = type(sys)("pylibCZIrw")
     sys.modules["pylibCZIrw"].czi = _PyCzi
     OV = load_stage("01_overviews.py", name="lsstage_01_partial")
     OV.pyczi = _PyCzi
-    FNAME = "LS01_s01a.czi"
-    open(os.path.join(st.source_dir, FNAME), "wb").close()
+    FNAME, FNAME2 = "LS01_s01a.czi", "LS01_s02a.czi"
+    for f in (FNAME, FNAME2):
+        open(os.path.join(st.source_dir, f), "wb").close()
     marker = list(OV.MASK_MARKERS)[0]
     scenes = [{"scene_uid": f"LS01_s01a_sc{s:02d}", "file": FNAME, "animal": "LS01",
                "slide": "1", "variant": "a", "marker_channel": marker,
                "scene_index": str(s), "section_order": str(s)} for s in range(3)]
+    scenes.append({"scene_uid": "LS01_s02a_sc00", "file": FNAME2, "animal": "LS01",
+                   "slide": "2", "variant": "a", "marker_channel": marker,
+                   "scene_index": "0", "section_order": "3"})
+    ALL = sorted(r["scene_uid"] for r in scenes)
+    LAST = "LS01_s02a_sc00"
     write(os.path.join(st.out_root, "manifest", "manifest_scenes.csv"), scenes)
     zoom = OV.BASE_PX_UM / OV.TARGET_UM
     ranges = {"DAPI": {"lo": 200, "hi": 20000}, marker: {"lo": 200, "hi": 20000}}
+    ranges_b = {"DAPI": {"lo": 300, "hi": 18000}, marker: {"lo": 250, "hi": 19000}}
 
-    with contextlib.redirect_stdout(io.StringIO()):
-        OV.export(scenes, {}, ranges, {}, zoom, 0, True)
+    quiet(OV.export, scenes, {}, ranges, {}, zoom, 0, True)
     before = {r["scene_uid"]: r for r in read(OV.QC_CSV)}
-    chk("the full export wrote a row per section", len(before), 3)
+    chk("the full export wrote a row per section", len(before), 4)
+    chk("...each stamped with the display ranges it was drawn with",
+        {r["display_ranges_id"] for r in before.values()}, {OV.ranges_id(ranges)})
     # Mark the rows, so a kept row is told apart from a re-exported one.
     rows = read(OV.QC_CSV)
     for r in rows:
         r["focus_score"] = "KEPT"
     write(OV.QC_CSV, rows)
 
-    with contextlib.redirect_stdout(io.StringIO()):
-        exported, _failed, n = OV.export(scenes, {}, ranges, {}, zoom, 1, True)
+    exported, _failed, n = quiet(OV.export, scenes, {}, ranges, {}, zoom, 1, True)
     after = read(OV.QC_CSV)
     chk("--force --limit 1 exported one section", exported, 1)
-    chk("focus.csv still holds every section", sorted(r["scene_uid"] for r in after),
-        sorted(before))
+    chk("focus.csv still holds every section", sorted(r["scene_uid"] for r in after), ALL)
     chk("...the one exported now was replaced",
         [r["scene_uid"] for r in after if r["focus_score"] != "KEPT"],
         [scenes[0]["scene_uid"]])
-    chk("...and the count reported is the whole file", n, 3)
+    chk("...and the count reported is the whole file", n, 4)
+
+    print()
+    print("--- 01: a forced run with new ranges that stops part way is finished "
+          "by the next plain run ---")
+    # The forced run resampled the ranges and got through one section before
+    # it stopped (a crash looks the same on disk: N fresh rows, the rest old).
+    quiet(OV.export, scenes, {}, ranges_b, {}, zoom, 1, True)
+    chk("the rows it did not reach are kept",
+        sorted(r["scene_uid"] for r in read(OV.QC_CSV)), ALL)
+    exported, _f, _n = quiet(OV.export, scenes, {}, ranges_b, {}, zoom, 0, False)
+    chk("the next plain run re-exports exactly the other three", exported, 3)
+    chk("...and every row is now drawn with the new ranges",
+        {r["display_ranges_id"] for r in read(OV.QC_CSV)}, {OV.ranges_id(ranges_b)})
+    exported, _f, _n = quiet(OV.export, scenes, {}, ranges_b, {}, zoom, 0, False)
+    chk("a run after that has nothing left to do", exported, 0)
+
+    legacy = read(OV.QC_CSV)
+    for r in legacy:
+        r["display_ranges_id"] = ""
+    write(OV.QC_CSV, legacy)
+    exported, _f, _n = quiet(OV.export, scenes, {}, ranges, {}, zoom, 0, False)
+    chk("a row from before the stamp counts as current (no wholesale redo)",
+        exported, 0)
+
+    print()
+    print("--- 01: a section that fails in a forced run is retried until it works ---")
+    os.remove(os.path.join(st.source_dir, FNAME2))
+    _e, failed, _n = quiet(OV.export, scenes, {}, ranges, {}, zoom, 0, True)
+    chk("the forced run reports the section it could not read", failed, 1)
+    row = {r["scene_uid"]: r for r in read(OV.QC_CSV)}[LAST]
+    chk("...keeps its row, marked failed", row["display_ranges_id"], OV.FAILED_ID)
+    failures = lambda: [r["scene_uid"] for r in read(OV.FAILURES_CSV)]  # noqa: E731
+    chk("...and lists it in overview_failures.csv", failures(), [LAST])
+    _e, failed, _n = quiet(OV.export, scenes, {}, ranges, {}, zoom, 0, False)
+    chk("the next plain run retries it", failed, 1)
+    chk("...and the failure is still on file", failures(), [LAST])
+    open(os.path.join(st.source_dir, FNAME2), "wb").close()
+    exported, failed, _n = quiet(OV.export, scenes, {}, ranges, {}, zoom, 0, False)
+    chk("once the file is back, exactly that section is exported", (exported, failed),
+        (1, 0))
+    chk("...and the failures file is empty", failures(), [])
+
+    print()
+    print("--- 01 --force --limit leaves the study's display ranges alone ---")
+    import json as _json
+    OV.JS.write_json_atomic(OV.RANGES_PATH, ranges)
+    ranges_before = text(OV.RANGES_PATH)
+    rc = run_main(OV, ["01", "--force", "--limit", "1"])
+    chk("01 --force --limit 1 returns 0", rc, 0)
+    chk("display_ranges.json is byte-for-byte as it was", text(OV.RANGES_PATH),
+        ranges_before)
+    chk("...and the section it redrew is stamped with those ranges",
+        {r["scene_uid"]: r for r in read(OV.QC_CSV)}[scenes[0]["scene_uid"]]
+        ["display_ranges_id"], OV.ranges_id(_json.loads(ranges_before)))
 
     print()
     print("--- 01k --force --limit: every other section keeps its raw row ---")
     K = load_stage("01k_saturation_raw.py", name="lsstage_01k_partial")
     sat_before = read(K.OUT_CSV)
-    chk("saturation_raw.csv holds every section", len(sat_before), 3)
+    chk("saturation_raw.csv holds every section", len(sat_before), 4)
     for r in sat_before:
         r["reader"] = "KEPT"
     write(K.OUT_CSV, sat_before)
-    rc = run_main(K, ["01k", "--force", "--limit", "1", "--native-sample", "0",
-                      "--no-merge"])
+    k_argv = ["01k", "--native-sample", "0", "--no-merge"]
+    rc = run_main(K, k_argv + ["--force", "--limit", "1"])
     chk("01k --force --limit 1 returns 0", rc, 0)
     sat_after = read(K.OUT_CSV)
     chk("saturation_raw.csv still holds every section",
-        sorted(r["scene_uid"] for r in sat_after), sorted(before))
+        sorted(r["scene_uid"] for r in sat_after), ALL)
     chk("...only the one measured now was replaced",
         [r["scene_uid"] for r in sat_after if r["reader"] != "KEPT"],
         [scenes[0]["scene_uid"]])
 
+    print()
+    print("--- 01k: a forced run for a new ceiling that stops part way is "
+          "finished by the next plain run ---")
+    write(os.path.join(st.out_root, "manifest", "manifest_files.csv"),
+          [{"file": FNAME, "clip_ceiling": "4095"},
+           {"file": FNAME2, "clip_ceiling": "4095"}])
+    rc = run_main(K, k_argv + ["--force", "--limit", "1"])
+    chk("01k --force --limit 1 under the new ceiling returns 0", rc, 0)
+    ceil = lambda: {r["scene_uid"]: r["ceiling"] for r in read(K.OUT_CSV)}  # noqa: E731
+    chk("one row is measured against it, the rest are kept",
+        sorted(ceil().values()), ["4095", "65535", "65535", "65535"])
+    before_reads = list(read(K.OUT_CSV))
+    for r in before_reads:
+        r["reader"] = "KEPT"
+    write(K.OUT_CSV, before_reads)
+    rc = run_main(K, k_argv)
+    chk("the next plain run returns 0", rc, 0)
+    chk("...having re-measured exactly the other three",
+        sorted(r["scene_uid"] for r in read(K.OUT_CSV) if r["reader"] != "KEPT"),
+        sorted(u for u in ALL if u != scenes[0]["scene_uid"]))
+    chk("...so every row is now at the new ceiling", set(ceil().values()), {"4095"})
+    legacy = read(K.OUT_CSV)
+    for r in legacy:
+        r["ceiling"] = ""
+        r["reader"] = "KEPT"
+    write(K.OUT_CSV, legacy)
+    run_main(K, k_argv)
+    chk("a row from before the stamp counts as current",
+        {r["reader"] for r in read(K.OUT_CSV)}, {"KEPT"})
+
+    print()
+    print("--- 01k: a section that fails in a forced run is retried ---")
+    os.remove(os.path.join(st.source_dir, FNAME2))
+    rc = run_main(K, k_argv + ["--force"])
+    chk("a forced 01k with a section it cannot read returns 1", rc, 1)
+    chk("...keeps that section's row, marked failed", ceil()[LAST], K.FAILED_CEILING)
+    rc = run_main(K, k_argv)
+    chk("the next plain run retries it and fails again", rc, 1)
+    open(os.path.join(st.source_dir, FNAME2), "wb").close()
+    rc = run_main(K, k_argv)
+    chk("once the file is back it is measured", (rc, ceil()[LAST]), (0, "4095"))
+
     os.remove(os.path.join(st.source_dir, FNAME))
-    rc = run_main(K, ["01k", "--force", "--native-sample", "0", "--no-merge"])
+    os.remove(os.path.join(st.source_dir, FNAME2))
+    rc = run_main(K, k_argv + ["--force"])
     chk("a forced 01k that measured nothing still fails", rc, 1)
-    chk("...and keeps every earlier row", len(read(K.OUT_CSV)), 3)
+    chk("...and keeps every earlier row", len(read(K.OUT_CSV)), 4)
+    chk("...each marked to be measured again", set(ceil().values()),
+        {K.FAILED_CEILING})
 
 print()
 print("FAILURES" if fails else "ALL PASS")

@@ -1095,6 +1095,11 @@ def _place_marker(marker, regions, plates, args, only=None):
         print(f"               {len(boxes)} ROIs     -> {box_out}")
         print(f"  {os.path.basename(box_csv(marker))} is untouched; run without "
               f"--limit to write it")
+        # A trial is for finding problems, so it names what it skipped too.
+        if skipped:
+            print(f"  SKIPPED {len(skipped)}:")
+            for uid, why in skipped[:10]:
+                print(f"    {uid}: {why}")
         print("=" * 72)
         return 0
 

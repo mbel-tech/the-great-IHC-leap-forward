@@ -329,12 +329,11 @@ def main():
               f"mean score {sim[np.arange(len(keep)), path].mean():.3f}")
 
     csv_path = os.path.join(REPORT_DIR, "atlas_proposals.csv")
-    with open(csv_path, "w", newline="", encoding="utf-8") as fh:
-        keys = ["scene_uid", "animal", "section_order", "proposed_plate",
-                "proposed_page", "proposed_score", "local_best", "confirmed_plate"]
-        w = csv.DictWriter(fh, fieldnames=keys, extrasaction="ignore")
-        w.writeheader()
-        w.writerows(proposals)
+    keys = ["scene_uid", "animal", "section_order", "proposed_plate",
+            "proposed_page", "proposed_score", "local_best", "confirmed_plate"]
+    # Atomic: `candidates` stays out, as before - atomic_write_csv ignores
+    # keys it is not given, exactly as extrasaction="ignore" did.
+    IO.atomic_write_csv(csv_path, proposals, keys)
 
     build_curator(proposals)
 

@@ -9,6 +9,33 @@ where things landed, not which plausible-looking route was tried and abandoned, 
 
 ---
 
+## 2026-11-15 - Early stages write atomically and fail honestly
+
+**Changed:** these stage outputs, which were written in place with `open(path, "w")` now go through
+`ls_io.atomic_write_csv` (a temp file swapped in by `os.replace`): `qc/tile_geometry.csv` (01e),
+`saturation_<marker><suffix>.csv` (01g), 01b's pick list, 01i's review sheet, 04a's lost-sections
+file, `plate_boxes.csv` (04a3b, still copied to the `_prev` file first), 04a_atlas_extract's
+`plates.csv`, `seeds.csv`, `text_labels.csv`, `legend_by_page.csv` and `gaps.csv`,
+`atlas_proposals.csv` (04b), `roi_regions_refined.csv` and `registration_quality.csv` (04e), and
+05b's `detection_tuning.csv`; 05b's `detection_tuning.md` goes through `ls_io.atomic_save`. Columns,
+column order and row order are unchanged. `01e_tile_geometry.py` returns 1 when it measured
+nothing and 0 on success, and ends `raise SystemExit(main())`. `01k_saturation_raw.py` returns 1
+when no section has a raw clipping record after the run (every CZI missing or failing), 0 otherwise,
+and ends the same way. A new suite, `tests/test_atomic_outputs.py`, walks the AST of these eleven
+scripts and fails on any text-mode `open(..., "w")` not on its allow-list (04b's curator HTML,
+04e's elastix point files in a temp directory).
+
+**Why:** found on review (REVIEW.md rules 2 and 3). The app's done check trusts these files'
+presence, so a crash mid-write left a truncated CSV that read as a finished stage. 01e printed
+"nothing measured" and returned None, and 01k printed "is the source drive mounted?" and returned
+None, so an unmounted drive was recorded as a successful run.
+
+**Cost:** a run of 01e or 01k against an absent drive now shows as failed in the app rather than
+done. A stray `<file>.tmp` can be left beside an output if the process is killed mid-write; the
+previous output is untouched.
+
+---
+
 ## 2026-11-15 - Importing curator exports never discards curation
 
 **Changed:** `04q_import_curation.py --write` merges into this study's entry in

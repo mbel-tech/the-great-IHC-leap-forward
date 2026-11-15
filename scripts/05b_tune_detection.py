@@ -56,6 +56,7 @@ _spec.loader.exec_module(D5)
 
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
 import czi_read as CR  # noqa: E402
+import ls_io as IO  # noqa: E402
 import ls_jsonio  # noqa: E402
 import ls_naming as NM  # noqa: E402
 import ls_segment as SG  # noqa: E402
@@ -335,12 +336,12 @@ def main():
         return 1
 
     os.makedirs(QC, exist_ok=True)
-    with open(TUNING_CSV, "w", newline="", encoding="utf-8") as fh:
-        w = csv.writer(fh)
-        w.writerow(COLUMNS)
-        w.writerows(rows)
-    with open(REPORT_MD, "w", encoding="utf-8") as fh:
-        fh.write(report(entries))
+    # Both through a temp file and a swap, so a crash leaves the previous
+    # tuning record rather than half of a new one.
+    IO.atomic_write_csv(TUNING_CSV, [dict(zip(COLUMNS, r)) for r in rows], COLUMNS)
+    with IO.atomic_save(REPORT_MD) as tmp:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(report(entries))
     print(f"report -> {REPORT_MD}\nper crop -> {TUNING_CSV}")
 
     for m, e in entries.items():

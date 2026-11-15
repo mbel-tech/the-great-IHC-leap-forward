@@ -55,6 +55,7 @@ if _HERE not in sys.path:
 # the whole process. Imported, not re-implemented: this block used to be four
 # lines copy-pasted into every stage.
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
+import ls_io as IO  # noqa: E402
 
 OUT_ROOT = CONFIG["out_root"]
 ATLAS_DIR = os.path.join(OUT_ROOT, "atlas")
@@ -188,10 +189,9 @@ def main():
         return
 
     shutil.copyfile(BOXES_CSV, PREV_CSV)
-    with open(BOXES_CSV, "w", newline="", encoding="utf-8") as fh:
-        w = csv.DictWriter(fh, fieldnames=list(out[0].keys()))
-        w.writeheader()
-        w.writerows(out)
+    # The copy above is the undo; the swap below is what keeps a crash from
+    # leaving a truncated plate_boxes.csv that 04a4 would rebuild plates from.
+    IO.atomic_write_csv(BOXES_CSV, out, list(out[0].keys()))
     print()
     print(f"  wrote {BOXES_CSV}   (previous kept as {os.path.basename(PREV_CSV)})")
     if review:

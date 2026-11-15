@@ -1040,8 +1040,8 @@ def main():
         # Loud, and written out, because these are sections the operator chose to
         # KEEP that did not make it through anyway.
         path = paths["lost"]
-        with open(path, "w", newline="", encoding="utf-8") as fh:
-            w = csv.writer(fh); w.writerow(["scene_uid", "reason"]); w.writerows(lost)
+        IO.atomic_write_csv(path, [{"scene_uid": uid, "reason": why} for uid, why in lost],
+                            ["scene_uid", "reason"])
         print()
         print("!" * 74)
         print(f"{len(lost)} section(s) were NOT excluded but still did not survive:")

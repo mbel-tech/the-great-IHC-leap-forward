@@ -336,15 +336,22 @@ def main():
     # run ended in a NameError before the merge and the native sample.
     summarise(rows, measured, failed)
 
+    # Not "nothing to do". A fresh export leaves this stage nothing to measure,
+    # but it still resumes every section 01_overviews already wrote, so `rows`
+    # is empty only when no section has a raw clipping record at all - every
+    # CZI missing or failing. summarise() has just said "is the source drive
+    # mounted?"; returning None after that recorded the stage as done with no
+    # masks behind it, and 04j then called every section unmeasured.
     if not rows:
-        return
+        return 1
     if not args.no_merge:
         merge_into_focus(rows)
     if args.native_sample:
         print()
         print("measuring the resolution-dilution factor on %d sections ..." % args.native_sample)
         native_sample(scenes, args.native_sample, ceilings)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

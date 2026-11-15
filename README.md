@@ -627,7 +627,9 @@ That matters: the page normally embeds whatever curation is in
 `out_root/curation`, and a suite reading that would start with hundreds of
 sections it knows nothing about, with counts that changed every time someone
 curated. The page is regenerated *with* the seed afterwards, so running the tests
-does not quietly downgrade the file you use.
+does not quietly downgrade the file you use. With no `config.json` (a fresh
+clone, or CI) the pages are generated from a small synthetic study written by
+`tests/_curator_study.py` instead, so the page suites run there too.
 
 **They check logic, not rendering.** Canvas calls are swallowed by the stub, so
 nothing here says anything about what is drawn — that is checked in a real

@@ -23,11 +23,29 @@ const legends = path.join(tmp, "legends.csv");
 fs.writeFileSync(legends, "cross_section,pdf_page,abbreviation,definition\n" +
   "71,6,Dl,lateral zone of D\n71,6,Dm,medial zone of D\n71,6,V,ventral telencephalic area\n");
 
+// A study config of its own, written by the shared fixture as wullimann_level.test.js
+// does. 04x reads config at import, and this used to name none: under run.sh's
+// LS_CONFIG_STRICT it then had nothing to read on a clone with no config.json, and
+// where there was one it built against the operator's study.
+const pys = [process.env.PY, "python3", "python"].filter(Boolean);
+let cfgPath = null;
+for (const exe of pys) {
+  try {
+    cfgPath = execFileSync(exe, ["-c",
+      "import sys; sys.path.insert(0, sys.argv[1]); import _fixture; " +
+      "print(_fixture.write_study(sys.argv[2], atlas_source='wullimann1996'))",
+      __dirname, path.join(tmp, "study")], { stdio: "pipe" }).toString().trim();
+    break;
+  } catch (e) { /* next interpreter */ }
+}
+if (!cfgPath) { console.error("could not write a study config"); process.exit(2); }
+
 let ran = false;
-for (const py of [process.env.PY, "python3", "python"].filter(Boolean)) {
+for (const py of pys) {
   try {
     execFileSync(py, [path.join(repo, "scripts", "04x_wullimann_polygons.py"),
-      "--plate-dir", tmp, "--review", "--legends", legends], { stdio: "pipe" });
+      "--plate-dir", tmp, "--review", "--legends", legends],
+      { env: { ...process.env, LS_CONFIG: cfgPath }, stdio: "pipe" });
     ran = true;
     break;
   } catch (e) { /* next interpreter */ }

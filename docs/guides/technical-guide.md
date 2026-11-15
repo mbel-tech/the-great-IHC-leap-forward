@@ -2271,7 +2271,7 @@ The pages' JavaScript is tested under Node (`tests/*.test.js`), against a stub D
 curator, so a suite never starts with a person's curation), lifts out its largest `<script>` block, and
 runs the suites against it. The stub absorbs canvas calls, so the suites cover state, ordering and what
 reaches the exports; anything only visible as pixels is checked in a real browser. The pages are built
-from the study `config.json` names; with no `config.json` (a fresh clone, and the GitHub workflow)
+from the study in `config.json`; with no `config.json` (a fresh clone, and the GitHub workflow)
 `tests/_curator_study.py` writes a small synthetic study - reformat indexes, a worklist, composites and a
 provenance table, no operator data, the shipped `plates_final` atlas - and the real `04l` and `04k` are
 run against that. A page suite that asserts a fact only the real study has is listed in `run.sh`'s

@@ -1559,9 +1559,10 @@ constant multiplier and barely moves the group contrast — **it is a reporting 
 one.** What it changes is whether a density can honestly be quoted as cells per square millimetre at
 all.
 
-Alongside the per-region table, the step writes a per-section detector specificity table carrying the
-background count, area, false-positive count and rate, the background level and spread, and the cut
-applied — so the threshold used on each section and the evidence for it travel together.
+Alongside the per-region table, the step writes a detector specificity table, one row per section and
+marker, carrying the background count, area, false-positive count and rate, the background level and
+spread, and the cut applied — so the threshold used on each section and the evidence for it travel
+together.
 
 > **In the code** — `scripts/06a_roi_dataset.py`
 >

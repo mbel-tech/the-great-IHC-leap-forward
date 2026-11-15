@@ -5553,7 +5553,7 @@
     "detector_specificity.csv"
    ],
    "writer": "06a_roi_dataset.py",
-   "what": "Per section: how many background-disc nuclei land above the cut. A measurement of the detector, not a negative control.",
+   "what": "Per section and marker: how many of that marker's background-disc nuclei land above its cut. A measurement of the detector, not a negative control.",
    "column_sources": [
     "06a_roi_dataset.py"
    ],
@@ -5656,7 +5656,7 @@
     "positivity_cuts.csv"
    ],
    "writer": "06a_roi_dataset.py",
-   "what": "The exact cut per section, at full precision, so 06i draws the same calls 06a counted.",
+   "what": "The exact cut per section and marker, at full precision, so 06i draws the same calls 06a counted.",
    "columns_from": "06a_roi_dataset.py:CUTS_COLUMNS",
    "columns": [
     {

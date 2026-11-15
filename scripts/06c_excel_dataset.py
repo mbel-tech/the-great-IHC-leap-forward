@@ -396,13 +396,19 @@ def main(argv=None):
             "axis_b_um": b.get("axis_b_um", ""),
         })
 
+    # PER (SECTION, MARKER). 06a's positivity cut is one marker's background
+    # on one section; under `multiplex` both markers share the section's uid,
+    # and keying by uid alone summed their nuclei into one row and showed
+    # whichever marker's cut came last under that marker's name. Under
+    # `paired` a section has one marker and this is one row per section, as
+    # before.
     per_sec = collections.defaultdict(lambda: [0, 0, set(), 0, 0])
-    cut_by, animal_by, marker_by = {}, {}, {}
+    cut_by, animal_by = {}, {}
     for r in meas:
-        s = per_sec[r["scene_uid"]]
-        cut_by[r["scene_uid"]] = r["section_positivity_cut"]
-        animal_by[r["scene_uid"]] = r["animal"]
-        marker_by[r["scene_uid"]] = r["marker"]
+        key = (r["scene_uid"], r["marker"])
+        s = per_sec[key]
+        cut_by[key] = r["section_positivity_cut"]
+        animal_by[key] = r["animal"]
         if r["roi_kind"] == "roi":
             s[0] += int(r["n_nuclei"])
             s[2].add(r["region"])
@@ -412,19 +418,21 @@ def main(argv=None):
             s[4] += 1
 
     by_section = []
-    for uid in sorted(measured):
-        n_roi, n_bg, regions, d_roi, d_bg = per_sec[uid]
-        an = animal_by.get(uid, NM.subject_of(uid))
+    # Every measured section is in per_sec: `measured` is read off the same
+    # rows.
+    for uid, mk in sorted(per_sec):
+        n_roi, n_bg, regions, d_roi, d_bg = per_sec[(uid, mk)]
+        an = animal_by.get((uid, mk), NM.subject_of(uid))
         by_section.append({
             "sample": an, "treatment": groups.get(an, ""),
             "environment": envs.get(an, ""), "scene_uid": uid,
-            "marker": marker_by.get(uid, ""),
+            "marker": mk,
             "n_roi_nuclei": n_roi, "n_background_nuclei": n_bg,
             "n_roi_discs": d_roi,
             "n_background_discs": d_bg,
             # Blank means the section had fewer than 5 background nuclei, so no
             # cut could be formed and its positivity columns are empty upstream.
-            "positivity_cut": cut_by.get(uid, ""),
+            "positivity_cut": cut_by.get((uid, mk), ""),
             "regions": ", ".join(sorted(regions)),
         })
 
@@ -451,7 +459,11 @@ def main(argv=None):
     print(f"{len(by_roi)} rows (one per ROI per sample) -> {args.out}")
     print(f"  sheets: by_roi, by_disc ({len(by_disc)}), "
           f"by_section ({len(by_section)}), coverage")
-    tr = collections.Counter(r["treatment"] or "(none)" for r in by_section)
+    # Sections, not by_section rows: under `multiplex` a section has a row per
+    # marker, and counting rows would count it once per marker.
+    tr = collections.Counter(
+        t or "(none)"
+        for t in {r["scene_uid"]: r["treatment"] for r in by_section}.values())
     print(f"  sections measured by arm: {dict(tr)}")
     print()
     # Matched to the coverage sheet, which is per (sample, MARKER). Summing

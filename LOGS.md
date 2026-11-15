@@ -9,6 +9,27 @@ where things landed, not which plausible-looking route was tried and abandoned, 
 
 ---
 
+## 2026-11-15 - The positivity cut is per (section, marker)
+
+**Changed:** 06a keys a section's background values, its positivity cut and its background level by
+`(scene_uid, marker)` instead of `scene_uid`. Every row's `section_positivity_cut`,
+`section_bg_level`, `section_bg_spread`, `section_bg_nuclei` and `n_positive`, the Abercrombie h of a
+marker segmented on its own channel, `positivity_cuts.csv` and `detector_specificity.csv` now read
+that marker's own cut, and `detector_specificity.csv` has one row per (section, marker) with a cut,
+from that marker's background discs only. 06c's `by_section` sheet is one row per (section, marker)
+with that marker's cut and counts. 05c's crop drawing, 06d and 06i already worked per marker.
+
+**Why:** found on review. Under `multiplex` both markers share the section's uid, so their background
+nuclei were pooled into one cut. With one marker's background near 100 and the other's near 5,000
+the cut came out above 13,000 for both, and nuclei of either marker that their own background calls
+positive were counted negative. The specificity row lumped both markers under the first one's name,
+and 06c showed whichever marker's cut came last.
+
+**Cost:** none under `paired`, where a section has one marker and every number is unchanged. A
+`multiplex` study's positive counts, cuts and specificity change once 06a and 06c are re-run.
+
+---
+
 ## 2026-11-15 - Densities are per area of usable tissue; an unsegmented ROI is not a zero
 
 **Changed:** 05c writes `results/roi_box_status.csv`, one row per ROI: whether the box was segmented,

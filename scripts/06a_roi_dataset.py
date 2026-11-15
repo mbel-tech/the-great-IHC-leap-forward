@@ -504,7 +504,10 @@ def main(argv=None):
     # the same order. The marker is in the key because it is in 05c's
     # numbering; see split_by_marker.
     by_idx = {}
-    bg_by = collections.defaultdict(lambda: array("d"))    # uid -> bg values
+    # (uid, marker) -> background values. PER MARKER: under `multiplex` both
+    # markers' background discs sit on the one scene_uid, and pooling them put
+    # one antibody's background into the other's cut (see the cut below).
+    bg_by = collections.defaultdict(lambda: array("d"))
     # (marker, region) -> diameters
     diam_by = collections.defaultdict(lambda: array("d"))
     d_by_marker = collections.defaultdict(lambda: array("d"))
@@ -576,7 +579,7 @@ def main(argv=None):
             own_by[mk] = own_by.get(mk, False) or own
             if r["roi_kind"] == "background":
                 if not cen:
-                    bg_by[uid].append(v)
+                    bg_by[(uid, mk)].append(v)
             elif not own:
                 diam_by[(mk, r["region"])].append(d)
 
@@ -611,13 +614,21 @@ def main(argv=None):
 
     # ---- the per-section cut, from that section's own background discs
     # (ls_overlay.section_cut: median + 3 * 1.4826 * MAD, none under 5 values.)
+    #
+    # PER (SECTION, MARKER). Under `paired` a section has one marker and this
+    # is the per-section cut unchanged. Under `multiplex` both markers share
+    # the section's uid, and a cut keyed by uid alone pooled their background
+    # nuclei: with one marker's background near 100 and the other's near
+    # 5,000 the pooled cut came out above 13,000 and called nuclei of BOTH
+    # markers negative - a complete, plausible, wrong dataset. A cut is a
+    # property of one antibody's background on one section, never of two.
     cuts, bgstat = {}, {}
-    for uid, bg in bg_by.items():
+    for key, bg in bg_by.items():
         got = LO.background_stats(bg)
         if got is None:
             continue
-        cuts[uid] = LO.section_cut(bg)
-        bgstat[uid] = got
+        cuts[key] = LO.section_cut(bg)
+        bgstat[key] = got
 
     # ---- h for Abercrombie, measured per region and marker
     #
@@ -629,9 +640,9 @@ def main(argv=None):
     # objects are not counted either.
     pos_by_marker = collections.defaultdict(lambda: array("d"))
     for (uid, mk, _), disc in by_idx.items():
-        if disc.kind == "background" or uid not in cuts:
+        if disc.kind == "background" or (uid, mk) not in cuts:
             continue
-        cut = cuts[uid]
+        cut = cuts[(uid, mk)]
         for v, d, c, o in zip(disc.v, disc.d, disc.cen, disc.own):
             if o and LO.is_positive(v, c, cut):
                 diam_by[(mk, disc.region)].append(d)
@@ -665,13 +676,15 @@ def main(argv=None):
     not_segmented, no_fraction = [], 0
     rows, spec = [], []
     for uid in sorted(uids):
-        cut = cuts.get(uid)
         # PER MARKER, so `i` restarts at 1 for each one - which is how 05c
         # numbered them. Under `paired` there is exactly one group per section
         # and this is the old single loop unchanged.
         for mk, mboxes in split_by_marker(box_by.get(uid, [])).items():
             if (uid, mk) not in measured:
                 continue
+            # This marker's cut and background on this section - see the cut.
+            cut = cuts.get((uid, mk))
+            bgs = bgstat.get((uid, mk))
             for i, b in enumerate(mboxes, 1):
                 here = by_idx.get((uid, mk, i))
                 segmented, usable_frac, why_not = status.get(
@@ -771,53 +784,60 @@ def main(argv=None):
                                                  if (cut is not None and area) else ""),
                     "marker_median_of_roi": (round(st.median(usable), 1)
                                              if usable else ""),
-                    "section_bg_level": round(bgstat[uid][0], 1) if uid in bgstat else "",
-                    "section_bg_spread": round(bgstat[uid][1], 1) if uid in bgstat else "",
-                    "section_bg_nuclei": bgstat[uid][2] if uid in bgstat else 0,
+                    "section_bg_level": round(bgs[0], 1) if bgs else "",
+                    "section_bg_spread": round(bgs[1], 1) if bgs else "",
+                    "section_bg_nuclei": bgs[2] if bgs else 0,
                     "section_positivity_cut": round(cut, 1) if cut is not None else "",
                     "n_censored": sum(here.cen) if here else 0,
                 }
                 rows.append(row)
 
-        # what the background discs report about the detector, per section
-        bgrows = [r for r in rows if r["scene_uid"] == uid
-                  and r["roi_kind"] == "background"]
-        if bgrows and cut is not None:
-            tot_n = sum(r["n_nuclei"] for r in bgrows)
-            tot_p = sum(r["n_positive"] for r in bgrows)
-            tot_a = sum(r["roi_area_mm2"] for r in bgrows)
-            dens = [r["profile_density_per_mm2"] for r in bgrows
-                    if r["profile_density_per_mm2"] != ""]
-            spec.append({
-                "scene_uid": uid, "animal": bgrows[0]["animal"],
-                "marker": bgrows[0]["marker"],
-                "n_discs": len(bgrows), "bg_nuclei": tot_n,
-                "bg_area_mm2": round(tot_a, 6),
-                "bg_nuclei_per_mm2": round(tot_n / tot_a, 1) if tot_a else "",
-                "bg_false_positives": tot_p,
-                # The rate's denominator is every object the detector chose to
-                # find in empty tissue. For a counterstain that is "nuclei",
-                # whatever their brightness; for a marker segmented on itself
-                # it is "blobs StarDist outlined on noise", which depends on
-                # how sensitive StarDist happens to be and not on the antibody.
-                # So the rate is withheld there, and the per-area count of
-                # false positives - which has no such denominator - stands in.
-                "false_positive_rate": (round(tot_p / tot_n, 4)
-                                        if (tot_n and not bgrows[0][
-                                            "denominator_withheld_reason"])
-                                        else ""),
-                "bg_false_positives_per_mm2": (round(tot_p / tot_a, 1)
-                                               if tot_a else ""),
-                "denominator_withheld_reason": bgrows[0][
-                    "denominator_withheld_reason"],
-                "bg_level": round(bgstat[uid][0], 1),
-                "bg_spread": round(bgstat[uid][1], 1),
-                "positivity_cut": round(cut, 1),
-                # Disagreement between discs on one section is heterogeneous
-                # autofluorescence, and is worth seeing before it is averaged.
-                "disc_density_spread": (round(max(dens) - min(dens), 1)
-                                        if len(dens) > 1 else 0),
-            })
+            # what the background discs report about the detector, per
+            # section and marker: this marker's discs only, against this
+            # marker's cut. Under `multiplex` a section's other marker has
+            # background discs of its own, and lumping them in would report
+            # one antibody's false positives under the other's name.
+            bgrows = [r for r in rows if r["scene_uid"] == uid
+                      and r["marker"] == mk and r["roi_kind"] == "background"]
+            if bgrows and cut is not None:
+                tot_n = sum(r["n_nuclei"] for r in bgrows)
+                tot_p = sum(r["n_positive"] for r in bgrows)
+                tot_a = sum(r["roi_area_mm2"] for r in bgrows)
+                dens = [r["profile_density_per_mm2"] for r in bgrows
+                        if r["profile_density_per_mm2"] != ""]
+                spec.append({
+                    "scene_uid": uid, "animal": bgrows[0]["animal"],
+                    "marker": bgrows[0]["marker"],
+                    "n_discs": len(bgrows), "bg_nuclei": tot_n,
+                    "bg_area_mm2": round(tot_a, 6),
+                    "bg_nuclei_per_mm2": (round(tot_n / tot_a, 1)
+                                          if tot_a else ""),
+                    "bg_false_positives": tot_p,
+                    # The rate's denominator is every object the detector
+                    # chose to find in empty tissue. For a counterstain that
+                    # is "nuclei", whatever their brightness; for a marker
+                    # segmented on itself it is "blobs StarDist outlined on
+                    # noise", which depends on how sensitive StarDist happens
+                    # to be and not on the antibody. So the rate is withheld
+                    # there, and the per-area count of false positives -
+                    # which has no such denominator - stands in.
+                    "false_positive_rate": (round(tot_p / tot_n, 4)
+                                            if (tot_n and not bgrows[0][
+                                                "denominator_withheld_reason"])
+                                            else ""),
+                    "bg_false_positives_per_mm2": (round(tot_p / tot_a, 1)
+                                                   if tot_a else ""),
+                    "denominator_withheld_reason": bgrows[0][
+                        "denominator_withheld_reason"],
+                    "bg_level": round(bgs[0], 1),
+                    "bg_spread": round(bgs[1], 1),
+                    "positivity_cut": round(cut, 1),
+                    # Disagreement between discs on one section is
+                    # heterogeneous autofluorescence, and is worth seeing
+                    # before it is averaged.
+                    "disc_density_spread": (round(max(dens) - min(dens), 1)
+                                            if len(dens) > 1 else 0),
+                })
 
     real = [r for r in rows if r["roi_kind"] == "roi"]
     # One row per (section, marker) that was counted against a cut, from the
@@ -825,13 +845,13 @@ def main(argv=None):
     # does. Header only when no section has a cut; gone with the rest below
     # when there is nothing at all.
     exact = sorted({(r["scene_uid"], r["marker"]) for r in rows
-                    if r["scene_uid"] in cuts})
+                    if (r["scene_uid"], r["marker"]) in cuts})
     # Beside whichever roi_measurements.csv is written, so the two always
     # describe the same run.
     cuts_csv = os.path.join(os.path.dirname(MEAS_CSV), os.path.basename(CUTS_CSV))
     if rows:
         IO.atomic_write_csv(cuts_csv,
-                            [{"scene_uid": u, "marker": m, "cut": repr(cuts[u])}
+                            [{"scene_uid": u, "marker": m, "cut": repr(cuts[(u, m)])}
                              for u, m in exact], CUTS_COLUMNS)
     elif os.path.exists(cuts_csv):
         os.remove(cuts_csv)
@@ -872,7 +892,7 @@ def main(argv=None):
     markers = sorted({r["marker"] for r in rows}) or [""]
     for mk in markers:
         m_uids = uids_by_marker.get(mk, set())
-        m_cuts = [u for u in cuts if u in m_uids]
+        m_cuts = [u for u, m in cuts if m == mk and u in m_uids]
         m_hs = {k: v for k, v in hs.items() if k[0] == mk}
         m_spec = [s for s in spec if s["marker"] == mk]
         head = f"  [{mk}] " if len(markers) > 1 else "  "

@@ -3877,7 +3877,7 @@ One row per region and background disc per section: counts, positives and densit
 
 #### `results/detector_specificity.csv`
 
-Per section: how many background-disc nuclei land above the cut. A measurement of the detector, not a negative control.
+Per section and marker: how many of that marker's background-disc nuclei land above its cut. A measurement of the detector, not a negative control.
 
 - **Written by:** 06a_roi_dataset.py
 - **Read by:** a person
@@ -3902,7 +3902,7 @@ Per section: how many background-disc nuclei land above the cut. A measurement o
 
 #### `results/positivity_cuts.csv`
 
-The exact cut per section, at full precision, so 06i draws the same calls 06a counted.
+The exact cut per section and marker, at full precision, so 06i draws the same calls 06a counted.
 
 - **Written by:** 06a_roi_dataset.py
 - **Read by:** 06i_detection_overlays.py

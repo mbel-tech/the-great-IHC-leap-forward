@@ -772,23 +772,26 @@ def memory_check(tmp):
         per < 200, True)
 
 
-def multiplex_fixture(tmp, stem, markers=("M1", "M2"), drop_boxes_for=None):
+def multiplex_fixture(tmp, stem, markers=("M1", "M2"), drop_boxes_for=None,
+                      bg=(BG_S1, BG_S1), roi_value=(200.0, 200.0)):
     """ONE section carrying BOTH markers - what a `multiplex` study images.
 
     05a's uid-collision guard is a hard stop under `paired` and deliberately
     relaxed under `multiplex`, so all_boxes() then returns both markers' boxes
     under the SAME scene_uid. The two markers get a different number of ROI
     nuclei here so that pooling them is visible in a count, not only in a key.
+    `bg` and `roi_value` are per marker, so a check can give the two markers
+    background levels as different as two antibodies' really are.
     """
     nuc, boxes, nid = [], [], 0
-    for mk, n_roi in zip(markers, (3, 2)):
+    for mk, n_roi, mbg, mroi in zip(markers, (3, 2), bg, roi_value):
         if mk != drop_boxes_for:
             boxes.append(dict(box("X1", "roi", "Dm"), marker=mk))
             boxes.append(dict(box("X1", "background", "__background__"), marker=mk))
         for j in range(n_roi):
             nid += 1
-            nuc.append(dict(nucleus("X1", "roi", "Dm", 1, nid, 200.0), marker=mk))
-        for v in BG_S1:
+            nuc.append(dict(nucleus("X1", "roi", "Dm", 1, nid, mroi), marker=mk))
+        for v in mbg:
             nid += 1
             nuc.append(dict(nucleus("X1", "background", "__background__", 2, nid, v),
                             marker=mk))
@@ -1003,6 +1006,92 @@ def multiplex_unmeasured_check(tmp):
         [("X1", "M1", "background", str(len(BG_S1))), ("X1", "M1", "roi", "3")])
 
 
+# A second antibody's background, some fifty times the first's - the gap
+# between two markers imaged on one section is of this order in practice.
+BG_M2 = [4900.0, 5000.0, 5100.0, 5200.0, 5300.0]   # median 5100, MAD 100
+CUT_M2 = 5100.0 + 3.0 * 1.4826 * 100.0            # 5544.78
+
+
+def multiplex_cut_check(tmp):
+    """Under `multiplex` the positivity cut is per (section, MARKER).
+
+    Both markers' background discs sit on the one scene_uid, and the cut was
+    keyed by scene_uid alone - so their background nuclei were pooled into
+    ONE cut. With one marker's background near 100 and the other's near
+    5,000, that cut landed between the two at about 13,000 and called every
+    nucleus of BOTH markers negative: a complete, plausible, wrong dataset.
+    The fixture's ROI values are chosen so each marker's own cut calls them
+    positive and the pooled one does not.
+    """
+    npath, bpath = multiplex_fixture(tmp, "mxcut", bg=(BG_S1, BG_M2),
+                                     roi_value=(200.0, 6000.0))
+    rc, meas = _run_06a_on(tmp, "mxcut", npath, bpath)
+    chk("multiplex cut: 06a exits 0", rc, 0)
+    roi = {r["marker"]: r for r in meas if r["roi_kind"] == "roi"}
+    close("multiplex cut: the first marker's cut is from its own background",
+          float(roi["M1"]["section_positivity_cut"] or "nan"), round(CUT_S1, 1),
+          0.05)
+    close("...and the second marker's from its own",
+          float(roi["M2"]["section_positivity_cut"] or "nan"), round(CUT_M2, 1),
+          0.05)
+    chk("...each counted on its own background nuclei only",
+        (roi["M1"]["section_bg_nuclei"], roi["M2"]["section_bg_nuclei"]),
+        (str(len(BG_S1)), str(len(BG_M2))))
+    chk("...so the first marker's 3 nuclei at 200 are positive",
+        roi["M1"]["n_positive"], "3")
+    chk("...and the second marker's 2 at 6,000 are positive",
+        roi["M2"]["n_positive"], "2")
+    chk("...with each marker's own background level",
+        (roi["M1"]["section_bg_level"], roi["M2"]["section_bg_level"]),
+        ("100.0", "5100.0"))
+
+    spec = G5.load_csv(os.path.join(tmp, "mxcut_specificity.csv"))
+    chk("multiplex cut: one specificity row per (section, marker)",
+        sorted((s["scene_uid"], s["marker"]) for s in spec),
+        [("X1", "M1"), ("X1", "M2")])
+    sp = {s["marker"]: s for s in spec}
+    chk("...each from that marker's background discs only",
+        [(m, sp[m]["n_discs"], sp[m]["bg_nuclei"]) for m in sorted(sp)],
+        [("M1", "1", str(len(BG_S1))), ("M2", "1", str(len(BG_M2)))])
+    chk("...and that marker's cut",
+        [sp[m]["positivity_cut"] for m in sorted(sp)],
+        [str(round(CUT_S1, 1)), str(round(CUT_M2, 1))])
+
+    cuts = G5.load_csv(os.path.join(tmp, os.path.basename(G6A.CUTS_CSV)))
+    got = {r["marker"]: float(r["cut"]) for r in cuts if r["scene_uid"] == "X1"}
+    chk("multiplex cut: positivity_cuts.csv has one row per marker",
+        sorted(got), ["M1", "M2"])
+    close("...the first marker's own cut", got.get("M1", float("nan")), CUT_S1)
+    close("...and the second marker's own, a different one",
+          got.get("M2", float("nan")), CUT_M2)
+
+    # ...and 06c's by_section sheet, which took a section's cut by scene_uid
+    # alone: the last row's marker won, and the section showed ONE cut, under
+    # one marker's name, with both markers' nuclei summed beside it.
+    try:
+        G6C = load("g6c_mx", "06c_excel_dataset.py")
+        from openpyxl import load_workbook
+    except Exception as exc:                                   # noqa: BLE001
+        print(f"skip  06c multiplex by_section ({exc})")
+        return
+    G6C.NUCLEI_CSV = npath
+    G6C.MEAS_CSV = os.path.join(tmp, "mxcut_measurements.csv")
+    G6C.G5.all_boxes = lambda: G6C.G5.load_csv(bpath)
+    G6C.animal_environment = lambda: {}
+    out = os.path.join(tmp, "mxcut_dataset.xlsx")
+    chk("multiplex cut: 06c exits 0", G6C.main(["--out", out]), 0)
+    rows = list(load_workbook(out)["by_section"].values)
+    sec = [dict(zip(rows[0], r)) for r in rows[1:]]
+    chk("...06c by_section has one row per (section, marker)",
+        sorted((r["scene_uid"], r["marker"]) for r in sec),
+        [("X1", "M1"), ("X1", "M2")])
+    chk("...each with that marker's own cut and nuclei",
+        sorted((r["marker"], str(r["positivity_cut"]), r["n_roi_nuclei"],
+                r["n_background_nuclei"]) for r in sec),
+        [("M1", str(round(CUT_S1, 1)), 3, len(BG_S1)),
+         ("M2", str(round(CUT_M2, 1)), 2, len(BG_M2))])
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="lsroi_")
     try:
@@ -1117,6 +1206,8 @@ def main():
         # ---- which under `multiplex` means per marker, not per position
         multiplex_join_check(tmp)
         multiplex_unmeasured_check(tmp)
+        # ...and so is the positivity cut
+        multiplex_cut_check(tmp)
 
         # ---- what 05c says about each box reaches the area and the rows
         box_status_check(tmp)

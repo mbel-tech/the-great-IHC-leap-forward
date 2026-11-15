@@ -3901,7 +3901,10 @@ Per section and marker: how many of that marker's background-disc nuclei land ab
 | `bg_area_mm2` | float | mm² | Their area. |
 | `bg_nuclei_per_mm2` | float | per mm² | Density. |
 | `bg_false_positives` | int |  | Background nuclei above the cut. |
-| `false_positive_rate` | float |  | bg_false_positives / bg_nuclei; blank where the denominator is withheld. |
+| `false_positive_rate` | float |  | bg_false_positives / bg_nuclei; blank where the denominator is withheld. In-sample: the cut was fitted to these same nuclei, so this describes the tail of their own distribution. |
+| `loo_false_positives` | int |  | Leave-one-disc-out: for each background disc with at least 5 usable (uncensored) nuclei, its nuclei positive against the cut formed from the other discs' usable values; summed. Blank with fewer than two such discs, or where false_positive_rate is withheld. |
+| `loo_nuclei` | int |  | The nuclei of the discs left out, censored included; blank where loo_false_positives is. |
+| `loo_false_positive_rate` | float |  | loo_false_positives / loo_nuclei, to 4 decimals: the out-of-sample false-positive rate. Blank where loo_false_positives is. |
 | `bg_false_positives_per_mm2` | float | per mm² | False positives per area. |
 | `denominator_withheld_reason` | text |  | As in roi_measurements. |
 | `bg_level` | float | grey value | Background median. |

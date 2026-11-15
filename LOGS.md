@@ -9,6 +9,30 @@ where things landed, not which plausible-looking route was tried and abandoned, 
 
 ---
 
+## 2026-11-15 - An out-of-sample false-positive rate
+
+**Changed:** `detector_specificity.csv` (06a) gains three columns after `false_positive_rate`:
+`loo_false_positives`, `loo_nuclei` and `loo_false_positive_rate` (4 decimals). For a (section,
+marker) with two or more background discs that each hold at least `CUT_MIN_NUCLEI` (5) usable
+nuclei - kept and not censored - each such disc in turn is counted against the cut
+(`ls_overlay.section_cut`) formed from the usable values of the section's other background discs,
+by `ls_overlay.is_positive`, censored nuclei positive and in the denominator as in the in-sample
+rate; the counts are summed over discs. Blank with fewer than two such discs, or where
+`false_positive_rate` is withheld (a marker segmented on itself). 06a's console prints, per marker,
+the median leave-one-disc-out rate and on how many sections it was formed. The module docstring and
+the README "Quantification" section now say the existing rate is in-sample. No existing number
+changes.
+
+**Why:** found on review. `false_positive_rate` counts a section's background nuclei above a cut
+fitted to those same nuclei, so it describes the tail of their own distribution; the README and
+06a's docstring called it the only independent check on the cut, which it is not.
+
+**Cost:** the out-of-sample rate exists only on sections with two adequately populated background
+discs, so it may be blank on many; the console says how many. A disc with fewer than 5 usable
+nuclei is never left out itself but still feeds the cuts the other discs are counted against.
+
+---
+
 ## 2026-11-15 - Early stages write atomically and fail honestly
 
 **Changed:** these stage outputs, which were written in place with `open(path, "w")` now go through

@@ -382,10 +382,16 @@ nothing compared them. `tests/test_roi_dataset.py` now does.
 **Two measures, side by side.** `cells_per_mm2` is every DAPI nucleus; `positive_cells_per_mm2`
 is the subset over that section's own cut, taken from its own background discs as
 `median + 3 × 1.4826 × MAD`. A spread and not a percentile, deliberately: a percentile would fix
-the false-positive rate by construction and destroy the only independent check the background
-discs exist to provide. Measured here at **2.1% median**, and — the number that decides whether
-positivity is usable at all — **not group-correlated** (control 2.2%, exercise 2.0%). Pooled ROI
-positivity is 13.3% against that, a 5.9x separation.
+the false-positive rate by construction. But the rate in `detector_specificity.csv`
+(`false_positive_rate`) is **in-sample** — the share of a section's background nuclei above a cut
+fitted to those same nuclei — so it describes the tail of their own distribution and is not an
+independent check. The out-of-sample one is `loo_false_positive_rate` beside it: each background
+disc counted against the cut the section's *other* background discs give, by the same rule. It is
+blank on a section without two background discs of at least 5 usable nuclei each, and 06a prints
+its median per marker and on how many sections it could be formed. The in-sample rate was
+measured here at **2.1% median**, and — the number that decides whether positivity is usable at
+all — **not group-correlated** (control 2.2%, exercise 2.0%). Pooled ROI positivity is 13.3%
+against that, a 5.9x separation.
 
 **One marker per figure.** The sheets carry both, keyed by `(sample, marker, ROI)`, but a
 figure draws one — `LS_MARKER` selects it and defaults to `AF568`. Two markers in one panel

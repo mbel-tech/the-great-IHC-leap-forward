@@ -17,15 +17,23 @@ is *produced by* clipped pixels pinned at 65,535 dragging the mean up. That is
 information loss, not a gain difference. The per-section cut is still the right
 choice; the reason is section-to-section variation, not two batches.
 
-Robust rather than a percentile, and this is the point: a percentile would fix
-the false-positive rate by construction and destroy the only independent check
-available. With a spread based cut, how many background nuclei land above it is
-a MEASUREMENT.
+Robust rather than a percentile: a percentile would fix the false-positive rate
+by construction. With a spread based cut, how many background nuclei land above
+it is at least not set by the rule. **But it is not independent, and this text
+used to say it was:** the cut is fitted to those same nuclei, so the share above
+it (`false_positive_rate`) is IN-SAMPLE - the tail of the distribution the cut
+came from. The independent check is the leave-one-disc-out rate
+(`loo_false_positive_rate`): each background disc counted against the cut the
+section's OTHER background discs give, by the same rule. It needs two discs of
+at least CUT_MIN_NUCLEI usable nuclei each and is blank otherwise - and a cut
+itself can rest on as few as CUT_MIN_NUCLEI (5) nuclei; `section_bg_nuclei` in
+roi_measurements.csv is how many a section's cut was taken from.
 
 **What the background discs then report.** The same detector over tissue called
-empty is a false-positive rate, per section and per animal. It is not a negative
-control - the primary antibody is on that tissue - so it measures non-specific
-binding plus autofluorescence, not zero.
+empty is a false-positive rate, per section and per animal - in-sample and, where
+it can be formed, out of sample. It is not a negative control - the primary
+antibody is on that tissue - so it measures non-specific binding plus
+autofluorescence, not zero.
 
 **Abercrombie.** Sections are 14 um and imaged in one plane, so what is counted
 is nuclear PROFILES: a nucleus straddling the cut face still appears in the
@@ -447,6 +455,46 @@ class _Disc:
         self.segon_own = None           # ...and of the first own-channel row
 
 
+def leave_one_disc_out(discs):
+    """(false positives, nuclei) counted out of sample, or None.
+
+    `discs` is one section's background discs for one marker (a _Disc each,
+    or None for a disc with no kept nuclei). The section's cut is fitted to
+    its own background nuclei, so how many of THOSE land above it describes
+    the tail of the distribution the cut came from - an in-sample number. This
+    is the independent one: each disc in turn is left out, the cut is formed
+    from the usable values of every OTHER disc by the same rule
+    (ls_overlay.section_cut), and the left-out disc's nuclei are counted
+    against it with the same positivity rule the in-sample rate uses. Summed
+    over discs.
+
+    "Usable" is what the cut is taken from - kept and not censored. A
+    censored nucleus is still positive by LO.is_positive and still a nucleus,
+    so it is in the left-out disc's numerator and denominator exactly as it is
+    in the in-sample rate.
+
+    A disc is left out only when it holds CUT_MIN_NUCLEI usable values of its
+    own, and the rate needs two such discs, so that every disc left out is
+    counted against a cut that includes at least one disc which could have
+    given a cut on its own - not one stitched together from slivers. A
+    thinner disc still feeds the cuts the others are counted
+    against - its values are as usable there as in the in-sample cut.
+    """
+    usable = [[v for v, c in zip(d.v, d.cen) if not c] if d else []
+              for d in discs]
+    qual = [i for i, u in enumerate(usable) if len(u) >= LO.CUT_MIN_NUCLEI]
+    if len(qual) < 2:
+        return None
+    fp = n = 0
+    for i in qual:
+        cut = LO.section_cut([v for j, u in enumerate(usable) if j != i
+                              for v in u])
+        d = discs[i]
+        fp += sum(1 for v, c in zip(d.v, d.cen) if LO.is_positive(v, c, cut))
+        n += len(d.v)
+    return fp, n
+
+
 def main(argv=None):
     # argv is accepted and ignored: this stage has no flags, and taking it
     # lets 06e call every stage the same way instead of branching on a label.
@@ -805,6 +853,11 @@ def main(argv=None):
                 tot_a = sum(r["roi_area_mm2"] for r in bgrows)
                 dens = [r["profile_density_per_mm2"] for r in bgrows
                         if r["profile_density_per_mm2"] != ""]
+                no_denom = bgrows[0]["denominator_withheld_reason"]
+                # The out-of-sample rate, over the same discs the in-sample
+                # one sums, and withheld where it is: see leave_one_disc_out.
+                loo = (None if no_denom else leave_one_disc_out(
+                    [by_idx.get((uid, mk, r["roi_index"])) for r in bgrows]))
                 spec.append({
                     "scene_uid": uid, "animal": bgrows[0]["animal"],
                     "marker": bgrows[0]["marker"],
@@ -821,14 +874,21 @@ def main(argv=None):
                     # to be and not on the antibody. So the rate is withheld
                     # there, and the per-area count of false positives -
                     # which has no such denominator - stands in.
+                    #
+                    # IN-SAMPLE: these nuclei are the ones the cut was fitted
+                    # to. The loo_ columns after it are the out-of-sample
+                    # check; blank with fewer than two background discs of
+                    # CUT_MIN_NUCLEI usable nuclei each.
                     "false_positive_rate": (round(tot_p / tot_n, 4)
-                                            if (tot_n and not bgrows[0][
-                                                "denominator_withheld_reason"])
+                                            if (tot_n and not no_denom)
                                             else ""),
+                    "loo_false_positives": loo[0] if loo else "",
+                    "loo_nuclei": loo[1] if loo else "",
+                    "loo_false_positive_rate": (round(loo[0] / loo[1], 4)
+                                                if loo and loo[1] else ""),
                     "bg_false_positives_per_mm2": (round(tot_p / tot_a, 1)
                                                    if tot_a else ""),
-                    "denominator_withheld_reason": bgrows[0][
-                        "denominator_withheld_reason"],
+                    "denominator_withheld_reason": no_denom,
                     "bg_level": round(bgs[0], 1),
                     "bg_spread": round(bgs[1], 1),
                     "positivity_cut": round(cut, 1),
@@ -927,7 +987,17 @@ def main(argv=None):
             print(f"{head}false-positive rate : median {st.median(fp)*100:.1f}%, "
                   f"range {min(fp)*100:.1f}-{max(fp)*100:.1f}%   "
                   f"(measured on {sum(s['bg_nuclei'] for s in m_spec)} "
-                  f"background nuclei)")
+                  f"background nuclei; IN-SAMPLE, the cut is fitted to them)")
+            # Beside it, the out-of-sample one, and on how many sections:
+            # it needs two background discs of CUT_MIN_NUCLEI usable nuclei,
+            # so it can be on far fewer sections than the rate above.
+            fp_loo = [s["loo_false_positive_rate"] for s in m_spec
+                      if s["loo_false_positive_rate"] != ""]
+            print(f"{head}leave-one-disc-out  : "
+                  + (f"median {st.median(fp_loo)*100:.1f}%, "
+                     if fp_loo else "")
+                  + f"on {len(fp_loo)} of {len(fp)} sections   (needs >=2 "
+                  f"background discs of >={LO.CUT_MIN_NUCLEI} usable nuclei)")
     print("=" * 72)
     return 0
 

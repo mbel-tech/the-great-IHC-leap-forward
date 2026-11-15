@@ -1092,6 +1092,118 @@ def multiplex_cut_check(tmp):
          ("M2", str(round(CUT_M2, 1)), 2, len(BG_M2))])
 
 
+# ---- the leave-one-disc-out false-positive rate, worked by hand
+#
+# Two background discs on one section, each with at least 5 usable nuclei:
+#   A (roi_index 2): 10, 20, 30, 40, 50, and one CENSORED nucleus (value 1).
+#   B (roi_index 3): 100, 110, 120, 130, 140, 500.
+# In-sample, the cut is taken from all 11 usable values pooled:
+#   median 100; |x - 100| = 90 80 70 60 50 0 10 20 30 40 400, median 50
+#   cut = 100 + 3 * 1.4826 * 50 = 322.39
+#   above it: 500, plus the censored one (positive by rule) -> 2 of 12.
+# Leave A out, cut from B only:
+#   median (120 + 130) / 2 = 125; |x - 125| = 25 15 5 5 15 375, median 15
+#   cut = 125 + 3 * 1.4826 * 15 = 191.717
+#   A against it: 10..50 are all below, the censored one is positive -> 1 of 6
+#   (the censored nucleus is in the numerator AND the denominator, as it is
+#   in the in-sample rate; it is only left out of the values a cut is taken
+#   from).
+# Leave B out, cut from A's five usable values only:
+#   median 30; |x - 30| = 20 10 0 10 20, median 10
+#   cut = 30 + 3 * 1.4826 * 10 = 74.478
+#   B against it: all six are above -> 6 of 6.
+# Summed: 7 false positives over 12 nuclei = 0.5833.
+LOO_A = [10.0, 20.0, 30.0, 40.0, 50.0]
+LOO_B = [100.0, 110.0, 120.0, 130.0, 140.0, 500.0]
+LOO_COLS = NUC_COLS + ["off_tissue", "segmented_on", "nucleus_shaped"]
+
+
+def loo_check(tmp):
+    """detector_specificity.csv carries an OUT-OF-SAMPLE false-positive rate.
+
+    The existing rate counts background nuclei above a cut fitted to those
+    same nuclei: the tail of its own distribution, not an independent check.
+    Leaving each background disc out of the cut it is then counted against
+    is. Four sections, all AF568 on the counterstain except the last:
+      L1  two qualifying background discs (the worked example above)
+      L2  one background disc                          -> blank
+      L3  two background discs, one with 4 usable      -> blank
+      L4  as L1, but segmented on the marker itself    -> blank (withheld)
+    """
+    nuc, boxes, nid = [], [], 0
+
+    def add(uid, kind, region, idx, value, cen=0, seg_on="nuclear"):
+        nonlocal nid
+        nid += 1
+        nuc.append(dict(nucleus(uid, kind, region, idx, nid, value, cen=cen),
+                        off_tissue=0, segmented_on=seg_on, nucleus_shaped="1"))
+
+    for uid, seg_on in (("L1", "nuclear"), ("L4", "AF568")):
+        boxes += [box(uid, "roi", "Dm"),
+                  box(uid, "background", "__background__"),
+                  box(uid, "background", "__background__")]
+        add(uid, "roi", "Dm", 1, 400.0, seg_on=seg_on)
+        for v in LOO_A:
+            add(uid, "background", "__background__", 2, v, seg_on=seg_on)
+        add(uid, "background", "__background__", 2, 1.0, cen=1, seg_on=seg_on)
+        for v in LOO_B:
+            add(uid, "background", "__background__", 3, v, seg_on=seg_on)
+    boxes += [box("L2", "roi", "Dm"), box("L2", "background", "__background__")]
+    add("L2", "roi", "Dm", 1, 400.0)
+    for v in LOO_A + LOO_B:
+        add("L2", "background", "__background__", 2, v)
+    boxes += [box("L3", "roi", "Dm"),
+              box("L3", "background", "__background__"),
+              box("L3", "background", "__background__")]
+    add("L3", "roi", "Dm", 1, 400.0)
+    for v in LOO_A:
+        add("L3", "background", "__background__", 2, v)
+    for v in LOO_B[:4]:
+        add("L3", "background", "__background__", 3, v)
+    # ...plus two censored on the short disc: counted, but not usable, so it
+    # still holds only 4 values a cut could be taken from.
+    for _ in range(2):
+        add("L3", "background", "__background__", 3, 9.0, cen=1)
+
+    npath = os.path.join(tmp, "loo_nuclei.csv")
+    bpath = os.path.join(tmp, "loo_boxes.csv")
+    for path, cols, rows in ((npath, LOO_COLS, nuc), (bpath, BOX_COLS, boxes)):
+        with open(path, "w", newline="", encoding="utf-8") as fh:
+            w = csv.DictWriter(fh, fieldnames=cols)
+            w.writeheader()
+            w.writerows(rows)
+    rc, _ = _run_06a_on(tmp, "loo", npath, bpath)
+    chk("leave-one-out: 06a exits 0", rc, 0)
+    spec = G5.load_csv(os.path.join(tmp, "loo_specificity.csv"))
+    sp = {s["scene_uid"]: s for s in spec}
+    chk("leave-one-out: a specificity row per section", sorted(sp),
+        ["L1", "L2", "L3", "L4"])
+    cols = list(spec[0]) if spec else []
+    want = ["false_positive_rate", "loo_false_positives", "loo_nuclei",
+            "loo_false_positive_rate"]
+    i = cols.index("false_positive_rate") if "false_positive_rate" in cols else 0
+    chk("...three columns right after false_positive_rate",
+        cols[i:i + 4], want)
+    l1 = sp.get("L1", {})
+    # The in-sample numbers are unchanged by this.
+    chk("L1 in-sample: 2 of 12 above the pooled cut",
+        (l1.get("bg_false_positives"), l1.get("bg_nuclei"),
+         l1.get("false_positive_rate")), ("2", "12", "0.1667"))
+    chk("L1 leave-one-disc-out: 1 + 6 false positives over 6 + 6 nuclei",
+        (l1.get("loo_false_positives"), l1.get("loo_nuclei"),
+         l1.get("loo_false_positive_rate")), ("7", "12", "0.5833"))
+    blank = ("", "", "")
+    for uid, why in (("L2", "one background disc"),
+                     ("L3", "only one disc with 5 usable nuclei"),
+                     ("L4", "a marker segmented on itself")):
+        s = sp.get(uid, {})
+        chk(f"{uid} ({why}): leave-one-out is blank",
+            (s.get("loo_false_positives"), s.get("loo_nuclei"),
+             s.get("loo_false_positive_rate")), blank)
+    chk("L4's in-sample rate is withheld too, for the same reason",
+        sp.get("L4", {}).get("false_positive_rate"), "")
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="lsroi_")
     try:
@@ -1208,6 +1320,9 @@ def main():
         multiplex_unmeasured_check(tmp)
         # ...and so is the positivity cut
         multiplex_cut_check(tmp)
+
+        # ---- the background discs also give an out-of-sample rate
+        loo_check(tmp)
 
         # ---- what 05c says about each box reaches the area and the rows
         box_status_check(tmp)

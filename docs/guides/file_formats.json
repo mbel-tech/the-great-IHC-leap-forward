@@ -5610,7 +5610,25 @@
      "name": "false_positive_rate",
      "type": "float",
      "units": "",
-     "meaning": "bg_false_positives / bg_nuclei; blank where the denominator is withheld."
+     "meaning": "bg_false_positives / bg_nuclei; blank where the denominator is withheld. In-sample: the cut was fitted to these same nuclei, so this describes the tail of their own distribution."
+    },
+    {
+     "name": "loo_false_positives",
+     "type": "int",
+     "units": "",
+     "meaning": "Leave-one-disc-out: for each background disc with at least 5 usable (uncensored) nuclei, its nuclei positive against the cut formed from the other discs' usable values; summed. Blank with fewer than two such discs, or where false_positive_rate is withheld."
+    },
+    {
+     "name": "loo_nuclei",
+     "type": "int",
+     "units": "",
+     "meaning": "The nuclei of the discs left out, censored included; blank where loo_false_positives is."
+    },
+    {
+     "name": "loo_false_positive_rate",
+     "type": "float",
+     "units": "",
+     "meaning": "loo_false_positives / loo_nuclei, to 4 decimals: the out-of-sample false-positive rate. Blank where loo_false_positives is."
     },
     {
      "name": "bg_false_positives_per_mm2",

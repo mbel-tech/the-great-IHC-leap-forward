@@ -9,6 +9,25 @@ where things landed, not which plausible-looking route was tried and abandoned, 
 
 ---
 
+## 2026-11-15 - 05c exits non-zero when it skipped sections
+
+**Changed:** `05c_detect_rois.py` returns 1 when any section was skipped for want of a tissue mask
+(`<uid>_mask.npy`) or of a shared intensity range, after writing, closing and reporting everything
+as before. Its last line says how many sections were not measured and that the stage is not
+complete. Measured sections stay measured and logged done; a resume measures only what is left.
+ROIs not segmented inside a measured section (`roi_box_status.csv`) do not fail the run.
+
+**Why:** found on review (REVIEW.md rule 2). The app runs stages in process and shows a stage done
+on 0, so a run that left sections unmeasured looked complete, with the warning scrolled past in the
+log. `app/runner.py` shows the last printed line as the failure message.
+
+**Cost:** a run with skipped sections now shows as failed in the app and stops **Run all
+remaining** at 05c, where it used to carry on to 06a with those sections missing. Nothing else
+calls 05c's `main()` for a measuring run: 06j uses `--backfill-status`, which returns before this,
+and 06e only counts sections on disk.
+
+---
+
 ## 2026-11-15 - The positivity cut is per (section, marker)
 
 **Changed:** 06a keys a section's background values, its positivity cut and its background level by

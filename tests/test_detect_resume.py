@@ -548,7 +548,9 @@ def zero_found_check():
         rc, _ = _run_main(_FakeModel(), "--force")
     finally:
         G5C.needs_shared_norm, G5C.section_range = saved
-    chk("a no_norm skip completes", rc, 0)
+    # Exit 1, not 0: the app runs 05c in process and shows a stage done on 0,
+    # so a run that left a section unmeasured looked complete.
+    chk("a no_norm skip fails the run", rc, 1)
     logged = G5C.read_done_log(G5C.DONE_LOG, marker) or set()
     chk("...and is NOT logged done", uid in logged, False)
     rc, reads = _run_main(_FakeModel())
@@ -560,6 +562,57 @@ def zero_found_check():
 print()
 print("--- a section measured and found empty ---")
 zero_found_check()
+
+
+def no_tissue_mask_check():
+    """A section with no tissue mask is skipped, and the run says it failed.
+
+    Without 04a's `<uid>_mask.npy` there is no telling a nucleus on the section
+    from one on the glass, so 05c skips the section. It used to return 0 all
+    the same, and the app - which runs 05c in process and reads only the
+    return value - showed the stage done with the section never measured.
+    """
+    try:
+        import pylibCZIrw.czi  # noqa: F401
+    except ImportError:                                          # noqa: BLE001
+        print("   (pylibCZIrw is not installed - main() cannot be driven)")
+        return
+    import contextlib
+    import io
+    uid, marker = "AB12_1a-s0", G5C.G5.MARKER
+    mask = os.path.join(G5C.REFORMAT_DIR, "sections", f"{uid}_mask.npy")
+    aside = mask + ".aside"
+    os.replace(mask, aside)
+    out = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out):
+            rc, reads = _run_main(_FakeModel(), "--force")
+    finally:
+        os.replace(aside, mask)
+    chk("a section with no tissue mask fails the run", rc, 1)
+    chk("...and is not read at all", reads, 0)
+    chk("...writes no nucleus rows",
+        [r for r in read(G5C.NUCLEI_CSV) if r["scene_uid"] == uid], [])
+    chk("...and no status rows",
+        [r for r in read(G5C.STATUS_CSV) if r["scene_uid"] == uid], [])
+    logged = G5C.read_done_log(G5C.DONE_LOG, marker) or set()
+    chk("...and is NOT logged done", uid in logged, False)
+    said = [ln.strip() for ln in out.getvalue().splitlines() if ln.strip()]
+    last = said[-1] if said else ""
+    # app/runner.py shows the last line printed as the failure message.
+    chk("...the last line says how many were not measured",
+        "1 section(s) NOT MEASURED" in last, True)
+    chk("...and that the stage is not complete", "not complete" in last, True)
+    rc, reads = _run_main(_FakeModel())
+    chk("with the mask back, the resume measures it and completes",
+        (rc, reads > 0), (0, True))
+    logged = G5C.read_done_log(G5C.DONE_LOG, marker) or set()
+    chk("...and then it is logged done", uid in logged, True)
+
+
+print()
+print("--- a section with no tissue mask ---")
+no_tissue_mask_check()
 
 
 def usable_area_check():

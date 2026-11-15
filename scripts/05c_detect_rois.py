@@ -2687,6 +2687,22 @@ def main():
         print("   Rerun 04a_reformat.py (and 05a_roi_geometry.py if its rows "
               "predate the scene rectangle), then this.")
     warn_no_artifact(no_artifact, "were measured")
+    # A SKIPPED SECTION FAILS THE RUN. The app runs this stage in process and
+    # shows it done on 0, so a run that left sections unmeasured - no tissue
+    # mask, or no intensity range to share - used to look complete, with the
+    # warnings above scrolled past. What was measured stays measured and
+    # logged: nothing is rolled back, and the resume does only what is left.
+    # ROIs not segmented inside a measured section are NOT counted here: their
+    # section was measured, each has its row in STATUS_CSV, and 06a leaves
+    # them out. Printed last, because app/runner.py shows the last line printed
+    # as the failure message.
+    unmeasured = set(no_tissue_mask) | {u for u, _, _ in no_norm}
+    if unmeasured:
+        print(f"!! {len(unmeasured)} section(s) NOT MEASURED (no tissue mask, "
+              f"or no intensity range - see above): this stage is not "
+              f"complete. Fix the cause and run it again; it measures only "
+              f"what is left.")
+        return 1
     return 0
 
 

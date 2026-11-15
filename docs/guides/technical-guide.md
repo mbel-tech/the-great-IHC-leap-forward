@@ -1546,7 +1546,11 @@ The longest-running stage (hours).
 - **Failure and re-run:** resumable: the done log says which sections are finished, and a resume drops the
   rows of any section it is about to measure again, so nothing is counted twice. A section whose boxes
   changed since it was measured is measured again. `--force` starts over; `--limit` measures a trial
-  number. In the app it runs only where StarDist imports (`cli_only` is a callable).
+  number. In the app it runs only where StarDist imports (`cli_only` is a callable). A section with no
+  tissue mask (`<uid>_mask.npy` from 04a) or no intensity range to share is skipped, not measured and
+  not logged done; the run then exits 1 with the number skipped on its last line, after writing and
+  logging every section it did measure, so a resume measures only those. ROIs not segmented inside a
+  measured section (`results/roi_box_status.csv`) do not fail the run.
 
 ### `06a_roi_dataset.py`
 

@@ -51,16 +51,37 @@ Sections with no decision at all are absent from the export by design, and stay
 absent here. Nothing is invented for them.
 
 Writes `curation/ls_roi_curator_v1.json`. Reports and exits without writing
-unless `--write` is passed; backs the old file up first.
+unless `--write` is passed.
+
+AN IMPORT NEVER DISCARDS CURATION
+---------------------------------
+
+`--write` MERGES. A section the export holds takes the export's record - it is
+the more recent statement about that section. A section only the stored state
+holds is KEPT as it is. An export is whatever one browser session touched: a
+session spent on one animal exports that animal, and replacing the stored state
+with it used to drop every decision about the other eleven - from the app's
+Import button, which runs this with `--write` and nothing else. `--replace`
+restores the old behaviour for an operator who means it; the app never passes it.
+
+Every write that changes an existing file first copies it beside itself as
+`<name>.<YYYYMMDD-HHMMSS>.backup` (with a counter if two land in one second).
+There used to be one `.backup`, overwritten by the next import, so the second
+import destroyed the only copy of what the first replaced. Nothing prunes them:
+they are small, and which one matters is not something this stage can know. The
+write itself is atomic (ls_jsonio.write_json_atomic), so a crash leaves the old
+file, never half of a new one.
 
 Run:  python 04q_import_curation.py --plates roi_plates.csv
           --landmarks roi_landmarks.csv --regions roi_regions.csv --write
+      ... --write --replace     # drop the sections this export does not hold
 """
 
 import sys
 import argparse
 import csv
 import json
+import datetime
 import os
 import shutil
 
@@ -81,6 +102,10 @@ import ls_atlas as AT  # noqa: E402
 # The file mirrors the page's localStorage key, which is filed per study (one
 # origin is shared by every study's page). Same rule as 04l and the app's import.
 import ls_curation as CU  # noqa: E402
+# The one "write .tmp, then os.replace" in the codebase. The seed used to be
+# written with open(..., "w") and json.dump, so a crash mid-write left a
+# truncated file where the operator's curation had been.
+import ls_jsonio  # noqa: E402
 
 OUT_ROOT = CONFIG["out_root"]
 STUDY_ID = CU.study_id(OUT_ROOT)
@@ -339,6 +364,46 @@ def compare(state, path):
     }
 
 
+# How many names a report line carries before it counts the rest. The list is
+# for a person checking "is that the animal I expected", not for a machine.
+NAME_CAP = 10
+
+
+def some(uids, cap=NAME_CAP):
+    """`a, b, c` - or the first `cap` and "... and N more"."""
+    uids = list(uids)
+    shown = ", ".join(uids[:cap])
+    return shown + (" ... and %d more" % (len(uids) - cap) if len(uids) > cap else "")
+
+
+def merged(state, old, replace=False):
+    """What this study's entry becomes: (records, kept uids).
+
+    The export's record wins for every section it holds. Every section only the
+    stored state holds is kept, untouched, unless `replace` - see the module
+    docstring for why merging is the default.
+    """
+    old = old if isinstance(old, dict) else {}
+    if replace:
+        return dict(state), []
+    kept = sorted(u for u in old if u not in state)
+    return dict({u: old[u] for u in kept}, **state), kept
+
+
+def backup_path(path, now=None):
+    """`<path>.<YYYYMMDD-HHMMSS>.backup`, or `...-2`, `-3`... if that is taken.
+
+    Never an existing name: a backup is the only copy of what a write replaced,
+    and the old single `.backup` was overwritten by the very next import.
+    """
+    stamp = (now or datetime.datetime.now()).strftime("%Y%m%d-%H%M%S")
+    cand, n = "%s.%s.backup" % (path, stamp), 1
+    while os.path.exists(cand):
+        n += 1
+        cand = "%s.%s-%d.backup" % (path, stamp, n)
+    return cand
+
+
 def counts(state):
     vals = state.values()
     return {
@@ -364,7 +429,11 @@ def main(argv=None):
     ap.add_argument("--no-rgb", action="store_true",
                     help="the page was built without --rgb, so K is 1 everywhere")
     ap.add_argument("--write", action="store_true",
-                    help="write --out; without this the run only reports")
+                    help="write --out (merged: sections the export lacks are kept); "
+                         "without this the run only reports")
+    ap.add_argument("--replace", action="store_true",
+                    help="with --write, drop this study's sections the export "
+                         "does not hold instead of keeping them")
     args = ap.parse_args(argv)
 
     k_of = k_from_disk(args.reformat_dir, not args.no_rgb)
@@ -398,26 +467,43 @@ def main(argv=None):
         print("\nagainst %s: %d sections on disk" % (args.out, d["old"]))
         print("  %d new, %d only on disk, %d changed"
               % (len(d["added"]), len(d["only_on_disk"]), len(d["changed"])))
-        # Work that exists ONLY on disk is the one thing this can destroy, so it
-        # is named rather than counted.
-        for uid in d["only_on_disk"]:
-            print("  ONLY ON DISK, would be lost: " + uid)
+        # Work that exists ONLY on disk is the one thing this could destroy, so
+        # what happens to it is said, and the sections are named.
+        only = d["only_on_disk"]
+        if only and args.replace:
+            print("  --replace: %d only on disk, would be DROPPED: %s"
+                  % (len(only), some(only)))
+        elif only:
+            print("  kept %d only on disk (the export does not hold them): %s"
+                  % (len(only), some(only)))
 
     if not args.write:
         print("\n(report only - pass --write to save)")
         return 0
 
+    # Into this study's entry, every other one kept: a flat file is this study's.
+    # The merge is against this study's part as compare() read it - its own entry,
+    # the one it had before its folder moved, or a flat file's whole value.
+    stored = read_stored(args.out)
+    mine, _ = merged(
+        state, CU.own(stored, STUDY_ID, STUDY_TOKEN) if stored is not None else None,
+        replace=args.replace)
+    value = CU.file_under(stored, STUDY_ID, mine, STUDY_TOKEN)
+
     if os.path.exists(args.out):
-        bak = args.out + ".backup"
+        if value == stored:
+            # Nothing to say that the file does not already say. Writing anyway
+            # would add a backup identical to the file, and enough of those
+            # bury the one that matters.
+            print("\n%s already holds this - not written" % args.out)
+            return 0
+        bak = backup_path(args.out)
         shutil.copy2(args.out, bak)
         print("\nbacked up %s -> %s"
               % (os.path.basename(args.out), os.path.basename(bak)))
-    os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
-    # Into this study's entry, every other one kept: a flat file is this study's
-    # and is replaced, as it always was.
-    stored = read_stored(args.out)
-    with open(args.out, "w", encoding="utf-8") as fh:
-        json.dump(CU.file_under(stored, STUDY_ID, state, STUDY_TOKEN), fh)
+    # Each study's records on one line: indented, a seed of a few hundred
+    # sections is tens of thousands of lines nobody reads.
+    ls_jsonio.write_json_atomic(args.out, value, compact=("_studies", "_legacy"))
     print("wrote " + args.out)
     print("Regenerate the page to pick it up: python scripts/04l_roi_curator.py ...")
     return 0

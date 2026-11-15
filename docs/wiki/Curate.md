@@ -60,6 +60,6 @@ Export writes three files to your exports folder, which Measure reads: `roi_plat
 
 ## Curating in a web browser
 
-The curator pages also work in an ordinary browser (run `serve_curators.bat`). Work done there lives in that browser only. Bring it in with **Bring in browser exports** on the Curate screen, or **Tools > Migrate browser curation**.
+The curator pages also work in an ordinary browser (run `serve_curators.bat`). Work done there lives in that browser only. Bring it in with **Bring in browser exports** on the Curate screen, or **Tools > Migrate browser curation**. Bringing in exports never loses curation: sections the export does not include keep what the app already had, and the previous state is kept as a dated backup in the study's `curation` folder.
 
 Next: [Measure](Measure).

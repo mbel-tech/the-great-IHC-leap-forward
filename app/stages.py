@@ -685,7 +685,8 @@ STAGES = [
           needs=["roi_curator"],
           blurb="Turns roi_plates / roi_landmarks / roi_regions back into the "
                 "curator's seed state, so work exported from a browser reaches "
-                "the app. Backs up the previous seed first."),
+                "the app. Merges: sections the export does not hold are kept, "
+                "and the previous seed is kept beside it as a dated backup."),
 
     Stage("level_curator", "04k  Level curator (superseded)", "Normalisation and curation",
           script="04k_level_curator.py",

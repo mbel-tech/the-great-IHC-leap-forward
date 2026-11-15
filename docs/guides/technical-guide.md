@@ -1435,8 +1435,12 @@ Stage `import_curation`. Turns the ROI curator's exported CSVs back into its sav
 
 - **Reads:** `roi_plates.csv`, `roi_landmarks.csv` and `roi_regions.csv` (the newest export by default, or
   the files named by `--plates`, `--landmarks` and `--regions`).
-- **Writes:** with `--write`, `curation/ls_roi_curator_v1.json`, keeping the previous one as
-  `.backup`; without it, a report only.
+- **Writes:** with `--write`, `curation/ls_roi_curator_v1.json`, atomically; without it, a report only.
+  The write merges into this study's entry: the export's record for every section it holds, the stored
+  record kept for every section it does not (named in the report). `--replace` drops those instead; the
+  app does not pass it. Other studies' entries are carried through. A write that changes an existing file
+  first copies it to `<name>.<YYYYMMDD-HHMMSS>.backup` (a counter is added on a clash); backups are never
+  overwritten or pruned.
 - **How:** the exports are in the canonical 256 px frame; the page divides by `K`, the width of the
   picture it showed over 256, which is 3 for a colour composite and 1 for greyscale. `K` is resolved per
   section from the picture the page would load, never once globally. Plate coordinates are not scaled.
@@ -2029,7 +2033,8 @@ straight from `sys.argv`) without running it. A script with no options says "(no
 | `04q_import_curation.py` | `--out` | `SEED_JSON` | "default " + SEED_JSON |
 | `04q_import_curation.py` | `--reformat-dir` | `REFORMAT_DIR` |  |
 | `04q_import_curation.py` | `--no-rgb` | off | the page was built without --rgb, so K is 1 everywhere |
-| `04q_import_curation.py` | `--write` | off | write --out; without this the run only reports |
+| `04q_import_curation.py` | `--write` | off | write --out (merged: sections the export lacks are kept); without this the run only reports |
+| `04q_import_curation.py` | `--replace` | off | with --write, drop this study's sections the export does not hold instead of keeping them |
 | `04v_wullimann_extract.py` | `pdf` |  | the Wullimann 1996 atlas PDF |
 | `04v_wullimann_extract.py` | `--out` |  | output folder (default: <repo>/atlas/wullimann1996) |
 | `04w_wullimann_plates.py` | `--src` |  | folder holding the extracted plates (default: <repo>/atlas/wullimann1996) |

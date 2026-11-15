@@ -319,10 +319,13 @@ def main():
         chk("...filed under this study", list(written["_studies"]), [Q.STUDY_ID])
         chk("...with every section in it", len(written["_studies"][Q.STUDY_ID]), 4)
 
-        # A second --write must not lose the first: the backup is the only copy
-        # of whatever it overwrites.
+        # The first write made the file, so there was nothing to back up. A
+        # second write of the same export changes nothing, so it neither writes
+        # nor leaves a backup: a backup per identical import would bury the one
+        # that matters under copies of the same state.
         Q.main(argv + ["--write"])
-        chk("a rewrite leaves a backup", os.path.exists(out + ".backup"), True)
+        chk("an identical rewrite leaves no backup",
+            [n for n in os.listdir(tmp) if n.endswith(".backup")], [])
 
         # ---- another study's curation in the same file is not this import's -----
         # The page keeps its curation filed per study inside one localStorage key,
@@ -343,7 +346,8 @@ def main():
             after = json.load(fh)
         chk("--write keeps another study's records",
             after["_studies"].get("/elsewhere/other_study"), {uid0: rec})
-        chk("...replaces this study's", sorted(after["_studies"][Q.STUDY_ID]), sorted(state))
+        chk("...merges into this study's, keeping what only it held",
+            sorted(after["_studies"][Q.STUDY_ID]), sorted(list(state) + ["MINE_ONLY"]))
         chk("...and keeps what is still unclaimed from before filing, minus what it replaced",
             after.get("_legacy"), {"UNCLAIMED": rec})
 
@@ -357,9 +361,120 @@ def main():
         Q.main(argv + ["--write"])
         with open(out, encoding="utf-8") as fh:
             after = json.load(fh)
-        chk("...the write files under the new folder", sorted(after["_studies"][Q.STUDY_ID]), sorted(state))
+        chk("...the write files under the new folder, the old entry's work merged in",
+            sorted(after["_studies"][Q.STUDY_ID]), sorted(list(state) + ["MINE_ONLY"]))
         chk("...and leaves the old entry in place", after["_studies"].get("/old/drive/out"),
             {"MINE_ONLY": rec})
+
+        # ---- an import never discards curation (REVIEW.md rule 4) ------------
+        # The app's Import button runs this stage with --write unconditionally.
+        # It used to REPLACE this study's entry with whatever the export held, so
+        # a session that exported one animal dropped the other eleven, and the
+        # single `.backup` it kept was overwritten by the next import.
+        merge_dir = os.path.join(tmp, "merge")
+        os.makedirs(merge_dir)
+        seed = os.path.join(merge_dir, "ls_roi_curator_v1.json")
+        uid_a, uid_c = "A_s01a_sc00", "C_s02a_sc00"
+        old_a = dict(rec, fav=False, rot=90)
+        stored0 = {"_studies": {Q.STUDY_ID: {uid_a: old_a, "B_KEPT_ONLY": rec},
+                                "/elsewhere/other_study": {"X": rec}}}
+        with open(seed, "w", encoding="utf-8") as fh:
+            json.dump(stored0, fh)
+        with open(seed, encoding="utf-8") as fh:
+            original_text = fh.read()
+        exp_plates = [r for r in PLATES if r["scene_uid"] in (uid_a, uid_c)]
+        exp_marks = [r for r in LANDMARKS if r["scene_uid"] == uid_a]
+        mp = dump("merge_p.csv", exp_plates, list(PLATES[0]))
+        ml = dump("merge_l.csv", exp_marks, list(LANDMARKS[0]))
+        mr = dump("merge_r.csv", [], rgf)
+        margv = ["--plates", mp, "--landmarks", ml, "--regions", mr,
+                 "--out", seed, "--no-rgb"]
+        exported, _ = Q.build(exp_plates, exp_marks, [], lambda u, m: 1.0)
+
+        def backups():
+            return sorted(n for n in os.listdir(merge_dir) if n.endswith(".backup"))
+
+        def stored():
+            with open(seed, encoding="utf-8") as fh:
+                return json.load(fh)
+
+        import contextlib
+        import io
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = Q.main(margv)
+        chk("a report-only run names what --write would keep",
+            "B_KEPT_ONLY" in buf.getvalue(), True)
+        chk("...and makes no backup", (rc, backups()), (0, []))
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            Q.main(margv + ["--write"])
+        mine = stored()["_studies"][Q.STUDY_ID]
+        chk("--write MERGES: export's sections plus the stored-only one",
+            sorted(mine), sorted([uid_a, "B_KEPT_ONLY", uid_c]))
+        chk("...the section in both takes the export's record", mine[uid_a], exported[uid_a])
+        chk("...the stored-only section is kept as it was", mine["B_KEPT_ONLY"], rec)
+        chk("...the new one is added", mine[uid_c], exported[uid_c])
+        chk("...another study's entry is untouched",
+            stored()["_studies"]["/elsewhere/other_study"], {"X": rec})
+        chk("...the report counts and names what it kept",
+            ("kept 1" in buf.getvalue(), "B_KEPT_ONLY" in buf.getvalue()), (True, True))
+        first = backups()
+        chk("...one timestamped backup beside it", len(first), 1)
+        chk("...named <name>.<YYYYMMDD-HHMMSS>.backup",
+            bool(first) and first[0].startswith("ls_roi_curator_v1.json.")
+            and len(first[0].split(".")[2]) == len("YYYYMMDD-HHMMSS"), True)
+        if first:
+            with open(os.path.join(merge_dir, first[0]), encoding="utf-8") as fh:
+                chk("...holding the original state, byte for byte", fh.read(), original_text)
+
+        merged = stored()
+        Q.main(margv + ["--write", "--replace"])
+        mine = stored()["_studies"][Q.STUDY_ID]
+        chk("--replace drops the stored-only section", sorted(mine), sorted([uid_a, uid_c]))
+        chk("...and still carries another study's entry through",
+            stored()["_studies"]["/elsewhere/other_study"], {"X": rec})
+        two = backups()
+        chk("two writes leave two distinct backups", len(two), 2)
+        chk("...the first is not overwritten", set(first) <= set(two), True)
+        if len(two) == 2:
+            with open(os.path.join(merge_dir, first[0]), encoding="utf-8") as fh:
+                chk("...and still holds the original state", fh.read(), original_text)
+            newer = [n for n in two if n not in first][0]
+            with open(os.path.join(merge_dir, newer), encoding="utf-8") as fh:
+                chk("...the second holds what the second write replaced", json.load(fh), merged)
+
+        # A write interrupted before the replace leaves the file as it was. The
+        # original state goes back first, so the import has something to change.
+        with open(seed, "w", encoding="utf-8") as fh:
+            fh.write(original_text)
+        before = original_text
+        real_replace = os.replace
+
+        def boom(src, dst):
+            raise OSError("simulated crash before the replace")
+        os.replace = boom
+        try:
+            raised = False
+            try:
+                Q.main(margv + ["--write"])
+            except OSError:
+                raised = True
+        finally:
+            os.replace = real_replace
+        chk("an interrupted write raises", raised, True)
+        chk("...and leaves the previous file intact",
+            open(seed, encoding="utf-8").read(), before)
+        chk("...with no temp file left beside it",
+            [n for n in os.listdir(merge_dir) if n.endswith(".tmp")], [])
+
+        # The names are a list a person reads: capped, with the rest counted.
+        many = ["S%02d" % i for i in range(25)]
+        line = Q.some(many)
+        chk("a long list is capped", ("S00" in line, "S24" in line), (True, False))
+        chk("...and says how many more", "and 15 more" in line, True)
+        chk("a short list is named in full", Q.some(["a", "b"]), "a, b")
     finally:
         import shutil
         shutil.rmtree(tmp, ignore_errors=True)

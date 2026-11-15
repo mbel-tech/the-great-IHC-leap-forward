@@ -1214,8 +1214,14 @@ exported files are therefore the only route the work takes, and a drawn polygon 
 file anywhere.
 
 This step reads the three exported tables back and rebuilds the curator's working state from them,
-so work done in any browser reaches the application. The previous state is backed up before anything
-is written.
+so work done in any browser reaches the application. The import merges: a section the export holds
+takes the export's record, being the more recent decision about it, and a section only the saved state
+holds is kept as it is. An export holds only what one browser session touched, so replacing the saved
+state with it would drop every decision about the sections that session did not open. The report names
+the sections kept. `--replace` drops them instead, for an operator who means it; the application never
+passes it. Before anything changes, the previous file is copied beside itself under a dated name
+(`ls_roi_curator_v1.json.<date-time>.backup`); no import overwrites an earlier backup, and nothing
+deletes them. The file itself is replaced in one step, so an interrupted import leaves the previous one.
 
 Every curator page opened from the same place shares one browser store, and two studies (a pilot and the
 main study, say) easily share section names. So each study's curation is filed under its own folder, and

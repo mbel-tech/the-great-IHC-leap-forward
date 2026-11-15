@@ -9,6 +9,28 @@ where things landed, not which plausible-looking route was tried and abandoned, 
 
 ---
 
+## 2026-11-15 - Importing curator exports never discards curation
+
+**Changed:** `04q_import_curation.py --write` merges into this study's entry in
+`curation/ls_roi_curator_v1.json`: a section the export holds takes the export's record, a section
+only the stored state holds is kept as it was, and the report counts and names the kept ones (ten,
+then "and N more"). A new `--replace` drops them, as `--write` used to; the app's Import does not
+pass it. Each write that changes an existing file first copies it to
+`ls_roi_curator_v1.json.<YYYYMMDD-HHMMSS>.backup` (a counter on a clash); nothing overwrites or
+prunes those. An import that changes nothing writes nothing and adds no backup. The file is written
+through `ls_jsonio.write_json_atomic`. Other studies' entries are carried through, as before.
+
+**Why:** found on review (REVIEW.md rule 4). The app's **Bring in browser exports** runs 04q with
+`--write`, which replaced the study's whole entry with the export: sections a browser session had
+not touched were printed as "ONLY ON DISK, would be lost" and then lost. The single `.backup` was
+overwritten by the next import, and the file was written in place, so a crash could truncate it.
+
+**Cost:** an import that is meant to forget sections now needs `--replace` on the command line.
+Backups accumulate in `curation/` until someone removes them. The seed is now written indented with
+each study's records on one line, instead of as a single line; every reader parses it as JSON.
+
+---
+
 ## 2026-11-15 - 05c exits non-zero when it skipped sections
 
 **Changed:** `05c_detect_rois.py` returns 1 when any section was skipped for want of a tissue mask

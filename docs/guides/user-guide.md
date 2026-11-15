@@ -449,7 +449,7 @@ This is the main curation job, and the only stop in a normal run. For each secti
 
 ### Curation done in a web browser
 
-The curator pages also work in an ordinary browser (run `serve_curators.bat`). Work done there lives in that browser only. To bring it into the app, either press **Bring in browser exports** to import its exported CSV files, or use **Tools > Migrate browser curation > Import curation state** to move the whole curation state.
+The curator pages also work in an ordinary browser (run `serve_curators.bat`). Work done there lives in that browser only. To bring it into the app, either press **Bring in browser exports** to import its exported CSV files (sections the export does not include keep what the app already had, and the previous state is kept as a dated backup in the `curation` folder), or use **Tools > Migrate browser curation > Import curation state** to move the whole curation state.
 
 ## 7. Measure: counting nuclei in your regions
 

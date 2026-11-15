@@ -216,6 +216,35 @@ for i, (theta, box488, box568, tilt488) in enumerate(CASES, 1):
             - iou(RF.reformat(p568, False, extra_angle=d["extra"])[1], pcna_mask)) < 1e-9,
         True)
 
+# The same, with the operator's flip on the curated section. 04a flips AFTER
+# rotating, so the curated 256-px mask is the mirror image of the unflipped
+# one; the partner has to be reformatted with the same flip to line up, and
+# the derived angle has to be the one that reaches the ceiling WITH that flip.
+note("\nthe same, with the curated section flipped by the operator:\n")
+theta, box488, box568, tilt488 = CASES[0]
+p488, p568 = os.path.join(tmp, "c1_488.png"), os.path.join(tmp, "c1_568.png")
+r488f = RF.reformat(p488, False, extra_angle=tilt488, flip=True)
+try:
+    d = P.derive_rotation(p488, p568, float(r488f[2]), r488f[1], source_flip=True)
+except TypeError as e:
+    d = None
+    note(f"   derive_rotation takes no flip: {e}")
+chk("flipped: derivation succeeded", d is not None, True)
+if d is not None:
+    def at_f(e):
+        return iou(RF.reformat(p568, False, extra_angle=float(e), flip=True)[1], r488f[1])
+    coarse = list(range(0, 360, 2))
+    e0 = coarse[int(np.argmax([at_f(e) for e in coarse]))]
+    fine = [e0 + k for k in range(-3, 4)]
+    fs = [at_f(e) for e in fine]
+    best_iou_f, best_deg_f = float(max(fs)), float(fine[int(np.argmax(fs))] % 360)
+    note(f"   extra={d['extra']:.1f}  final_iou_256={d['final_iou_256']:.3f}  "
+         f"ceiling={best_iou_f:.3f} at {best_deg_f:g}")
+    close("flipped: derived angle reaches the ceiling angle",
+          ang_diff(d["extra"], best_deg_f), 0.0, 4.0)
+    chk("flipped: final_iou_256 (partner flipped too) near the ceiling",
+        d["final_iou_256"] >= best_iou_f - 0.025, True)
+
 
 print()
 print("--- the overview is where focus.csv says it is, not under two literals ---")
@@ -281,10 +310,13 @@ with temp_study(acquisition={"layout": "paired",
         open(os.path.join(d, _uid + "_DAPI.png"), "wb").close()
 
     seen = []
+    flips_seen = []
+    EXTRA = [3.0]
 
-    def _derive(p_source, p_target, total_source, curated_mask=None):
+    def _derive(p_source, p_target, total_source, curated_mask=None, source_flip=False):
         seen.append((p_source, p_target))
-        return {"extra": 3.0, "deg": 0.0, "auto_target": 0.0, "align_iou": 0.9,
+        flips_seen.append(source_flip)
+        return {"extra": EXTRA[0], "deg": 0.0, "auto_target": 0.0, "align_iou": 0.9,
                 "flip_margin": 0.0, "final_iou_256": 0.88}
 
     _saved = P4.derive_rotation
@@ -319,6 +351,108 @@ with temp_study(acquisition={"layout": "paired",
         hasattr(P4, "REPORT_DIR"), False)
     chk("...and does not create qc/perk",
         os.path.exists(os.path.join(P4.OUT_ROOT, "qc", "perk")), False)
+
+    import contextlib  # noqa: E402
+    import glob  # noqa: E402
+    import io  # noqa: E402
+    import re  # noqa: E402
+
+    def run4i():
+        out = io.StringIO()
+        P4.derive_rotation = _derive
+        try:
+            with contextlib.redirect_stdout(out):
+                P4.main()
+        finally:
+            P4.derive_rotation = _saved
+        with open(P4.OUT_CSV, newline="", encoding="utf-8") as fh:
+            return {r["perk_scene_uid"]: r for r in csv.DictReader(fh)}, out.getvalue()
+
+    def backups():
+        return sorted(glob.glob(glob.escape(P4.OUT_CSV) + ".*.backup"))
+
+    def write_overrides(rows, cols):
+        with open(P4.OUT_CSV, "w", newline="", encoding="utf-8") as fh:
+            w = csv.DictWriter(fh, fieldnames=cols)
+            w.writeheader()
+            w.writerows(rows)
+
+    print()
+    print("--- the operator's flip on the curated section reaches its partner ---")
+    # 04a records the curator's flip as `manual_flip` in reformat_index.csv and
+    # applies it AFTER rotating. 04i used to hard-code flip 0 into every derived
+    # row, so a section the operator flipped got a partner in the mirror frame:
+    # left and right hemispheres swapped between the two passes of one section.
+    _wcsv(os.path.join(reformat_dir, "reformat_index.csv"),
+          [{"id": u_src, "kind": "section", "angle": "12.0", "manual_flip": "1"}],
+          ["id", "kind", "angle", "manual_flip"])
+    flips_seen.clear()
+    got, _ = run4i()
+    chk("the source's manual_flip is handed to the derivation", flips_seen, [True])
+    chk("...and the derived row carries it", got[u_tgt]["flip"], "1")
+
+    print()
+    print("--- a hand correction in the overrides file survives a re-run ---")
+    # 04i rewrote the whole overrides file from derived rows, so a correction
+    # typed into it (the operator's perk_overrides.csv is hand-kept) was gone
+    # after the next full run.
+    _wcsv(os.path.join(reformat_dir, "reformat_index.csv"),
+          [{"id": u_src, "kind": "section", "angle": "12.0", "manual_flip": "0"}],
+          ["id", "kind", "angle", "manual_flip"])
+    run4i()
+    EXTRA[0] = 5.0
+    got, _ = run4i()
+    chk("an untouched derived row follows a new derivation",
+        got[u_tgt]["extra_rotation"], "5")
+    chk("...and is marked derived", got[u_tgt].get("source"), "derived")
+
+    with open(P4.OUT_CSV, newline="", encoding="utf-8") as fh:
+        rd = csv.DictReader(fh)
+        cols, rows = rd.fieldnames, list(rd)
+    rows[0]["extra_rotation"] = "40"          # typed in by hand; source left alone
+    write_overrides(rows, cols)
+    with open(P4.OUT_CSV, encoding="utf-8") as fh:
+        before = fh.read()
+    had = set(backups())
+    EXTRA[0] = 7.0
+    got, text = run4i()
+    chk("the hand-edited value survives", got[u_tgt]["extra_rotation"], "40")
+    chk("...and the row is now marked manual", got[u_tgt].get("source"), "manual")
+    chk("the run says how many hand rows it kept", "kept 1 hand-edited row(s)" in text, True)
+    # By set difference, not sort order: two backups in one second get a -N
+    # counter, and "-2" sorts before ".backup".
+    bak = sorted(set(backups()) - had)
+    chk("a backup was taken before the rewrite", len(bak), 1)
+    if bak:
+        chk("...named <name>.<YYYYMMDD-HHMMSS>.backup",
+            bool(re.fullmatch(re.escape(os.path.basename(P4.OUT_CSV))
+                              + r"\.\d{8}-\d{6}(-\d+)?\.backup",
+                              os.path.basename(bak[0]))), True)
+        with open(bak[0], encoding="utf-8") as fh:
+            chk("...holding the file as it was", fh.read(), before)
+    n_bak = len(backups())
+    run4i()
+    chk("a re-run that changes nothing takes no backup", len(backups()), n_bak)
+
+    # A file written before 04i marked its rows: nothing records what was
+    # derived, so a row that differs from this run's derivation is treated as a
+    # hand row rather than silently replaced; one that matches is derived.
+    legacy_cols = ["perk_scene_uid", "pcna_scene_uid", "animal", "extra_rotation",
+                   "flip", "excluded", "align_iou", "final_iou_256", "flip_margin",
+                   "confidence", "reason"]
+    other = "AB12_9a-s0"
+    write_overrides([
+        {"perk_scene_uid": u_tgt, "pcna_scene_uid": u_src, "animal": "AB12",
+         "extra_rotation": "7", "flip": "0", "excluded": "0"},
+        {"perk_scene_uid": other, "pcna_scene_uid": "", "animal": "AB12",
+         "extra_rotation": "0", "flip": "0", "excluded": "1",
+         "reason": "torn, seen by eye"}], legacy_cols)
+    got, text = run4i()
+    chk("legacy file: a row equal to the derivation is derived",
+        got[u_tgt].get("source"), "derived")
+    chk("legacy file: a row 04i did not derive is kept as a hand row",
+        (got.get(other, {}).get("excluded"), got.get(other, {}).get("source")),
+        ("1", "manual"))
 
 # `--limit 40` is the documented way to try 04i on a subset first. It used to
 # write those 40 rows over the whole overrides file, which 04a reads as the

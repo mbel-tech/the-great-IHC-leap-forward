@@ -134,6 +134,46 @@ def source_png(animal, uid, chan):
                         uid + "_DAPI.png")
 QC_CSV = os.path.join(OUT_ROOT, "qc", "focus.csv")
 REPORT_DIR = os.path.join(OUT_ROOT, "qc", "exclusion")
+# The source pass's canonical exclusion list, named by 04a's own rule - the
+# same pass whose unsuffixed index this stage walks.
+EXCLUDED_CSV = _RF.marker_paths(_RF.DEFAULT_MARKER)["excluded"]
+
+
+def carry_excluded(indexed):
+    """Rows of the previous `exclusion_candidates.csv` for sections that are
+    already excluded and no longer in the index - unchanged.
+
+    This stage measures what `reformat_index.csv` holds, and after a final
+    `04a --apply-overrides` that index no longer holds the sections it
+    excluded. For a study with no override file, 04a takes its exclusions FROM
+    this file - so a re-run that measured only the index wrote those sections
+    out of it, and the next final reformat put them silently back into the
+    analysis. Nothing errored; the candidates file just got shorter.
+
+    Carried, not re-measured: the row is the record of why the section was
+    proposed, and the decision built on it was already taken. A section that
+    is neither indexed nor excluded has nothing to carry it and is dropped as
+    before, and one with no previous row has nothing to carry (its exclusion
+    lives in the override file or section_review.csv, which persist).
+    """
+    try:
+        with open(EXCLUDED_CSV, newline="", encoding="utf-8") as fh:
+            excluded = {r["scene_uid"] for r in csv.DictReader(fh)}
+        with open(CANDIDATES_CSV, newline="", encoding="utf-8") as fh:
+            prior = list(csv.DictReader(fh))
+    except OSError:
+        return []
+    return [r for r in prior if r.get("uid") in excluded and r["uid"] not in indexed]
+
+
+def _order_key(r):
+    """Sort key over measured rows (ints) and carried ones (strings as read)."""
+    def num(v):
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return 0
+    return (-num(r["proposed"]), r["animal"], num(r["section_order"]))
 
 UM_PX = 5.20e-3        # mm per pixel in the overviews - verified constant, all 222 files
 PIECE_MIN_MM2 = 0.5    # a "piece" of tissue rather than a speck
@@ -256,6 +296,8 @@ def main():
         r["reason"] = "; ".join(t for _, t in cls)
 
     n_prop = sum(r["proposed"] for r in rows)
+    # --survey proposes nothing and writes its own file, so it carries nothing.
+    carried = [] if args.survey else carry_excluded({r["id"] for r in index})
 
     print()
     print("=" * 74)
@@ -287,13 +329,20 @@ def main():
         print("These are PROPOSALS, pre-marked in the curator and reversible with a")
         print("right-click. The export records auto vs manual, so how often the")
         print("proposal was wrong stays measurable rather than assumed.")
+        print()
+        print(f"carried {len(carried)} already-excluded section(s) unchanged from the "
+              f"previous {os.path.basename(CANDIDATES_CSV)}")
+        if carried:
+            print("  they are in excluded_sections.csv but not in reformat_index.csv,")
+            print("  because a final reformat left them out; dropping them here would")
+            print("  put them back into the analysis at the next final reformat")
     print("=" * 74)
 
     out = output_path(args.survey)
     os.makedirs(os.path.dirname(out), exist_ok=True)
     keys = ["uid", "animal", "section_order", "proposed", "artifact_class", "reason",
             "largest_mm2", "total_mm2", "n_pieces", "focus_score", "frame_mm2"]
-    IO.atomic_write_csv(out, sorted(rows, key=lambda r: (-r["proposed"], r["animal"], r["section_order"])), keys)
+    IO.atomic_write_csv(out, sorted(rows + carried, key=_order_key), keys)
     print(f"wrote {out}")
 
     montage(rows, args.montage)

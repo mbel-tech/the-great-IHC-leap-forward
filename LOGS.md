@@ -9,6 +9,36 @@ where things landed, not which plausible-looking route was tried and abandoned, 
 
 ---
 
+## 2026-11-15 - The curation chain keeps hand decisions (04a / 04f / 04i)
+
+**Changed:** `04i_propagate_to_perk` keeps hand corrections in the overrides file. Each row now
+carries `source` (`derived` / `manual`) and `derived_as` (the pairing, rotation, flip and exclusion
+04i wrote); a full run keeps a row marked manual, or one whose values no longer equal its
+`derived_as`, in place of the derived row, says how many it kept, and copies the old file to
+`<name>.<YYYYMMDD-HHMMSS>.backup` (04q's `backup_path`, imported) before changing it. A run that
+changes nothing does not rewrite the file. In a file written before these columns, a row that
+differs from this run's derivation, or that 04i did not derive, is kept as manual. 04i also carries
+the curated section's `manual_flip`: the goal mask is mirrored after rotating, as 04a does, the
+target is aligned mirrored and the angle turned back, the derived row gets `flip` = 1, and
+`final_iou_256` reformats the partner with the flip. `04f_exclusion_candidates` carries the
+previous row, unchanged, for a section in `excluded_sections.csv` that is no longer in
+`reformat_index.csv`, and says how many. `04a_reformat --render-excluded` reports an excluded
+section that cannot be rendered in its own count, not in `lost_sections`. Checks in
+`tests/test_propagate_frames.py`, `tests/test_proposed_exclusions.py` and
+`tests/test_section_review.py`.
+
+**Why:** found on review (REVIEW.md rule 4). A full 04i run rewrote `perk_overrides.csv` from
+derived rows only, so a correction typed into it was lost; a section the operator flipped got a
+partner in the mirror frame (hemispheres swapped between the passes) and its `final_iou_256` was
+measured against the flipped mask unflipped. After a final 04a, a re-run of 04f dropped the
+excluded sections from `exclusion_candidates.csv`, and for a study with no override file the next
+final reformat put them back into the analysis. 04a called an excluded section's failed picture a
+kept section that "did not survive".
+
+**Cost:** two more columns in the overrides file. A legacy file's rows that are stale (not hand
+edits) are kept as manual on the first run until someone deletes them; the run prints the count.
+A carried 04f row is not re-measured, so a changed threshold does not reach it.
+
 ## 2026-11-15 - Boxes carry the marker they were placed for; multiplex bookkeeping per marker
 
 **Changed:** `05a_roi_geometry` stamps each box and geometry row with the marker the run is placing

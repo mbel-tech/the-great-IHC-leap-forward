@@ -907,6 +907,12 @@ def main():
     n_excluded = 0
     n_rendered = 0
     lost = []
+    # Excluded sections whose look-at-only picture could not be made. Kept
+    # apart from `lost`, which is the list of sections the operator chose to
+    # KEEP that vanished anyway: an excluded section was never going into the
+    # analysis, and putting it there named a deliberate exclusion as an
+    # unexplained loss and inflated the one alarm that matters.
+    excl_failed = []
     no_mask = []
     for i, r in enumerate(secs):
         # Excluded sections are kept out of the INDEX rather than filtered
@@ -936,7 +942,8 @@ def main():
         # failed mask removed a section from the analysis with no record at all -
         # indistinguishable from a deliberate exclusion.
         if not os.path.exists(src):
-            lost.append((r["scene_uid"], "overview PNG missing"))
+            (excl_failed if is_excl else lost).append(
+                (r["scene_uid"], "overview PNG missing"))
             continue
         extra, flip = overrides.get(r["scene_uid"], (0.0, False))
         # A rejected mask means this section reformats UNMASKED even with
@@ -955,7 +962,8 @@ def main():
         out = reformat(src, light_background=False, extra_angle=extra, flip=flip,
                        artifact=art, censor=cen)
         if out is None:
-            lost.append((r["scene_uid"], "no tissue mask could be formed"))
+            (excl_failed if is_excl else lost).append(
+                (r["scene_uid"], "no tissue mask could be formed"))
             continue
         img, mask, angle, amask, cmask = out
         Image.fromarray(img).save(os.path.join(sec_dir, r["scene_uid"] + ".png"))
@@ -1013,6 +1021,7 @@ def main():
         print()
         print("=" * 72)
         print(f"--only: rendered {n_rendered} excluded section(s); index left alone")
+        report_excluded_failures(excl_failed)
         return
 
     out_csv = paths["index"]
@@ -1051,6 +1060,7 @@ def main():
             print(f"    ... and {len(lost) - 15} more")
         print(f"  full list: {path}")
         print("!" * 74)
+    report_excluded_failures(excl_failed)
     if n_excluded:
         print(f"excluded {n_excluded} section(s) marked as too damaged in the curator;")
         print(f"  the list is in {paths['excluded']}")
@@ -1058,6 +1068,25 @@ def main():
               f"so no later stage can pick them up")
     print("NEXT: 04c_atlas_match.py")
     print("=" * 72)
+
+
+def report_excluded_failures(excl_failed):
+    """Say which excluded sections got no picture, in their own words.
+
+    Not an error and not `lost`: the section stays excluded and out of the
+    index either way. What is missing is the picture the Review mode would
+    show, so the operator cannot look at it to decide on reinstating it - which
+    is worth saying, but must not read as a kept section going missing.
+    """
+    if not excl_failed:
+        return
+    print()
+    print(f"{len(excl_failed)} excluded section(s) could not be rendered for "
+          f"Review mode (still excluded; nothing is lost from the analysis):")
+    for uid, why in excl_failed[:15]:
+        print(f"    {uid:<24} {why}")
+    if len(excl_failed) > 15:
+        print(f"    ... and {len(excl_failed) - 15} more")
 
 
 def preview(rows, sec_dir, plate_dir, n):

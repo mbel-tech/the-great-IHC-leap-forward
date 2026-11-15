@@ -1254,7 +1254,9 @@ padded square and resized.
   Masks ride through the same transform as companions, so they stay registered to the picture.
 - **Settings:** `acquisition` (which marker, which channel is the counterstain).
 - **Failure and re-run:** `--apply-overrides` re-applies the operator's decisions; `--render-excluded`
-  also draws the excluded sections so Review mode can show them; `--only` limits the run to named uids.
+  also draws the excluded sections so Review mode can show them (an excluded section whose picture cannot
+  be made is reported in its own count, never in `lost_sections`, which lists only kept sections that
+  vanished); `--only` limits the run to named uids.
   A changed angle moves every ROI placed on that section, so 05a refuses a section whose recorded angle no
   longer matches.
 
@@ -1303,6 +1305,10 @@ Stage `exclusion`. Proposes the sections that cannot be measured, conservatively
   0.01-wide focus bands. Solidity was tried and rejected: it proposed excluding good telencephalon,
   because a section there is two lobes. Every proposal carries the number that produced it, is applied by
   `04a --apply-overrides`, and can be reinstated in the ROI curator's Review mode.
+- **Failure and re-run:** it measures the sections in `reformat_index.csv`. A section already in
+  `excluded_sections.csv` and no longer in the index (a final reformat left it out) keeps its previous
+  row unchanged, and the run says how many it carried; dropping it would put it back into the analysis at
+  the next final reformat.
 
 ### `04g_artifact_mask.py`
 
@@ -1333,8 +1339,15 @@ other pass of the same physical sections.
   are **re-derived**, not copied: the other pass is reformatted, and the rotation that best aligns its
   tissue mask with the curated pass's mask is searched over the full 360°, with a flip scored alongside as
   a check (a flip should never win). The overlap of the two 256 px masks is reported as `final_iou_256`.
-  Artifacts are not propagated: 04g runs on each pass's own overviews.
-- **Failure and re-run:** `--limit N` writes a `.trialN` file instead of the real one.
+  Artifacts are not propagated: 04g runs on each pass's own overviews. A flip the operator made on the
+  curated section (`manual_flip` in its index) is carried to the partner, applied after the rotation as
+  04a applies it.
+- **Failure and re-run:** `--limit N` writes a `.trialN` file instead of the real one. A full run keeps
+  hand corrections: each row says `source` (`derived` or `manual`) and `derived_as` (what 04i wrote), and a
+  row marked manual, or whose values no longer match its `derived_as`, is kept in place of the derived one
+  (in a file written before these columns, a row that differs from this run's derivation is kept). The
+  run says how many it kept; deleting a row hands that section back to 04i. Before it changes the file it
+  copies it to `<name>.<YYYYMMDD-HHMMSS>.backup`, the same naming 04q uses.
 
 ### `04j_censor_clipped.py`
 
@@ -3274,7 +3287,7 @@ Per section: the rotation and exclusion carried onto the second scan. The LS stu
 
 - **Written by:** 04i_propagate_to_perk.py (the second scan of a paired study); older studies carry the removed rotation curator's export
 - **Read by:** ls_bundle.py
-- **Format:** `--limit N` writes `<name>.trialN.csv`. A trial run writes beside this file and never over it; nothing reads the trial file and the app's Done check does not count it.
+- **Format:** `--limit N` writes `<name>.trialN.csv`. A trial run writes beside this file and never over it; nothing reads the trial file and the app's Done check does not count it. A full run keeps rows marked `manual` or edited away from their `derived_as`, and backs the old file up to `<name>.<YYYYMMDD-HHMMSS>.backup` before changing it.
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
@@ -3282,13 +3295,15 @@ Per section: the rotation and exclusion carried onto the second scan. The LS stu
 | `pcna_scene_uid` | text |  | Its partner in the curated pass. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `extra_rotation` | int | degrees | Rotation on top of the automatic angle, re-derived by silhouette alignment. |
-| `flip` | 0/1 |  | 1 to mirror. |
+| `flip` | 0/1 |  | 1 to mirror; carried from the curated section's manual_flip. |
 | `excluded` | 0/1 |  | 1 when excluded (carried from the partner). |
 | `align_iou` | float |  | Overlap of the two tissue masks at the best rotation. |
 | `final_iou_256` | float |  | Overlap of the two 256-pixel masks after reformatting. |
 | `flip_margin` | float |  | How much better the chosen side is than the mirrored one. |
 | `confidence` | text |  | `high`, or `low` when align_iou is under the threshold and the transfer is worth a look. |
 | `reason` | text |  | Why, in words. |
+| `source` | text |  | `derived` (written by 04i) or `manual` (a hand correction a re-run keeps). |
+| `derived_as` | text |  | The decision 04i derived for this row (pairing, rotation, flip, excluded). A row whose values differ from it was edited by hand. |
 
 #### `reformatted/section_review.csv`
 

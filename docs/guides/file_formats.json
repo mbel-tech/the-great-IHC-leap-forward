@@ -3055,7 +3055,7 @@
      "name": "flip",
      "type": "0/1",
      "units": "",
-     "meaning": "1 to mirror."
+     "meaning": "1 to mirror; carried from the curated section's manual_flip."
     },
     {
      "name": "excluded",
@@ -3092,9 +3092,21 @@
      "type": "text",
      "units": "",
      "meaning": "Why, in words."
+    },
+    {
+     "name": "source",
+     "type": "text",
+     "units": "",
+     "meaning": "`derived` (written by 04i) or `manual` (a hand correction a re-run keeps)."
+    },
+    {
+     "name": "derived_as",
+     "type": "text",
+     "units": "",
+     "meaning": "The decision 04i derived for this row (pairing, rotation, flip, excluded). A row whose values differ from it was edited by hand."
     }
    ],
-   "format": "`--limit N` writes `<name>.trialN.csv`. A trial run writes beside this file and never over it; nothing reads the trial file and the app's Done check does not count it."
+   "format": "`--limit N` writes `<name>.trialN.csv`. A trial run writes beside this file and never over it; nothing reads the trial file and the app's Done check does not count it. A full run keeps rows marked `manual` or edited away from their `derived_as`, and backs the old file up to `<name>.<YYYYMMDD-HHMMSS>.backup` before changing it."
   },
   {
    "path": "reformatted/section_review.csv",

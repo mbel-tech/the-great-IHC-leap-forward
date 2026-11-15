@@ -166,7 +166,7 @@ def _blank():
     # exactly what by_index says.
     return {"plate": 0, "plate_id": "", "plate_fp": "", "plate_px": "",
             "verified": AT.BY_INDEX, "pairs": [], "assigned": False,
-            "noroi": False, "fav": False, "rot": 0.0, "excl": False}
+            "noroi": False, "fav": False, "hard": False, "rot": 0.0, "excl": False}
 
 
 def rebuild(plates_csv, landmarks_csv=None, k=None, regions_csv=None, frame_of=None):
@@ -219,6 +219,7 @@ def rebuild(plates_csv, landmarks_csv=None, k=None, regions_csv=None, frame_of=N
                 # only writes one when the operator chose it.
                 e["assigned"] = True
             e["fav"] = r.get("favorite") == "1"
+            e["hard"] = r.get("difficult") == "1"
             e["excl"] = r.get("excluded") == "1"
             e["noroi"] = (r.get("status") or "") == "no_roi"
             try:
@@ -350,11 +351,12 @@ def main():
         print(f"merging: {fresh} from the export, {len(kept)} kept of "
               f"{len(prior)} already on file")
     dec = sum(1 for v in S.values()
-              if v["assigned"] or v["fav"] or v["excl"] or v["noroi"] or v["rot"])
+              if v["assigned"] or v["fav"] or v.get("hard") or v["excl"] or v["noroi"] or v["rot"])
     print(f"rebuilt {len(S)} sections from {os.path.basename(plates)}")
     print(f"  {dec} carry a decision")
     print(f"  {sum(1 for v in S.values() if v['excl'])} excluded")
     print(f"  {sum(1 for v in S.values() if v['fav'])} favourite")
+    print(f"  {sum(1 for v in S.values() if v.get('hard'))} hard to attribute")
     print(f"  {sum(1 for v in S.values() if v['assigned'])} with a plate")
     print(f"  {sum(1 for v in S.values() if v['rot'])} rotated")
     print(f"  {n_pairs} landmark pairs")

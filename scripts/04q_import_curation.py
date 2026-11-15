@@ -246,6 +246,7 @@ def build(plates, landmarks, regions, k_of):
             assigned=bool(cell(r, "plate_id")),
             noroi=cell(r, "status") == "no_roi",
             fav=cell(r, "favorite") == "1",
+            hard=cell(r, "difficult") == "1",
             rot=tidy(num(cell(r, "view_rotation_deg"))),
             excl=cell(r, "excluded") == "1",
         )
@@ -410,6 +411,7 @@ def counts(state):
         "sections": len(state),
         "excluded": sum(1 for v in vals if v["excl"]),
         "favourites": sum(1 for v in vals if v["fav"]),
+        "difficult": sum(1 for v in vals if v.get("hard")),
         "assigned": sum(1 for v in vals if v["assigned"]),
         "landmarks": sum(1 for v in vals for p in v["pairs"] if len(p) <= 6),
         "background": sum(1 for v in vals for p in v["pairs"] if len(p) > 6),

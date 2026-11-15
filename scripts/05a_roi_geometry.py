@@ -49,6 +49,10 @@ reason the suffix exists:
                                    bounding box
     reformatted/roi_regions_used_<MARKER>.csv  the export these came from
 
+`--limit N` places the first N sections only and writes them to
+`roi_geometry_<MARKER>.trialN.csv` / `roi_boxes_<MARKER>.trialN.csv` beside
+the real pair, which it leaves as it was (see trial_path).
+
 The marker is read from the export's own `marker` column, not passed in. An
 export carrying both markers (the curator's normal output for a paired study)
 is placed one marker at a time, each into its own files.
@@ -140,6 +144,22 @@ def geom_csv(marker):
 
 def box_csv(marker):
     return os.path.join(REFORMAT_DIR, f"roi_boxes_{marker}.csv")
+
+
+def trial_path(path, limit):
+    """Where a `--limit N` run writes instead of `path`: `<name>.trialN.csv`.
+
+    A trial places the first N sections only. Written over the real file it
+    would replace every other section's boxes with nothing - 05c then measures
+    N sections, 06a reports the rest as never curated, and the app shows the
+    stage as done because the file exists. 04i's `--limit` already writes its
+    trial beside the real file; this is the same rule. The trial name is not
+    one any reader or the app's done check looks for.
+    """
+    if not limit:
+        return path
+    root, ext = os.path.splitext(path)
+    return f"{root}.trial{limit}{ext}"
 
 
 def resolve_paths(marker):
@@ -1042,8 +1062,23 @@ def _place_marker(marker, regions, plates, args, only=None):
     # Written to the SUFFIXED pair always, even when the legacy unsuffixed file
     # is what was read: the point is that a second marker cannot overwrite the
     # first, and that only holds once both live under their own names.
-    for path, rows in ((geom_csv(marker), geom), (box_csv(marker), boxes)):
+    #
+    # A --limit run writes its pair beside the real one (trial_path) and stops
+    # there: the archived export below describes the REAL boxes, and a trial
+    # that replaced it would leave the record naming an export the boxes on
+    # disk were not built from.
+    geom_out = trial_path(geom_csv(marker), args.limit)
+    box_out = trial_path(box_csv(marker), args.limit)
+    for path, rows in ((geom_out, geom), (box_out, boxes)):
         IO.atomic_write_csv(path, rows, list(rows[0].keys()))
+    if args.limit:
+        print("=" * 72)
+        print(f"--limit trial: {len(geom)} sections -> {geom_out}")
+        print(f"               {len(boxes)} ROIs     -> {box_out}")
+        print(f"  {os.path.basename(box_csv(marker))} is untouched; run without "
+              f"--limit to write it")
+        print("=" * 72)
+        return 0
 
     # Keep the export these boxes were built from, beside them.
     #

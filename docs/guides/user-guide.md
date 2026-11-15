@@ -286,7 +286,7 @@ Prepare reads the slides, checks them, builds the atlas, and turns every section
 
 Many stages share these switches under **Options**:
 
-- **Only the first N sections** (`--limit`): for a quick trial run. 0 means all. Use it on a new study to check the settings before the full run.
+- **Only the first N sections** (`--limit`): for a quick trial run. 0 means all. Use it on a new study to check the settings before the full run. A trial never replaces a complete result: a stage that writes one table writes the trial beside it (for example `roi_boxes_<marker>.trial5.csv`), and the stage does not show as done from a trial alone. Stages that keep one row per section add the trial's sections and keep every other row.
 - **Redo … already done** (`--force`): normally finished work is skipped. You rarely need it: a stage made from something that has changed since shows *Out of date*, and its next run redoes everything by itself (section 10). Turn it on to redo a stage the app does not check, then turn it off again.
 - **Include excluded sections**: also makes pictures or masks of excluded sections, so the curator's Review can show them.
 

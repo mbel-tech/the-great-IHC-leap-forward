@@ -999,7 +999,9 @@ the raw clipping measurement.
   The focus score is the mean absolute difference between neighbouring pixels inside tissue, divided by
   the tissue's mean brightness, so a dim section is not mistaken for a blurred one.
 - **Settings:** `pixel_size_um`, `overview_target_um_per_px`, `acquisition`, `display`.
-- **Failure and re-run:** resumable: a section whose PNGs exist is skipped unless `--force`. A section
+- **Failure and re-run:** resumable: a section whose PNGs exist is skipped unless `--force`. `--force`
+  chooses what is exported again, not which rows survive: a section exported now replaces its own
+  `focus.csv` row and every other row stays, so `--force --limit N` cannot shrink the file. A section
   that cannot be read is a row in `overview_failures.csv`, not a stop. Needs a Python with pylibCZIrw.
 
 ### `01a_flatfield.groovy`
@@ -1131,7 +1133,8 @@ itself, and measures how much downsampling dilutes it.
   native sample compares clipping at 0.65 and 5.2 µm per pixel: median dilution 1.09 times where clipping
   is above 0.1 % of the frame.
 - **Failure and re-run:** a backfill: a section that already has its raw row is skipped unless `--force`.
-  Writes go through `ls_io`, which retries over a vanished drive.
+  A forced run replaces only the rows it measures, so `--force --limit N` keeps every other section's
+  row; a forced run that measures nothing exits 1. Writes go through `ls_io`, which retries over a vanished drive.
 
 ### `01l_scene_renders.py`
 
@@ -1308,6 +1311,8 @@ otherwise good tissue and masks them.
   (fibre, hair, external debris). The masked area is small (median 0.13 % of
   tissue) but it is the brightest signal, so `04a --mask-artifacts` applies it before anything is
   normalised. `--include-excluded` also masks the excluded sections, for Review mode.
+- **Failure and re-run:** `--limit N` writes `artifact_summary[_<marker>].trialN.csv` instead of the real
+  summary, which is left as it was and is what the app's Done check looks for.
 
 ### `04i_propagate_to_perk.py`
 
@@ -1398,6 +1403,8 @@ Stage `worklist`. Orders the ROI curation queue so that stopping early still lea
   number of sections, and within an animal the order is farthest-point over `section_order` (both ends
   first, then whichever section is furthest from those taken). Any prefix of the list spreads evenly over
   animals and over the brain. Nothing is deleted; the other tiers keep their reason.
+- **Failure and re-run:** `--tier X` writes that tier alone to `reformatted/roi_worklist.X.csv`;
+  `roi_worklist.csv` keeps every tier (04l and 04o filter it by tier themselves).
 
 ### `04o_section_rgb.py`
 
@@ -1506,6 +1513,9 @@ real slide pixels.
   (agreement 0.04 to 0.15 px, which is PIL's own resampling). A circle on the frame is an ellipse on the
   slide, so 05a writes a box and 05c decides membership per pixel by mapping back.
 - **Settings:** `pixel_size_um`, `acquisition`.
+- **Failure and re-run:** `--limit N` writes `roi_geometry_<marker>.trialN.csv` and
+  `roi_boxes_<marker>.trialN.csv` beside the real pair and archives no export; the real pair, which 05c
+  reads and the app's Done check looks for, is left as it was.
 
 ### `05b_tune_detection.py`
 
@@ -2012,7 +2022,7 @@ straight from `sys.argv`) without running it. A script with no options says "(no
 | `04l_roi_curator.py` | `--use-auto-polygons` | off | Wullimann plate set only: also show polygons the program named but nobody has reviewed. Off by default - the name is a guess and it becomes a measurement key. |
 | `04l_roi_curator.py` | `--out` | `CURATOR_HTML` | where to write the page (default: the live curator under out_root). tests/run.sh points this at tests/build/ so a test run never rewrites the page being curated in |
 | `04m_sections_dataset.py` | (none) |  |  |
-| `04n_roi_worklist.py` | `--tier` | `None` | only write this tier (core / unpaired_unchecked / animal_underpowered) |
+| `04n_roi_worklist.py` | `--tier` | `None` | only write this tier (core / unpaired_unchecked / animal_underpowered) Choices: ['core', 'unpaired_unchecked', 'animal_underpowered']. |
 | `04n_roi_worklist.py` | `--min-sections` | `10` | animals with fewer than N measurable sections are held out of core (default 10). Pass 0 to keep every animal, which puts its sections in the main queue interleaved rather than appended at the end |
 | `04o_section_rgb.py` | `--marker` | `_default` | which marker to process (default <_default>) Choices: MARKERS. |
 | `04o_section_rgb.py` | `--tier` | `None` | only this worklist tier |

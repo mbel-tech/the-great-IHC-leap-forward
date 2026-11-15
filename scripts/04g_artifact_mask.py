@@ -51,6 +51,7 @@ rather than guessed at.
 
 Run:  python 04g_artifact_mask.py --preview 8     # look before committing
       python 04g_artifact_mask.py
+      python 04g_artifact_mask.py --limit 20   # trial: writes artifact_summary*.trial20.csv
 """
 
 import sys
@@ -315,6 +316,24 @@ def summary_csv(marker):
     return os.path.join(MASK_DIR, f"artifact_summary_{marker}.csv")
 
 
+def output_path(marker, limit):
+    """Where this run's summary goes: summary_csv(marker), or for `--limit N`
+    `<name>.trialN.csv` beside it.
+
+    04p reads the summary as the record of every masked section, and the app
+    counts the stage done when it exists. A trial on the first N sections
+    written over it dropped every other section's artifact numbers from that
+    record, with the stage still showing done. Same rule as 04i's --limit. The masks a trial
+    writes are the ones a full run writes for those sections, so only the
+    table needs to go aside.
+    """
+    out = summary_csv(marker)
+    if not limit:
+        return out
+    root, ext = os.path.splitext(out)
+    return f"{root}.trial{limit}{ext}"
+
+
 def build_parser():
     """The parser, built separately so a test can read the marker default off
     it. The default is not a detail: it selects which pass gets masked."""
@@ -453,7 +472,7 @@ def main():
         if args.preview:
             return
 
-    out = summary_csv(args.marker)
+    out = output_path(args.marker, args.limit)
     IO.atomic_write_csv(out, rows, SUMMARY_KEYS)
 
     pct = np.array([r["artifact_pct_of_tissue"] for r in rows])
@@ -461,6 +480,9 @@ def main():
     print()
     print("=" * 74)
     print(f"{len(rows)} sections -> {out}")
+    if args.limit:
+        print(f"  (--limit trial: {os.path.basename(summary_csv(args.marker))} is "
+              f"untouched; run without --limit to write it)")
     print(f"  masks written to {MASK_DIR}/<uid>_artifact.png  "
           f"(0 clean, {LBL_COMPACT} compact, {LBL_ELONGATED} elongated)")
     print(f"  sections with >=1 artifact : {aff} ({100 * aff / len(rows):.0f}%)")

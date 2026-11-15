@@ -369,13 +369,28 @@ def channel_range(ranges, name):
     return ranges[name]["lo"], ranges[name]["hi"]
 
 
+def load_qc():
+    """focus.csv as uid -> row, in file order, or empty when there is none yet.
+
+    Read on EVERY run, --force included. --force decides which sections are
+    exported again, not which rows survive: a forced run that stops early -
+    `--force --limit N`, a crash, a drive dropped - used to checkpoint its N
+    fresh rows over the whole file, and every other section vanished from
+    focus.csv, which every later stage reads as the list of what was scanned.
+    A section exported now replaces its own row; the rest stay as they were,
+    the same rule write_sat_raw's rows already follow.
+    """
+    if not os.path.exists(QC_CSV):
+        return {}
+    with open(QC_CSV, newline="", encoding="utf-8") as fh:
+        return {r["scene_uid"]: r for r in csv.DictReader(fh)}
+
+
 def export(scenes, fields, ranges, ceilings, zoom, limit, force):
+    qc_rows = load_qc()
     done_uids = set()
-    qc_rows = []
-    if os.path.exists(QC_CSV) and not force:
-        with open(QC_CSV, newline="", encoding="utf-8") as fh:
-            qc_rows = list(csv.DictReader(fh))
-        done_uids = {r["scene_uid"] for r in qc_rows}
+    if qc_rows and not force:
+        done_uids = set(qc_rows)
         print(f"resuming: {len(done_uids)} sections already exported")
 
     by_file = {}
@@ -463,7 +478,7 @@ def export(scenes, fields, ranges, ceilings, zoom, limit, force):
                     Image.fromarray(m8).save(os.path.join(out_dir, f"{uid}_MARK.png"))
                     Image.fromarray(rgb).save(os.path.join(out_dir, f"{uid}_RGB.png"))
 
-                    qc_rows.append({
+                    qc_rows[uid] = {
                         "scene_uid": uid, "file": fname, "animal": r["animal"],
                         "slide": r["slide"], "variant": r["variant"],
                         "marker_channel": marker, "scene_index": s,
@@ -486,7 +501,7 @@ def export(scenes, fields, ranges, ceilings, zoom, limit, force):
                         "saturated_fraction_dapi_raw": f"{sat_dapi_raw:.6f}",
                         "tilefield_applied": int(bool(fields)),
                         "reader": "pylibCZIrw",
-                    })
+                    }
                     exported += 1
                     done_here.add(uid)
         except Exception as exc:  # noqa: BLE001 - one bad file must not kill the run
@@ -498,14 +513,14 @@ def export(scenes, fields, ranges, ceilings, zoom, limit, force):
 
         # Checkpoint per file: this runs unattended against an external drive
         # that has already dropped writes once.
-        write_qc(qc_rows)
+        write_qc(list(qc_rows.values()))
         write_sat_raw(sat_raw)
         rate = exported / max(time.time() - t0, 1e-9)
         print(f"\r  exported {exported}/{total}  failed {failed}  "
               f"({rate:.1f}/s, {(time.time() - t0) / 60:.1f} min)", end="")
 
     print()
-    write_qc(qc_rows)
+    write_qc(list(qc_rows.values()))
     write_sat_raw(sat_raw)
     os.makedirs(QC_DIR, exist_ok=True)
     IO.atomic_write_csv(FAILURES_CSV, failures, FAILURE_KEYS)

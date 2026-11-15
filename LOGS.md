@@ -9,6 +9,29 @@ where things landed, not which plausible-looking route was tried and abandoned, 
 
 ---
 
+## 2026-11-15 - Partial and trial runs never replace a complete output
+
+**Changed:** a narrowed run no longer writes over the stage's complete table. `05a --limit N`
+writes `roi_geometry_<marker>.trialN.csv` / `roi_boxes_<marker>.trialN.csv` beside the real pair
+and archives no export; `04g --limit N` writes `artifact_summary[_<marker>].trialN.csv`; `04n --tier
+X` writes `roi_worklist.X.csv` (and `--tier` now only accepts the three tier names, because it is
+part of a file name). `01_overviews` and `01k_saturation_raw` read their existing rows on every run,
+`--force` included, and a section measured now replaces only its own row, so `--force --limit N`
+keeps every other section in `focus.csv` / `saturation_raw.csv`. A forced 01k that measures nothing
+still exits 1. None of the trial names is one the app's Done check looks for. New suite
+`tests/test_partial_runs.py` drives all five stages (stand-ins for the CZI reader, the reformat and
+the detector).
+
+**Why:** found on review (REVIEW.md rule 4). Each of these atomically replaced the full table with
+the subset, and the stage then read as done on a fraction of the study: 05c measured N sections'
+boxes, 04j called every section missing from `saturation_raw.csv` unmeasured, and a one-tier
+worklist dropped the held-out sections from the record 04l and 04o filter themselves. 04i's
+`--limit` already wrote a `.trialN` file; this applies the same rule.
+
+**Cost:** a trial no longer moves the stage forward: after a trial the stage still shows as not
+done until a full run. A forced 01/01k run whose section fails now keeps that section's earlier row
+instead of dropping it (the failure is still reported, and 01 still exits 1 on it).
+
 ## 2026-11-15 - The curator page suites run without a study, and so in CI
 
 **Changed:** new `tests/_curator_study.py` writes a small synthetic study (six animals LS101-LS106,

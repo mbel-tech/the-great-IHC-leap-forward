@@ -47,7 +47,7 @@ not used either: inside `analysis_set` they are near zero by construction
 (max 0.011 in tissue), so they rank nothing.
 
 Run:  python 04n_roi_worklist.py
-      python 04n_roi_worklist.py --tier core
+      python 04n_roi_worklist.py --tier core   # writes roi_worklist.core.csv
 """
 
 import sys
@@ -126,6 +126,22 @@ def multiplex_rows():
 
 
 OUT_CSV = os.path.join(REFORMAT_DIR, "roi_worklist.csv")
+
+
+def output_path(tier):
+    """Where this run's queue goes: `roi_worklist.csv`, or for `--tier X`
+    `roi_worklist.X.csv` beside it.
+
+    The full queue is the record 04l --worklist and 04o read, and both filter
+    it by tier themselves (`--tier core` there). A one-tier run written over it
+    used to drop every other tier from that record - the held-out sections and
+    the count they stand for vanished, and the stage still showed as done. The
+    one-tier file is for looking at; the app's done check does not name it.
+    """
+    if not tier:
+        return OUT_CSV
+    root, ext = os.path.splitext(OUT_CSV)
+    return f"{root}.{tier}{ext}"
 COLUMNS = ["rank", "tier", "tier_reason", "scene_uid", "partner_scene_uid",
            "animal", "section_order", "rotation_unchecked", "pair_confidence",
            "pair_align_iou", "partner_focus_score", "partner_n_pieces",
@@ -185,7 +201,9 @@ def interleave_proportional(groups):
 
 def main():
     ap = argparse.ArgumentParser()
+    # choices, because the tier is now part of a file name (output_path).
     ap.add_argument("--tier", default=None,
+                    choices=["core", "unpaired_unchecked", "animal_underpowered"],
                     help="only write this tier (core / unpaired_unchecked / animal_underpowered)")
     ap.add_argument("--min-sections", type=int, default=MIN_SECTIONS_PER_ANIMAL,
                     metavar="N",
@@ -297,12 +315,16 @@ def _write(rows, col_uid, col_focus, col_pieces, col_largest, args, min_sections
             1 if r["paired"] == "0" else 0,
             r["pair_confidence"], num(r, "pair_align_iou"),
             num(r, col_focus), num(r, col_pieces), num(r, col_largest)])))
-    IO.atomic_write_csv(OUT_CSV, rows, COLUMNS)
+    out_csv = output_path(args.tier)
+    IO.atomic_write_csv(out_csv, rows, COLUMNS)
 
     counts = defaultdict(int)
     for tier, _ in ordered:
         counts[tier] += 1
-    print(f"wrote {OUT_CSV}")
+    print(f"wrote {out_csv}")
+    if out_csv != OUT_CSV:
+        print(f"  (--tier {args.tier}: {os.path.basename(OUT_CSV)} is untouched; "
+              f"run without --tier to write it)")
     for tier in ("core", "unpaired_unchecked", "animal_underpowered"):
         if counts[tier]:
             note = f"  - {reason[tier]}" if reason[tier] else ""

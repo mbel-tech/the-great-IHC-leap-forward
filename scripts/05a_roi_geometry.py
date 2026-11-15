@@ -194,6 +194,34 @@ def use_marker(marker):
     return MARKER
 
 
+def refuse_stale_markers(path, marker, rows):
+    """Stop when a multiplex box file holds rows that name another marker.
+
+    Until 2026-11-15 build() stamped every multiplex box with focus.csv's one
+    `marker_channel`, so a study placed before then still has a
+    roi_boxes_<second>.csv whose every row says <first>. Nothing else compares
+    a row's marker with its file's, and both readers trust the row: 06a's
+    split_by_marker would pool those rows with the first marker's real discs,
+    and 05c reads the plane `plane_index_for(row marker)` names - the first
+    marker's pixels, written out as the first marker's nuclei. Refused rather
+    than relabelled: whether a stale file's discs are still the curation is
+    for a fresh 05a run to say, not for a reader to assume.
+
+    Under `paired` a section belongs to one marker and the row's marker is the
+    scan's own, so this checks nothing there.
+    """
+    if LAYOUT != CH.LAYOUT_MULTIPLEX:
+        return
+    found = sorted({(r.get("marker") or "").strip() for r in rows})
+    if found and found != [marker]:
+        raise SystemExit(
+            f"{path} is {marker}'s box file, but its rows name the marker(s) "
+            f"{found}. It was written before 05a stamped each box with the "
+            f"marker it was placed for, so its discs would be joined to the "
+            f"wrong marker. Re-run 05a_roi_geometry.py --marker {marker} to "
+            f"rewrite it.")
+
+
 def all_boxes():
     """Every marker's boxes, concatenated, for stages that span both.
 
@@ -209,6 +237,7 @@ def all_boxes():
         if not os.path.exists(p):
             continue
         rows = load_csv(p)
+        refuse_stale_markers(p, m, rows)
         for r in rows:
             u = r["scene_uid"]
             # THE DISJOINTNESS IS CHECKED, NOT ASSUMED - under `paired`. 06a

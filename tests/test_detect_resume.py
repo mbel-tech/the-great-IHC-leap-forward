@@ -1011,6 +1011,104 @@ print("--- a re-export re-measures only the sections whose boxes changed ---")
 changed_boxes_check()
 
 
+def multiplex_second_marker_check():
+    """Under `multiplex`, the second marker's first run measures every section.
+
+    Both markers' rows in roi_nuclei.csv name the SAME sections, and the
+    resume counted a section as measured if it had a row of ANY marker. So
+    the first `--marker Mk2` run after Mk1 found Mk1's rows, seeded the done
+    log (which had no Mk2 entry yet) with every one of those sections as done
+    for Mk2, and measured nothing; 06a then reported them all as measured and
+    empty for Mk2. And a box file from before 05a stamped the placed marker
+    (roi_boxes_Mk2.csv saying Mk1 on every row) made 05c read Mk1's plane and
+    label the nuclei Mk1; it is refused now.
+    """
+    try:
+        import pylibCZIrw.czi as _real_pyczi
+    except ImportError:                                          # noqa: BLE001
+        print("   (pylibCZIrw is not installed - the multiplex resume cannot "
+              "be driven through main())")
+        return
+    from _fixture import temp_study, load_stage
+    with temp_study(acquisition={"layout": "multiplex", "channels": [
+            {"name": "DAPI", "role": "nuclear", "czi_name": "DAPI", "index": 0},
+            {"name": "Mk1", "role": "marker", "czi_name": "AF568", "index": 1,
+             "segment": "nuclear"},
+            {"name": "Mk2", "role": "marker", "czi_name": "AF647", "index": 2,
+             "segment": "nuclear"}]}):
+        M = load_stage("05c_detect_rois.py", name="lsstage_05c_mx2")
+        secs = {"AB12_2a-s0": 100, "AB12_3a-s0": 200}
+        mask_dir = os.path.join(M.REFORMAT_DIR, "sections")
+        os.makedirs(mask_dir, exist_ok=True)
+        gcols = ["scene_uid", "animal", "marker", "czi_file", "scene_index",
+                 "m00", "m01", "m02", "m10", "m11", "m12"]
+        bcols = ["scene_uid", "animal", "marker", "roi_kind", "region",
+                 "seed_n", "czi_x0", "czi_y0", "czi_w", "czi_h", "sec_x",
+                 "sec_y", "sec_r", "sec_poly"]
+
+        def put(mk, stamp=None):
+            with open(M.G5.geom_csv(mk), "w", newline="", encoding="utf-8") as fh:
+                w = csv.writer(fh)
+                w.writerow(gcols)
+                for u in secs:
+                    w.writerow([u, "AB12", mk, u + ".czi", "0",
+                                "1", "0", "0", "0", "1", "0"])
+            with open(M.G5.box_csv(mk), "w", newline="", encoding="utf-8") as fh:
+                w = csv.writer(fh)
+                w.writerow(bcols)
+                for u, x0 in secs.items():
+                    w.writerow([u, "AB12", stamp or mk, "roi", "Dm", "1", x0, 0,
+                                24, 20, x0 + 12, 10, "50", ""])
+            for u in secs:
+                np.save(os.path.join(mask_dir, f"{u}_mask.npy"),
+                        np.ones((512, 512), dtype=bool))
+
+        def run(mk):
+            """(exit code or SystemExit text, sections read, planes read)."""
+            fake_doc = _FakeCzi((20, 24))
+            saved = (_real_pyczi.open_czi, M.load_model, sys.argv)
+            _real_pyczi.open_czi = _FakeOpenCzi(fake_doc)
+            M.load_model = lambda: _OneNucleusModel()
+            sys.argv = ["05c_detect_rois.py", "--marker", mk, "--order", "uid"]
+            try:
+                rc = M.main()
+            except SystemExit as exc:
+                rc = f"SystemExit: {exc}"
+            finally:
+                _real_pyczi.open_czi, M.load_model, sys.argv = saved
+            by_x = {x: u for u, x in secs.items()}
+            return (rc, sorted({by_x[c["roi"][0]] for c in fake_doc.calls}),
+                    sorted({c["plane"]["C"] for c in fake_doc.calls}))
+
+        put("Mk1")
+        put("Mk2")
+        A, B = sorted(secs)
+        chk("multiplex: Mk1's run measures both sections", run("Mk1")[:2],
+            (0, [A, B]))
+        rc, read_secs, planes = run("Mk2")
+        chk("multiplex: Mk2's first run after Mk1 measures every section",
+            (rc, read_secs), (0, [A, B]))
+        chk("...on Mk2's own plane", 2 in planes, True)
+        chk("...and logs them done for Mk2",
+            sorted(M.read_done_log(M.DONE_LOG, "Mk2") or []), [A, B])
+        chk("...with Mk2's own nuclei in the file",
+            sorted((r["scene_uid"], r["marker"]) for r in read(M.NUCLEI_CSV)),
+            sorted([(A, "Mk1"), (B, "Mk1"), (A, "Mk2"), (B, "Mk2")]))
+
+        # The stale file: every row of roi_boxes_Mk2.csv says Mk1.
+        put("Mk2", stamp="Mk1")
+        rc, read_secs, _ = run("Mk2")
+        chk("multiplex: a stale roi_boxes_Mk2.csv (rows say Mk1) is refused",
+            str(rc).startswith("SystemExit") and "roi_boxes_Mk2.csv" in str(rc)
+            and "['Mk1']" in str(rc), True)
+        chk("...before anything is read", read_secs, [])
+
+
+print()
+print("--- multiplex: the second marker is measured, not inherited ---")
+multiplex_second_marker_check()
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="ls5c_")
     try:

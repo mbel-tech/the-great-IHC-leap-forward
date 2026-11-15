@@ -1972,6 +1972,10 @@ def main():
         return 1
     print(f"marker: {args.marker}  ({os.path.basename(G5.BOX_CSV)})")
     boxes = G5.load_csv(G5.BOX_CSV)
+    # A multiplex box file from before 05a stamped the placed marker names the
+    # first marker on every row, and the plane read below follows the row's
+    # marker - so --marker Mk2 would measure Mk1's pixels and label them Mk1.
+    G5.refuse_stale_markers(G5.BOX_CSV, args.marker, boxes)
     geom = {g["scene_uid"]: g for g in G5.load_csv(G5.GEOM_CSV)}
     os.makedirs(RESULTS, exist_ok=True)
     if args.qc:
@@ -2034,10 +2038,19 @@ def main():
         with open(NUCLEI_CSV, newline="", encoding="utf-8") as rf:
             rd = csv.reader(rf)
             mi = (next(rd, None) or COLUMNS).index("marker")
+            # THIS MARKER'S ROWS ONLY, for `measured` as for `gone`. Under
+            # `multiplex` every marker's rows name the same sections, and a
+            # row of any marker used to count: on the first --marker Mk2 run
+            # after Mk1, the done log (no Mk2 entry yet) was seeded with every
+            # section Mk1 had measured, Mk2 was never measured, and 06a then
+            # reported those sections as measured-and-empty for Mk2. Under
+            # `paired` a section's rows are all one marker, so nothing changes.
             for row in rd:
-                if row and row[0] in by_sec:
+                if not (len(row) > mi and row[mi] == args.marker):
+                    continue
+                if row[0] in by_sec:
                     measured.add(row[0])
-                elif len(row) > mi and row[mi] == args.marker:
+                else:
                     gone.add(row[0])
     if exists:
         logged = read_done_log(DONE_LOG, args.marker)

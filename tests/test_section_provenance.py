@@ -348,6 +348,16 @@ with temp_study(acquisition={"layout": "multiplex", "channels": [
     chk("...and that marker's nuclei only", s1["n_nuclei"], "0")
     chk("...so its status is its own", s1["status"], "curated")
 
+    # The disc count keys by the ROW's marker, as 06a's split_by_marker does,
+    # so the two count the same discs under the same marker. A stale
+    # roi_boxes_Mk2.csv whose rows say Mk1 (05a and 05c refuse it) is counted
+    # here under Mk1, where 06a would also put it - not under the file's Mk2.
+    write_csv(os.path.join(ref, "roi_boxes_Mk2.csv"), MBOX,
+              [{"scene_uid": "S1", "marker": "Mk1", "roi_index": i}
+               for i in (1, 2, 3)])
+    chk("count_rois keys a disc by its row's marker, as 06a does",
+        dict(P4.count_rois()), {("S1", "Mk1"): 5})
+
 print()
 print("ALL PASS" if not failures else f"{len(failures)} FAILED")
 sys.exit(1 if failures else 0)

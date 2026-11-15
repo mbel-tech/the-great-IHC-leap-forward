@@ -228,7 +228,18 @@ def main(argv=None):
     # The genuine error is the other direction: 06a referencing sections the
     # nuclei file does not contain means the two files are not from the same
     # data at all, and every count would be joined against the wrong geometry.
-    orphaned = measured - nuc_secs
+    #
+    # A section 05c measured and found EMPTY is neither. It has no row in
+    # roi_nuclei.csv - there was nothing to write - and 06a still reports it,
+    # with zero nuclei on every disc, because 05c's done log says it was
+    # measured. Counting it as orphaned failed every study with one such
+    # section. A section whose 06a rows hold any nucleus is still required in
+    # the nuclei file.
+    found = collections.Counter()
+    for r in meas:
+        found[r["scene_uid"]] += int(r["n_nuclei"] or 0)
+    measured_empty = {u for u in measured if not found[u]}
+    orphaned = measured - nuc_secs - measured_empty
     if orphaned:
         print(f"  INCONSISTENT: roi_measurements.csv has {len(orphaned)} "
               f"sections that are not in roi_nuclei.csv "

@@ -333,14 +333,16 @@ def count_rois():
     every marker's file names the SAME uids, and a count by uid alone summed
     both markers' discs onto the section: 2 discs for one marker and 3 for the
     other read as 5, and a section curated for one marker read as curated for
-    both. The marker is the FILE's, not the row's `marker` column, for the
-    same reason the file is per marker at all. A file that is not there is
-    recorded by `load` rather than passed over.
+    both. The marker is the ROW's `marker` column, which is what 06a keys its
+    discs by (split_by_marker), so the two count the same discs under the same
+    marker; the file's marker stands in only for a file with no such column.
+    05a and 05c refuse a multiplex file whose rows name another marker. A file
+    that is not there is recorded by `load` rather than passed over.
     """
     out = Counter()
     for m in MARKERS:
         for r in load(NAMES.read("roi_boxes", m)):
-            out[(r["scene_uid"], m)] += 1
+            out[(r["scene_uid"], (r.get("marker") or "").strip() or m)] += 1
     return out
 
 

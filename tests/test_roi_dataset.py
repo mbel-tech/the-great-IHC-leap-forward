@@ -1005,6 +1005,44 @@ def multiplex_unmeasured_check(tmp):
         [g for g in got if g[0] == "X1"],
         [("X1", "M1", "background", str(len(BG_S1))), ("X1", "M1", "roi", "3")])
 
+    # ...and 06c accepts that measured-empty section. X2 has 06a rows (zeros,
+    # from the done log) and no row in roi_nuclei.csv - there was nothing to
+    # write - and 06c's consistency check called that "not from the same run"
+    # and returned 1 for any study with one such section.
+    try:
+        G6C = load("g6c_mxun", "06c_excel_dataset.py")
+        from openpyxl import load_workbook
+    except Exception as exc:                                   # noqa: BLE001
+        print(f"skip  06c measured-empty ({exc})")
+        return
+    G6C.NUCLEI_CSV = npath
+    G6C.MEAS_CSV = os.path.join(tmp, "mxun_measurements.csv")
+    G6C.G5.all_boxes = lambda: G6C.G5.load_csv(bpath)
+    G6C.animal_environment = lambda: {}
+    out = os.path.join(tmp, "mxun_dataset.xlsx")
+    chk("06c: a section measured and found empty is not 'inconsistent'",
+        G6C.main(["--out", out]), 0)
+    rows = list(load_workbook(out)["coverage"].values)
+    cov = [dict(zip(rows[0], r)) for r in rows[1:]]
+    chk("...and counts as measured for its marker",
+        sorted((c["marker"], c["sections_measured"]) for c in cov),
+        [("M1", 2), ("M2", 0)])
+
+    # A section 06a reports WITH nuclei that roi_nuclei.csv does not hold is
+    # still the real inconsistency, and still a stop.
+    meas_rows = G5.load_csv(G6C.MEAS_CSV)
+    for r in meas_rows:
+        if r["scene_uid"] == "X2" and r["roi_kind"] == "roi":
+            r["n_nuclei"] = "4"
+    bad = os.path.join(tmp, "mxun_bad_measurements.csv")
+    with open(bad, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=list(meas_rows[0]))
+        w.writeheader()
+        w.writerows(meas_rows)
+    G6C.MEAS_CSV = bad
+    chk("...while a section 06a counts nuclei in and the nuclei file lacks "
+        "is still refused", G6C.main(["--out", out]), 1)
+
 
 def multiplex_coverage_check(tmp):
     """06c's coverage sheet: under `multiplex`, measured is per MARKER.

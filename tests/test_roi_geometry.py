@@ -449,7 +449,9 @@ def _boxes_under(layout, rows_by_marker):
         G5.resolve_paths = real_resolve
 
 
-both = {"A": list(COLLIDE), "B": list(COLLIDE)}
+# Each file's rows name that file's marker, as 05a writes them: under
+# `multiplex` all_boxes() refuses a file whose rows name another marker.
+both = {m: [dict(r, marker=m) for r in COLLIDE] for m in ("A", "B")}
 chk("paired: a shared uid is still a hard stop",
     _raises(lambda: _boxes_under("paired", both), SystemExit), True)
 chk("multiplex: a shared uid is the expected state",
@@ -827,6 +829,25 @@ with temp_study(acquisition={"layout": "multiplex", "channels": [
         [("Mk1", "1", "R1", "3"), ("Mk1", "2", "__background__", "5"),
          ("Mk2", "1", "R1", "4"), ("Mk2", "2", "R2", "2"),
          ("Mk2", "3", "__background__", "5")])
+
+    # A box file written before this fix still says Mk1 on every row of
+    # roi_boxes_Mk2.csv, and stays on the drive until 05a is re-run for Mk2.
+    # all_boxes() refuses it, naming the file and what its rows say, instead
+    # of handing 06a Mk1-labelled rows to pool with the real Mk1 discs.
+    _good = X5.load_csv(X5.box_csv("Mk2"))
+    _stale = [dict(b, marker="Mk1") for b in _good]
+    X5.IO.atomic_write_csv(X5.box_csv("Mk2"), _stale, list(_stale[0]))
+    try:
+        X5.all_boxes()
+        _said = "accepted"
+    except SystemExit as exc:
+        _said = str(exc)
+    chk("multiplex: a stale roi_boxes_Mk2.csv (rows say Mk1) is refused",
+        "roi_boxes_Mk2.csv" in _said and "['Mk1']" in _said
+        and "--marker Mk2" in _said, True)
+    X5.IO.atomic_write_csv(X5.box_csv("Mk2"), _good, list(_good[0]))
+    chk("...and the rewritten file is read again",
+        len(X5.all_boxes()), 5)
 
 
 print()

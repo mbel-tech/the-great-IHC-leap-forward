@@ -19,6 +19,12 @@ row's marker. `06c_excel_dataset`'s coverage sheet counts a section as measured 
 when 06a has rows for that (section, marker). New checks: a multiplex section placed for two
 markers in `tests/test_roi_geometry.py` (through 05a and 06a), the per-marker verdict and counts in
 `tests/test_section_provenance.py`, and per-marker coverage in `tests/test_roi_dataset.py`.
+After review: under `multiplex`, 05a's `all_boxes` and 05c stop on a `roi_boxes_<m>.csv` whose
+rows name another marker (a file written before this fix) and say to re-run 05a for that marker.
+05c's resume counts only `--marker`'s own rows as measured, so the second marker's first run
+measures every section instead of inheriting the first marker's. 06c no longer calls a section that
+06a reports with zero nuclei (measured and found empty) inconsistent. 04p counts discs by each
+row's marker, as 06a does. Covered in `tests/test_detect_resume.py` too.
 
 **Why:** found on review (REVIEW.md rule 5). A multiplex scan has one `focus.csv` row, whose
 `marker_channel` is the first marker, so every marker's `roi_boxes_<m>.csv` said the first marker on
@@ -30,7 +36,8 @@ discs and nuclei together. 06c reported a marker 05c had never run on as fully m
 that row now shows only that marker's verdict and counts. The other markers' verdicts are not in
 the table; a row per (scan, marker) would need 04l's Review pane, which looks rows up by scene_uid
 alone, to change as well. 04o is unchanged: under multiplex it still finds sections for the first
-marker only (see the task report).
+marker only (see the task report). A multiplex study placed before this fix has to re-run 05a
+for every marker but the first before 06a, 06c or 05c will read its boxes.
 
 ## 2026-11-15 - Partial and trial runs never replace a complete output
 

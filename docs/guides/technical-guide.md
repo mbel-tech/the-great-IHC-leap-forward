@@ -2522,7 +2522,7 @@ One row per scene, which is one section: where it sits on the slide and its plac
 | `slide_col` | int |  | Column of the slide grid, from 0. |
 | `serial_<convention>` | int |  | The scene's position on its slide under each mounting convention (S_scan_order, A_rows_LR, B_cols_TB, C_rows_serpentine, D_cols_serpentine). |
 | `slide_serial` | int |  | The position under the study's chosen convention (`section_order_convention`). |
-| `section_order` | int |  | Position of the section along the animal's brain, 1..N within one marker's series. |
+| `section_order` | int |  | Position of the section along the animal's brain, 1..N within one marker's series. Every scan of a re-scanned slide is numbered inside that slide's places, and the scan Stage 2 uses runs on without a gap. |
 
 #### `qc/slide_layout_summary.csv`
 
@@ -2687,7 +2687,7 @@ One row per exported section: the quality numbers every later stage reads. Measu
 One row per section: clipping on the raw plane, and where its mask is. 04j censors from these masks.
 
 - **Written by:** 01_overviews.py (01k_saturation_raw.py backfills)
-- **Read by:** 06f_recensor_nuclei.py
+- **Read by:** 01k_saturation_raw.py, 06f_recensor_nuclei.py
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
@@ -2992,7 +2992,7 @@ Where a slide was scanned more than once: which scan was used.
 Optional: which scan of a re-scanned slide to use.
 
 - **Written by:** a person
-- **Read by:** 02_pair_passes.py
+- **Read by:** 00_manifest.py, 02_pair_passes.py
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|

@@ -294,7 +294,7 @@
      "name": "section_order",
      "type": "int",
      "units": "",
-     "meaning": "Position of the section along the animal's brain, 1..N within one marker's series."
+     "meaning": "Position of the section along the animal's brain, 1..N within one marker's series. Every scan of a re-scanned slide is numbered inside that slide's places, and the scan Stage 2 uses runs on without a gap."
     }
    ]
   },

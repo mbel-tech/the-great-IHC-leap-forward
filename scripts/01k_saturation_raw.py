@@ -295,6 +295,10 @@ def main():
     if os.path.exists(OUT_CSV):
         with open(OUT_CSV, newline="", encoding="utf-8") as fh:
             by_uid = {r["scene_uid"]: r for r in csv.DictReader(fh)}
+    # Kept rows, --force included, take section_order / slide / variant from
+    # the manifest as it is now, and a row whose section has left it goes:
+    # see 01_overviews.refresh_identity.
+    OV.refresh_identity(by_uid, scenes, "saturation_raw.csv")
     if by_uid and not args.force:
         rows = list(by_uid.values())
         # A row counts as done only if the mask its marker now calls for is

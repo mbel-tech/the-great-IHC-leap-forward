@@ -359,6 +359,81 @@ def serial_numbers(rows, cols, scenes):
     return out
 
 
+# ---------------------------------------------------------------- section order
+
+
+CHOSEN_VARIANTS_CSV = os.path.join(MANIFEST_DIR, "chosen_variants.csv")
+
+
+def _slide_key(value):
+    """A slide number as one spelling: 8, "8" and "08" are the same slide."""
+    text = str(value if value is not None else "").strip()
+    return str(int(text)) if text.isdigit() else text
+
+
+def chosen_variant_overrides():
+    """(animal, slide, marker) -> replicate letter, from chosen_variants.csv.
+
+    The person-written file 02_pair_passes.choose_variants reads. Read here
+    too so the scan a person picked for a re-scanned slide is the one whose
+    sections the next slide's numbers follow on from.
+    """
+    if not os.path.exists(CHOSEN_VARIANTS_CSV):
+        return {}
+    with open(CHOSEN_VARIANTS_CSV, newline="", encoding="utf-8") as fh:
+        return {(r["animal"], _slide_key(r["slide"]), r["marker_channel"]): r["variant"]
+                for r in csv.DictReader(fh)}
+
+
+def assign_section_order(scene_rows, order_key):
+    """Write `section_order` (and `slide_serial`) on every scene row.
+
+    Rostro-caudal position across the whole animal: slide number first, then
+    position within the slide under the confirmed convention (`order_key`).
+
+    One series per (animal, marker), NOT per replicate letter. The letter is
+    which scan of a slide this is, and a slide scanned again (`8c` beside
+    `1b..9b`) is the same physical sections as its first scan. Numbering each
+    letter as its own series gave `8c` 1..k, colliding with slide 1, and 01d
+    (sorted by section_order then slide) and 04b (section_order alone)
+    interleaved the two slides.
+
+    So each slide owns a block of places, and every scan of it is numbered
+    inside that block: place = sections on the earlier slides + serial within
+    the slide. Which scan is used stays Stage 2's decision
+    (02_pair_passes.choose_variants), and each slide's block is as long as the
+    scan that decision picks - the chosen_variants.csv override, else the scan
+    with most scenes, then the earlier letter - so the chosen scans run 1..N
+    without a gap or a repeat whatever letter each slide's chosen scan has. A
+    scan not chosen shares numbers with the chosen one (same sections); if it
+    has more scenes than the chosen scan, its extra ones run past the block.
+
+    Returns (series, re-scanned slides).
+    """
+    overrides = chosen_variant_overrides()
+    series = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
+    for row in scene_rows:
+        series[(row["animal"], row["marker_channel"])][row["slide"]][row["variant"]].append(row)
+
+    rescans = 0
+    for (animal, marker), slides in series.items():
+        offset = 0
+        for slide in sorted(slides, key=lambda s: (s is None, s if s is not None else 0)):
+            scans = slides[slide]
+            pick = overrides.get((animal, _slide_key(slide), marker))
+            if pick not in scans:
+                pick = sorted(scans, key=lambda v: (-len(scans[v]), v))[0]
+            if len(scans) > 1:
+                rescans += 1
+            for rows in scans.values():
+                rows.sort(key=lambda r: r[order_key])
+                for position, row in enumerate(rows, start=1):
+                    row["slide_serial"] = row[order_key]
+                    row["section_order"] = offset + position
+            offset += len(scans[pick])
+    return len(series), rescans
+
+
 # ---------------------------------------------------------------- slide-map figure
 
 
@@ -763,21 +838,11 @@ def main():
         )
         print(f"  accepted {len(accepted)} row-count suggestion(s) into layout_overrides.csv")
 
-    # Rostro-caudal position across the whole animal: slide number first, then
-    # position within the slide under the confirmed convention. Kept per
-    # variant series so the duplicate re-scans each get a clean 1..N and the
-    # choice between them stays a Stage 1 decision.
     order_key = f"serial_{ORDER_CONVENTION}"
-    series = defaultdict(list)
-    for row in scene_rows:
-        series[(row["animal"], row["marker_channel"], row["variant"])].append(row)
-    for rows_in_series in series.values():
-        rows_in_series.sort(key=lambda r: (r["slide"], r[order_key]))
-        for position, row in enumerate(rows_in_series, start=1):
-            row["slide_serial"] = row[order_key]
-            row["section_order"] = position
-
-    print(f"  section_order written from {order_key} across {len(series)} variant series")
+    n_series, n_rescans = assign_section_order(scene_rows, order_key)
+    print(f"  section_order written from {order_key} across {n_series} series"
+          + (f"; {n_rescans} re-scanned slide(s) numbered inside their slide's "
+             f"places" if n_rescans else ""))
 
     _write_csv(os.path.join(MANIFEST_DIR, "manifest_files.csv"), file_rows)
     _write_csv(os.path.join(MANIFEST_DIR, "manifest_scenes.csv"), scene_rows)

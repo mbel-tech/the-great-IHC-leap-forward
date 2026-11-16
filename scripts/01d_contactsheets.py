@@ -86,9 +86,12 @@ def chosen_variants():
     """(animal, slide, marker) -> variant, from Stage 2's re-scan resolution.
 
     Five slides were scanned twice (LS45_8b/8c, LS45_9b/9c, LS61_2b/2c,
-    LS61_4b/4c, LS85_7a/7b-). Both copies carry their own 1..N section_order,
-    so including both interleaves two series into one sheet - which is exactly
-    what the alternating sl1/sl8 labels revealed.
+    LS61_4b/4c, LS85_7a/7b-). Each copy used to carry its own 1..N
+    section_order, so including both interleaved two series into one sheet -
+    which is exactly what the alternating sl1/sl8 labels revealed. 00 now
+    numbers both copies inside their slide's places, so they no longer collide
+    with another slide, but both are still the same sections: only the chosen
+    one belongs on the sheet.
     """
     path = os.path.join(OUT_ROOT, "manifest", "variant_choices.csv")
     if not os.path.exists(path):

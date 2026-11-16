@@ -9,6 +9,39 @@ where things landed, not which plausible-looking route was tried and abandoned, 
 
 ---
 
+## 2026-11-16 - Section order survives a re-scan; resumed QC rows are current (00 / 01 / 01k)
+
+**Changed:** `00_manifest` numbers `section_order` per (animal, marker), not per (animal, marker,
+replicate letter) (`assign_section_order`). Each slide owns a block of places, as long as the scan
+Stage 2 will use for it (the `chosen_variants.csv` override, else most scenes, then the earlier
+letter - `02_pair_passes.choose_variants`' rule, so 00 now reads that file too), and every scan of
+the slide is numbered inside it by its position on the slide. The chosen scans run 1..N with no gap
+whatever letter each one has; a scan not chosen shares its slide's numbers. On resume, 01 and 01k
+copy `section_order`, `slide` and `variant` of every kept `focus.csv` / `saturation_raw.csv` row
+from the current manifest and drop rows whose uid is no longer in it, printing how many of each
+(`01_overviews.refresh_identity`, `--force` runs included). Checks in
+`tests/test_rescan_order.py`.
+
+**Why:** found on review. A slide scanned again under another letter (`8c` beside `1b..9b`) was a
+series of its own and numbered 1..k, colliding with slide 1; 01d sorts by `section_order` then
+slide and 04b by `section_order` alone, so the two slides interleaved on the contact sheets and in
+the atlas match. And 01 resumed past rows exactly as written, so after 00 was re-run (mounting
+convention confirmed, overrides changed) `focus.csv` and `saturation_raw.csv` kept the old order
+and identity, and a section gone from the manifest kept its row for good.
+
+**Cost:** `section_order` changes for every study with a re-scanned slide (a slide with two
+replicate letters for one marker, or a slide whose only scan has a letter the rest of the animal
+does not): every section from that slide on is renumbered. Such a study must re-run 00, then 01
+(which now refreshes `focus.csv` and `saturation_raw.csv` without re-exporting) and everything
+after it that copies the column - 01d, 01g, 01l, 04a (`reformat_index`), 04b/04c, 04f, 04g, 04m,
+04n, 04p and the registration report. Curator exports already saved (`atlas_levels.csv`,
+`roi_plates.csv`, `roi_landmarks.csv`) keep the old numbers in their `section_order` column; they
+join by `scene_uid`, but anything reading their order should be checked. Studies with no re-scan
+get the same numbers as before. A person who overrides `chosen_variants.csv` after 00 has run gets
+a gap or overlap at that slide until 00 is run again; a scan not chosen that has more scenes than
+the chosen one runs past its slide's block into the next slide's numbers (02 uses only the chosen scan, and 01d drops the other once 02 has
+run; 04b still matches both, as before).
+
 ## 2026-11-16 - Ingest tells the truth (00 / 00b / 01c / 01d / 01f / 01g / 01h / 01k)
 
 **Changed:** `00_manifest` exits 1 and writes neither `manifest_files.csv` nor

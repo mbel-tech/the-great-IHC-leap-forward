@@ -190,6 +190,11 @@ of scenes and where each sits on the glass — without decoding a single pixel. 
 it touches only the file's index, and it produces the two tables the whole pipeline is built on:
 one row per file, one row per scanned section.
 
+This step can read the headers of CZI files still inside their transfer zips. **No step after it
+can:** every step that reads pixels, from the overviews (01) on, reads extracted CZI files in the
+source folder. A study whose slides arrived as zips must have them extracted before stage 01, and
+00b checks that extraction.
+
 In a multiplex study the table of channels can rename a marker (the scan's AF568 called pERK). The
 manifest records each scene's marker under the study's name, not the scan's, because every later
 step selects scenes by comparing that name; under the scan's name, 01 would write no clipping masks
@@ -1513,8 +1518,11 @@ deviation scaled by the constant that makes it comparable to a standard deviatio
 to section.
 
 **A spread and not a percentile, deliberately.** Taking the top few per cent of background objects as
-the cut would fix the false-positive rate by construction — and destroy the only independent check
-available. With a spread-based cut, how many background nuclei land above it is a *measurement*. On
+the cut would fix the false-positive rate by construction. With a spread-based cut, how many
+background nuclei land above it is a *measurement* — but an **in-sample** one: the cut was fitted
+to those same nuclei, so it is not an independent check. The independent check is the
+leave-one-disc-out rate (`loo_false_positive_rate` in `detector_specificity.csv`), where each
+background disc is counted against the cut the section's other discs give. On
 this dataset it is a low single-digit percentage, and — the number that decides whether positivity
 is usable at all — **it is not correlated with treatment group.** Positivity inside the anatomical
 regions is several-fold higher than that background rate.

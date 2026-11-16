@@ -1160,10 +1160,24 @@ def main():
     # one placed cleanly after it used to leave the second marker's "====="
     # separator as the reason.
     if failed and len(todo) > 1:
-        print(f"!! ROIs not placed for {', '.join(failed)} (see that marker's "
-              f"output above); the other marker(s) were placed. This stage is "
-              f"not complete: fix the cause and run it again.")
+        print(not_placed_line(failed, todo))
     return 1 if failed else 0
+
+
+def not_placed_line(failed, todo):
+    """The closing "!!" line of a run over several markers, some failed.
+
+    It used to say "the other marker(s) were placed" whatever happened - also
+    when every marker failed and nothing was placed at all. Placed markers are
+    named only when there are some.
+    """
+    placed = [m for m in todo if m not in failed]
+    return (f"!! ROIs not placed for {', '.join(failed)} (see "
+            f"{'that marker' if len(failed) == 1 else 'each marker'}'s output "
+            f"above)"
+            + (f"; {', '.join(placed)} {'was' if len(placed) == 1 else 'were'} "
+               f"placed" if placed else "; no marker was placed")
+            + ". This stage is not complete: fix the cause and run it again.")
 
 
 def _place_marker(marker, regions, plates, args, only=None):

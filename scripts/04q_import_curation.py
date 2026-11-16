@@ -464,15 +464,24 @@ def main(argv=None):
               % (len(d["added"]), len(d["only_on_disk"]), len(d["changed"])))
         # Work that exists ONLY on disk is the one thing this could destroy, so
         # what happens to it is said, and the sections are named.
+        # A report-only run changes nothing, so it says what --write WOULD do
+        # rather than "kept", which read as though it had already been done.
         only = d["only_on_disk"]
         if only and args.replace:
-            print("  --replace: %d only on disk, would be DROPPED: %s"
-                  % (len(only), some(only)))
+            print("  --replace: %d only on disk, %s DROPPED: %s"
+                  % (len(only), "will be" if args.write else "would be",
+                     some(only)))
         elif only:
-            print("  kept %d only on disk (the export does not hold them): %s"
-                  % (len(only), some(only)))
+            print("  %s %d only on disk (the export does not hold them): %s"
+                  % ("keeping" if args.write else "would keep", len(only),
+                     some(only)))
 
     if not args.write:
+        # --replace alone used to do nothing and say nothing about it, so a
+        # person who asked for the stored-only sections to go was left
+        # believing they had.
+        if args.replace:
+            print("\n--replace needs --write: nothing was dropped")
         print("\n(report only - pass --write to save)")
         return 0
 
@@ -480,6 +489,12 @@ def main(argv=None):
     # The merge is against this study's part as compare() read it - its own entry,
     # the one it had before its folder moved, or a flat file's whole value.
     stored = read_stored(args.out)
+    if stored is None and os.path.exists(args.out):
+        # Replaced below, after the backup: said, because what it held is not
+        # merged into the new file - only the backup keeps it.
+        print("\ncould not read %s (not valid JSON, or unreadable) - its "
+              "contents are not merged; it is backed up and replaced"
+              % args.out)
     mine, _ = merged(
         state, CU.own(stored, STUDY_ID, STUDY_TOKEN) if stored is not None else None,
         replace=args.replace)

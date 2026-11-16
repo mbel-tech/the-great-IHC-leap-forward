@@ -115,8 +115,6 @@ R = [{0: "1", 2: "3"}, {0: "2", 2: "303"}]
 m = {"id_column": "Fish", "group_columns": ["Group"], "match": "number",
      "fill": [{"when": "Tank", "is": "303", "set": "Group", "to": "exercise"}]}
 j = S.join(["LS1", "LS2"], H, R, m)
-chk("fish_id follows the same rule: one run of digits, else none",
-    [S.fish_id(a) for a in ("LS22", "LS-022", "T1F22", "LS2-1")], ["22", "022", "", ""])
 chk("a string `is` is that one value",
     {a: x["treatment"] for a, x in j["meta"].items()}, {"LS1": "", "LS2": "exercise"})
 

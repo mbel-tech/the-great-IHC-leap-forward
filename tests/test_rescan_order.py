@@ -142,18 +142,59 @@ chk("the default choice of scans runs 1..N without a gap",
 two_c = sorted(int(r["section_order"]) for r in rows if r["file"] == "LS45_2c.czi")
 chk("the re-scan of slide 2 is numbered inside slide 2's places", two_c, [4, 5])
 
+# 00 keeps its own copy of 02's scan choice. The two must agree: the scans 02's
+# choose_variants picks are the ones that must run 1..N without a gap.
+P2 = load_stage("02_pair_passes.py", name="lsstage_02_rescan")
+
+
+def picked_by_02(rows):
+    """The scene rows of the scans 02_pair_passes.choose_variants picks."""
+    typed = [dict(r, slide=int(r["slide"])) for r in rows]
+    with contextlib.redirect_stdout(io.StringIO()):
+        picked, _ = P2.choose_variants(typed)
+    return [r for scans in picked.values() for r in scans]
+
+
+chk("default: 02's chosen scans are the ones 00 numbers 1..N",
+    sorted(int(r["section_order"]) for r in picked_by_02(rows)), list(range(1, 12)))
+
 print("--- 00: a chosen_variants.csv override is honoured ---")
-write(os.path.join(M.MANIFEST_DIR, "chosen_variants.csv"),
-      [{"animal": "LS45", "slide": "2", "marker_channel": rows[0]["marker_channel"],
-        "variant": "c"}])
-code, rows, out = run00(FILES)
-chk("00 returns 0", code, 0)
-chosen = [r for r in rows if (r["slide"], r["variant"]) != ("2", "b")]
-chk("the chosen scans (2c for slide 2) run 1..N without a gap",
-    sorted(int(r["section_order"]) for r in chosen), list(range(1, 11)))
-chk("slide 3 follows slide 2's chosen scan",
-    sorted(int(r["section_order"]) for r in rows if r["slide"] == "3"), [6, 7, 8])
-os.remove(os.path.join(M.MANIFEST_DIR, "chosen_variants.csv"))
+CV = os.path.join(M.MANIFEST_DIR, "chosen_variants.csv")
+try:
+    write(CV, [{"animal": "LS45", "slide": "2",
+                "marker_channel": rows[0]["marker_channel"], "variant": "c"}])
+    code, rows, out = run00(FILES)
+    chk("00 returns 0", code, 0)
+    chosen = [r for r in rows if (r["slide"], r["variant"]) != ("2", "b")]
+    chk("the chosen scans (2c for slide 2) run 1..N without a gap",
+        sorted(int(r["section_order"]) for r in chosen), list(range(1, 11)))
+    chk("slide 3 follows slide 2's chosen scan",
+        sorted(int(r["section_order"]) for r in rows if r["slide"] == "3"), [6, 7, 8])
+    p02 = picked_by_02(rows)
+    chk("override: 02 picks 2c too",
+        sorted({r["variant"] for r in p02 if r["slide"] == 2}), ["c"])
+    chk("...and its chosen scans are the ones 00 numbers 1..N",
+        sorted(int(r["section_order"]) for r in p02), list(range(1, 11)))
+
+    # A person-written file missing a column is refused by both, naming the
+    # file and the column - not a bare KeyError.
+    write(CV, [{"animal": "LS45", "slide": "2", "variant": "c"}])
+    for who, fn in (("00", M.chosen_variant_overrides),
+                    ("02", lambda: P2.choose_variants([]))):
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                fn()
+            said = "no refusal"
+        except SystemExit as exc:
+            said = str(exc)
+        except KeyError as exc:
+            said = f"KeyError {exc}"
+        chk(f"{who}: chosen_variants.csv without marker_channel is refused by name",
+            ("chosen_variants.csv" in said, "marker_channel" in said,
+             said.startswith("KeyError")), (True, True, False))
+finally:
+    if os.path.exists(CV):
+        os.remove(CV)
 
 print("--- 00: two markers of one animal are separate series ---")
 code, rows, out = run00({

@@ -382,7 +382,8 @@ def main():
     if unmeasured or absent:
         print(f"{len(unmeasured) + len(absent)} of {len(results) + len(absent)} section(s) "
               f"not measured ({len(unmeasured)} with too little tissue or no usable "
-              f"profile, {len(absent)} not found); the verdict covers the rest")
+              f"profile, {len(absent)} not found); the verdict covers the rest. "
+              f"Drop or replace the unmeasured section(s), then run 01c again.")
         return 1
     return 0
 

@@ -193,8 +193,10 @@ def main():
             by_marker[r["marker_channel"]].append((p, r["marker_channel"]))
         else:
             absent.append(r["file"])
-    # czifile reads loose files only. A CZI still inside its zip, or on a
-    # drive that is not mounted, is not sampled - said, not silently dropped.
+    # czifile reads loose files only - like every pixel stage, this reads
+    # EXTRACTED CZIs (00_manifest reads only the headers from zips). A CZI
+    # still inside its zip, or on a drive that is not mounted, is not sampled
+    # - said, not silently dropped.
     if absent:
         print(f"{len(absent)} of {len(rows)} file(s) in the manifest are not in "
               f"{SOURCE_DIR} and cannot be sampled (first: {absent[:3]})")
@@ -209,7 +211,8 @@ def main():
     stacks = collect_tiles(chosen, args.tiles, rng, failed)
     if not stacks:
         # The absent count is often the whole reason: a study that keeps its
-        # CZIs inside zips has none on disk for czifile to read.
+        # CZIs inside zips has none on disk for czifile to read - 00 read their
+        # headers from the zips, but the slides must be extracted before 01.
         why = []
         if absent:
             why.append(f"{len(absent)} of {len(rows)} manifest file(s) are not in "

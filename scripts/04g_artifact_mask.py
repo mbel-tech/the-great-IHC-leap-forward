@@ -467,14 +467,14 @@ def main():
         src = os.path.join(OVERVIEW_DIR, r["animal"], chan.get(uid, args.marker), uid + "_DAPI.png")
         if not os.path.exists(src):
             not_masked.append((uid, "overview PNG missing"))
-            if write_masks:
+            if write_masks and not args.limit:
                 drop_stale_mask(uid)
             continue
         im = np.asarray(Image.open(src).convert("L")).astype(np.float32)
         tis = load_tissue(im)
         if tis is None:
             not_masked.append((uid, "no tissue mask could be formed"))
-            if write_masks:
+            if write_masks and not args.limit:
                 drop_stale_mask(uid)
             continue
         mm_px = _RF.overview_um_px({"um_px": um_px.get(uid)}) / 1000.0
@@ -540,9 +540,10 @@ def main():
     # reason. A --limit trial counts only the sections it was told to do.
     if not_masked:
         report_not_masked(not_masked)
-        print(f"!! {len(not_masked)} section(s) NOT MASKED (see above; any "
-              f"earlier mask of theirs was removed): this stage is not "
-              f"complete. Fix the cause and run it again.")
+        print(f"!! {len(not_masked)} section(s) NOT MASKED (see above; "
+              + ("a --limit trial left any earlier mask of theirs in place"
+                 if args.limit else "any earlier mask of theirs was removed")
+              + "): this stage is not complete. Fix the cause and run it again.")
         return 1
 
 
@@ -553,6 +554,10 @@ def drop_stale_mask(uid):
     it, 05c flags nuclei under it, and the summary - which no longer lists the
     section - is the only thing that disagrees. Gone, 04a reports the section
     as having no mask, which is the truth.
+
+    A FULL run only. A --limit trial writes its summary beside the real one
+    and app/workflow.py ignores trial records, so the stage still reads done
+    on the real summary - which lists this section and expects its mask.
     """
     p = os.path.join(MASK_DIR, uid + "_artifact.png")
     if os.path.exists(p):

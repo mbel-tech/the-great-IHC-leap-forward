@@ -40,6 +40,11 @@ _lsio = importlib.util.spec_from_file_location(
     "_lsio", os.path.join(os.path.dirname(os.path.abspath(__file__)), "ls_io.py"))
 IO = importlib.util.module_from_spec(_lsio)
 _lsio.loader.exec_module(IO)
+# source_files matching, shared with 00_manifest so the two cannot drift.
+_lssrc = importlib.util.spec_from_file_location(
+    "_lssrc", os.path.join(os.path.dirname(os.path.abspath(__file__)), "ls_sources.py"))
+SRC = importlib.util.module_from_spec(_lssrc)
+_lssrc.loader.exec_module(SRC)
 
 # check()'s columns, pinned: an inventory with nothing in it must still
 # leave a file with a header rather than crash on rows[0].
@@ -63,30 +68,38 @@ def zip_inventory(problems=None):
     study's. Without that, a subset study - the case source_files exists for,
     where the rest of the folder is often never extracted - failed here on
     slides it never asked for. An unreadable archive nobody named is likewise
-    not a problem of this run.
+    not a problem of this run - unless a named CZI is then found nowhere
+    (its only zip may be that archive), which is one, named with the archive.
+    The matching is ls_sources', the one 00 uses.
     """
     problems = problems if problems is not None else []
-    only = CONFIG.get("source_files") or None
-    if only:
-        only = {os.path.basename(n) for n in only}
+    only = SRC.named(CONFIG.get("source_files"))
     inventory = {}
+    # A named CZI extracted loose is found; 00b only checks zip members, and a
+    # loose file with no archive has nothing to be checked against.
+    found = {os.path.basename(p)
+             for p in glob.glob(os.path.join(SOURCE_DIR, "*.czi"))}
+    unreadable = []
     for zpath in sorted(glob.glob(os.path.join(SOURCE_DIR, "*.zip"))):
         zname = os.path.basename(zpath)
-        whole = not only or zname in only
+        whole = SRC.takes_zip(zname, only)
         try:
             zf = zipfile.ZipFile(zpath)
         except (zipfile.BadZipFile, OSError) as exc:
             if whole:
                 print(f"  !! unreadable archive: {zname}")
                 problems.append(f"unreadable archive {zname}: {exc}")
+            else:
+                unreadable.append(zname)
             continue
+        if whole:
+            found.add(zname)
         with zf:
             for info in zf.infolist():
                 name = os.path.basename(info.filename)
-                if not name.lower().endswith(".czi"):
+                if not SRC.takes_member(info.filename, whole, only):
                     continue
-                if not whole and name not in only:
-                    continue
+                found.add(name)
                 if name in inventory and inventory[name]["size"] != info.file_size:
                     print(f"  !! {name} differs between archives - keeping first")
                     problems.append(f"{name} differs between {inventory[name]['zip']} "
@@ -101,6 +114,13 @@ def zip_inventory(problems=None):
                         "compress_type": info.compress_type,
                     },
                 )
+    # Only with a source_files list, as in 00: a named file found nowhere -
+    # used to be skipped silently, so a CZI whose only zip would not open was
+    # never checked and the run said the extraction was verified.
+    if only:
+        for name, why in SRC.unfound(only, found, unreadable, SOURCE_DIR):
+            print(f"  !! {name}: {why}")
+            problems.append(f"{name}: {why}")
     return inventory
 
 

@@ -280,8 +280,24 @@ with temp_study() as st:
         return np.zeros(im.shape, np.uint8), []
     G.detect = _detect
 
+    # A --limit TRIAL that reaches the section first: it fails, but it must
+    # not remove the real mask - the stage reads done on the real summary
+    # (workflow ignores trial records), which expects that mask.
     buf = io.StringIO()
     saved = sys.argv
+    sys.argv = ["04g", "--marker", marker, "--limit", "3"]
+    try:
+        with contextlib.redirect_stdout(buf):
+            rc = G.main()
+    finally:
+        sys.argv = saved
+    chk("a --limit trial that cannot mask a section returns 1", rc, 1)
+    chk("...but leaves that section's real mask in place",
+        os.path.exists(stale), True)
+    chk("...and says so", "left any earlier mask" in buf.getvalue(), True)
+    seen.clear()
+
+    buf = io.StringIO()
     sys.argv = ["04g", "--marker", marker]
     try:
         with contextlib.redirect_stdout(buf):

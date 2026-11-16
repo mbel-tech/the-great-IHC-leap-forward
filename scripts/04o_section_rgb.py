@@ -1007,10 +1007,23 @@ def main():
         # rule 2): a mismatch means a landmark placed on the composite does not
         # mean what the exports say, and a section it could not check is not
         # a pass.
-        if mismatched or missing:
+        # The last line says WHICH failure it was: "does not reproduce" is a
+        # finding about the pictures, "could not be checked" is not - and it
+        # used to say the first whenever either happened.
+        if mismatched and missing:
             print(f"!! {args.marker} --verify: {mismatched} section(s) MISMATCHED "
                   f"and {len(missing)} could not be checked (see above): the "
                   f"blue plane does not reproduce the greyscale sections.")
+            return 1
+        if mismatched:
+            print(f"!! {args.marker} --verify: {mismatched} section(s) MISMATCHED "
+                  f"(see above): the blue plane does not reproduce the "
+                  f"greyscale sections.")
+            return 1
+        if missing:
+            print(f"!! {args.marker} --verify: {len(missing)} section(s) could "
+                  f"not be checked (see above); none of those checked "
+                  f"mismatched, but the check is not complete.")
             return 1
         return None
     if missing:

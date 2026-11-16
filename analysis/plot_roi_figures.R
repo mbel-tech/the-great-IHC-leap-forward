@@ -130,9 +130,21 @@ if (file.exists(SPEC)) {
   fr <- suppressWarnings(as.numeric(sp$false_positive_rate))
   fr <- fr[is.finite(fr)]
   if (length(fr)) {
+    # IN-SAMPLE, and the caption says so: the cut is fitted to these same
+    # background nuclei, so the share above it is the tail of the distribution
+    # the cut came from, not an independent check. The out-of-sample one is
+    # the leave-one-disc-out rate (06a, loo_false_positive_rate), quoted
+    # beside it where any section could form it.
     fp_note <- sprintf(
-      "detector false-positives on background discs: median %.1f%% (range %.1f-%.1f%%, n=%d)",
+      "in-sample detector false-positives on background discs: median %.1f%% (range %.1f-%.1f%%, n=%d)",
       100 * median(fr), 100 * min(fr), 100 * max(fr), length(fr))
+    lo <- if ("loo_false_positive_rate" %in% names(sp))
+      suppressWarnings(as.numeric(sp$loo_false_positive_rate)) else numeric(0)
+    lo <- lo[is.finite(lo)]
+    fp_note <- if (length(lo)) sprintf(
+      "%s; leave-one-disc-out median %.1f%% (n=%d)",
+      fp_note, 100 * median(lo), length(lo))
+    else paste0(fp_note, "; no section had two discs for a leave-one-disc-out rate")
   } else if ("bg_false_positives_per_mm2" %in% names(sp)) {
     # A marker segmented on its own channel has no false-positive RATE (06a
     # withholds it: there is no count of all cells to divide by), and without
@@ -142,7 +154,7 @@ if (file.exists(SPEC)) {
     fd <- suppressWarnings(as.numeric(sp$bg_false_positives_per_mm2))
     fd <- fd[is.finite(fd)]
     if (length(fd)) fp_note <- sprintf(
-      "detector false-positives on background discs: median %.1f per mm2 (range %.1f-%.1f, n=%d)",
+      "in-sample detector false-positives on background discs: median %.1f per mm2 (range %.1f-%.1f, n=%d)",
       median(fd), min(fd), max(fd), length(fd))
   }
 } else {

@@ -283,6 +283,24 @@ with temp_study(acquisition={"layout": "paired",
                              "markers": ["Mk1", "Mk2"]}) as MK:
     P4 = load_stage("04i_propagate_to_perk.py", name="lsstage_04i_mk")
 
+    # `source` is read stripped and case-blind: a person who typed `Manual`
+    # or ` manual ` marked the row as theirs, and --rederive-legacy must
+    # never replace it as though it were unmarked.
+    _fresh = {"perk_scene_uid": "U9", "pcna_scene_uid": "V9", "animal": "AB12",
+              "extra_rotation": "0", "flip": "0", "excluded": "0",
+              "source": "derived"}
+    _fresh["derived_as"] = P4.decision_of(_fresh)
+    for _mark in ("Manual", " manual ", "MANUAL"):
+        _m = P4.merge_hand_rows(
+            [dict(_fresh)],
+            [{"perk_scene_uid": "U9", "pcna_scene_uid": "V9", "animal": "AB12",
+              "extra_rotation": "33", "flip": "0", "excluded": "0",
+              "source": _mark}],
+            rederive_legacy=True)
+        chk(f"source {_mark!r} counts as manual: kept under --rederive-legacy",
+            ([r["extra_rotation"] for r in _m["rows"]], _m["n_rederived"],
+             _m["n_kept"] - _m["n_legacy"]), (["33"], 0, 1))
+
     # Mk2 is the geometry source - the SECOND declared - so it is the curated
     # pass, and Mk1 is the one being propagated onto.
     chk("the target is the pass that does not own the unsuffixed names",

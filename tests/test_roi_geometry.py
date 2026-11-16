@@ -826,6 +826,12 @@ with temp_study(acquisition={"layout": "paired",
         "!! 1 Mk1 section(s) with ROIs NOT PLACED" in _buf2.getvalue(), True)
     chk("...and the LAST line names Mk1, not Mk2's separator",
         _last2.startswith("!! ROIs not placed for Mk1 "), True)
+    chk("...and names Mk2 as the one placed", "; Mk2 was placed." in _last2, True)
+    # Every marker failed: the line must not claim any was placed.
+    _all = P5.not_placed_line(["Mk1", "Mk2"], ["Mk1", "Mk2"])
+    chk("every marker failed: the closing line says none was placed",
+        ("were placed" in _all, "Mk2 was placed" in _all,
+         "; no marker was placed." in _all), (False, False, True))
 
 
 print()

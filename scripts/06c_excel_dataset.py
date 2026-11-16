@@ -102,28 +102,41 @@ NUCLEI_CSV = os.path.join(RESULTS, "roi_nuclei.csv")
 MEAS_CSV = os.path.join(RESULTS, "roi_measurements.csv")
 XLSX = os.path.join(RESULTS, "roi_dataset.xlsx")
 
-def animal_environment():
-    """animal -> sea / brackish, read straight from the sampling workbook.
+def animal_environment(meta_csv=None):
+    """animal -> sea / brackish, from 06b's results/animal_metadata.csv.
 
-    Reuses `read_sheet()` from 06b rather than requiring 06a and 06b to have run
-    first: this stage is meant to be runnable while detection is still going,
-    and making it depend on the end of the chain would take that away.
+    Joined by animal, so it follows exactly the sheet, ID column, matching rule
+    and `--xlsx` 06b joined the groups by. It used to re-read the DEFAULT
+    workbook path itself, keep only all-digit sheet IDs and prefix "LS" - so a
+    study whose workbook was passed with --xlsx, or whose IDs are "LS22" or
+    "22b", got no environment, and "07" became an animal "LS07" that might not
+    be the one 06b matched.
+
+    The column is the one carried from the sheet whose header starts "enviro"
+    (ls_sampling.COLUMN_PREFIX, which also catches the live sheet's
+    "enviroment"). Absent file or absent column is SAID, never filled from the
+    default workbook behind 06b's back.
 
     NOTE that environment is perfectly confounded with timepoint in this design
     - brackish IS timepoint 1 and sea IS timepoint 2 - so anything reported by
     environment is equally a statement about time.
     """
-    try:
-        col, sheet = G6B.read_table(G6B.DEFAULT_XLSX)
-    except Exception as exc:                                   # noqa: BLE001
-        print(f"  (no environment: {exc})")
+    meta_csv = meta_csv or G6B.META_CSV
+    if not os.path.exists(meta_csv):
+        print(f"  (no environment: no {os.path.basename(meta_csv)} - run "
+              f"06b_join_sampling.py)")
         return {}
-    out = {}
-    for r in sheet:
-        fid = (r.get(col["fish"], "") or "").strip()
-        if fid.isdigit():
-            out["LS" + fid] = (r.get(col["environment"], "") or "").strip()
-    return out
+    rows = G5.load_csv(meta_csv)
+    cols = list(rows[0]) if rows else []
+    prefix = G6B.SAMPLING.COLUMN_PREFIX["environment"]
+    hits = [c for c in cols if c.startswith(prefix)]
+    if len(hits) != 1:
+        print(f"  (no environment: {os.path.basename(meta_csv)} has "
+              + (f"{len(hits)} columns starting '{prefix}' ({', '.join(hits)})"
+                 if hits else f"no environment column (none starting '{prefix}')")
+              + " - the environment column is left blank)")
+        return {}
+    return {r["animal"]: (r.get(hits[0]) or "").strip() for r in rows}
 
 
 def write_workbook(path, sheets):

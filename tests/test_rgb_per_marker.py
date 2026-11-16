@@ -320,6 +320,40 @@ with temp_study(acquisition=MULTIPLEX) as study:
     chk("...and the reason is the last line",
         bool(said) and "1 section(s) MISMATCHED and 1 could not be checked" in said[-1], True)
 
+    # A mismatch ALONE, every section checkable, still fails - and says it
+    # does not reproduce.
+    write_csv(os.path.join(out, "reformatted", "reformat_index.csv"),
+              ["id", "kind", "animal"],
+              [{"id": u, "kind": "section", "animal": "AB12"} for u in (UID, bad)])
+    rc, said = run_04o_rc(O, "Mk1", ("--all", "--verify"))
+    chk("--verify with only a mismatch fails the run", rc, 1)
+    chk("...its last line says it does not reproduce, not that any could not be checked",
+        bool(said) and "1 section(s) MISMATCHED" in said[-1]
+        and "does not reproduce" in said[-1]
+        and "could not be checked" not in said[-1], True)
+
+    # No greyscale to compare with: no image is written (verify renders at
+    # scale 1, and saving it would overwrite the composite path), and the last
+    # line says it could not be checked - not that it does not reproduce.
+    nogrey = "S4"
+    for suf, v in (("_DAPI.png", 40), ("_MARK.png", 200)):
+        Image.fromarray(np.full((SIDE, SIDE), v, np.uint8)).save(
+            os.path.join(d, nogrey + suf))
+    write_csv(os.path.join(out, "reformatted", "reformat_index.csv"),
+              ["id", "kind", "animal"],
+              [{"id": u, "kind": "section", "animal": "AB12"} for u in (UID, nogrey)])
+    write_csv(os.path.join(out, "qc", "focus.csv"),
+              ["scene_uid", "marker_channel", "animal"],
+              [{"scene_uid": u, "marker_channel": "Mk1", "animal": "AB12"}
+               for u in (UID, nogrey)])
+    target = os.path.join(O.rgb_dir("Mk1"), nogrey + ".png")
+    rc, said = run_04o_rc(O, "Mk1", ("--all", "--verify"))
+    chk("--verify with no greyscale to compare with fails the run", rc, 1)
+    chk("...and writes no image for it", os.path.exists(target), False)
+    chk("...its last line says it could not be checked, not that it does not reproduce",
+        bool(said) and "1 section(s) could not be checked" in said[-1]
+        and "does not reproduce" not in said[-1], True)
+
 # The first two markers shown get red and green by default; a third with no
 # `display.colours` entry is what the colour map leaves out.
 THREE = {"layout": "multiplex", "channels": MULTIPLEX["channels"] + [

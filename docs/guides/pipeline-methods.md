@@ -596,8 +596,11 @@ section**, because this is a high-baseline marker and the background level moves
 section.
 
 **A spread and not a percentile, deliberately.** A percentile cut would fix the false-positive
-rate by construction and destroy the only independent check available. With a spread-based cut,
-how many background nuclei land above it is a *measurement*. On this dataset that measurement is
+rate by construction. With a spread-based cut, how many background nuclei land above it is a
+*measurement*, though an **in-sample** one: the cut is fitted to those same nuclei, so it is not an
+independent check. The independent check is the leave-one-disc-out rate
+(`loo_false_positive_rate`): each background disc counted against the cut formed from the
+section's other discs, by the same rule. On this dataset the in-sample measurement is
 a median false-positive rate of 2.10 % across the 130 sections measured so far — and, the number that decides whether
 positivity is usable at all, it is not correlated with treatment group (2.2 % control against
 2.0 % exercise). Pooled positivity inside the anatomical ROIs is 13.2 % against that — 82,016 of 619,300 nuclei — a

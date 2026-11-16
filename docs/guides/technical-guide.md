@@ -122,6 +122,8 @@ small picture of every section, and a record of which scan of which section belo
   the slide's grid from the scenes' positions and draws one picture per candidate mounting order for a
   person to confirm once. The order matters because consecutive sections along the brain are 14 µm apart,
   so a section's place in the series is its position along the brain.
+  00 reads headers from loose CZIs and from CZIs inside the transfer zips alike; every stage that reads
+  pixels (01 on) reads extracted CZI files only, so zipped slides must be extracted before stage 01.
 - **00b Verify extraction** checks each copied file against the size, and optionally the checksum,
   recorded in the transfer zip.
 - **00d CZI self-test** checks the four things every reading stage assumes about the files: the scene
@@ -889,7 +891,9 @@ counters are read too.
 Every pixel that reaches a result is read by `czi_read.py` through pylibCZIrw, and the call **always names
 the scene**: 219 of the 222 LS files have overlapping scene rectangles, and a read without `scene=`
 composites a neighbour's tissue into the array. `czi_meta.py` reads the metadata XML straight from the
-file's segments without decoding pixels, from a plain file or a stored zip member. `ls_channels.py` turns
+file's segments without decoding pixels, from a plain file or a stored zip member - but only the header:
+the pixel readers take extracted CZI files, so a zipped slide is extracted (and checked by 00b) before
+stage 01. `ls_channels.py` turns
 the study's declared channels into a plane index per file, by the CZI's own channel name first and the
 declared index only as a fallback. Part 1, chapter 1 ("Why the file is read the way it is"), gives the
 reasons.
@@ -1395,8 +1399,9 @@ other pass of the same physical sections.
   row marked manual, or whose values no longer match its `derived_as`, is kept in place of the derived one
   (in a file written before these columns, a row that differs from this run's derivation is kept, and
   written back still unmarked). The run says how many it kept; deleting a row hands that section back to
-  04i, and `--rederive-legacy` replaces every unmarked row by today's derivation (never a row marked
-  `manual`). An exclusion carried from the partner is applied on top of a hand row (its rotation and flip
+  04i, and `--rederive-legacy` replaces each unmarked row that 04i derives a row for in this run by
+  today's derivation (an unmarked row with no derivation is kept; a row marked `manual`, in any case and
+  spacing, never is). An exclusion carried from the partner is applied on top of a hand row (its rotation and flip
   stay); a hand row that excludes a section whose partner is kept is left as it is and listed. Kept rows
   in the mirror frame of their partner are listed by name. Before it changes the file it copies it to
   `<name>.<YYYYMMDD-HHMMSS>.backup` (`ls_io.backup_path`, which 04q uses too).
@@ -1700,8 +1705,9 @@ Stage `join_sampling`. The unblinding step: joins the per-ROI numbers to the exp
 
 Stage `excel_sample`. The analysis table as a workbook, one row per ROI per animal.
 
-- **Reads:** `results/roi_measurements.csv` from 06a (it re-derives nothing) and the sampling sheet
-  through 06b's reader.
+- **Reads:** `results/roi_measurements.csv` from 06a (it re-derives nothing), and the `environment`
+  column from 06b's `results/animal_metadata.csv` (joined by animal, so it follows the sheet, `--xlsx`,
+  ID column and matching 06b used; without that file or column it says so and leaves the column blank).
 - **Writes:** `results/roi_dataset.xlsx` (`--out` to change), with sheets `by_roi`, `by_disc`,
   `by_section` and `coverage`, written with openpyxl (bold header, frozen first row, sized columns).
 - **How:** groups 06a's rows. Withheld values (no cut, no denominator, Abercrombie not applied) are blank,
@@ -1990,6 +1996,13 @@ out: the `project` block, `curation`, stage-written values (`detection.auto`), n
 out by default: folder and file paths, and `groups`. Import is a merge, checked by the same validator the
 stages run, after copying the study file aside. The windows are in `app/settings_transfer.py`.
 
+### `ls_sources.py`
+
+Shared module, standard library only: which files a study takes from its source folder under
+`source_files` (a loose CZI, a whole zip, or a CZI inside a zip, by basename), and the named files found
+nowhere. One copy for `00_manifest.py` (what it reads) and `00b_verify_extraction.py` (what it checks), so
+the two cannot select different slides; a named CZI whose only zip will not open fails both.
+
 ### `ls_tune.py`
 
 Shared module, no study file and no CZI: measures a crop's signal and decides detection settings, so every
@@ -2105,7 +2118,7 @@ straight from `sys.argv`) without running it. A script with no options says "(no
 | `04g_artifact_mask.py` | `--marker` | `_default` | which marker to process (default <_default>) Choices: MARKERS. |
 | `04g_artifact_mask.py` | `--include-excluded` | off | mask every scanned section of the marker, from focus.csv, excluded ones included, so they can be reviewed with a mask like every other section. Needs no reformat first. Excluded ones are marked excluded=1 in the summary. |
 | `04i_propagate_to_perk.py` | `--limit` | `0` |  |
-| `04i_propagate_to_perk.py` | `--rederive-legacy` | off | replace rows with no `source` mark (written before 04i marked its rows) by today's derivation, after a backup. Rows marked manual are never replaced |
+| `04i_propagate_to_perk.py` | `--rederive-legacy` | off | replace rows with no `source` mark (written before 04i marked its rows) that this run derives a row for by today's derivation, after a backup; unmarked rows with no derivation are kept. Rows marked manual are never replaced |
 | `04j_censor_clipped.py` | `--tolerance` | `0.01` | section is set aside at or above this clipped fraction |
 | `04j_censor_clipped.py` | `--allow-partial` | off | write the analysis set even if it has unmeasured sections and the file on disk is complete |
 | `04j_censor_clipped.py` | `--marker` | `_default` | which marker to process (default <_default>) Choices: MARKERS. |
@@ -2256,6 +2269,7 @@ straight from `sys.argv`) without running it. A script with no options says "(no
 | `ls_sampling.py` | (none) |  |  |
 | `ls_segment.py` | (none) |  |  |
 | `ls_settings_io.py` | (none) |  |  |
+| `ls_sources.py` | (none) |  |  |
 | `ls_tune.py` | (none) |  |  |
 | `make_demo_pack.py` | `--czi` |  |  |
 | `make_demo_pack.py` | `--scenes` |  | scene indices to keep, e.g. 3,4,6 |

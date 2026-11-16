@@ -42,8 +42,10 @@ never win. If they do, the pairing is suspect.
 **Hand corrections in the overrides file are kept** (see merge_hand_rows). A
 row written before 04i marked its rows (no `source` column) that differs from
 today's derivation is kept too, since nothing says whether a person wrote it;
-`--rederive-legacy` replaces those unmarked rows by today's derivation, after
-the backup, and never touches a row marked `manual`. Kept rows whose flip
+`--rederive-legacy` replaces those unmarked rows that this run derives a row
+for by today's derivation, after the backup; an unmarked row with no
+derivation in this run is kept. It never touches a row marked `manual` (in
+any case, spaces ignored). Kept rows whose flip
 differs from their partner's `manual_flip` are listed and written to
 `<overrides stem>_flip_mismatch.csv`.
 
@@ -444,8 +446,11 @@ def merge_hand_rows(derived, existing, partner_of=None, excluded_sources=(),
     rule keeps a legacy row that may be stale rather than dropping one that may
     be hand work, because where a legacy file came from cannot be known from
     here. `rederive_legacy` (--rederive-legacy) is the operator saying it: a
-    legacy row that differs is then replaced by today's derivation, after the
-    backup. Rows marked `manual` are never replaced, flag or not.
+    legacy row that differs AND that this run derives a row for is then
+    replaced by today's derivation, after the backup; one with no derivation
+    in this run has nothing to be replaced by and is kept. Rows marked
+    `manual` (any case, surrounding spaces ignored) are never replaced, flag
+    or not.
 
     A hand row replaces the derived row for its section in place; `derived_as`
     is updated to what 04i would say now, so the difference stays visible.
@@ -478,7 +483,10 @@ def merge_hand_rows(derived, existing, partner_of=None, excluded_sources=(),
         uid = (r.get("perk_scene_uid") or "").strip()
         if not uid:
             continue
-        src = (r.get("source") or "").strip()
+        # Compared stripped and case-blind: `Manual` or ` manual ` typed by a
+        # person in a spreadsheet is still their mark, and read literally it
+        # counted as UNMARKED - which --rederive-legacy replaces.
+        src = (r.get("source") or "").strip().lower()
         mark = (r.get("derived_as") or "").strip()
         fresh = by_uid.get(uid)
         legacy = src not in ("manual", "derived")
@@ -579,8 +587,10 @@ def main():
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--rederive-legacy", action="store_true",
                     help="replace rows with no `source` mark (written before 04i "
-                         "marked its rows) by today's derivation, after a backup. "
-                         "Rows marked manual are never replaced")
+                         "marked its rows) that this run derives a row for by "
+                         "today's derivation, after a backup; unmarked rows with "
+                         "no derivation are kept. Rows marked manual are never "
+                         "replaced")
     args = ap.parse_args()
 
     with open(PAIRS_CSV, newline="", encoding="utf-8") as fh:
@@ -792,7 +802,8 @@ def main():
         print(f"  full list: {mismatch_path(OUT_CSV)}")
         print(f"  To fix: set `flip` in {os.path.basename(OUT_CSV)} to the partner's")
         print("  manual_flip, or delete the row so 04i derives it; for rows written")
-        print("  before 04i marked its rows, --rederive-legacy replaces all of them.")
+        print("  before 04i marked its rows, --rederive-legacy replaces those 04i")
+        print("  derives a row for in this run.")
         print("!" * 74)
     if merged is not None and merged["excl_disagree"]:
         dis = merged["excl_disagree"]

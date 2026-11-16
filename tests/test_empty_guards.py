@@ -209,6 +209,13 @@ try:
         V.CONFIG["source_files"] = ["other.zip"]
         rc, out = call_main(V, ["00b"])
         chk("...and a named zip's unextracted member still fails", rc, 1)
+        # A named CZI whose only zip will not open used to be skipped
+        # silently: the broken archive was nobody's by name, so the CZI was
+        # never looked for and the run passed. 00 fails on it; so must 00b.
+        V.CONFIG["source_files"] = ["A_1a.czi", "C_3a.czi"]
+        rc, out = call_main(V, ["00b"])
+        chk("...a named CZI found nowhere, its zip unreadable, fails",
+            (rc, "C_3a.czi" in out, "broken.zip" in out), (1, True, True))
     finally:
         V.CONFIG["source_files"] = saved_only
     os.remove(os.path.join(src, "broken.zip"))
@@ -249,6 +256,7 @@ try:
     rc, out = call_main(C, ["01c", good, os.path.join(tmp, "gone.tif")])
     chk("01c with a named section missing returns 1", rc, 1)
     chk("...counting it last", "1 not found" in last_line(out), True)
+    chk("...and saying what to do", "then run 01c again" in last_line(out), True)
 
     # 01h: a channel with too few tiles is counted and fails the run.
     H = load("h", "01h_tilefield_raw.py")

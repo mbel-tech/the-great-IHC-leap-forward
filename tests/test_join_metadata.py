@@ -370,5 +370,41 @@ with tempfile.TemporaryDirectory() as tmp:
     code, _last = run_06b(book, choice)
     chk("a study with no groups at all still joins its columns", code, 0)
 
+print("--- 06c's environment follows 06b's join ---")
+# 06c read the environment from the DEFAULT workbook path itself, kept only
+# all-digit IDs and prefixed "LS": a workbook passed with --xlsx gave none, and
+# an "LS22" ID was dropped. It now reads 06b's animal_metadata.csv by animal.
+with tempfile.TemporaryDirectory() as tmp:
+    with open(B.MEAS_CSV, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=["animal", "roi_kind", "value"])
+        w.writeheader()
+        w.writerows([{"animal": a, "roi_kind": "roi", "value": "1"}
+                     for a in ("LS07", "LS22")])
+    book = os.path.join(tmp, "not_the_default_name.xlsx")
+    chk("the workbook is not at the default path", book != B.DEFAULT_XLSX, True)
+    wb = openpyxl.Workbook()
+    for r in (["Animal", "Group", "Environment"], ["07", "control", "sea"],
+              ["LS22", "exercise", "brackish"]):
+        wb.active.append(r)
+    wb.save(book)
+    choice = {"id_column": "Animal", "group_columns": ["Group"], "match": "number",
+              "fill": []}
+    code, _last = run_06b(book, choice)
+    chk("06b joins a padded ID and an LS-prefixed one", code, 0)
+    chk("06c's environment is 06b's, by animal",
+        C.animal_environment(), {"LS07": "sea", "LS22": "brackish"})
+    wb = openpyxl.Workbook()
+    for r in (["Animal", "Group"], ["07", "control"], ["LS22", "exercise"]):
+        wb.active.append(r)
+    wb.save(book)
+    run_06b(book, choice)
+    import contextlib
+    import io as _io
+    said = _io.StringIO()
+    with contextlib.redirect_stdout(said):
+        got = C.animal_environment()
+    chk("no environment column: none, and said - not read from the default workbook",
+        (got, "no environment column" in said.getvalue()), ({}, True))
+
 print("\n" + ("ALL PASS" if not fails else f"{fails} FAILED"))
 raise SystemExit(1 if fails else 0)

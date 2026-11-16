@@ -47,6 +47,8 @@ if _HERE not in sys.path:
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
 import ls_channels as CH  # noqa: E402
 import ls_io as IO  # noqa: E402
+# source_files matching, shared with 00b so the two cannot drift.
+import ls_sources as SRC  # noqa: E402
 import ls_naming as NM  # noqa: E402
 import ls_progress as PG  # noqa: E402
 
@@ -135,9 +137,7 @@ def discover_sources(stack, skipped=None):
     complete study.
     """
     skipped = skipped if skipped is not None else []
-    only = CONFIG.get("source_files") or None
-    if only:
-        only = {os.path.basename(n) for n in only}
+    only = SRC.named(CONFIG.get("source_files"))
     found = set()
     unreadable = []
 
@@ -145,14 +145,14 @@ def discover_sources(stack, skipped=None):
 
     for path in sorted(glob.glob(os.path.join(SOURCE_DIR, "*.czi"))):
         name = os.path.basename(path)
-        if only and name not in only:
+        if not SRC.takes_loose(name, only):
             continue
         found.add(name)
         entries.append(("LOOSE", name, path, (lambda p: (lambda: open(p, "rb")))(path)))
 
     for zpath in sorted(glob.glob(os.path.join(SOURCE_DIR, "*.zip"))):
         zname = os.path.basename(zpath)
-        whole = not only or zname in only
+        whole = SRC.takes_zip(zname, only)
         try:
             zf = stack.enter_context(zipfile.ZipFile(zpath))
         except (zipfile.BadZipFile, OSError) as exc:
@@ -167,9 +167,7 @@ def discover_sources(stack, skipped=None):
         if whole and only:
             found.add(zname)
         for info in zf.infolist():
-            if not info.filename.lower().endswith(".czi"):
-                continue
-            if not whole and os.path.basename(info.filename) not in only:
+            if not SRC.takes_member(info.filename, whole, only):
                 continue
             found.add(os.path.basename(info.filename))
             entries.append(
@@ -181,12 +179,8 @@ def discover_sources(stack, skipped=None):
                 )
             )
 
-    for name in sorted((only or set()) - found):
-        where = (f"; {len(unreadable)} archive(s) could not be opened to look: "
-                 f"{', '.join(unreadable)}" if unreadable else "")
-        skipped.append(("source_files", name,
-                        f"named in source_files but not found as a loose CZI, a zip, "
-                        f"or a CZI inside a zip in {SOURCE_DIR}{where}"))
+    for name, why in SRC.unfound(only, found, unreadable, SOURCE_DIR):
+        skipped.append(("source_files", name, why))
     return entries
 
 
@@ -363,6 +357,8 @@ def serial_numbers(rows, cols, scenes):
 
 
 CHOSEN_VARIANTS_CSV = os.path.join(MANIFEST_DIR, "chosen_variants.csv")
+#: The columns 00 and 02 both read from it.
+CHOSEN_VARIANT_COLS = ("animal", "slide", "marker_channel", "variant")
 
 
 def _slide_key(value):
@@ -381,8 +377,13 @@ def chosen_variant_overrides():
     if not os.path.exists(CHOSEN_VARIANTS_CSV):
         return {}
     with open(CHOSEN_VARIANTS_CSV, newline="", encoding="utf-8") as fh:
+        rd = csv.DictReader(fh)
+        # A person writes this file: a missing column is a refusal naming the
+        # file and the column, not a bare KeyError from inside the loop.
+        for col in CHOSEN_VARIANT_COLS:
+            IO.pick_column(rd.fieldnames, col, what=CHOSEN_VARIANTS_CSV)
         return {(r["animal"], _slide_key(r["slide"]), r["marker_channel"]): r["variant"]
-                for r in csv.DictReader(fh)}
+                for r in rd}
 
 
 def assign_section_order(scene_rows, order_key):

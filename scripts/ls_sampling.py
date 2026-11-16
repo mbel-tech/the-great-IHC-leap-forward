@@ -56,8 +56,8 @@ EXERCISE_TANKS = {"303", "304", "307", "308"}
 CONTROL_TANKS = {"305", "306", "309", "310"}
 
 # The LS sheet's columns, by a prefix of the header cell after lower-casing and
-# collapsing whitespace. 06c still reads `environment` through these; 06b only
-# uses them to recognise an LS sheet in a study that has made no choice.
+# collapsing whitespace. 06b uses them to recognise an LS sheet in a study that
+# has made no choice; 06c finds the environment column 06b carried by its prefix.
 COLUMN_PREFIX = {"fish": "fish id", "timepoint": "timepoint", "environment": "enviro",
                  "brackish_tank": "brackish tank", "sea_tank": "sea water tank",
                  "treatment": "treatment", "body_weight_g": "body weight",
@@ -243,16 +243,6 @@ def workbook_path(cfg, options):
         return chosen
     source = (cfg or {}).get("source_dir") or ""
     return os.path.join(source, DEFAULT_NAME) if source else ""
-
-
-def fish_id(animal):
-    """The LS sheet's Fish ID for an animal: LSnn -> nn; "" unless it has one number.
-
-    The rule `_number` matches by: one run of digits is an ID, two are not one
-    ("LS2-1" is not fish 21). The digits are kept as written (LS07 -> "07").
-    """
-    runs = re.findall(r"\d+", animal or "")
-    return runs[0] if len(runs) == 1 else ""
 
 
 def sheet_names(path):

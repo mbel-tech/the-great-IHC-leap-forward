@@ -309,6 +309,22 @@ with temp_study() as st:
     rc = run_main(G, ["04g", "--marker", marker, "--limit", "2"])
     chk("a --limit trial is not failed for sections it was told not to do", rc, None)
 
+    # A focus row with no um_px takes the config's overview scale - said, not
+    # silent, since that is wrong if the scale changed after the export.
+    write(G.QC_CSV, [{"scene_uid": u, "animal": "LS01", "section_order": str(i),
+                      "marker_channel": marker, "saturated_fraction": "0",
+                      "um_px": ("" if i == 0 else "5.20")}
+                     for i, u in enumerate(uids)])
+    buf = io.StringIO()
+    sys.argv = ["04g", "--marker", marker, "--limit", "2"]
+    try:
+        with contextlib.redirect_stdout(buf):
+            G.main()
+    finally:
+        sys.argv = saved
+    chk("a section with no um_px is counted as on the config's scale",
+        "1 section(s) have no um_px in focus.csv" in buf.getvalue(), True)
+
     # The area gates are physical. One bright, smooth disc of 112 px in
     # granular tissue, the same pixels at three scales: its area follows the
     # square of the scale, and the 1 px specks that are noise at 5.20 um/px
@@ -326,6 +342,19 @@ with temp_study() as st:
         [round(r["area_mm2"], 6) for r in at[10.4e-3]], [round(112 * 10.4e-3 ** 2, 6)])
     chk("...and at 20.8 um/px single-pixel specks clear the physical minimum",
         len(at[20.8e-3]) > 1, True)
+
+    # The tissue-core gate is physical too (MIN_CORE_MM2, which was 500 px).
+    # A 1260 px smooth dome in 200x200 px of tissue: at 0.65 um/px the eroded
+    # core is 0.0149 mm2 and the dome is found; at 0.60 um/px the core is
+    # 0.0127 mm2, under the gate, and nothing is - although the dome itself
+    # (0.00045 mm2) would clear MIN_OBJ_MM2. As 500 px, the gate passed both.
+    im2 = rng.normal(100, 25, (200, 200)).astype(np.float32)
+    d2 = (yy - 100) ** 2 + (xx - 100) ** 2
+    im2[d2 < 400] = (300 - 0.1 * d2)[d2 < 400]
+    chk("enough tissue core at 0.65 um/px: the dome is found",
+        len(G2.detect(im2, tis, 6.5e-4)[1]), 1)
+    chk("...too little physical core at 0.60 um/px: nothing is judged",
+        G2.detect(im2, tis, 6.0e-4)[1], [])
 
 # ---------------------------------------------------------------- 01 / 01k
 

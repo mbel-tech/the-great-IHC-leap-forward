@@ -104,17 +104,40 @@ def overview_um_px(row):
     ratio, and nothing said so. One helper, here because all three already
     load this module, so the fallback cannot drift between them.
     """
-    try:
-        v = float((row or {}).get("um_px") or "")
-        if v > 0:
-            return v
-    except (TypeError, ValueError):
-        pass
+    v = own_um_px(row)
+    if v is not None:
+        return v
     v = CONFIG.get("overview_target_um_per_px")
     if not v:
         raise SystemExit("no overview scale: focus.csv has no um_px for this "
                          "section and the config sets no overview_target_um_per_px")
     return float(v)
+
+
+def own_um_px(row):
+    """The focus.csv row's own `um_px` as a float, or None when it has none."""
+    try:
+        v = float((row or {}).get("um_px") or "")
+    except (TypeError, ValueError):
+        return None
+    return v if v > 0 else None
+
+
+def report_scale_fallbacks(uids, own):
+    """Say how many of `uids` took the config's overview scale.
+
+    `own` is the set of uids whose focus.csv row carries its own `um_px`. The
+    fallback is the scale 01 exports at, so it is normally right - but it is
+    silent, and wrong if the config's scale changed after the export. A count
+    makes that visible. Returns the count.
+    """
+    n = sum(1 for u in uids if u not in own)
+    if n:
+        print(f"  {n} section(s) have no um_px in focus.csv; their areas use the "
+              f"config's overview_target_um_per_px "
+              f"({overview_um_px(None)} um/px). Re-run 01_overviews.py if that is "
+              f"not the scale they were exported at.")
+    return n
 
 # The naming rule, borrowed rather than restated. ls_paths owns it; this
 # module is one of its callers. See marker_paths below for what still is not

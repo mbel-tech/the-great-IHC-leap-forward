@@ -1294,7 +1294,12 @@ def incomplete(stage, study):
     the log, and 05c trusts such rows, so nothing is counted against them.
     """
     if stage.sid != "detect":
-        rec = last_run((study.cfg or {}).get("project"), stage.sid)
+        # Full runs only. A `--limit` trial writes beside the real outputs
+        # (.trialN), so whether it passed says nothing about them - and a
+        # passing trial after a failed full run used to clear "its last run
+        # failed", leaving the partial table the full run wrote reading as
+        # done.
+        rec = last_run((study.cfg or {}).get("project"), stage.sid, full_only=True)
         if (rec is not None and not rec.get("ok")
                 and stage.done(study.out_root, study.names)):
             return "its last run failed"
@@ -2086,11 +2091,18 @@ def next_up(study, setup_ok=True, setup_missing=()):
     return "home", "Everything the app can run is done.", None
 
 
-def last_run(project_block, sid):
-    """The newest run record for a stage, or None."""
+def last_run(project_block, sid, full_only=False):
+    """The newest run record for a stage, or None.
+
+    `full_only` skips trial runs - records whose options carry `--limit` -
+    which narrow the stage on purpose and leave its real outputs alone.
+    """
     for rec in reversed((project_block or {}).get("runs") or []):
-        if rec.get("stage") == sid:
-            return rec
+        if rec.get("stage") != sid:
+            continue
+        if full_only and ((rec.get("options") or {}).get("--limit")):
+            continue
+        return rec
     return None
 
 

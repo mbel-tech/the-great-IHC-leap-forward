@@ -26,7 +26,7 @@ Draws every scene straight from the scan, so you can look at the raw tissue befo
 
 Many stages share these switches under **Options**:
 
-- **Only the first N sections**: a quick trial run. 0 means all. A trial never replaces a complete result: it is written beside it (a `.trialN.csv` file), or adds its sections to a per-section table, and a stage is not shown as done from a trial alone.
+- **Only the first N sections**: a quick trial run. 0 means all. A trial never replaces a complete result: it is written beside it (a `.trialN.csv` file), or adds its sections to a per-section table, and a stage is not shown as done from a trial alone. A trial that passes does not clear a full run that failed.
 - **Redo … already done**: normally finished work is skipped. Turn this on after changing a setting that affects the stage, then turn it off again. From *Place the ROIs on the slide* on you rarely need it: those stages show *Out of date* and redo themselves (see [Measure](Measure#out-of-date)).
 - **Include excluded sections**: also makes pictures of excluded sections, so the curator's Review can show them.
 

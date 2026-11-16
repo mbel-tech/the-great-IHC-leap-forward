@@ -1084,12 +1084,21 @@ def main():
     # Every marker is attempted even when an earlier one fails, and a marker
     # that places nothing is NOT written: its existing boxes are curation-
     # derived work, and an empty file would silently replace them.
-    rc = 0
+    failed = []
     for marker in todo:
         if _place_marker(marker, regions, plates, args,
                          only=marker if split else None):
-            rc = 1
-    return rc
+            failed.append(marker)
+    # The reason goes LAST, after every marker has printed its summary.
+    # app/runner.py shows the last line printed as the failure, and the app
+    # runs this with no --marker, so under `paired` a marker that failed and
+    # one placed cleanly after it used to leave the second marker's "====="
+    # separator as the reason.
+    if failed and len(todo) > 1:
+        print(f"!! ROIs not placed for {', '.join(failed)} (see that marker's "
+              f"output above); the other marker(s) were placed. This stage is "
+              f"not complete: fix the cause and run it again.")
+    return 1 if failed else 0
 
 
 def _place_marker(marker, regions, plates, args, only=None):

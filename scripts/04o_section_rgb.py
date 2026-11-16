@@ -971,7 +971,12 @@ def main():
                 else:
                     mismatched += 1
                     print(f"  MISMATCH {uid}")
-                continue
+            else:
+                # Nothing to compare with. This fell through to the save
+                # below and wrote a 256 px render (verify renders at scale 1)
+                # over the composite path - a check that changed the output.
+                missing.append((uid, "no greyscale section to compare with"))
+            continue
 
         Image.fromarray(composite(comp, img, colour, NUCLEAR_COLOUR)).save(out_path)
         refresh_thumb(out_dir, uid, args.thumb_size)
@@ -986,7 +991,7 @@ def main():
         if existing:
             print(f"  {existing} already there, left alone (--force rebuilds them)")
     if missing:
-        print(f"  {len(missing)} not built:")
+        print(f"  {len(missing)} not {'verified' if args.verify else 'built'}:")
         for uid, why in missing[:10]:
             print(f"    {uid}  {why}")
     # Every composite rebuilt above already re-shrank its own thumbnail; this
@@ -997,6 +1002,17 @@ def main():
     # the whole of it and the run returned None, so the app showed the stage
     # done and the curator showed those sections grey. What was built stays;
     # printed last, because app/runner.py shows the last line as the reason.
+    if args.verify:
+        # A check that finds a failure must not end in success (REVIEW.md
+        # rule 2): a mismatch means a landmark placed on the composite does not
+        # mean what the exports say, and a section it could not check is not
+        # a pass.
+        if mismatched or missing:
+            print(f"!! {args.marker} --verify: {mismatched} section(s) MISMATCHED "
+                  f"and {len(missing)} could not be checked (see above): the "
+                  f"blue plane does not reproduce the greyscale sections.")
+            return 1
+        return None
     if missing:
         print(f"!! {len(missing)} {args.marker} composite(s) NOT BUILT (see above): "
               f"this stage is not complete. Fix the cause and run it again; it "

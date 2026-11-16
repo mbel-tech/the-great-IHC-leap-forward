@@ -246,7 +246,7 @@ print()
 print("--- a composite not built, or a marker with no colour, fails the run ---")
 
 
-def run_04o_rc(O, marker):
+def run_04o_rc(O, marker, extra=("--all", "--thumbs")):
     """run_04o, but keeping main()'s return value and what it printed."""
     import contextlib
     import io
@@ -257,7 +257,7 @@ def run_04o_rc(O, marker):
         return img, None, 0.0, None, None, comp
 
     saved_argv, saved_rf = sys.argv, O.RF.reformat
-    sys.argv = ["04o_section_rgb.py", "--marker", marker, "--all", "--thumbs",
+    sys.argv = ["04o_section_rgb.py", "--marker", marker, *extra,
                 "--source", "overview"]
     O.RF.reformat = fake_reformat
     out = io.StringIO()
@@ -293,6 +293,32 @@ with temp_study(acquisition=MULTIPLEX) as study:
         bool(said) and "1 Mk1 composite(s) NOT BUILT" in said[-1], True)
     chk("...the one that could be built is on disk",
         os.path.exists(os.path.join(O.rgb_dir("Mk1"), UID + ".png")), True)
+
+    # --verify is a check: a mismatch, or a section it could not check, used
+    # to end in success. UID's greyscale matches its DAPI overview; S3's does
+    # not; `gone` has no overview, so it cannot be checked.
+    sec = O.RF.marker_paths("Mk1")["sections"]
+    os.makedirs(sec, exist_ok=True)
+    Image.fromarray(np.full((SIDE, SIDE), 40, np.uint8)).save(os.path.join(sec, UID + ".png"))
+    bad = "S3"
+    Image.fromarray(np.full((SIDE, SIDE), 41, np.uint8)).save(os.path.join(sec, bad + ".png"))
+    Image.fromarray(np.full((SIDE, SIDE), 40, np.uint8)).save(os.path.join(d, bad + "_DAPI.png"))
+    Image.fromarray(np.full((SIDE, SIDE), 200, np.uint8)).save(os.path.join(d, bad + "_MARK.png"))
+    write_csv(os.path.join(out, "reformatted", "reformat_index.csv"),
+              ["id", "kind", "animal"],
+              [{"id": u, "kind": "section", "animal": "AB12"} for u in (UID, gone, bad)])
+    write_csv(os.path.join(out, "qc", "focus.csv"),
+              ["scene_uid", "marker_channel", "animal"],
+              [{"scene_uid": u, "marker_channel": "Mk1", "animal": "AB12"}
+               for u in (UID, gone, bad)])
+    rc, said = run_04o_rc(O, "Mk1", ("--all", "--verify"))
+    chk("--verify with a mismatch fails the run", rc, 1)
+    chk("...naming the mismatch", any("MISMATCH " + bad in ln for ln in said), True)
+    chk("...the section it could not check is 'not verified', not 'not built'",
+        any("1 not verified" in ln for ln in said)
+        and not any("NOT BUILT" in ln for ln in said), True)
+    chk("...and the reason is the last line",
+        bool(said) and "1 section(s) MISMATCHED and 1 could not be checked" in said[-1], True)
 
 # The first two markers shown get red and green by default; a third with no
 # `display.colours` entry is what the colour map leaves out.

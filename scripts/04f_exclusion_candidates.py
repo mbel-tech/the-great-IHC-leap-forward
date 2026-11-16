@@ -177,7 +177,32 @@ def carry_excluded(indexed):
     if ex_rows is None or prior is None:
         return []
     excluded = {r.get("scene_uid") for r in ex_rows}
-    return [r for r in prior if r.get("uid") in excluded and r["uid"] not in indexed]
+    return [dict(r, carried="excluded") for r in prior
+            if r.get("uid") in excluded and r["uid"] not in indexed]
+
+
+def carry_unmeasured(uids):
+    """Rows of the previous `exclusion_candidates.csv` for indexed sections
+    this run could not measure (overview unreadable), marked carried=unreadable.
+
+    Without them a full run replaced the file with one lacking those rows -
+    and a row that PROPOSED an exclusion is what 04a --apply-overrides reads
+    for a study with no override file, so the next final reformat would
+    quietly stop excluding it. The run still fails for these sections; this
+    only keeps the last measurement standing until one succeeds. A section with
+    no previous row has nothing to carry.
+    """
+    if not uids or not os.path.exists(CANDIDATES_CSV):
+        return []
+    try:
+        with open(CANDIDATES_CSV, newline="", encoding="utf-8") as fh:
+            prior = list(csv.DictReader(fh))
+    except (OSError, UnicodeDecodeError, csv.Error) as e:
+        print(f"!! could not read {CANDIDATES_CSV} ({e}); no previous row carried "
+              f"for the sections not measured")
+        return []
+    want = set(uids)
+    return [dict(r, carried="unreadable") for r in prior if r.get("uid") in want]
 
 
 def _order_key(r):
@@ -271,7 +296,8 @@ def main():
     with open(QC_CSV, newline="", encoding="utf-8") as fh:
         for r in csv.DictReader(fh):
             chan[r["scene_uid"]] = r["marker_channel"]
-            um_px[r["scene_uid"]] = _RF.overview_um_px(r)
+            if _RF.own_um_px(r) is not None:
+                um_px[r["scene_uid"]] = _RF.own_um_px(r)
             try:
                 focus[r["scene_uid"]] = float(r["focus_score"])
             except (KeyError, ValueError):
@@ -280,6 +306,7 @@ def main():
     with open(os.path.join(REFORMAT_DIR, "reformat_index.csv"), newline="", encoding="utf-8") as fh:
         index = [r for r in csv.DictReader(fh) if r["kind"] == "section"]
 
+    _RF.report_scale_fallbacks([r["id"] for r in index], set(um_px))
     rows = []
     # Sections this run could not measure. A silent `continue` once: a section
     # never measured is never proposed, and the candidates file just came out
@@ -324,6 +351,7 @@ def main():
     n_prop = sum(r["proposed"] for r in rows)
     # --survey proposes nothing and writes its own file, so it carries nothing.
     carried = [] if args.survey else carry_excluded({r["id"] for r in index})
+    kept_prior = [] if args.survey else carry_unmeasured(unmeasured)
 
     print()
     print("=" * 74)
@@ -362,13 +390,17 @@ def main():
             print("  they are in excluded_sections.csv but not in reformat_index.csv,")
             print("  because a final reformat left them out; dropping them here would")
             print("  put them back into the analysis at the next final reformat")
+        if kept_prior:
+            print(f"kept the previous row of {len(kept_prior)} section(s) this run could "
+                  f"not measure (carried=unreadable), so their proposal still stands")
     print("=" * 74)
 
     out = output_path(args.survey)
     os.makedirs(os.path.dirname(out), exist_ok=True)
     keys = ["uid", "animal", "section_order", "proposed", "artifact_class", "reason",
-            "largest_mm2", "total_mm2", "n_pieces", "focus_score", "frame_mm2"]
-    IO.atomic_write_csv(out, sorted(rows + carried, key=_order_key), keys)
+            "largest_mm2", "total_mm2", "n_pieces", "focus_score", "frame_mm2",
+            "carried"]
+    IO.atomic_write_csv(out, sorted(rows + carried + kept_prior, key=_order_key), keys)
     print(f"wrote {out}")
 
     montage(rows, args.montage)

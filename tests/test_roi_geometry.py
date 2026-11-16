@@ -728,14 +728,27 @@ with temp_study(acquisition={"layout": "paired",
             report.update(dict(REP, angle=7.0) if U3 in src else REP)
         return np.zeros((256, 256), np.uint8)
 
+    # The same export with Mk2's clean section in it too: the app runs 05a
+    # with no --marker, so Mk1 fails and Mk2 is placed AFTER it in one run.
+    turned2_csv = os.path.join(MK.root, "roi_regions_turned2.csv")
+    _wcsv(turned2_csv,
+          [{"scene_uid": u, "marker": m, "roi_kind": "roi", "region": "R1",
+            "seed_n": "1", "sec_x": "128", "sec_y": "128", "sec_r": "10",
+            "sec_poly": ""} for u, m in ((U1, "Mk1"), (U3, "Mk1"), (U2, "Mk2"))],
+          _RCOLS)
+
     _saved = (P5.RF.reformat, P5.scene_rects, sys.argv)
     _buf = _io.StringIO()
+    _buf2 = _io.StringIO()
     try:
         P5.RF.reformat = _turned
         P5.scene_rects = lambda path: {0: (100, 200, 1000, 1000)}
         sys.argv = ["05a_roi_geometry.py", turned_csv, "--all-sections"]
         with _ctx.redirect_stdout(_buf):
             _rc = P5.main()
+        sys.argv = ["05a_roi_geometry.py", turned2_csv, "--all-sections"]
+        with _ctx.redirect_stdout(_buf2):
+            _rc2 = P5.main()
     finally:
         P5.RF.reformat, P5.scene_rects, sys.argv = _saved
         for _p, _text in _keep.items():
@@ -749,6 +762,13 @@ with temp_study(acquisition={"layout": "paired",
         _last.startswith("!! 1 Mk1 section(s) with ROIs NOT PLACED"), True)
     chk("...the section that was placed still has its box",
         _uids(P5.box_csv("Mk1")), [U1])
+    _last2 = [ln for ln in _buf2.getvalue().splitlines() if ln.strip()][-1]
+    chk("two markers, Mk1 skips and Mk2 is clean: the run fails", _rc2, 1)
+    chk("...Mk2 was still placed", _uids(P5.box_csv("Mk2")), [U2])
+    chk("...Mk1's own NOT PLACED line is printed",
+        "!! 1 Mk1 section(s) with ROIs NOT PLACED" in _buf2.getvalue(), True)
+    chk("...and the LAST line names Mk1, not Mk2's separator",
+        _last2.startswith("!! ROIs not placed for Mk1 "), True)
 
 
 print()

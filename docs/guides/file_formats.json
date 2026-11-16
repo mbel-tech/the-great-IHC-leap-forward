@@ -2895,6 +2895,12 @@
      "type": "float",
      "units": "mm²",
      "meaning": "Area of the whole working frame."
+    },
+    {
+     "name": "carried",
+     "type": "text",
+     "units": "",
+     "meaning": "Empty for a row this run measured. `excluded`: the previous row, unchanged, of a section already excluded and no longer in the index. `unreadable`: the previous row of an indexed section whose overview this run could not read (the run fails for it)."
     }
    ]
   },

@@ -25,6 +25,15 @@ could not place, angle mismatch included). A `--limit` trial counts only the sec
 to do. Checks in `tests/test_section_review.py`, `test_partial_runs.py`,
 `test_proposed_exclusions.py`, `test_propagate_frames.py`, `test_rgb_per_marker.py`,
 `test_roi_geometry.py` and `test_wullimann_registration.py`.
+After review: a 05a run over several markers ends with one line naming the markers that
+failed, so a clean marker placed after a failed one no longer leaves its separator as the reason;
+04g's tissue-core gate is an area (`MIN_CORE_MM2`); 04f, 04g and 04i say how many sections took
+the config's overview scale for want of a `um_px`; 04f keeps the previous row of a section it
+could not read, marked in a new `carried` column (`unreadable`, and `excluded` for the
+already-excluded rows); `04o --verify` exits 1 on a mismatch or a section it cannot check, and no
+longer writes a 256 px render over the composite when there is no greyscale to compare; and the
+app's "its last run failed" is judged from full runs only, so a passing `--limit` trial cannot
+clear a failed full run (`tests/test_failed_run.py`).
 
 **Why:** found on review (REVIEW.md rules 2 and 6). Under `paired`, 04e looked in `sections/`
 only, so the second marker's landmark export ended "nothing refined". `UM_PX = 5.20e-3` in 04f and

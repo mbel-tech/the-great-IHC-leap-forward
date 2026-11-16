@@ -133,6 +133,10 @@ HALO_PCTL = 90.0
 HALO_ITERS = 10
 # ~0.0004 mm2 (15 px at 5.20 um/px - the same cut there); below this it is noise
 MIN_OBJ_MM2 = 4.0e-4
+# Below this much tissue core (after the rim erosion) there is nothing to
+# judge against. 0.0135 mm2 is 500 px at 5.20 um/px, the same cut there
+# (500 px is 0.01352, 499 px 0.01349); it was the pixel count `500`.
+MIN_CORE_MM2 = 0.0135
 MAX_OBJ_MM2 = 1.2           # above this it is not an artifact, it is anatomy
 ELONGATION_SPLIT = 3.0      # bbox aspect ratio dividing compact from elongated
 FILL_SPLIT = 0.55           # area / bbox area; a curved fibre is low, a disc is high
@@ -156,7 +160,7 @@ def detect(im, tis, mm_px):
     """
     px_mm2 = mm_px ** 2
     core = ndimage.binary_erosion(tis, np.ones((2 * RIM_ERODE_PX + 1,) * 2))
-    if core.sum() < 500:
+    if core.sum() * px_mm2 < MIN_CORE_MM2:
         return np.zeros(im.shape, np.uint8), []
 
     tex = texture(im)
@@ -425,7 +429,8 @@ def main():
             chan[r["scene_uid"]] = r["marker_channel"]
             # The scale this section's overview was exported at; see
             # 04a.overview_um_px.
-            um_px[r["scene_uid"]] = _RF.overview_um_px(r)
+            if _RF.own_um_px(r) is not None:
+                um_px[r["scene_uid"]] = _RF.own_um_px(r)
             try:
                 satur[r["scene_uid"]] = float(r["saturated_fraction"])
             except (KeyError, ValueError):
@@ -446,6 +451,7 @@ def main():
 
     if args.limit:
         index = index[: args.limit]
+    _RF.report_scale_fallbacks([r["id"] for r in index], set(um_px))
 
     rows, previews = [], []
     # Sections this run was asked to mask and could not. Both used to be a

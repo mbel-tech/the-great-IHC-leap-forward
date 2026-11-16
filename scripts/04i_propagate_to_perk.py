@@ -602,7 +602,8 @@ def main():
     with open(os.path.join(OUT_ROOT, "qc", "focus.csv"), newline="", encoding="utf-8") as fh:
         for r in csv.DictReader(fh):
             chan[r["scene_uid"]] = (r["animal"], r["marker_channel"])
-            um_px[r["scene_uid"]] = _RF.overview_um_px(r)
+            if _RF.own_um_px(r) is not None:
+                um_px[r["scene_uid"]] = _RF.own_um_px(r)
 
     rows, n_excl, n_nopair, failed = [], 0, 0, 0
     todo = list(kept.items())
@@ -626,6 +627,9 @@ def main():
             n_excl += 1
 
     # 2. Rotations, re-derived by aligning to the curated source mask.
+    _RF.report_scale_fallbacks(
+        [u for uid, _ in todo if target_of.get(uid) for u in (uid, target_of[uid])],
+        set(um_px))
     for i, (uid, meta) in enumerate(todo, 1):
         u_target = target_of.get(uid)
         if not u_target:

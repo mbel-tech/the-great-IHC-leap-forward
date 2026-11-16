@@ -1318,7 +1318,9 @@ Stage `exclusion`. Proposes the sections that cannot be measured, conservatively
   row unchanged, and the run says how many it carried (and why, when an existing exclusions or candidates
   file cannot be read); dropping it would put it back into the analysis at
   the next final reformat. A section whose overview cannot be read is named and fails the run (exit 1, the
-  count as the last line); the sections that were measured are written.
+  count as the last line); the sections that were measured are written, and its previous row, if it
+  had one, is kept with `carried` = `unreadable` so a standing proposal is not lost (rows carried for
+  already-excluded sections say `excluded`).
 
 ### `04g_artifact_mask.py`
 
@@ -1330,7 +1332,9 @@ otherwise good tissue and masks them.
   previews in `qc/artifacts/`.
 - **How:** on the DAPI overview (artifacts that affect every channel equally), 5.20 µm per pixel on the
   LS study. Every area (the object size gates, tissue and measurable mm²) is converted with the section's
-  own `um_px` from `qc/focus.csv`, or the config's `overview_target_um_per_px` when the row has none. The tissue rim is
+  own `um_px` from `qc/focus.csv`, or the config's `overview_target_um_per_px` when the row has none
+  (the run says how many sections took that fallback, as 04f and 04i do). The minimum tissue core
+  is an area too (`MIN_CORE_MM2`, 500 px at 5.20 µm/px). The tissue rim is
   eroded by 6 px (31 µm) first, because the pial and ventricular surfaces are genuinely bright. Bright
   objects inside are classed by shape as compact (air bubble, antibody aggregate) or elongated
   (fibre, hair, external debris). The masked area is small (median 0.13 % of
@@ -1465,7 +1469,9 @@ frame.
   GB to render and more than a browser holds comfortably. Measurement never depends on it.
 - **Settings:** `curation_render.*`, `display`, `acquisition`, `channels`.
 - **Failure and re-run:** resumable; `--force` redraws. `--all` builds the whole index and
-  `--include-excluded` every scanned section, unmasked, for Review mode. A composite it could not build
+  `--include-excluded` every scanned section, unmasked, for Review mode. `--verify` exits 1 when a
+  section's blue plane does not match its greyscale or a section cannot be checked; it writes nothing.
+  A composite it could not build
   (overview missing, no tissue mask, the CZI unreadable) is named and the run exits 1 with the count as its
   last line, as does a marker with no `display.colours` entry; what was built is kept, and a re-run builds
   only what is missing.
@@ -1563,7 +1569,8 @@ real slide pixels.
   reads and the app's Done check looks for, is left as it was. A section with ROIs that could not be
   placed (its angle no longer matches, its overview or scene rectangle is missing, or it has no index
   row) is listed under `SKIPPED` and the run exits 1 with the count as its last line, a trial included
-  for the sections it was told to place; the boxes that were placed are written. Sections left out by the
+  for the sections it was told to place; the boxes that were placed are written. When one run places
+  several markers, a closing line after the last marker names the ones that failed. Sections left out by the
   analysis-set rule (no background disc) are the curation's decision and do not fail the run.
 
 ### `05b_tune_detection.py`
@@ -3266,6 +3273,7 @@ One row per reformatted section: whether 04f proposes it for exclusion, and the 
 | `n_pieces` | int |  | Pieces above the minimum size. |
 | `focus_score` | float |  | From focus.csv (rule: under 0.070 proposes `out_of_focus`). |
 | `frame_mm2` | float | mm² | Area of the whole working frame. |
+| `carried` | text |  | Empty for a row this run measured. `excluded`: the previous row, unchanged, of a section already excluded and no longer in the index. `unreadable`: the previous row of an indexed section whose overview this run could not read (the run fails for it). |
 
 #### `reformatted/reformat_index[_<marker>].csv`
 

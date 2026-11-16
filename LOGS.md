@@ -9,6 +9,33 @@ where things landed, not which plausible-looking route was tried and abandoned, 
 
 ---
 
+## 2026-11-16 - Ingest tells the truth (00 / 00b / 01c / 01d / 01f / 01g / 01h / 01k)
+
+**Changed:** `00_manifest` exits 1 and writes neither `manifest_files.csv` nor
+`manifest_scenes.csv` when it finds no CZI, or when any file cannot be read: a name outside the
+grammar, no Scenes block, a Scenes block that disagrees with `SizeS` (was only printed), an archive
+that will not open (was skipped uncounted), or a `source_files` name found nowhere. `source_files`
+may now name a CZI inside a zip; it was matched against the zip's own name, so the whole archive
+was skipped. The paired marker check, which sat after `return 0`, now runs after the tables are
+written. A QC table with no rows (`slide_layout_review.csv`, and 04a's `gaps.csv`) is written
+header-only instead of leaving last run's file. 00b exits 1 on a corrupt, missing or still
+extracting file or an unreadable archive. 01f exits 1 on a channel with no usable section (build) or
+a section with no field (verify); 01h on a channel with too few tiles or a file it could not read,
+and counts manifest files not on disk; 01c on no sections or nothing measurable, and then writes no
+summary; 01k on any section it could not measure, not only those with an earlier row, with a
+sentence rather than a row of `=` as its last line; 01g on sections with no overview pair, writing
+no census when nothing was measured; 01d on focus.csv sections with no overview PNG, counted. Each
+prints its reason last. Checks in `tests/test_manifest_checks.py`, `test_empty_guards.py` and
+`test_atomic_outputs.py`.
+
+**Why:** found on review (REVIEW.md rules 2 and 3). Each of these printed its problem and exited
+0, so the app showed the step done; a partial 00 left the two manifest tables describing different
+runs, and a stale review list read as this run's.
+
+**Cost:** a slides folder holding one CZI the grammar does not fit now stops 00 until it is
+renamed or left out with `source_files`. 01c's FAIL verdict is still a successful run: the
+before-correction measurement is expected to find the artifact.
+
 ## 2026-11-15 - Study-agnostic stages that fail honestly (04a / 04e / 04f / 04g / 04i / 04o / 05a)
 
 **Changed:** no stage converts an overview area with a literal pixel size any more.

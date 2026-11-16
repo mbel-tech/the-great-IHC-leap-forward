@@ -233,5 +233,113 @@ finally:
 chk("01k with its only CZI missing returns 1", rc, 1)
 chk("...and says nothing was measured", "nothing measured" in said.getvalue(), True)
 
+
+def _last_line(text):
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    return lines[-1] if lines else ""
+
+
+chk("...and the reason is the last line, not a row of =",
+    "measured nothing" in _last_line(said.getvalue()), True)
+
+print()
+print("--- 01k: a run where only SOME files fail is a failure ---")
+# Fresh: no earlier saturation_raw.csv, so no row is "kept stale" - the case
+# that used to exit 0 with the missing file's sections simply absent.
+GOOD_K, GONE_K = "LS01_s03a.czi", "LS01_s04a.czi"
+open(os.path.join(K.SOURCE_DIR, GOOD_K), "wb").close()
+scenes_k = [dict(scenes[0], scene_uid="LS01_s03a_sc00", file=GOOD_K, slide="3"),
+            dict(scenes[0], scene_uid="LS01_s04a_sc00", file=GONE_K, slide="4")]
+with open(os.path.join(STUDY.out_root, "manifest", "manifest_scenes.csv"), "w",
+          newline="", encoding="utf-8") as fh:
+    w = csv.DictWriter(fh, fieldnames=list(scenes_k[0]))
+    w.writeheader()
+    w.writerows(scenes_k)
+if os.path.exists(K.OUT_CSV):
+    os.remove(K.OUT_CSV)
+
+
+class _Doc:
+    scenes_bounding_rectangle = {0: object()}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+class _PyCziOne:
+    @staticmethod
+    def open_czi(path):
+        return _Doc()
+
+
+sys.modules["pylibCZIrw"].czi = _PyCziOne
+
+
+def _record(r, fname, rect, s, zoom, dapi_raw, mark_raw, corrected, ceiling):
+    return {"scene_uid": r["scene_uid"], "file": fname, "marker_channel": r["marker_channel"],
+            "saturated_fraction_raw": 0.1, "saturated_fraction_dapi_raw": 0.0,
+            "raw_over_corrected": "", "ceiling": ceiling}
+
+
+try:
+    sys.argv = ["01k", "--native-sample", "0", "--no-merge"]
+    with mock.patch.object(K, "measure", lambda *a, **k: (None, None, None)), \
+            mock.patch.object(K.OV, "raw_clip_record", _record), \
+            contextlib.redirect_stdout(io.StringIO()) as said:
+        rc = K.main()
+finally:
+    sys.argv = argv
+    sys.modules["pylibCZIrw"].czi = _PyCzi
+chk("01k with one of two files missing returns 1", rc, 1)
+chk("...naming the section in the last line",
+    "LS01_s04a_sc00" in _last_line(said.getvalue()), True)
+with open(K.OUT_CSV, newline="", encoding="utf-8") as fh:
+    chk("...and still keeps the section it did measure",
+        [r["scene_uid"] for r in csv.DictReader(fh)], ["LS01_s03a_sc00"])
+
+print()
+print("--- 01g: nothing measured is a failure and writes no census ---")
+G = load_stage("01g_saturation_map.py")
+mk = G.MARKERS[0]
+os.makedirs(os.path.dirname(G.QC_CSV), exist_ok=True)
+QC_FIELDS = ["scene_uid", "animal", "slide", "marker_channel", "section_order", "um_px",
+             "saturated_fraction", "saturated_fraction_raw"]
+with open(G.QC_CSV, "w", newline="", encoding="utf-8") as fh:
+    w = csv.DictWriter(fh, fieldnames=QC_FIELDS)
+    w.writeheader()
+    w.writerow({"scene_uid": "LS01_s05a_sc00", "animal": "LS01", "slide": "5",
+                "marker_channel": mk, "section_order": "1", "um_px": "5.2",
+                "saturated_fraction": "0", "saturated_fraction_raw": "0"})
+census = os.path.join(G.REPORT_DIR, f"saturation_{mk}.csv")
+try:
+    sys.argv = ["01g"]
+    with contextlib.redirect_stdout(io.StringIO()) as said:
+        rc = G.main()
+finally:
+    sys.argv = argv
+chk("01g with no overview for its only section returns 1", rc, 1)
+chk("...and writes no saturation csv for the app to read as done",
+    os.path.exists(census), False)
+chk("...saying why, last", "no _MARK/_DAPI overview" in _last_line(said.getvalue()), True)
+
+print()
+print("--- 04a atlas extract: an empty gaps table replaces last run's ---")
+AX = load_stage("04a_atlas_extract.py")
+gaps = os.path.join(STUDY.out_root, "gaps_probe.csv")
+with open(gaps, "w", encoding="utf-8") as fh:
+    fh.write("plate_id,page,image_file,reason\nP1,1,p1.png,no region seeds on this plate\n")
+with contextlib.redirect_stdout(io.StringIO()):
+    AX._write_csv(gaps, [], ["plate_id", "page", "image_file", "reason"])
+with open(gaps, newline="", encoding="utf-8") as fh:
+    chk("04a gaps.csv with no gaps is header-only", list(csv.reader(fh)),
+        [["plate_id", "page", "image_file", "reason"]])
+with open(os.path.join(SCRIPTS, "04a_atlas_extract.py"), encoding="utf-8") as fh:
+    src = fh.read()
+chk("04a passes gaps.csv its columns",
+    '"gaps.csv"), gap_rows,\n               ["plate_id", "page", "image_file", "reason"])' in src, True)
+
 print("\n" + ("ALL PASS" if not fails else f"{fails} FAILED"))
 raise SystemExit(1 if fails else 0)

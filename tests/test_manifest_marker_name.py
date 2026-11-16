@@ -67,7 +67,7 @@ def fake_info(name):
 
 
 files = ["CD16_1a.czi", "PO16_2a.czi"]
-M.discover_sources = lambda stack: [
+M.discover_sources = lambda stack, skipped=None: [
     ("LOOSE", name, os.path.join(STUDY.source_dir, name),
      (lambda n: (lambda: contextlib.nullcontext(n)))(name)) for name in files]
 M.read_metadata = lambda name: name

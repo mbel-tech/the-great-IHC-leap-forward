@@ -286,12 +286,19 @@ def main():
     targets = [a for a in sys.argv[1:] if not a.startswith("--")]
     # Expand globs here: the app runs this in-process with a literal
     # ".../test_sections_corrected/*.tif", which no shell has expanded.
+    named = list(targets)
     targets = [p for t in targets for p in (sorted(glob.glob(t)) or [t])]
     if not targets:
         targets = sorted(glob.glob(os.path.join(TEST_DIR, "*.tif")))
+    # Returning None here recorded "the pass/fail test" as passed with nothing
+    # measured. A named pattern that matches nothing (01f verify wrote no
+    # corrected copies) is the same failure, not a traceback from tifffile.
+    targets = [p for p in targets if os.path.exists(p)]
     if not targets:
-        print(f"No test sections found. Run 01b_export_section.groovy first.")
-        return
+        print("No test sections found%s. Run 01b_export_section.groovy first "
+              "(or 01f_tilefield.py verify for the corrected set)."
+              % (f" at {', '.join(named)}" if named else f" in {TEST_DIR}"))
+        return 1
 
     print(f"Measuring {len(targets)} section(s)\n")
     results = []
@@ -315,12 +322,6 @@ def main():
         else:
             print(f"  {result['file']}: {result.get('note', 'no measurement')}")
 
-    # Written whole, after every section is measured, so an interrupted run
-    # leaves no summary and the stage does not read as done.
-    for section_dir, rows in by_dir.items():
-        ls_jsonio.write_json_atomic(summary_path(section_dir),
-                                    {"section_dir": section_dir, "results": rows})
-
     amps = [
         r[f"{a}_pitch_amplitude_pct"]
         for r in results
@@ -333,8 +334,23 @@ def main():
         for a in ("x", "y")
         if isinstance(r.get(f"{a}_pitch_prominence"), (int, float))
     ]
+    # Written whole, after every section is measured, so an interrupted run
+    # leaves no summary and the stage does not read as done. Not written when
+    # nothing was measured, for the same reason: the summary is the file the
+    # app reads as "this run happened".
+    if amps:
+        for section_dir, rows in by_dir.items():
+            ls_jsonio.write_json_atomic(summary_path(section_dir),
+                                        {"section_dir": section_dir, "results": rows})
+
+    unmeasured = [r["file"] for r in results
+                  if not isinstance(r.get("x_pitch_prominence"), (int, float))
+                  and not isinstance(r.get("y_pitch_prominence"), (int, float))]
     print()
     print("=" * 72)
+    if unmeasured:
+        print(f"not measured: {len(unmeasured)} of {len(results)} section(s) "
+              f"(too little tissue or no usable profile)")
     if amps:
         print(f"AT THE TILE PITCH ({PITCH_PX_NATIVE} px native, {PITCH_PX_NATIVE * BASE_PX_UM:.0f} um)")
         print(f"  amplitude : median {np.median(amps):.1f}%  max {np.max(amps):.1f}%")
@@ -350,7 +366,15 @@ def main():
             print("FAIL: coherent power remains at the tile pitch. Correction is not")
             print("      working - rebuild from more sections, or escalate to BaSiC.")
     print("=" * 72)
+    # Nothing measured is no verdict at all; the summary above is empty and
+    # used to end a run that exited 0. A FAIL verdict is NOT a failed run: the
+    # before-correction measurement is expected to find the artifact.
+    if not amps:
+        print(f"no section could be measured: all {len(results)} had too little "
+              f"tissue or no usable profile")
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

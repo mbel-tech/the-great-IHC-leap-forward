@@ -110,7 +110,7 @@ ROW_SPREAD_FLAG = 0.8
 # ---------------------------------------------------------------- source discovery
 
 
-def discover_sources(stack):
+def discover_sources(stack, skipped=None):
     """Yield (source, member, opener) for every CZI, loose files first.
 
     `source` is either "LOOSE" or the zip filename; `opener` returns a fresh
@@ -123,10 +123,23 @@ def discover_sources(stack):
     a subset into its own directory would say the same thing at the cost of
     moving hundreds of gigabytes, and the slide drive here is exFAT, which
     supports neither hardlinks nor symlinks.
+
+    A name in `source_files` is a loose CZI, a whole zip, or a CZI inside a zip.
+    It used to be matched against the zip's own name only, so naming a member
+    skipped its whole archive and the slide simply never appeared, uncounted.
+
+    `skipped`, a list, receives (source, member, reason) for everything that was
+    meant to be read and could not be: an archive that will not open, and a
+    `source_files` name found nowhere. main() fails the run on any of them;
+    printing "cannot open" and carrying on made a missing slide look like a
+    complete study.
     """
+    skipped = skipped if skipped is not None else []
     only = CONFIG.get("source_files") or None
     if only:
         only = {os.path.basename(n) for n in only}
+    found = set()
+    unreadable = []
 
     entries = []
 
@@ -134,20 +147,31 @@ def discover_sources(stack):
         name = os.path.basename(path)
         if only and name not in only:
             continue
+        found.add(name)
         entries.append(("LOOSE", name, path, (lambda p: (lambda: open(p, "rb")))(path)))
 
     for zpath in sorted(glob.glob(os.path.join(SOURCE_DIR, "*.zip"))):
         zname = os.path.basename(zpath)
-        if only and zname not in only:
-            continue
+        whole = not only or zname in only
         try:
             zf = stack.enter_context(zipfile.ZipFile(zpath))
-        except zipfile.BadZipFile:
-            print(f"  !! cannot open {zname}, skipping")
+        except (zipfile.BadZipFile, OSError) as exc:
+            # Counted only where it was asked for. With a source_files subset
+            # an unreadable archive nobody named is not this run's business -
+            # unless a named CZI turns out to be missing, which says so below.
+            if whole:
+                skipped.append((zname, "", f"cannot open the archive: {exc}"))
+            else:
+                unreadable.append(zname)
             continue
+        if whole and only:
+            found.add(zname)
         for info in zf.infolist():
             if not info.filename.lower().endswith(".czi"):
                 continue
+            if not whole and os.path.basename(info.filename) not in only:
+                continue
+            found.add(os.path.basename(info.filename))
             entries.append(
                 (
                     zname,
@@ -156,6 +180,13 @@ def discover_sources(stack):
                     (lambda z, n: (lambda: z.open(n)))(zf, info.filename),
                 )
             )
+
+    for name in sorted((only or set()) - found):
+        where = (f"; {len(unreadable)} archive(s) could not be opened to look: "
+                 f"{', '.join(unreadable)}" if unreadable else "")
+        skipped.append(("source_files", name,
+                        f"named in source_files but not found as a loose CZI, a zip, "
+                        f"or a CZI inside a zip in {SOURCE_DIR}{where}"))
     return entries
 
 
@@ -522,14 +553,16 @@ def main():
     # The archives stay open only for as long as the openers are used; the
     # CSVs below are written after they are released.
     with contextlib.ExitStack() as stack:
-        entries = discover_sources(stack)
+        # (source, member, reason) for every slide file meant to be read that
+        # was not. Any entry fails the run and writes no manifest: see below.
+        failures = []
+        entries = discover_sources(stack, failures)
         print(f"Discovered {len(entries)} CZI entries across loose files and zips.")
 
         file_rows = []
         scene_rows = []
         layout_rows = []
         seen_names = {}
-        failures = []
 
         for n_done, (source, member, container, opener) in enumerate(entries):
             PG.report(n_done, len(entries), "slide files")
@@ -558,6 +591,23 @@ def main():
                     info = summarise(read_metadata(fh))
             except Exception as exc:  # noqa: BLE001 - want the reason in the report
                 failures.append((source, member, repr(exc)[:120]))
+                continue
+
+            # Checked before the file gets a row, so manifest_files.csv never
+            # lists a file manifest_scenes.csv has no sections for. Both used
+            # to be "printed and carried on": a file with no Scenes block got a
+            # file row and no scene rows, and a Scenes block that disagreed
+            # with SizeS (sections the header says exist but cannot place)
+            # was a line in the summary of a run that exited 0.
+            scenes = info["scenes"]
+            if not scenes:
+                failures.append((source, member, "no scenes in metadata"))
+                continue
+            if len(scenes) != info["size_s"]:
+                failures.append((source, member,
+                                 f"{len(scenes)} scene(s) in the Scenes block but "
+                                 f"SizeS is {info['size_s']}; the sections it cannot "
+                                 f"place would be missing from the study"))
                 continue
 
             channel_names = [c["name"] for c in info["channels"]]
@@ -604,11 +654,6 @@ def main():
             }
             seen_names[base] = {k: row[k] for k in row if k not in ("source", "container", "is_redundant_copy")}
             file_rows.append(row)
-
-            scenes = info["scenes"]
-            if not scenes:
-                failures.append((source, member, "no scenes in metadata"))
-                continue
 
             forced = overrides.get(base)
             rows_idx, cols_idx = build_grid(scenes, forced)
@@ -674,6 +719,33 @@ def main():
 
     # Before anything is written for downstream to read: a stale manifest from
     # an earlier good run is safer than a fresh one that is wrong.
+    #
+    # Nothing found is a failure, not "nothing to write": the old manifest was
+    # left in place and the stage read as done over a study it never saw.
+    if not entries and not failures:
+        print()
+        print(f"!! 00_manifest found no CZI in {SOURCE_DIR}"
+              + (" matching source_files" if CONFIG.get("source_files") else "")
+              + "; manifest not written.")
+        return 1
+    # A file that could not be read is a failure of the whole run, and neither
+    # manifest table is written. Writing the rest used to replace
+    # manifest_files.csv while manifest_scenes.csv kept the previous run's rows
+    # (or lost a file's sections without a count), so the two tables described
+    # different studies and every later stage trusted both.
+    if failures:
+        print()
+        print("=" * 72)
+        print(f"slide files read : {len(file_rows)}")
+        print(f"failures         : {len(failures)}")
+        for f in failures:
+            print(f"    !! {f[0]} :: {f[1]} :: {f[2]}")
+        print("=" * 72)
+        print(f"!! 00_manifest: {len(failures)} slide file(s) could not be read, so "
+              f"neither manifest table was written - fix or rename them, or leave "
+              f"them out with source_files.")
+        return 1
+
     refused = refusals(file_rows, scene_rows, CONFIG["pixel_size_um"])
     if refused:
         print()
@@ -709,25 +781,35 @@ def main():
 
     _write_csv(os.path.join(MANIFEST_DIR, "manifest_files.csv"), file_rows)
     _write_csv(os.path.join(MANIFEST_DIR, "manifest_scenes.csv"), scene_rows)
-    _write_csv(os.path.join(QC_DIR, "slide_layout_summary.csv"), layout_rows)
+    _write_csv(os.path.join(QC_DIR, "slide_layout_summary.csv"), layout_rows, LAYOUT_KEYS)
 
-    _report(file_rows, scene_rows, layout_rows, failures)
-    return 0
+    _report(file_rows, scene_rows, layout_rows)
 
     # Written first so the operator can read which channels the scans carry;
-    # then stopped, because every stage after this keys on those names.
+    # then stopped, because every stage after this keys on those names. This
+    # sat after `return 0` and never ran.
     CH.require_manifest_markers(CONFIG, scene_rows, CONFIG_PATH)
+    return 0
 
 
-def _write_csv(path, rows):
-    if not rows:
-        print(f"  !! nothing to write for {path}")
-        return
-    keys = list(rows[0].keys())
+# slide_layout_summary.csv / slide_layout_review.csv, pinned so a table with no
+# rows is still written - header only - rather than left as last run's file.
+LAYOUT_KEYS = ["file", "animal", "slide", "variant", "n_scenes", "n_rows", "n_cols",
+               "row_counts", "row_spread_ratio", "rows_forced", "suggested_rows",
+               "needs_review"]
+
+
+def _write_csv(path, rows, keys=()):
+    """Every row's columns, `keys` first. A table with no rows is written
+    header-only: skipping it left the previous run's file (a review list of
+    slides that no longer need review) to be read as this run's."""
+    keys = list(keys)
     for r in rows:
         for k in r:
             if k not in keys:
                 keys.append(k)
+    if not keys:
+        raise ValueError(f"no columns for {path}: pass keys for a table that can be empty")
     # Swapped in, not written in place: every later stage reads the manifest
     # as the truth about the study, and a crash part-way through left a
     # truncated one that they read without complaint.
@@ -735,16 +817,13 @@ def _write_csv(path, rows):
     print(f"  wrote {path}  ({len(rows)} rows)")
 
 
-def _report(file_rows, scene_rows, layout_rows, failures):
+def _report(file_rows, scene_rows, layout_rows):
     unique = [r for r in file_rows if not r["is_redundant_copy"]]
     print()
     print("=" * 72)
     print(f"unique CZI files parsed : {len(unique)}")
     print(f"redundant loose copies  : {len(file_rows) - len(unique)}")
     print(f"sections (scenes) total : {len(scene_rows)}")
-    print(f"failures                : {len(failures)}")
-    for f in failures:
-        print(f"    !! {f[0]} :: {f[1]} :: {f[2]}")
 
     by_marker = defaultdict(int)
     for r in unique:
@@ -757,11 +836,6 @@ def _report(file_rows, scene_rows, layout_rows, failures):
     print(f"distinct pixel sizes     : {sorted(odd_px)}")
     shading = {r["shading_reference_mode"] for r in unique}
     print(f"shading reference modes  : {shading}")
-
-    mismatched = [r for r in unique if r["n_scenes"] != r["size_s"]]
-    print(f"n_scenes != SizeS        : {len(mismatched)}  <- must be 0")
-    for r in mismatched[:5]:
-        print(f"    {r['file']}: {r['n_scenes']} scenes vs SizeS {r['size_s']}")
 
     exposures = defaultdict(set)
     for r in unique:
@@ -778,7 +852,7 @@ def _report(file_rows, scene_rows, layout_rows, failures):
         (r for r in layout_rows if r["needs_review"]),
         key=lambda r: -r["row_spread_ratio"],
     )
-    _write_csv(os.path.join(QC_DIR, "slide_layout_review.csv"), review)
+    _write_csv(os.path.join(QC_DIR, "slide_layout_review.csv"), review, LAYOUT_KEYS)
     print(f"slides needing row review: {len(review)}  (worst first, see qc/slide_layout_review.csv)")
     for r in review[:10]:
         print(

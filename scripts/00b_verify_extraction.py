@@ -49,14 +49,22 @@ WATCH_INTERVAL_S = 60
 CRC_CHUNK = 1 << 24
 
 
-def zip_inventory():
-    """member filename -> {size, crc, zip} for every CZI in every transfer zip."""
+def zip_inventory(problems=None):
+    """member filename -> {size, crc, zip} for every CZI in every transfer zip.
+
+    `problems`, a list, receives one line per archive that could not be read
+    and per member that two archives disagree on. Both used to be printed and
+    passed over, so a corrupt transfer zip - whose CZIs are then never checked
+    at all - ended in a run that exited 0.
+    """
+    problems = problems if problems is not None else []
     inventory = {}
     for zpath in sorted(glob.glob(os.path.join(SOURCE_DIR, "*.zip"))):
         try:
             zf = zipfile.ZipFile(zpath)
-        except zipfile.BadZipFile:
+        except (zipfile.BadZipFile, OSError) as exc:
             print(f"  !! unreadable archive: {os.path.basename(zpath)}")
+            problems.append(f"unreadable archive {os.path.basename(zpath)}: {exc}")
             continue
         with zf:
             for info in zf.infolist():
@@ -65,6 +73,8 @@ def zip_inventory():
                     continue
                 if name in inventory and inventory[name]["size"] != info.file_size:
                     print(f"  !! {name} differs between archives - keeping first")
+                    problems.append(f"{name} differs between {inventory[name]['zip']} "
+                                    f"and {os.path.basename(zpath)}")
                     continue
                 inventory.setdefault(
                     name,
@@ -165,12 +175,31 @@ def report(rows, inventory, do_crc):
     return counts
 
 
+def verdict(counts, problems):
+    """Why this run must exit non-zero, or None when every CZI checked out.
+
+    A verification that finds a corrupt, missing or half-written file, or an
+    archive it could not read, has not verified the extraction - and it used
+    to say so in its table and then exit 0, so the app showed the step done.
+    """
+    bad = {s: counts.get(s, 0) for s in
+           ("size_mismatch", "crc_mismatch", "missing", "in_progress")}
+    parts = [f"{n} {s.replace('_', ' ')}" for s, n in bad.items() if n]
+    if problems:
+        parts.append(f"{len(problems)} archive problem(s)")
+    if not parts:
+        return None
+    return ("extraction not verified: " + ", ".join(parts)
+            + " - see qc/extraction_status.csv")
+
+
 def main():
     do_crc = "--crc" in sys.argv
     watch = "--watch" in sys.argv
 
     print(f"Reading zip central directories in {SOURCE_DIR} ...")
-    inventory = zip_inventory()
+    problems = []
+    inventory = zip_inventory(problems)
     stored = sum(1 for m in inventory.values() if m["compress_type"] == 0)
     print(f"  {len(inventory)} CZI members ({stored} STORED)")
 
@@ -188,6 +217,16 @@ def main():
         print(f"  waiting {WATCH_INTERVAL_S}s ...\n")
         time.sleep(WATCH_INTERVAL_S)
 
+    for line in problems:
+        print(f"  !! {line}")
+    # No archives is not a failure: a study of loose CZIs has nothing to check
+    # against, and the empty table says exactly that.
+    reason = verdict(counts, problems)
+    if reason:
+        print(reason)
+        return 1
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

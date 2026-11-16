@@ -913,8 +913,9 @@ than writing a partial or a guessed result.
 Stage `manifest`. The first stage: reads every CZI header, loose files and members of stored zips
 alike, without decoding a pixel, and builds the tables every later stage keys on.
 
-- **Reads:** the slides folder (`source_dir`, or the list in `source_files`), and
-  `manifest/layout_overrides.csv` where a person has fixed a slide's row count.
+- **Reads:** the slides folder (`source_dir`, or the list in `source_files`, whose names may be loose
+  CZIs, whole zips or CZIs inside a zip), and `manifest/layout_overrides.csv` where a person has fixed
+  a slide's row count.
 - **Writes:** `manifest/manifest_files.csv` (one row per CZI), `manifest/manifest_scenes.csv` (one row
   per scene, which is one brain section), `qc/slidemaps/<file>.png`, `qc/slide_layout_summary.csv` and
   `qc/slide_layout_review.csv`.
@@ -924,7 +925,11 @@ alike, without decoding a pixel, and builds the tables every later stage keys on
   candidate mounting convention, drawn as one panel each in the slide map so a person can confirm one.
   The scene uid (`LS105_s10a_sc03`) is built here and is the key of every table after it.
 - **Settings:** `slide_naming`, `pixel_size_um`, `section_order_convention`, `acquisition`.
-- **Failure and re-run:** cheap (headers only) and rewrites every output on each run.
+- **Failure and re-run:** cheap (headers only) and rewrites every output on each run. Exits 1, writing
+  neither manifest table, when no CZI is found or any file cannot be read: a name that does not fit the
+  grammar, no scenes in the header, a scene count that disagrees with `SizeS`, an archive that will not
+  open, or a `source_files` name found nowhere. A QC table with no rows is written header-only. A paired
+  study whose `acquisition.markers` do not name the scans' channels stops after the tables are written.
   `--accept-suggestions` writes the suggested row counts into `layout_overrides.csv`.
 
 ### `00b_verify_extraction.py`
@@ -937,8 +942,9 @@ came from.
 - **How:** the zips are stored, not compressed, so each member's size and CRC-32 are already in the
   central directory. The default compares sizes, which costs nothing. `--crc` reads every extracted file
   end to end and compares the CRC (about 420 GB on the LS study). `--watch` polls until extraction ends.
-- **Failure and re-run:** a mismatch is a row with its status, not an exception; re-running rechecks
-  everything.
+- **Failure and re-run:** a mismatch is a row with its status, not an exception, but any corrupt, missing
+  or still-extracting file, or an unreadable archive, makes the run exit 1 with the counts as its last
+  line. No zips at all is nothing to verify, and exits 0. Re-running rechecks everything.
 
 ### `00c_channel_identity.py`
 

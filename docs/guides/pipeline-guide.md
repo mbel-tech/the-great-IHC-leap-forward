@@ -1604,9 +1604,14 @@ The join validates itself rather than trusting the spreadsheet: the cohort it pr
 against an independent column in the workbook recording which animals were sliced for this
 experiment, and a disagreement is reported loudly. A run that mis-assigns animals to groups should
 fail obviously rather than produce a plausible and wrong result. An animal with no row in the
-workbook stops the join. A blank treatment is left blank unless a fill rule says otherwise: in the
-LS sheet the tanks partition cleanly (303/304/307/308 exercise, 305/306/309/310 control) and only the
-control side was typed at timepoint 1, so the LS choice carries those tanks as rules.
+workbook stops the join, and so does one row that two animals match (by number, LS1 and LS01 are
+both row 1); both animals are named. Only a cell holding a single number is read as one, so "Tank 3
+fish 1" is not fish 31. A blank treatment is filled only by a fill rule: in the LS sheet the tanks
+partition cleanly (303/304/307/308 exercise, 305/306/309/310 control) and only the control side was
+typed at timepoint 1, so the LS choice carries those tanks as rules. A blank no rule fills stops the
+join and names the animals, unless `groups.by_animal` gives them a group or the study has no groups at
+all (no animal has one in the sheet and `groups.by_animal` is empty). Re-running this step, or
+changing the workbook, puts the results built from it out of date.
 
 **Which columns.** The study says which sheet column names the animal and which column (or
 columns) hold the treatment; two or more make one group, such as "exercise · 1". The person chooses

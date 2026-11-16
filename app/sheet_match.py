@@ -33,7 +33,7 @@ PREVIEW_ROWS = 20
 def summary(headers, rows, animals, mapping):
     """What the join would do, for the window: a dict, never raising."""
     out = {"problems": SAMPLING.problems(mapping, headers), "rule": None, "missing": [],
-           "duplicate": [], "unresolved": [], "groups": {}, "unused": 0,
+           "duplicate": [], "shared": [], "unresolved": [], "groups": {}, "unused": 0,
            "matched": 0, "animals": len(animals)}
     if not mapping.get("id_column"):
         return out
@@ -41,10 +41,12 @@ def summary(headers, rows, animals, mapping):
         return out
     probe = dict(mapping, group_columns=mapping.get("group_columns") or [])
     if not probe["group_columns"]:                  # still say how the IDs match
-        found, rule, dup = SAMPLING.match_ids(
-            [r.get(SAMPLING.column(headers, mapping["id_column"]), "") for r in rows],
-            animals, mapping.get("match", "auto"))
-        out.update(rule=rule, duplicate=dup, matched=len(found),
+        values = [r.get(SAMPLING.column(headers, mapping["id_column"]), "") for r in rows]
+        found, rule, dup = SAMPLING.match_ids(values, animals, mapping.get("match", "auto"))
+        shared = SAMPLING.shared_rows(found, values)
+        claimed = {a for _sid, names in shared for a in names}
+        out.update(rule=rule, duplicate=dup, shared=shared,
+                   matched=len([a for a in found if a not in claimed]),
                    missing=[a for a in animals if a not in found and a not in dup])
         return out
     try:
@@ -53,7 +55,7 @@ def summary(headers, rows, animals, mapping):
         out["problems"] = [str(exc)]
         return out
     out.update(rule=j["rule"], missing=j["missing"], duplicate=j["duplicate"],
-               unresolved=j["unresolved"], unused=len(j["unused_ids"]),
+               shared=j["shared"], unresolved=j["unresolved"], unused=len(j["unused_ids"]),
                matched=len(j["meta"]))
     for m in j["meta"].values():
         if m["treatment"]:
@@ -356,6 +358,11 @@ class SheetMatchDialog(QDialog):
             if s["duplicate"]:
                 lines.append("<span style='color:%s'>On two or more rows: %s. Fix the "
                              "sheet first.</span>" % (red, html.escape(", ".join(s["duplicate"]))))
+            if s["shared"]:
+                lines.append("<span style='color:%s'>One row for two or more animals: %s. "
+                             "Fix the sheet first.</span>" % (red, html.escape("; ".join(
+                                 "row %s is %s" % (sid, " and ".join(names))
+                                 for sid, names in s["shared"]))))
             if s["unused"]:
                 lines.append("%d IDs in the sheet have no slide; that is normal when the "
                              "sheet lists more animals than were imaged." % s["unused"])
@@ -378,4 +385,5 @@ class SheetMatchDialog(QDialog):
             lines.append("<span style='color:%s'>%s.</span>" % (red, html.escape(p)))
         self.check.setText("<br>".join(lines))
         self.save_btn.setEnabled(bool(m["id_column"] and m["group_columns"]
-                                      and not s["duplicate"] and not other))
+                                      and not s["duplicate"] and not s["shared"]
+                                      and not other))

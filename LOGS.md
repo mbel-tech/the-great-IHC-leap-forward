@@ -9,6 +9,39 @@ where things landed, not which plausible-looking route was tried and abandoned, 
 
 ---
 
+## 2026-11-16 - One sheet row is one animal; 06b's groups and workbook date the results (06b / app)
+
+**Changed:** `ls_sampling.join` reports each sheet row two or more animals match (`shared`, from
+`shared_rows`), joins none of them, and 06b stops naming both, as it stops on an animal on two
+rows; Check workbook and Match the sheet say so too, and Match the sheet will not save. By number
+only a cell with a single run of digits is a number (`_number`), so "Tank 3 fish 1" matches
+nobody. A fill rule's `is` given as one string is that one value. 06b stops, naming the animals,
+on a blank treatment no rule fills, unless `groups.by_animal` gives the animal a group or the study
+has no groups at all (no group in the sheet and `groups.by_animal` empty, the "no key" case 05c
+keeps). `workflow.fingerprint` takes the sampling workbook's content for `join_sampling` and
+`build_results`, and `animal_metadata.csv` for `build_results` under 06b's key
+(`_extra_inputs`); a key a run record lacks is judged by date, as the per-marker keys are.
+`_last_ok` skips `--limit` trial runs. The study picker no longer opens `<repo>/config.json`
+unasked when the last study is gone and none is active (`ensure_study`); LS_CONFIG naming it
+still does. `workbook_path` moved to `ls_sampling` so the app's check and its out-of-date test
+name the same file. Checks in `tests/test_sampling_text.py`, `tests/test_join_metadata.py`,
+`tests/test_workflow.py` and `tests/test_studies.py`.
+
+**Why:** found on review. Under the number rule LS1 and LS01 both joined row 1 and LS22 and LS22b
+both joined row 22, and 06b wrote one row's group for both animals and exited 0; "Tank 3 fish 1"
+read as 31; a rule written `"is": "303"` matched tanks 3 and 0. Blank treatments were written as
+"" with exit 0, so the animals fell out of every comparison silently. Re-running 06b with other
+groups left the results reading Done, though 06c takes its groups from 06b's table, and a changed
+workbook changed nothing on screen. A 5-section trial was taken as the last ok run, so a stage put
+out of date by a setting read Done. And the picker's fallback opened whatever `config.json` lay in
+the checkout as the study (REVIEW.md rule 6).
+
+**Cost:** a sheet whose IDs only matched because digits were glued together, or that numbered two
+animals alike, now stops 06b until it is fixed. A study whose sheet leaves some treatments blank
+must fill them, add a rule, or list them in `groups.by_animal`. Results built before 06b last ran
+(06b's table newer than them) show out of date once. 06c still reads the environment column from
+the default workbook path, not `--xlsx`; unchanged here.
+
 ## 2026-11-16 - Section order survives a re-scan; resumed QC rows are current (00 / 01 / 01k)
 
 **Changed:** `00_manifest` numbers `section_order` per (animal, marker), not per (animal, marker,

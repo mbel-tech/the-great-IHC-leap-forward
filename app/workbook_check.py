@@ -27,11 +27,7 @@ import ls_sampling as SAMPLING
 
 def workbook_path(cfg, options):
     """The workbook 06b would read: its --xlsx, else the default in the slides folder."""
-    chosen = (options or {}).get("--xlsx") or ""
-    if chosen:
-        return chosen
-    source = (cfg or {}).get("source_dir") or ""
-    return os.path.join(source, SAMPLING.DEFAULT_NAME) if source else ""
+    return SAMPLING.workbook_path(cfg, options)
 
 
 def _csv_rows(path):

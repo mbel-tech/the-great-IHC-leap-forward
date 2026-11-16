@@ -307,5 +307,66 @@ with tempfile.TemporaryDirectory() as tmp:
         B.CONFIG.pop("sampling", None)
     chk("a saved choice that matches no animal stops 06b", code, 1)
 
+
+def run_06b(book, sampling, by_animal=None):
+    """06b's exit code and its last printed line, on `book` with this choice."""
+    import contextlib
+    import io
+    argv, out = sys.argv, io.StringIO()
+    sys.argv = ["06b", "--xlsx", book]
+    B.CONFIG["sampling"] = sampling
+    B.CONFIG["groups"] = {"order": [], "by_animal": dict(by_animal or {})}
+    if os.path.exists(B.META_CSV):
+        os.remove(B.META_CSV)
+    try:
+        with contextlib.redirect_stdout(out):
+            code = B.main()
+    finally:
+        sys.argv = argv
+        B.CONFIG.pop("sampling", None)
+        B.CONFIG.pop("groups", None)
+    lines = [ln for ln in out.getvalue().splitlines() if ln.strip()]
+    return code, (lines[-1] if lines else "")
+
+
+print("--- 06b refuses a join that would put an animal in the wrong group ---")
+with tempfile.TemporaryDirectory() as tmp:
+    with open(B.MEAS_CSV, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=["animal", "roi_kind", "value"])
+        w.writeheader()
+        w.writerows([{"animal": a, "roi_kind": "roi", "value": "1"}
+                     for a in ("LS1", "LS01", "LS2")])
+    book = os.path.join(tmp, "s.xlsx")
+    wb = openpyxl.Workbook()
+    for r in (["Fish", "Group"], [1, "control"], [2, "exercise"]):
+        wb.active.append(r)
+    wb.save(book)
+    choice = {"id_column": "Fish", "group_columns": ["Group"], "match": "number", "fill": []}
+    code, last = run_06b(book, choice)
+    chk("one sheet row joined to two animals stops 06b", code, 1)
+    chk("...naming both animals", ("LS1" in last and "LS01" in last), True)
+    chk("...and writes no metadata", os.path.exists(B.META_CSV), False)
+
+    with open(B.MEAS_CSV, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=["animal", "roi_kind", "value"])
+        w.writeheader()
+        w.writerows([{"animal": a, "roi_kind": "roi", "value": "1"}
+                     for a in ("LS1", "LS2", "LS3")])
+    wb = openpyxl.Workbook()
+    for r in (["Fish", "Group"], [1, "control"], [2, None], [3, "exercise"]):
+        wb.active.append(r)
+    wb.save(book)
+    code, last = run_06b(book, choice)
+    chk("an animal with a blank treatment stops 06b", code, 1)
+    chk("...and is named", "LS2" in last and "LS1" not in last, True)
+    code, _last = run_06b(book, choice, by_animal={"LS2": "control"})
+    chk("...unless groups.by_animal gives it one (06c reads that too)", code, 0)
+    wb = openpyxl.Workbook()
+    for r in (["Fish", "Group"], [1, None], [2, None], [3, None]):
+        wb.active.append(r)
+    wb.save(book)
+    code, _last = run_06b(book, choice)
+    chk("a study with no groups at all still joins its columns", code, 0)
+
 print("\n" + ("ALL PASS" if not fails else f"{fails} FAILED"))
 raise SystemExit(1 if fails else 0)

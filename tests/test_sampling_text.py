@@ -73,5 +73,41 @@ for bad in ("", "hello", "ID\tGroup\n"):
 
 chk("an .xlsx is not a text table", S.is_text("D:/x/sampling.xlsx"), False)
 
+# ---- one sheet row is one animal -------------------------------------------
+# By number, LS1 and LS01 are both row "1", and LS22 and LS22b both row "22".
+# Only an animal on two rows used to be refused, so 06b wrote one row's group
+# for two animals and exited 0. A row matched by two animals is the same
+# mistake the other way round, and is refused the same way, naming both.
+H = ["Fish", "Group"]
+R = [{0: "1", 1: "control"}, {0: "22", 1: "exercise"}, {0: "5", 1: "control"}]
+m = {"id_column": "Fish", "group_columns": ["Group"], "match": "number"}
+j = S.join(["LS1", "LS01", "LS22", "LS22b", "LS5"], H, R, m)
+chk("a row two animals match is named, with both animals",
+    j.get("shared"), [("1", ["LS01", "LS1"]), ("22", ["LS22", "LS22b"])])
+chk("...neither of them is joined to it", sorted(j["meta"]), ["LS5"])
+chk("...and neither is called missing", j["missing"], [])
+with tempfile.TemporaryDirectory() as tmp:
+    path = os.path.join(tmp, "s.tsv")
+    S.write_text(path, [dict(enumerate(H))] + R)
+    rep = S.check(path, {"LS1": 1, "LS01": 1, "LS5": 1}, m)
+    chk("check: the shared row is reported, not matched",
+        (rep.get("shared"), sorted(rep["matched"])), ([("1", ["LS01", "LS1"])], ["LS5"]))
+    chk("check: the words name both animals",
+        any("LS1" in ln and "LS01" in ln for ln in S.words(rep)), True)
+# A cell with two numbers in it is not one number: "Tank 3 fish 1" is not 31.
+found, _rule, _dup = S.match_ids(["Tank 3 fish 1", "7"], ["LS31", "LS7"], "number")
+chk("a cell that is not a single number is not read as one", found, {"LS7": 1})
+
+# ---- a fill rule's `is` -----------------------------------------------------
+# A string is one value. Iterated, "303" was the set {"3", "0"}: tank 3 filled
+# and tank 303 did not.
+H = ["Fish", "Group", "Tank"]
+R = [{0: "1", 2: "3"}, {0: "2", 2: "303"}]
+m = {"id_column": "Fish", "group_columns": ["Group"], "match": "number",
+     "fill": [{"when": "Tank", "is": "303", "set": "Group", "to": "exercise"}]}
+j = S.join(["LS1", "LS2"], H, R, m)
+chk("a string `is` is that one value",
+    {a: x["treatment"] for a, x in j["meta"].items()}, {"LS1": "", "LS2": "exercise"})
+
 print("\n" + ("ALL PASS" if not fails else f"{fails} FAILED"))
 raise SystemExit(1 if fails else 0)

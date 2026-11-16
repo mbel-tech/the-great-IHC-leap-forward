@@ -1675,6 +1675,10 @@ Stage `join_sampling`. The unblinding step: joins the per-ROI numbers to the exp
   (`sheet`, `rule` or `unresolved`). Every other sheet column not marked Ignore is carried through.
 - **Settings:** `sampling`.
 - **Failure and re-run:** refuses a sheet it cannot map, and says to choose the columns in Set up.
+  Refuses an animal on two rows, one row two animals match (LS1 and LS01 by number), and a blank
+  treatment no fill rule fills unless `groups.by_animal` names the animal or the study has no groups
+  at all. The workbook's content is fingerprinted, for this stage and for `build_results`, which also
+  fingerprints `animal_metadata.csv`: changing either puts them out of date.
 
 ### `06c_excel_dataset.py`
 

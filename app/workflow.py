@@ -1748,6 +1748,32 @@ def _input_groups(need, study):
     return groups
 
 
+def _extra_inputs(sid, study):
+    """{fingerprint key: [files]} stage `sid` reads that are not a `made_from` stage's outputs.
+
+    06b reads the sampling workbook, which no stage writes. The results (06e:
+    06a, 06c, 06d) read it too, and take their groups from 06b's
+    animal_metadata.csv (06c resolve_groups), so re-running 06b with other
+    groups must put them out of date. Only that table, under 06b's own key:
+    06b's roi_dataset.csv is its copy of 06a's numbers, which the results
+    rebuild themselves, so hashing it would make every 06b run after new
+    measurements cost one more pointless rebuild. 06b is not in their
+    `made_from` for the same reason: 06b goes out of date whenever 06a's table
+    changes, and that alone says nothing about the groups.
+    """
+    out = {}
+    if sid in ("join_sampling", "build_results") and study.out_root:
+        import ls_sampling as SAMPLING
+        opts = (((study.cfg.get("project") or {}).get("stage_options") or {})
+                .get("join_sampling"))
+        book = SAMPLING.workbook_path(study.cfg, opts)
+        out["workbook"] = [book] if book and os.path.isfile(book) else []
+    if sid == "build_results" and study.out_root:
+        meta = os.path.join(study.out_root, "results", "animal_metadata.csv")
+        out["join_sampling"] = [meta] if os.path.exists(meta) else []
+    return out
+
+
 def _input_paths(need, study):
     """The files a stage reads from stage `need`: a curator's newest export, else its outputs."""
     return [p for paths in _input_groups(need, study).values() for p in paths]
@@ -1782,6 +1808,8 @@ def fingerprint(sid, study):
     files = {key: _hash([_content(p) for p in paths])
              for need in st.made_from if applies(S.BY_ID[need], study)[0]
              for key, paths in _input_groups(need, study).items()}
+    files.update({key: _hash([_content(p) for p in paths])
+                  for key, paths in _extra_inputs(sid, study).items()})
     settings = {k: _hash(_setting(study.cfg, k)) for k in st.settings}
     return {"files": files, "settings": settings}
 
@@ -1799,13 +1827,24 @@ def run_inputs(sid, values, study):
 
 
 def _last_ok(study, sid):
+    """The newest ok FULL run of `sid`: the record that says what its results were made from.
+
+    A `--limit` trial is recorded ok with no inputs (run_inputs); taken as the
+    last ok run it sent the status back to file dates, which a setting change
+    does not move, so a stage put out of date by a setting read Done after a
+    5-section trial. A narrowed run is never that proof (as last_run's
+    full_only).
+    """
     for rec in reversed(((study.cfg or {}).get("project") or {}).get("runs") or []):
-        if rec.get("stage") == sid and rec.get("ok"):
+        if rec.get("stage") == sid and rec.get("ok") and not (
+                (rec.get("options") or {}).get("--limit")):
             return rec
     return None
 
 
 def _changed_from(need, study):
+    if need == "workbook":
+        return "the sampling workbook"
     need, _, marker = need.partition(":")
     if marker:
         return "%s for %s" % (_changed_from(need, study), study.marker_label(
@@ -1872,16 +1911,19 @@ def _files_changed(st, study, now, was, made):
     marker had a key of its own, or one made before the export held that
     marker - is judged by date, as a run with no record is: newer than `st`'s
     results is a change. By hash it would put every such study out of date at
-    once, though nothing it reads had changed.
+    once, though nothing it reads had changed. The same for an input added
+    since the run was recorded (_extra_inputs: the workbook, 06b's table).
     """
     out = []
+    extra = _extra_inputs(st.sid, study)
     for k, h in now.items():
-        if k in was or ":" not in k:
+        if k in was or (":" not in k and k not in extra):
             if h != was.get(k):
                 out.append(k)
         elif made is not None and any(
                 os.path.getmtime(p) > made
-                for p in _input_groups(k.partition(":")[0], study).get(k, ())):
+                for p in (extra[k] if k in extra
+                          else _input_groups(k.partition(":")[0], study).get(k, ()))):
             out.append(k)
     return out
 
@@ -1919,6 +1961,9 @@ def _own_reason(st, study):
         if applies(S.BY_ID[need], study)[0] and any(
                 os.path.getmtime(p) > made for p in _input_paths(need, study)):
             return "%s is newer than its results" % _changed_from(need, study)
+    for key, paths in _extra_inputs(st.sid, study).items():
+        if any(os.path.getmtime(p) > made for p in paths):
+            return "%s is newer than its results" % _changed_from(key, study)
     return None
 
 

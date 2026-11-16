@@ -34,6 +34,7 @@ is what 06b did before the choice existed.
     guess(headers, rows, animals)     a starting choice for the window
     join(animals, headers, rows, m)   what 06b decides per animal
     check(path, animals, saved)       that join as a report, never raising
+    workbook_path(cfg, options)       the workbook 06b reads
     words(report)                     the report as lines for a person
     group_key(report)                 groups.order / groups.by_animal from a check
 """
@@ -231,6 +232,19 @@ def read_sheet(path, sheet=None):
     return rows
 
 
+def workbook_path(cfg, options):
+    """The workbook 06b reads: its --xlsx option, else DEFAULT_NAME in the slides folder.
+
+    Here so Set up's check (app/workbook_check.py) and the app's out-of-date
+    test (workflow.fingerprint) name the same file 06b opens.
+    """
+    chosen = (options or {}).get("--xlsx") or ""
+    if chosen:
+        return chosen
+    source = (cfg or {}).get("source_dir") or ""
+    return os.path.join(source, DEFAULT_NAME) if source else ""
+
+
 def fish_id(animal):
     """The LS sheet's Fish ID for an animal: LSnn -> nn."""
     return re.sub(r"\D", "", animal)
@@ -301,8 +315,14 @@ def _id_text(v):
 
 
 def _number(v):
-    d = re.sub(r"\D", "", v or "")
-    return str(int(d)) if d else ""
+    """The one number in an ID ("LS22" -> "22", "022" -> "22"), else "".
+
+    Only a single run of digits is a number. Joining every digit read
+    "Tank 3 fish 1" as fish 31, and "LS2-1" as 21: a row matched to an animal
+    it does not name. Two runs are not one ID, so they match nobody by number.
+    """
+    runs = re.findall(r"\d+", v or "")
+    return str(int(runs[0])) if len(runs) == 1 else ""
 
 
 def match_ids(values, animals, how="auto"):
@@ -334,6 +354,21 @@ def match_ids(values, animals, how="auto"):
         if found or dup:
             return found, rule, dup
     return best
+
+
+def shared_rows(found, values):
+    """[(sheet ID, [animals])] for each row that more than one animal matched.
+
+    The other half of match_ids's duplicate: by number LS1 and LS01 are both
+    row "1", and LS22 and LS22b both row "22". One row is one animal, so a row
+    two animals claim is the sheet's word for neither, and the join refuses
+    them as it refuses an animal on two rows.
+    """
+    by_row = {}
+    for a, i in found.items():
+        by_row.setdefault(i, []).append(a)
+    return sorted(((_id_text(values[i]), sorted(names)) for i, names in by_row.items()
+                   if len(names) > 1), key=lambda t: (_number(t[0]) == "", len(t[0]), t[0]))
 
 
 def legacy_mapping(headers):
@@ -401,7 +436,9 @@ def join(animals, headers, rows, mapping):
     """What 06b decides for each animal, as a dict; writes nothing.
 
     `missing` are animals with no row (06b stops on any), `duplicate` those
-    whose ID is on two rows, `meta` a row per matched animal. A group is the
+    whose ID is on two rows, `shared` the rows two or more animals match
+    ([(sheet ID, [animals])], 06b stops on these too), `meta` a row per
+    matched animal. A group is the
     treatment cells joined with JOIN; a blank cell is filled by the first fill
     rule that fits, else the animal is in `unresolved` with no group.
     """
@@ -421,10 +458,18 @@ def join(animals, headers, rows, mapping):
             n, k = "%s_%d" % (slug(headers[i]), k), k + 1
         names[i] = n
         seen.add(n)
-    found, rule, dup = match_ids([r.get(idc, "") for r in rows], animals,
-                                 mapping.get("match", "auto"))
+    values = [r.get(idc, "") for r in rows]
+    found, rule, dup = match_ids(values, animals, mapping.get("match", "auto"))
+    shared = shared_rows(found, values)
+    for _sid, names in shared:
+        for a in names:
+            found.pop(a, None)
+
+    def _is(v):
+        # A string is one value: iterated, "303" was the set {"3", "0"}.
+        return [v] if isinstance(v, (str, int, float)) else list(v or [])
     fill = [dict(r, when_i=column(headers, r["when"]), set_i=column(headers, r["set"]),
-                 values={_id_text(v).lower() for v in r.get("is") or []})
+                 values={_id_text(v).lower() for v in _is(r.get("is"))})
             for r in mapping.get("fill") or []]
     low = bool(mapping.get("lowercase"))
     meta, unresolved = {}, []
@@ -451,9 +496,11 @@ def join(animals, headers, rows, mapping):
                    "treatment": group, "treatment_source": src,
                    **{names[i]: str(r.get(i, "") or "") for i in keep}}
     ids = {_id_text(r.get(idc, "")) for r in rows} - {""}
-    used = {meta[a]["sheet_id"] for a in meta}
-    return {"rule": rule, "missing": [a for a in animals if a not in found and a not in dup],
-            "duplicate": dup, "meta": meta, "unresolved": unresolved,
+    used = {meta[a]["sheet_id"] for a in meta} | {sid for sid, _names in shared}
+    claimed = {a for _sid, names in shared for a in names}
+    return {"rule": rule, "missing": [a for a in animals if a not in found and a not in dup
+                                      and a not in claimed],
+            "duplicate": dup, "shared": shared, "meta": meta, "unresolved": unresolved,
             "unused_ids": sorted(ids - used, key=lambda v: (_number(v) == "", len(v), v))}
 
 
@@ -466,7 +513,7 @@ def check(path, animals, saved=None, sheet=None):
     animals = dict(animals or {})
     rep = {"path": path, "error": None, "animals": len(animals), "matched": [],
            "slides": sum(animals.values()), "slides_matched": 0, "missing": [],
-           "duplicate": [], "blank": [], "from_rule": [], "groups": {},
+           "duplicate": [], "shared": [], "blank": [], "from_rule": [], "groups": {},
            "by_animal": {}, "rule": None, "unused_ids": [], "mapping": None}
     if not path or not os.path.isfile(path):
         rep["error"] = f"no workbook at {path}" if path else "no workbook chosen"
@@ -494,7 +541,7 @@ def check(path, animals, saved=None, sheet=None):
         rep["error"] = str(exc)
         return rep
     rep.update(rule=j["rule"], missing=j["missing"], duplicate=j["duplicate"],
-               blank=list(j["unresolved"]), unused_ids=j["unused_ids"])
+               shared=j["shared"], blank=list(j["unresolved"]), unused_ids=j["unused_ids"])
     for a, m in j["meta"].items():
         if not m["treatment"]:
             continue
@@ -539,6 +586,10 @@ def words(rep):
     if rep.get("duplicate"):
         out.append("On two or more rows: %s. Fix the sheet; these match nothing."
                    % ", ".join(rep["duplicate"]))
+    if rep.get("shared"):
+        out.append("One row for two or more animals: %s. Fix the sheet; these match "
+                   "nothing." % "; ".join("row %s is %s" % (sid, " and ".join(names))
+                                          for sid, names in rep["shared"]))
     if rep["blank"]:
         out.append("Blank treatment, and no rule fills it: %s. Left without a group."
                    % "; ".join("%s (%s)" % (a, why) for a, why in rep["blank"]))

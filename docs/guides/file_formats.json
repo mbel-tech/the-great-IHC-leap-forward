@@ -3937,7 +3937,7 @@
      "name": "subset",
      "type": "text",
      "units": "",
-     "meaning": "Which queue the section was loaded from."
+     "meaning": "Which queue the section was loaded from (`all`, the analysis-set file's name, `roi_worklist[:<tier>]`, `reinstated`), or `outside_build` for a section exported from the saved curation although this build of the page did not carry it."
     },
     {
      "name": "section_order",

@@ -774,6 +774,9 @@ CURATOR_HTML = os.path.join(REFORMAT_DIR, "roi_curator.html")
 # Where exports are filed. Config so the app and this stage cannot disagree
 # about it; one dated folder per export is created inside it.
 EXPORT_DIR = LC.export_dir(CONFIG)
+# Paired or multiplex. The page needs it to export a section outside its build
+# under every marker it is curated for (see exportCsv).
+LAYOUT = (CONFIG.get("acquisition") or {}).get("layout", CH.LAYOUT_MULTIPLEX)
 PROVENANCE_CSV = os.path.join(REFORMAT_DIR, "section_provenance.csv")
 
 # The Review mode needs one row per SCANNED section - 2,572, against the ~1,242
@@ -1553,6 +1556,10 @@ const GROUPS = __GROUPS__;
 // one. Scene uids never collide (`_s01a_` is pERK, `_s01b_` is PCNA), which is
 // what lets a single store hold both without keying on the channel.
 const MARKERS = __MARKERS__;          // [{id, label, n, sub, colour}]
+// "paired" or "multiplex", from acquisition.layout. Under multiplex one record
+// in S serves every marker of its scene; exportCsv needs to know that to write
+// a section outside this build for each of them.
+const ACQ_LAYOUT = __ACQLAYOUT__;
 // The Review pane's colour filters, computed in Python by review_filters()
 // from the SAME ls_channels.marker_colours() that 04o_section_rgb builds the
 // composites with. The page installs them; it does not know the arithmetic.
@@ -3621,14 +3628,21 @@ function commitPoly(){
   if(!draft || draft.length < 6 || !active || !gTarget){ return; }
   const h = gRoi();
   if(!h){ return; }
-  // ...and an area, not a sliver. Three collinear clicks pass the count and
-  // still enclose nothing.
-  if(polyArea(draft) < 4 * imgK() * imgK()){ return; }
-  // ...and one that does not cross itself. The ring stays open, so z can take
-  // back the corner that crossed and the outline be finished from there.
+  // ...one that does not cross itself. Tested BEFORE the area: a symmetric
+  // bowtie's lobes cancel to an area of about 0, so the area test caught it
+  // first and refused it with no word - Enter seemed to do nothing. The ring
+  // stays open, so z can take back the corner that crossed.
   if(ringCrosses(draft)){
     polyRefuse("NOT CLOSED - this outline crosses itself, so it has no single area."
              + " Press z to take back corners, then close it again.");
+    drawSec(); status();
+    return;
+  }
+  // ...and an area, not a sliver. Three collinear clicks pass the count and
+  // still enclose nothing. Said, like the crossing, rather than ignored.
+  if(polyArea(draft) < 4 * imgK() * imgK()){
+    polyRefuse("NOT CLOSED - this outline encloses no area (its corners are in a"
+             + " line or on top of each other). Press z to take back corners.");
     drawSec(); status();
     return;
   }
@@ -4292,6 +4306,16 @@ function select(uid, keep){
   el("slider").value = p;
   secImg.src = d.img;
   onSlide(p);
+  // A crossed outline already in the store - drawn before the page refused
+  // them, or imported by 04q - is said on arrival. 05a refuses it and fails
+  // the run, and this is the place it can be redrawn, so the operator hears
+  // about it here rather than only from 05a's log.
+  const crossed = (s.polys || []).filter(pg => ringCrosses(pg.v));
+  polyRefuse(crossed.length
+    ? `REDRAW - ${crossed.length} region(s) on this section cross themselves (`
+      + crossed.map(pg => pg.region || "?").join(", ")
+      + `), so 05a will refuse them. Drag a corner until the edges no longer cross, or remove the region and draw it again.`
+    : "");
   document.querySelectorAll(".cell").forEach(c=>c.classList.toggle("active", c.dataset.uid===uid));
   if(!keep) document.querySelector(`[data-uid="${CSS.escape(uid)}"]`)
     ?.scrollIntoView({inline:"center", block:"nearest"});
@@ -4721,18 +4745,59 @@ function exportCsv(){
   // by THIS build's idea of the frame, which for a section it does not show is
   // a guess; no provenance row means no marker to join by. Those are named in
   // the header and left out, never dropped in silence.
-  const inBuild = new Set(DATA.map(d => d.uid));
+  //
+  // THE BUILD IS A SET OF (uid, marker), not of uids. Under multiplex one scan
+  // carries every marker, so one record in S serves them all and the build has
+  // a DATA row per marker for it - and --worklist / --analysis-set narrow only
+  // the first marker, so a curated scene can be in this build through marker 2
+  // and missing for marker 1, the quantified one. Keyed by uid alone, such a
+  // section got no outside row for marker 1 and 05a placed nothing for it.
+  // So under multiplex an outside row is written for every declared marker the
+  // build does not carry for that uid. Under paired, uids are per scan and the
+  // provenance marker IS the scan's marker, so one row, and only when the uid
+  // is not in the build at all.
+  //
+  // A SECTION THE PIPELINE NO LONGER CARRIES is exported as excluded. A section
+  // curated and later dropped in Review, or one 04a now excludes, censors out
+  // or never reformatted, is not in the next build - that is exactly why it is
+  // outside. Exported as a live section, 05a would try to place it, find no
+  // reformat_index row and fail on every run, and the operator could not clear
+  // it from a page that does not show it. excluded=1 is the true statement:
+  // 05a's analysis set leaves it out as "excluded by the operator", and
+  // roi_plates.csv still records the work.
+  const keyOf = (uid, m) => uid + "\t" + m;
+  const inBuild = new Set(DATA.map(d => keyOf(d.uid, d.m)));
+  const uidInBuild = new Set(DATA.map(d => d.uid));
+  const allMarkers = MARKERS.map(mk => mk.id);
+  const GONE_STATUS = new Set(["excluded", "censored_out", "not_reformatted"]);
   const outside = [], cannot = [];
+  let nGone = 0;
   for(const uid of Object.keys(S).sort()){
     const s = S[uid];
-    if(inBuild.has(uid) || !hasRoiWork(s)) continue;
+    if(!hasRoiWork(s)) continue;
+    const want = ACQ_LAYOUT === "multiplex" ? allMarkers
+               : (uidInBuild.has(uid) ? [] : [P_BY[uid] ? P_BY[uid].marker : ""]);
+    const missing = want.filter(m => !inBuild.has(keyOf(uid, m)));
+    if(!missing.length) continue;
+    // Animal and order: the provenance row, or under multiplex this uid's row
+    // for another marker when the build carries one.
     const p = P_BY[uid];
+    const d0 = DATA.find(d => d.uid === uid);
+    const meta = p ? {animal: p.animal, order: +p.section_order || 0}
+               : d0 ? {animal: d0.animal, order: d0.order} : null;
     const placed = (s.pairs && s.pairs.length) || (s.polys && s.polys.length);
-    const why = !p ? "no animal or marker for it in the provenance table"
-              : (placed && !s.frame) ? "no frame stamped on its record" : "";
+    // A uid the build shows (under another marker) has its frame from this
+    // page like any in-build section; only one the page never shows needs it
+    // stamped on the record.
+    const why = !meta || missing.some(m => !m)
+                  ? "no animal or marker for it in the provenance table"
+              : (placed && !s.frame && !uidInBuild.has(uid)) ? "no frame stamped on its record" : "";
     if(why){ cannot.push(uid + " (" + why + ")"); continue; }
-    outside.push({uid, animal: p.animal, m: p.marker, sub: "outside_build",
-                  order: +p.section_order || 0});
+    const gone = (s.rev && s.rev.act === "drop") || !!(p && GONE_STATUS.has(p.status));
+    if(gone) nGone++;
+    for(const m of missing)
+      outside.push({uid, animal: meta.animal, m, sub: "outside_build",
+                    order: meta.order, gone});
   }
 
   for(const d of DATA.concat(outside)){
@@ -4749,7 +4814,7 @@ function exportCsv(){
     const chosen = hasPlateWork(s);   // is the plate a decision, or still the default?
     // isExcl(), not s.excl: a Review-mode reinstatement beats the flag, and the
     // strip already honours that. The two must not disagree.
-    const excl = isExcl(d.uid);
+    const excl = isExcl(d.uid) || !!d.gone;
     const status = excl ? "excluded"
                  : s.noroi ? "no_roi" : n>=3 ? "registered"
                  : chosen ? "plate_only"
@@ -4895,8 +4960,9 @@ function exportCsv(){
     }
   }
   beginExport(3);
-  expNote = outside.length
-    ? `${outside.length} of ${pl.length - 1} section(s) came from outside this build`
+  expCur.note = outside.length
+    ? `${outside.length} of ${pl.length - 1} row(s) came from outside this build`
+      + (nGone ? ` (${nGone} section(s) the pipeline no longer carries, exported as excluded)` : "")
     : "";
   const w = el("expWarn");
   if(w){
@@ -4942,10 +5008,18 @@ const EXPORT_DIR = __EXPORTDIR__;   // configured target, shown when no folder i
 let expStamp = null;                // DD.MM.YYYY_HH.MM for the action in progress
 let expDir = null;                  // chosen directory handle, if there is one
 let expSub = null;                  // the dated folder inside it, for this action
+let expSubStamp = null;             // ...and which action's stamp it was made for
 let expQueue = Promise.resolve();   // writes are serialised - see saveExport
-let expWant = 1;                    // files this action writes
-let expGot = [];                    // [{name, url}] downloaded by the fallback, this action
-let expNote = "";                   // what this action adds to every status message
+// THE ACTION a write belongs to, captured when the write is QUEUED: {stamp,
+// want (files it writes), got ([{name, url}] downloaded), written (to the
+// picked folder), note (what it adds to every message)}. Not module state read
+// when the write RUNS: the fallback spaces its downloads, so a second Export
+// pressed while the first is still downloading would otherwise rename the
+// first's remaining files with its own stamp (the app files by that stamp, so
+// a roi_regions could land in a folder with no roi_plates beside it) and count
+// both actions' files against one total ("downloaded 5 of 3"). Each export is
+// queued behind the one before it, under its own stamp and its own count.
+let expCur = null;
 let expLastDl = 0;                  // Date.now() of the last fallback download
 // The gap between two fallback downloads. See expWrite.
 const EXP_GAP_MS = 800;
@@ -4961,25 +5035,29 @@ function expStampNow(){
 // `n` is how many files this action writes, so the download fallback can say
 // how many to expect (see expWrite).
 function beginExport(n){
-  expStamp = expStampNow(); expSub = null;
-  expWant = n || 1; expGot = []; expNote = "";
+  expStamp = expStampNow(); expSub = null; expSubStamp = null;
+  expCur = {stamp: expStamp, want: n || 1, got: [], written: 0, note: ""};
+  return expCur;
 }
 
 // name.csv -> name_DD.MM.YYYY_HH.MM.csv. The extension stays last so the file
 // still opens by double-click, and 05a's roi_regions*.csv glob still matches.
-function expName(base){
+function expName(base){ return expNameAt(base, expStamp || expStampNow()); }
+// ...under a given action's stamp (expWrite passes its own, see expCur).
+function expNameAt(base, stamp){
   const i = base.lastIndexOf(".");
   const stem = i < 0 ? base : base.slice(0, i);
   const ext  = i < 0 ? ""   : base.slice(i);
-  return stem + "_" + (expStamp || expStampNow()) + ext;
+  return stem + "_" + stamp + ext;
 }
 
 // expNote rides on every message of one action, so "wrote ..." per file does
 // not overwrite what the export as a whole has to say (how many sections came
 // from outside the build).
-function expSay(msg){
+function expSay(msg, ctx){
+  const note = (ctx || expCur || {}).note;
   const e = el("expStat");
-  if(e) e.textContent = msg + (expNote ? " - " + expNote : "");
+  if(e) e.textContent = msg + (note ? " - " + note : "");
 }
 
 function expShow(){
@@ -5050,29 +5128,35 @@ async function expRestoreDir(){
 // Serialised: exportCsv fires three writes back to back, and letting them race
 // would have three of them create the dated folder at once.
 function saveExport(blob, base){
-  expQueue = expQueue.then(() => expWrite(blob, base)).catch(() => {});
+  const ctx = expCur || beginExport();
+  expQueue = expQueue.then(() => expWrite(blob, base, ctx)).catch(() => {});
   return expQueue;
 }
 
-async function expWrite(blob, base){
-  const name = expName(base);
+async function expWrite(blob, base, ctx){
+  ctx = ctx || expCur || beginExport();
+  const name = expNameAt(base, ctx.stamp);
   let why = "";
   if(expDir){
     try {
       if(!await expGrant(expDir)) throw new Error("permission not granted");
-      if(!expSub) expSub = await expDir.getDirectoryHandle(expStamp || expStampNow(), {create: true});
+      if(!expSub || expSubStamp !== ctx.stamp){
+        expSub = await expDir.getDirectoryHandle(ctx.stamp, {create: true});
+        expSubStamp = ctx.stamp;
+      }
       const fh = await expSub.getFileHandle(name, {create: true});
       const w = await fh.createWritable();
       await w.write(blob);
       await w.close();
-      expSay("wrote " + (expStamp || "") + "/" + name);
+      ctx.written++;
+      expSay("wrote " + ctx.stamp + "/" + name, ctx);
       return;
     } catch(err){
       // A dropped permission or a deleted folder must not lose the export.
       // Fall through to the download, and say why the folder was not used.
       why = "could not write to " + expDir.name + " (" + (err.message || err)
           + ") - downloaded instead. ";
-      expSay(why);
+      expSay(why, ctx);
     }
   }
   // THE DOWNLOAD FALLBACK, one file at a time. Three clicks back to back are
@@ -5095,22 +5179,30 @@ async function expWrite(blob, base){
   a.download = name;
   a.click();
   expLastDl = Date.now();
-  expGot.push({name, url});
-  expListDownloads(why);
+  ctx.got.push({name, url});
+  expListDownloads(why, ctx);
 }
 
 // "downloaded 2 of 3 - expect 3 files: a, b, c". Built as markup because the
 // names are links; every name goes through esc.
-function expListDownloads(why){
+//
+// "Expect" counts only what goes to the download folder: files of this action
+// already written to a picked folder are not downloads, and saying all three
+// were coming would send the operator looking for files that are elsewhere.
+function expListDownloads(why, ctx){
+  ctx = ctx || expCur;
   const e = el("expStat");
-  if(!e) return;
-  const links = expGot.map(f =>
+  if(!e || !ctx) return;
+  const expect = Math.max(ctx.got.length, ctx.want - ctx.written);
+  const links = ctx.got.map(f =>
     `<a href="${esc(f.url)}" download="${esc(f.name)}">${esc(f.name)}</a>`).join(", ");
-  e.innerHTML = esc(why || "") + `downloaded ${expGot.length} of ${expWant} - expect ${expWant}`
-    + ` file${expWant === 1 ? "" : "s"} in the download folder: ${links}`
-    + (expWant > 1 ? ". If the browser asked to allow several downloads and one is"
-                   + " missing, click its name to download it again." : "")
-    + (expNote ? " - " + esc(expNote) : "");
+  e.innerHTML = esc(why || "") + `downloaded ${ctx.got.length} of ${expect} - expect ${expect}`
+    + ` file${expect === 1 ? "" : "s"} in the download folder`
+    + (ctx.written ? ` (${ctx.written} written to ${esc(expDir ? expDir.name : "the folder")})` : "")
+    + `: ${links}`
+    + (expect > 1 ? ". If the browser asked to allow several downloads and one is"
+                  + " missing, click its name to download it again." : "")
+    + (ctx.note ? " - " + esc(ctx.note) : "");
 }
 
 function dl(rowsArr,name){
@@ -6835,7 +6927,7 @@ def main():
     page = IO.fill(PAGE, {
         "__ATLASSCOPE__": scope,
         "__SEED__": seed, "__ROISEL__": roisel, "__CUSTOM__": custom, "__PROV__": load_provenance(), "__DATA__": data,
-        "__PLATES__": pl, "__PLATESET__": PLATE_SET, "__MARKERS__": markers,
+        "__PLATES__": pl, "__PLATESET__": PLATE_SET, "__MARKERS__": markers, "__ACQLAYOUT__": LAYOUT,
         "__STUDY__": STUDY_ID, "__TOKEN__": token,
         # The page compares aspect ratios exactly as `ls_atlas.plate_status`
         # does, so it is handed THAT number rather than repeating it. A literal

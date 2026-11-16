@@ -30,6 +30,7 @@ import json
 import os
 import sys
 import tempfile
+import shutil
 
 # The atlas plates shipped in atlas/ are copied into a study that lacks them
 # (ls_atlas.seed_from_bundle). A suite builds its own plate sets and asserts on
@@ -124,6 +125,30 @@ def use_temp_study(**overrides):
     study = ctx.__enter__()
     atexit.register(lambda: ctx.__exit__(None, None, None))
     return study
+
+
+def private_home():
+    """Point the home folder at an empty temp dir for the rest of this process.
+
+    Some stages look in the operator's download folder (`~/Downloads`): 05a
+    for `roi_regions*`, 04a for `section_review*`. A suite that reaches one of
+    them would otherwise read whatever the runner happens to have downloaded.
+    Both HOME and USERPROFILE: on Windows `expanduser("~")` reads the second.
+    """
+    saved = {k: os.environ.get(k) for k in ("HOME", "USERPROFILE")}
+    home = tempfile.mkdtemp(prefix="lshome_")
+    for k in saved:
+        os.environ[k] = home
+
+    def _restore():
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        shutil.rmtree(home, ignore_errors=True)
+    atexit.register(_restore)
+    return home
 
 
 def load_stage(script, name=None):

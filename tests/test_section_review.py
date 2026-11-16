@@ -39,7 +39,11 @@ SCRIPTS = os.path.join(os.path.dirname(HERE), "scripts")
 # then pass or fail on their data. See tests/_fixture.py.
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
-from _fixture import use_temp_study  # noqa: E402
+from _fixture import private_home, use_temp_study  # noqa: E402
+
+# 04a's apply_review also searches ~/Downloads for a review export; this
+# suite must not read the runner's.
+private_home()
 
 # PAIRED, explicitly. Every assertion below about "the other marker's row"
 # is a statement about the paired layout, where the two markers are separate
@@ -148,11 +152,13 @@ def test_review_export_is_found():
     confirmation said 04a would act on it.
     """
     import time
-    keep = (RF.REVIEW_CSV, getattr(RF, "EXPORT_DIR", None), os.environ.get("HOME"))
+    keep = (RF.REVIEW_CSV, getattr(RF, "EXPORT_DIR", None),
+            {k: os.environ.get(k) for k in ("HOME", "USERPROFILE")})
     # getattr so a 04a without the search fails these checks, not the import.
     find = getattr(RF, "find_review_csv", lambda: "no find_review_csv")
     tmp = tempfile.mkdtemp(prefix="lsrevx_")
-    os.environ["HOME"] = tmp        # no stray ~/Downloads of the runner's
+    # No stray ~/Downloads of the runner's; USERPROFILE is what Windows reads.
+    os.environ["HOME"] = os.environ["USERPROFILE"] = tmp
     try:
         RF.REVIEW_CSV = os.path.join(tmp, "reformatted", "section_review.csv")
         RF.EXPORT_DIR = os.path.join(tmp, "exports")
@@ -184,12 +190,27 @@ def test_review_export_is_found():
         new = time.time() + 100
         os.utime(RF.REVIEW_CSV, (new, new))
         chk("...and a newer one wins", find(), RF.REVIEW_CSV)
+
+        # The counts are printed even when they are all zero. When the newest
+        # file changes - another browser's export, holding fewer decisions - a
+        # run that now applies nothing must say so, not look like the last one.
+        import contextlib
+        import io
+        write_review(RF.REVIEW_CSV, [
+            {"scene_uid": "E9", "marker": "AF568", "excluded": 0,
+             "decision": "", "mask_rejected": 0, "reason": ""}])
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            RF.apply_review({}, "AF568")
+        chk("a file that applies nothing still prints its zero counts",
+            "0 reinstated, 0 dropped, 0 mask(s) rejected" in buf.getvalue(), True)
     finally:
-        RF.REVIEW_CSV, RF.EXPORT_DIR, home = keep
-        if home is None:
-            os.environ.pop("HOME", None)
-        else:
-            os.environ["HOME"] = home
+        RF.REVIEW_CSV, RF.EXPORT_DIR, homes = keep
+        for k, v in homes.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
         shutil.rmtree(tmp, ignore_errors=True)
 
 

@@ -25,6 +25,14 @@ header line (`polyWarn`) says why. 05a refuses such a polygon from an older expo
 region (`ring_crosses`, listed under `REFUSED`) instead of measuring it. The download fallback
 spaces the files of one export `EXP_GAP_MS` (800 ms) apart and lists each, with the count to
 expect, as a link that downloads it again. The app's "Open in browser" button is removed.
+Review fixes: the build is a set of (scene_uid, marker), and under multiplex (`ACQ_LAYOUT`, now
+embedded) an outside section is written for every declared marker the build lacks, which also
+covers a `--worklist` build narrowed on the first marker only; a section the pipeline no longer
+carries (Review drop, or provenance status excluded / censored_out / not_reformatted) goes out with
+`excluded=1`; 05a exits 1 on a refused crossed polygon, after writing the boxes it placed, with the
+count as its last line; each export keeps its own stamp and counts while queued behind another
+(`expCur`); the crossing test runs before the area floor, which now says why; a stored crossed
+region is named when its section is shown; 04a prints its review counts even when zero.
 
 **Why:** After a rebuild with a different subset, the next export silently left out curated
 sections, and 05a takes the newest export. Review decisions never reached 04a: the page writes a
@@ -39,8 +47,9 @@ it, so removing it was the smaller change than a notice.
 **Cost:** A section curated in an older build is exported only if its record carries a frame;
 records imported by 04q and never shown again in an `--rgb` build do not, and are named until the
 page is rebuilt with them. Out-of-build sections take the marker from 04p's provenance row; under
-multiplex that is one marker per scene. A 05a run with a refused crossed polygon still exits 0
-(as a shapeless row does); the region is missing from the analysis until it is redrawn. An export
+multiplex the scene is written under every declared marker instead. A 05a run with a refused
+crossed polygon fails until the region is redrawn and exported again (a shapeless row still only
+warns). An export
 in the fallback takes about 1.6 s longer. Blob URLs for the re-download links are not revoked.
 
 ## 2026-11-16 - The ROI curator does not lose work (04l / app)

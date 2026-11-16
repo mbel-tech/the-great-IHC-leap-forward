@@ -602,7 +602,12 @@ with temp_study(acquisition={"layout": "paired",
            {"scene_uid": U1, "marker": "Mk1", "roi_kind": "roi",
             "region": "SQUARE", "seed_n": "", "sec_x": "125", "sec_y": "125",
             # A double-clicked corner (the same point twice) is not a crossing.
-            "sec_r": "", "sec_poly": "100 100;150 100;150 150;150 150;100 150"}],
+            "sec_r": "", "sec_poly": "100 100;150 100;150 150;150 150;100 150"},
+           # Pinched to a narrow waist that does NOT touch: the two notch tips
+           # are 2 px apart. A simple outline, however close it comes, is kept.
+           {"scene_uid": U1, "marker": "Mk1", "roi_kind": "roi",
+            "region": "HOURGLASS", "seed_n": "", "sec_x": "125", "sec_y": "125",
+            "sec_r": "", "sec_poly": "100 100;150 100;126 124;150 150;100 150;124 124"}],
           ["scene_uid", "marker", "roi_kind", "region", "seed_n",
            "sec_x", "sec_y", "sec_r", "sec_poly"])
     _buf = _bio.StringIO()
@@ -616,8 +621,12 @@ with temp_study(acquisition={"layout": "paired",
     finally:
         P5.RF.reformat, P5.scene_rects = _saved
     _said = _buf.getvalue()
-    chk("a bowtie polygon is not placed",
-        sorted(b["region"] for b in _boxes), ["SQUARE"])
+    chk("a bowtie polygon is not placed; a pinched one that does not touch is",
+        sorted(b["region"] for b in _boxes), ["HOURGLASS", "SQUARE"])
+    chk("ring_crosses: an outline touching itself at one point is refused",
+        P5.ring_crosses([(0, 0), (5, 5), (10, 10), (10, 0), (5, 5), (0, 10)]), True)
+    chk("ring_crosses: a corner resting on another edge is refused",
+        P5.ring_crosses([(0, 0), (10, 0), (10, 10), (5, 0), (0, 10)]), True)
     chk("...the refusal names the section and the region",
         any(U1 in ln and "BOWTIE" in ln for ln in _said.splitlines()), True)
     chk("...and says why", "crosses itself" in _said, True)
@@ -715,6 +724,19 @@ with temp_study(acquisition={"layout": "paired",
         _uids(P5.geom_csv("Mk1")), [U1])
     chk("roi_geometry_Mk2.csv holds Mk2's section only",
         _uids(P5.geom_csv("Mk2")), [U2])
+
+    # The bowtie through main(): the run FAILS with the count as its last line,
+    # and the boxes it did place are still written. A refused region the
+    # operator drew is a gap 05c would never measure, and exiting 0 made the
+    # app show 05a done with the section looking complete.
+    _rc, _said = _main(_bow, "--marker", "Mk1")
+    chk("a crossed polygon makes main() return 1", _rc, 1)
+    _last = [ln for ln in _said.splitlines() if ln.strip()][-1]
+    chk("...the last line names the refusal and its count",
+        _last.startswith("!! 1 Mk1 polygon ROI(s) REFUSED"), True)
+    chk("...and the boxes it placed are written",
+        sorted(r["region"] for r in P5.load_csv(P5.box_csv("Mk1"))),
+        ["HOURGLASS", "SQUARE"])
 
     # --marker stays an assertion: with it, only that marker is touched. The
     # other marker's boxes are curation-derived work and must survive as-is.

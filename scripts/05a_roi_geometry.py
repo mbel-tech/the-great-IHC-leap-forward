@@ -610,7 +610,7 @@ def analysis_set(regions, plates):
 
 
 def build(regions_csv, limit=None, plates_csv=None, require_background=True,
-          marker=None):
+          marker=None, refused=None):
     regions = load_csv(regions_csv)
     # One marker's rows of an export that carries several - see main(). The
     # paired markers' uids are disjoint, so the plates' `excluded` flags need no
@@ -667,7 +667,10 @@ def build(regions_csv, limit=None, plates_csv=None, require_background=True,
 
     geom_rows, box_rows, skipped = [], [], []
     shapeless = []          # ROI rows carrying no geometry at all - see below
-    crossed = []            # polygon rows whose outline crosses itself
+    # Polygon rows whose outline crosses itself. The caller's list when it
+    # passes one (`refused`), so _place_marker can fail the run on them without
+    # build() changing what it returns to every other caller.
+    crossed = refused if refused is not None else []
     rect_cache = {}
 
     for n, uid in enumerate(uids, 1):
@@ -853,8 +856,7 @@ def build(regions_csv, limit=None, plates_csv=None, require_background=True,
             print(f"    ... and {len(shapeless) - 10} more")
     if crossed:
         print(f"  REFUSED {len(crossed)} polygon ROI row(s) whose outline crosses "
-              f"itself - no single area, so not placed; redraw these regions in "
-              f"the curator and export again:")
+              f"itself - no single area, so not placed:")
         for _u, _reg in crossed[:10]:
             print(f"    {_u} {_reg}")
         if len(crossed) > 10:
@@ -1168,14 +1170,16 @@ def _place_marker(marker, regions, plates, args, only=None):
     """Place one marker's ROIs and write that marker's files. 1 on failure."""
     use_marker(marker)
     print(f"marker: {marker}")
+    crossed = []
     geom, boxes, skipped = build(regions, limit=args.limit, plates_csv=plates,
                                  require_background=not args.all_sections,
-                                 marker=only)
+                                 marker=only, refused=crossed)
     if not geom:
         print(f"no {marker} section could be placed")
         if skipped:
             for uid, why in skipped[:10]:
                 print(f"    {uid}: {why}")
+        not_placed(marker, skipped, crossed)
         return 1
 
     # Written to the SUFFIXED pair always, even when the legacy unsuffixed file
@@ -1204,7 +1208,7 @@ def _place_marker(marker, regions, plates, args, only=None):
         print("=" * 72)
         # Only the N sections the trial was told to place can be skipped
         # here; the rest were never asked for, and are no failure.
-        return not_placed(marker, skipped)
+        return not_placed(marker, skipped, crossed)
 
     # Keep the export these boxes were built from, beside them.
     #
@@ -1255,10 +1259,10 @@ def _place_marker(marker, regions, plates, args, only=None):
         for uid, why in skipped[:10]:
             print(f"    {uid}: {why}")
     print("=" * 72)
-    return not_placed(marker, skipped)
+    return not_placed(marker, skipped, crossed)
 
 
-def not_placed(marker, skipped):
+def not_placed(marker, skipped, crossed=()):
     """1, with the reason as the last line printed, when sections were skipped.
 
     A section in `skipped` has ROIs the operator drew and no box: its angle
@@ -1269,13 +1273,22 @@ def not_placed(marker, skipped):
     written and stay; this only makes the gap a failure someone has to read.
     Sections left out by the analysis-set rule (no background disc) are not
     in `skipped` - that is the curation's own decision, printed by build().
+
+    `crossed` are polygon ROIs refused because their outline crosses itself
+    (see ring_crosses). The rest of their section is placed - its background
+    disc included - so without this the section would look complete downstream
+    with a region the operator drew silently missing. Same rule: the boxes that
+    were placed are written, and the run fails with the count as its last line.
     """
-    if not skipped:
-        return 0
-    print(f"!! {len(skipped)} {marker} section(s) with ROIs NOT PLACED (see "
-          f"SKIPPED above): their ROIs have no boxes, so 05c would not measure "
-          f"them. Fix the cause and run this again.")
-    return 1
+    if skipped:
+        print(f"!! {len(skipped)} {marker} section(s) with ROIs NOT PLACED (see "
+              f"SKIPPED above): their ROIs have no boxes, so 05c would not measure "
+              f"them. Fix the cause and run this again.")
+    if crossed:
+        print(f"!! {len(crossed)} {marker} polygon ROI(s) REFUSED (outline crosses "
+              f"itself; see REFUSED above) - redraw them in the curator and export "
+              f"again.")
+    return 1 if (skipped or crossed) else 0
 
 
 if __name__ == "__main__":

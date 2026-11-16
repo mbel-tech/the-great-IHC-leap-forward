@@ -48,11 +48,11 @@ In every curator, **a dashed amber border is a proposal the program made; a soli
 
 ## Export
 
-Export writes three files to your exports folder, which Measure reads: `roi_plates.csv` (plate and status per section), `roi_landmarks.csv` and `roi_regions.csv` (every region and background disc). It includes every section you have curated, also those not in the current build of the page, and says how many came from outside it; a curated section it cannot write correctly is named in red and left out until the page is rebuilt with it. In a browser without a chosen folder the three files download a moment apart, and the line under the tools lists each as a link to download again if the browser refused one.
+Export writes three files to your exports folder, which Measure reads: `roi_plates.csv` (plate and status per section), `roi_landmarks.csv` and `roi_regions.csv` (every region and background disc). It includes every section you have curated, also those not in the current build of the page, and says how many came from outside it (one the pipeline no longer uses, such as one dropped in Review, goes out as excluded); a curated section it cannot write correctly is named in red and left out until the page is rebuilt with it. In a browser without a chosen folder the three files download a moment apart, and the line under the tools lists each as a link to download again if the browser refused one.
 
 Review's own export (`section_review_<date>.csv`) is applied by the next reformat run with overrides, which takes the newest one in the exports folder.
 
-An outline may not cross itself: one that would is not closed, and a corner dragged across another edge springs back, with a red line saying why.
+An outline may not cross itself: one that would is not closed, and a corner dragged across another edge springs back, with a red line saying why. A region from earlier work that crosses itself is named in red when its section is opened; redraw it, or ROI placement in Measure fails.
 
 **Shotgun** and **By region** build a PowerPoint deck of your favourites, split by treatment group. They are the only curator buttons that read the groups, and are off unless the study lists them.
 

@@ -732,9 +732,11 @@ def apply_review(excluded, marker):
             elif r.get("excluded") == "1":
                 out[uid] = ("manual", r.get("reason") or "excluded on review")
                 dropped += 1
-    if restored or dropped or rejected:
-        print(f"{os.path.basename(path)}: {restored} reinstated, {dropped} dropped, "
-              f"{len(rejected)} mask(s) rejected")
+    # Always, zeros included, once a file is used: when the newest export
+    # changes (another browser's, holding fewer decisions), a run that now
+    # applies nothing has to say so rather than look like the last one.
+    print(f"{os.path.basename(path)}: {restored} reinstated, {dropped} dropped, "
+          f"{len(rejected)} mask(s) rejected")
     return out, rejected
 
 

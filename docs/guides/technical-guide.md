@@ -1443,10 +1443,14 @@ repository (about 6,500 lines, most of it the page's JavaScript). Chapter 7 desc
 - **Writes:** `reformatted/roi_curator.html`. Its exports are `roi_plates.csv`, `roi_landmarks.csv` and
   `roi_regions.csv`, each with a timestamp added to its name, and Review mode exports
   `section_review.csv` (stamped the same way). The three ROI files cover every section the saved state
-  holds work for, not only the sections in this build: a section outside the build takes its animal,
-  marker and order from the embedded provenance table and is divided by the frame stamped on its record;
-  one with no provenance row, or with positions and no stored frame, is named in the page header and left
-  out.
+  holds work for, not only the sections in this build. The build is a set of (scene_uid, marker): under
+  multiplex a section is written for every declared marker the build does not carry it for (the
+  `--worklist` / `--analysis-set` narrowing applies to the first marker only), under paired once, under
+  its provenance marker. A section outside the build takes its animal and order from the embedded
+  provenance table and is divided by the frame stamped on its record; one with no provenance row, or with
+  positions and no stored frame, is named in the page header and left out. One the pipeline no longer
+  carries (dropped in Review, or provenance status `excluded`, `censored_out` or `not_reformatted`) is
+  written with `excluded=1`, so 05a's analysis set leaves it out instead of failing to place it.
 - **How:** Python collects the data and fills twenty placeholders (`__DATA__`, `__PLATES__`, `__SEED__` and the rest) in one HTML template with `ls_io.fill`, which escapes the JSON for a `<script>` block.
 - **Settings:** `acquisition`, `atlas_source`, `atlas_scope` (`existing_regions`, `regions_to_add`),
   `atlas_polygon_mirror`, `export_dir`, `display`, and `groups` (only to build the blinded Shotgun deck
@@ -1604,8 +1608,9 @@ real slide pixels.
   analysis-set rule (no background disc) are the curation's decision and do not fail the run. A polygon
   ROI whose outline crosses or touches itself (`ring_crosses`; the curator refuses one since 2026-11-16,
   an older export can still carry one) has no single area - the shoelace and 05c's even-odd membership
-  disagree - so it is refused and listed under `REFUSED` by section and region, like a row with no shape;
-  the rest of the section is placed.
+  disagree - so it is refused and listed under `REFUSED` by section and region; the rest of the section is
+  placed and written, and the run exits 1 with `!! N <marker> polygon ROI(s) REFUSED ...` as its last
+  line (`not_placed`).
 
 ### `05b_tune_detection.py`
 
@@ -2377,8 +2382,12 @@ top-level functions:
 - **Export:** `exportCsv`, `saveExport` and `dl`. `exportCsv` loops over the saved state, not `DATA`
   (see `04l_roi_curator.py` above). Without a chosen folder, `expWrite` downloads the files of one action
   `EXP_GAP_MS` apart and `expListDownloads` lists each as a re-download link with the count to expect.
-- **Polygons:** `ringCrosses` refuses an outline that crosses itself in `commitPoly`, puts back a corner
-  drag that makes one, and refuses a corner removal that would; `polyRefuse` says why in `#polyWarn`.
+  Each export's stamp and counts are captured when its files are queued (`expCur`, passed through
+  `saveExport` to `expWrite`), so a second Export pressed mid-download keeps its own.
+- **Polygons:** `ringCrosses` refuses an outline that crosses itself in `commitPoly` (before the area
+  floor, which has its own message), puts back a corner drag that makes one, and refuses a corner removal
+  that would; `polyRefuse` says why in `#polyWarn`. `select()` names any crossed region already stored on
+  the section shown.
 
 ### 7.4 The level curator
 
@@ -3615,7 +3624,7 @@ One row per section with any curation work: the plate it was matched to and how 
 | `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
-| `subset` | text |  | Which queue the section was loaded from. |
+| `subset` | text |  | Which queue the section was loaded from (`all`, the analysis-set file's name, `roi_worklist[:<tier>]`, `reinstated`), or `outside_build` for a section exported from the saved curation although this build of the page did not carry it. |
 | `section_order` | int |  | Position of the section along the animal's brain, 1..N within one marker's series. |
 | `plate_set` | text |  | The atlas plate set (`plates_final`, `plates_wullimann`, or an own atlas). |
 | `plate_id` | text |  | The plate's id, which sorts rostral to caudal. |

@@ -28,6 +28,7 @@ class ProjectSession(QObject):
     dirtyChanged = Signal(bool)
     saved = Signal()
     opened = Signal(str)           # a different project is now the open one
+    reloaded = Signal(str)         # the same file read again, replacing what was in memory
 
     def __init__(self, project, parent=None):
         super().__init__(parent)
@@ -86,9 +87,14 @@ class ProjectSession(QObject):
             self.project.save()
         except LP.ProjectConflict as exc:
             ans = BTN.question(parent, "The file changed on disk",
-                               "%s\n\nSave over it anyway? (Choose No to keep the file as it is "
-                               "and use File > Revert to read it again.)" % exc,
-                               BTN.Yes | BTN.No, BTN.No)
+                               "%s\n\nYes: save over it anyway. The other change to the settings is "
+                               "lost; curation decisions in the file are kept.\n"
+                               "Discard: throw away your unsaved changes here and read the file "
+                               "again.\nCancel: leave both as they are for now." % exc,
+                               BTN.Yes | BTN.Discard | BTN.Cancel, BTN.Cancel)
+            if ans == BTN.Discard:
+                self.reload(parent)
+                return False
             if ans != BTN.Yes:
                 return False
             try:
@@ -126,6 +132,25 @@ class ProjectSession(QObject):
         LC.remember_project(path)
         self._after_write()
         self.opened.emit(path)               # the window now points the stages at this file
+        return True
+
+    def reload(self, parent=None):
+        """Read the file again, dropping unsaved changes and any "changed on disk" state.
+
+        The way out of a conflict that keeps the other change: `Project.revert` only goes back
+        to this copy's last save, which is exactly what conflicts with the file. True if read.
+        """
+        if not self.idle_for("read the project file again"):
+            return False
+        try:
+            self.project.reload()
+        except LP.ProjectError as exc:
+            BTN.warning(parent, "Could not read the file", str(exc))
+            return False
+        self._was_dirty = self.project.dirty
+        self.reloaded.emit(self.project.path)
+        self.dirtyChanged.emit(self._was_dirty)
+        self.changed.emit()
         return True
 
     def _after_write(self):

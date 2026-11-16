@@ -626,18 +626,36 @@ class Project:
 
     # ---- saving ---------------------------------------------------------------
 
-    def _check_disk_unchanged(self):
-        if self.path and (self._foreign or (self._stamp is not None and _stamp(self.path) != self._stamp)):
-            raise ProjectConflict(
-                "%s changed on disk since this project last read or wrote it. Reload it, or "
-                "save over it with force=True." % self.path)
+    def _disk_if_moved(self):
+        """The file as it is now if it changed since this project last read or wrote it, else None."""
+        if not self.path or not (self._foreign or (
+                self._stamp is not None and _stamp(self.path) != self._stamp)):
+            return None
+        try:
+            with open(self.path, encoding="utf-8") as fh:
+                disk = json.load(fh)
+        except (OSError, ValueError):
+            return False                       # moved, and unreadable: nothing to take from it
+        return disk if isinstance(disk, dict) else False
 
     def save(self, force=False):
+        """Write the working copy over the file.
+
+        If the file moved since this project last read or wrote it: only curation, run rows,
+        sync marks or a stage's output moved (`_benign`) - take them in and save; anything else
+        raises ProjectConflict unless `force`. Either way what memory takes from disk
+        (`_follow_disk`) is taken first, so "save over it anyway" overwrites the other copy's
+        settings, as asked, and never its curation decisions or a stage's tuned values.
+        """
         self._check_writable()
         if not self.path:
             raise ProjectError("this project has no file yet; use save_as")
-        if not force:
-            self._check_disk_unchanged()
+        disk = self._disk_if_moved()
+        if not force and disk is not None and (disk is False or self._foreign or not self._benign(disk)):
+            raise ProjectConflict("%s changed on disk since this project last read or wrote it. "
+                                  "Reload it, or save over it with force=True." % self.path)
+        if disk:
+            self._follow_disk(disk, (self.cfg,))
         block = self.block
         block["modified"] = _now()
         block["app_version"] = code_version()
@@ -656,6 +674,7 @@ class Project:
             raise ProjectError("%s already exists" % path)
         self.path = path
         self._stamp = _stamp(path)             # whatever is there is ours to replace, by choice
+        self._foreign = False                  # ...and nothing of it is taken in
         return self.save(force=True)
 
     def revert(self):
@@ -703,29 +722,44 @@ class Project:
             raise ProjectError("%s is not a project" % self.path)
         return disk, seen
 
+    def _benign(self, disk):
+        """True if `disk` differs from the last save only in what memory takes from disk."""
+        mine = self._snapshot if self._snapshot is not None else self.cfg
+        if "project" not in disk and isinstance(mine.get("project"), dict):
+            # A file with no record yet: this copy's block is the one it would get (as the
+            # partial writers seed it), so the block's absence is not someone's change.
+            disk = dict(disk, project=mine["project"])
+        return _canon(_settings_view(disk)) == _canon(_settings_view(mine))
+
+    def _follow_disk(self, disk, targets):
+        """Take curation and FOLLOWS_DISK from `disk` into each of `targets`.
+
+        None of these is ever an unsaved edit: curation, sync marks and run rows are written to
+        the file as they happen, and detection.auto is written by a stage. So whatever else is
+        decided about the file, memory takes them from disk - in particular a forced save, which
+        otherwise would erase the other copy's curation decisions along with its settings.
+        """
+        for target in targets:
+            if target is None:
+                continue
+            if isinstance(disk.get("curation"), dict):
+                target["curation"] = dict(disk["curation"])
+            else:
+                target.pop("curation", None)
+            for dotted in FOLLOWS_DISK:
+                _carry(disk, target, dotted.split("."))
+
     def _write_partial(self, disk, seen):
         """Write `disk` (the file as read plus this writer's own keys); returns True if it had moved."""
         moved = seen != self._stamp
-        benign = True
-        if moved:
-            mine = self._snapshot if self._snapshot is not None else self.cfg
-            benign = _canon(_settings_view(disk)) == _canon(_settings_view(mine))
-            if not benign:
-                self._foreign = True
+        if moved and not self._benign(disk):
+            self._foreign = True
         ls_jsonio.write_json_atomic(self.path, disk, compact=COMPACT)
-        if moved and benign and not self._foreign:
+        if moved:
             # Another writer's curation, run rows, marks or stage output: memory follows disk, so
-            # the next full save carries them instead of putting back what this copy last saw.
-            # (After a conflict memory is left alone: it is what a forced save would write.)
-            for target in (self.cfg, self._snapshot):
-                if target is None:
-                    continue
-                if isinstance(disk.get("curation"), dict):
-                    target["curation"] = dict(disk["curation"])
-                else:
-                    target.pop("curation", None)
-                for dotted in FOLLOWS_DISK:
-                    _carry(disk, target, dotted.split("."))
+            # the next save carries them instead of putting back what this copy last saw. Settings
+            # are not taken (after a conflict they are what the person decides between).
+            self._follow_disk(disk, (self.cfg, self._snapshot))
         self._stamp = _stamp(self.path)
         LC.clear_cache()
         return moved

@@ -148,10 +148,33 @@ s2 = session_on("c")
 with open(s2.project.path, "r+", encoding="utf-8") as fh:
     d = json.load(fh); d["pixel_size_um"] = 4; fh.seek(0); json.dump(d, fh, indent=2); fh.truncate()
 s2.project.set("section_thickness_um", 15.0, by="t")
-answers["The file changed on disk"] = QMessageBox.No
-chk("saving over a hand edit asks; No leaves the file", (s2.save(None), read(s2.project.path)["pixel_size_um"]), (False, 4))
+answers["The file changed on disk"] = QMessageBox.Cancel
+chk("saving over a hand edit asks; Cancel leaves the file", (s2.save(None), read(s2.project.path)["pixel_size_um"]), (False, 4))
 answers["The file changed on disk"] = QMessageBox.Yes
 chk("Yes saves over it", (s2.save(None), read(s2.project.path)["section_thickness_um"]), (True, 15.0))
+
+# The way out that keeps the other change: Discard reads the file again. Revert alone only went
+# back to this copy's last save - the very thing that conflicts - so the question came back on
+# every later Save.
+s3 = session_on("conflict_reload")
+other = LP.Project.open(s3.project.path)
+other.set("pixel_size_um", 0.71, by="B")
+other.save()
+s3.project.write_curation("ls_reload_probe", "1")            # a partial write arms the conflict
+s3.project.set("section_thickness_um", 16.0, by="t")
+s3.touch()
+reloaded = []
+s3.reloaded.connect(reloaded.append)
+answers["The file changed on disk"] = QMessageBox.Discard
+chk("Discard reads the file again instead of saving",
+    (s3.save(None), s3.project.get("pixel_size_um"), s3.project.get("section_thickness_um") == 16.0, s3.dirty),
+    (False, 0.71, False, False))
+chk("...and tells the window", reloaded, [s3.project.path])
+s3.project.set("section_thickness_um", 17.0, by="t")
+asked.clear()
+chk("...after which Save goes through without asking, keeping the other change",
+    (s3.save(None), "The file changed on disk" in asked, read(s3.project.path)["pixel_size_um"],
+     read(s3.project.path)["section_thickness_um"]), (True, False, 0.71, 17.0))
 
 print("--- saving while a stage runs ---")
 # Save As rebinds the runner and a saved out_root re-roots the curator, both under a stage

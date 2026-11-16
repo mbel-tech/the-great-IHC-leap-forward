@@ -177,6 +177,8 @@ class MainWindow(QMainWindow):
                 f"paths updated for this location: {key} -> {new} (File > Save to keep)")
         self.session.changed.connect(self._update_title)
         self.session.opened.connect(self._project_opened)
+        # Read again after a conflict: the screens and the curator follow it as for a replaced file.
+        self.session.reloaded.connect(lambda p: self._project_opened(p, again=True))
         self.session.saved.connect(self._project_saved)
         self.out_root = self._config()["out_root"]
         line = self.session.sync_curation(self)

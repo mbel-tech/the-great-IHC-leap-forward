@@ -513,11 +513,136 @@ try:
         parked_left[0] in UA.result_text("apply", ok, "1.3", "1.4", inst), True)
     chk("hand-over fails: no journal is left to undo a good update", os.path.exists(journal(inst)), False)
 
-    # The bundled runtime runs the recovery before `-m app` is looked for.
+    # The bundled runtime runs the recovery before `-m app` is looked for - and only when `app`
+    # is missing, since every interpreter it starts (stages, workers) passes through there.
     for plat in ("windows", "macos"):
         site = open(os.path.join(REPO, "packaging", plat, "sitecustomize.py")).read()
-        chk("%s sitecustomize recovers an interrupted update" % plat,
-            "swap-journal.json" in site and "recover(" in site, True)
+        chk("%s sitecustomize recovers an interrupted update, only without app/" % plat,
+            ("swap-journal.json" in site, "recover(" in site,
+             'not os.path.isdir(os.path.join(_root, "app"))' in site), (True, True, True))
+
+    def new_start():
+        """A fresh process: recovery is attempted at most once per process per install."""
+        for k in [k for k in os.environ if k.startswith(UA.TRIED_ENV)]:
+            del os.environ[k]
+
+    def results(inst):
+        p = os.path.join(inst, "updates", "last-result.txt")
+        return open(p, encoding="utf-8").read().splitlines() if os.path.exists(p) else []
+
+    # Killed after the check passed, while filing the old version as previous/ ("swapped").
+    inst = fresh_install("killed-swapped")
+    UA._move = kill_on(lambda src, dst: os.path.basename(src).startswith("parked-")
+                       and os.path.basename(dst) == "previous")
+    try:
+        UA.apply(inst, make_update(inst), check=lambda r: True)
+    except Killed:
+        pass
+    finally:
+        UA._move = real_move
+    with open(journal(inst), encoding="utf-8") as fh:
+        chk("swapped: the journal says the new version passed", json.load(fh)["phase"], "swapped")
+    new_start()
+    text, moved = UA.recover(inst)
+    chk("swapped: recovery keeps the new version and files the old one",
+        (moved, marker(inst), UP.installed_info(inst)["version"],
+         marker(os.path.join(inst, "updates", "previous")), UP.can_undo(inst)),
+        ([], "new app", "1.3", "app", True))
+    chk("swapped: no journal or parked folder left",
+        (os.path.exists(journal(inst)),
+         [n for n in os.listdir(os.path.join(inst, "updates")) if n.startswith("parked-")]), (False, []))
+    chk("swapped: the next start says so", "finished" in (text or ""), True)
+
+    # Undo killed between its two `app` moves: recovery puts 1.3 back and previous/ is whole again.
+    inst = fresh_install("undo-killed")
+    UA.apply(inst, make_update(inst), check=lambda r: True)
+    UA._move = kill_on(lambda src, dst: os.path.basename(os.path.dirname(src)) == "previous"
+                       and os.path.basename(src) == "app")
+    try:
+        UA.undo(inst, check=lambda r: True)
+    except Killed:
+        pass
+    finally:
+        UA._move = real_move
+    chk("undo killed: no app folder", os.path.exists(os.path.join(inst, "app")), False)
+    new_start()
+    text, moved = UA.recover(inst)
+    chk("undo killed: recovery puts the version it was on back",
+        (moved, marker(inst), UP.installed_info(inst)["version"]), (["app"], "new app", "1.3"))
+    chk("undo killed: previous/ is whole again, so Undo still works",
+        (marker(os.path.join(inst, "updates", "previous")), UP.can_undo(inst),
+         UA.undo(inst, check=lambda r: True), marker(inst)), ("app", True, "ok", "app"))
+    chk("undo killed: the message names the undo", "undo of the last update" in (text or ""), True)
+
+    def interrupted(name):
+        inst = fresh_install(name)
+        UA._move = kill_on(lambda src, dst: os.path.relpath(src, inst).startswith("updates")
+                           and os.path.basename(src) == "app")
+        try:
+            UA.apply(inst, make_update(inst), check=lambda r: True)
+        except Killed:
+            pass
+        finally:
+            UA._move = real_move
+        new_start()
+        return inst
+
+    # Only one process recovers at a time: a lock held by a live process is respected, a dead
+    # one's (a crash mid-recovery) is taken over.
+    inst = interrupted("lock-held")
+    holder = _sp.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    lock = os.path.join(inst, "updates", UA.LOCK)
+    try:
+        with open(lock, "w") as fh:
+            fh.write(str(holder.pid))
+        chk("a lock held by a running process: recovery waits for it",
+            (UA.recover(inst), os.path.exists(os.path.join(inst, "app"))), ((None, []), False))
+    finally:
+        holder.kill()
+        holder.wait()
+    new_start()
+    chk("a dead holder's lock is taken over, and released after",
+        (UA.recover(inst)[1], marker(inst), os.path.exists(lock)), (["app"], "app", False))
+
+    # A reversal that fails (a locked folder) is said once per start, retried on later starts,
+    # and given up after MAX_ATTEMPTS with a single "run the installer".
+    inst = interrupted("recover-locked")
+
+    def parked_locked(src, dst):
+        if "parked-" in src:
+            raise PermissionError("in use")
+        return real_move(src, dst)
+
+    UA._move, UA.RETRY_DELAY = parked_locked, 0
+    try:
+        first = UA.recover(inst)
+        again = UA.recover(inst)                     # same process: sitecustomize, then __main__
+        lines = [results(inst)]
+        for _ in range(UA.MAX_ATTEMPTS):
+            new_start()
+            UA.recover(inst)
+            lines.append(results(inst))
+    finally:
+        UA._move, UA.RETRY_DELAY = real_move, 1.0
+    chk("failed reversal: said once, with the reason", ("tried again" in (first[0] or ""), len(lines[0])), (True, 1))
+    chk("...not attempted twice in one process", again, (None, []))
+    chk("...retried quietly, then given up once, then left alone",
+        [len(x) for x in lines], [1, 1, 2, 2])
+    chk("...and the last word is to run the installer", "run the installer" in lines[-1][-1], True)
+    chk("...the journal is kept for the installer's sake", os.path.exists(journal(inst)), True)
+
+    # A journal that cannot be read: set aside, said once, nothing moved.
+    inst = fresh_install("bad-journal")
+    os.makedirs(os.path.join(inst, "updates"), exist_ok=True)
+    with open(journal(inst), "w") as fh:
+        json.dump({"phase": "swapping", "parts": [["app"]], "parked": 1}, fh)
+    new_start()
+    text, moved = UA.recover(inst)
+    chk("a malformed journal is set aside, not acted on",
+        (moved, os.path.exists(journal(inst)), marker(inst),
+         any(n.startswith(UA.JOURNAL + ".bad-") for n in os.listdir(os.path.join(inst, "updates")))),
+        ([], False, "app", True))
+    chk("...and the next start says so", "cannot be read" in (text or ""), True)
 
     src_main = open(os.path.join(REPO, "app", "__main__.py")).read()
     chk("app/__main__.py handles --check-install", "--check-install" in src_main, True)

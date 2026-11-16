@@ -2449,8 +2449,9 @@ only come from the new Setup program. `update_apply.py`, copied out of `app/` be
 the new code in after the app closes, checks that it imports, and puts the old version back if anything
 fails; it also does **Help > Undo last update**. Before moving anything it writes
 `updates/swap-journal.json`; if the helper dies mid-swap, `update_apply.recover()` reads it and puts the
-old version back, run by the bundled runtime's `sitecustomize.py` (which still runs when `app/` itself is
-missing) and by `app/__main__.py`. The replaced version is deleted only once it is filed as
+old version back under an exclusive `swap-journal.lock`. `app/__main__.py` runs it before the app starts;
+the bundled runtime's `sitecustomize.py` runs it only when `app/` itself is missing. A reversal that fails
+is retried on later starts and given up after three tries. The replaced version is deleted only once it is filed as
 `updates/previous/`. `update_ui.py` is the window side.
 `packaging/make_update.py` writes the update package at build time.
 

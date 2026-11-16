@@ -268,6 +268,41 @@ on = read(bfp)
 chk("...and the save keeps both of them",
     (sorted(on["curation"]), on["detection"]["auto"]), (["ls_from_a", "ls_from_b"], {"AF488": {"threshold": 3}}))
 
+# "Save over it anyway" overwrites the other copy's SETTINGS, as asked - never its curation
+# decisions, sync marks or run rows, which are not anyone's unsaved edit.
+for via_partial in (False, True):
+    ffp, _ffd = fresh("force_%d" % via_partial)
+    fa, fb = P.Project.open(ffp), P.Project.open(ffp)
+    fb.write_curation("ls_by_b", '{"s1": "keep"}')
+    fb._mark_synced("ls_by_b", "feedbeef0000")
+    fb.record_run("b_run", True, "a", "b")
+    fb.set("pixel_size_um", 0.81, by="B")
+    fb.save()
+    if via_partial:
+        fa.write_curation("ls_by_a", "1")                       # arms the conflict
+    fa.set("section_thickness_um", 44.0, by="A")
+    chk("forced save (%s): unforced is refused" % ("after a partial write" if via_partial else "direct"),
+        raises(fa.save, P.ProjectConflict, "changed on disk"), True)
+    fa.save(force=True)
+    on = read(ffp)
+    chk("...forced keeps B's curation decision, mark and run row",
+        (on["curation"].get("ls_by_b"), on["project"]["synced"].get("ls_by_b"),
+         [r["stage"] for r in on["project"]["runs"]]), ({"s1": "keep"}, "feedbeef0000", ["b_run"]))
+    chk("...and writes A's settings over B's, as asked",
+        (on["section_thickness_um"], on["pixel_size_um"]), (44.0, 0.65))
+
+# A Save while 05b is running: the stage wrote detection.auto, no run row yet. That is not a
+# conflict, and the Save keeps the tuned values.
+sfp, _sfd = fresh("save_during_05b")
+sa = P.Project.open(sfp)
+disk = read(sfp)
+disk.setdefault("detection", {})["auto"] = {"AF568": {"threshold": 5}}
+ls_jsonio.write_json_atomic(sfp, disk, compact=P.COMPACT)
+sa.set("pixel_size_um", 0.61, by="A")
+sa.save()
+chk("a Save during a 05b run neither asks nor drops the tuned values",
+    (read(sfp)["detection"]["auto"], read(sfp)["pixel_size_um"]), ({"AF568": {"threshold": 5}}, 0.61))
+
 print("--- bad files ---")
 bad = os.path.join(d, "bad.json")
 open(bad, "w").write("{nope")

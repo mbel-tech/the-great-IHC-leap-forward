@@ -19,13 +19,13 @@ The helper can also die half way (power cut, killed by antivirus, the PC shut
 down). Before it moves anything it writes updates\\swap-journal.json, saying
 which parts it is about to move and where, and removes it once the swap is
 settled. `recover()` reads a leftover journal and puts every part back where it
-was before the swap started. It is run at the start of every interpreter by the
-bundled runtime's sitecustomize.py (the only place that still runs when the
-`app` folder itself is the part that went missing), and again by app/__main__.py
-for installs whose runtime predates that.
+was before the swap started, under an exclusive lock file. app/__main__.py runs
+it before the app starts; the bundled runtime's sitecustomize.py runs it only
+when the `app` folder itself is missing, the one case the app cannot reach.
 """
 
 import datetime
+import hashlib
 import json
 import os
 import shutil
@@ -272,14 +272,20 @@ def _alive(pid):
     if sys.platform == "win32":
         # os.kill(pid, 0) on Windows TERMINATES the process: ask for its exit code instead.
         import ctypes
-        k32 = ctypes.windll.kernel32
-        h = k32.OpenProcess(0x1000, False, pid)          # PROCESS_QUERY_LIMITED_INFORMATION
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.OpenProcess.restype = ctypes.c_void_p             # a HANDLE, not a C int
+        k32.OpenProcess.argtypes = (ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32)
+        k32.GetExitCodeProcess.argtypes = (ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong))
+        k32.CloseHandle.argtypes = (ctypes.c_void_p,)
+        h = k32.OpenProcess(0x1000, False, pid)              # PROCESS_QUERY_LIMITED_INFORMATION
         if not h:
-            return False
+            # Access denied means it exists (another user's, or protected): treat as running,
+            # so a helper's journal is never taken over while it might still be working.
+            return ctypes.get_last_error() == 5             # ERROR_ACCESS_DENIED
         code = ctypes.c_ulong()
         ok = k32.GetExitCodeProcess(h, ctypes.byref(code))
         k32.CloseHandle(h)
-        return bool(ok) and code.value == 259            # STILL_ACTIVE
+        return not ok or code.value == 259                   # STILL_ACTIVE
     try:
         os.kill(pid, 0)
     except PermissionError:
@@ -289,82 +295,199 @@ def _alive(pid):
     return True
 
 
-def recover(root):
-    """Finish or reverse a swap whose helper died. Returns (message or None, [parts moved]).
+LOCK = "swap-journal.lock"
+STALE_LOCK = 600        # seconds: a recovery never takes this long; an older lock is a crash's
+MAX_ATTEMPTS = 3        # failed reversals before recovery stops and says "run the installer"
+TRIED_ENV = "LSAPP_UPDATE_RECOVERY_"
 
-    Nothing to do without a journal, or while the helper that wrote it is still running
-    (its own check and compile steps start interpreters too). A journal still "swapping"
-    is reversed part by part from what is on disk now, so it works wherever the crash
-    fell, including between moving the live `app` out and the new one in:
 
-      had a live copy, old copy in parked   the live one (if any) is the new one: back
-                                            to `incoming`, then the old one back in
-      had a live copy, none in parked       it never moved; nothing to do
-      new part, live and not in incoming    it is the new one: back to `incoming`
+def _take_lock(root):
+    """Create updates/swap-journal.lock exclusively; its path, or None if another process holds it.
 
-    "swapped" means the new version passed its check and only the filing of the old
-    one was cut short; that is finished instead. The outcome is added to
-    updates/last-result.txt, which the app shows on start.
+    O_CREAT|O_EXCL is atomic on NTFS and POSIX alike, so of several interpreters starting
+    together exactly one recovers. A lock whose writer is dead, or older than STALE_LOCK, is
+    a leftover from a crash and is taken over. One being written this instant (no pid yet,
+    young) counts as held.
     """
-    path = journal_path(root)
-    try:
-        with open(path, encoding="utf-8") as fh:
-            j = json.load(fh)
-    except (OSError, ValueError):
-        return None, []
-    if not isinstance(j, dict) or _alive(j.get("pid")):
-        return None, []
-    mode = j.get("mode") or "apply"
-    what = "update" if mode == "apply" else "undo of the last update"
-    parked, incoming = j.get("parked") or "", j.get("incoming") or ""
-    moved, problems = [], []
-    if j.get("phase") == "swapped":
-        if mode == "apply" and os.path.isdir(parked) and not _hand_over(root, parked):
-            problems.append(f"the version it replaced is kept in {parked}")
-        _drop_journal(root)
-        text = (f"The {what} finished, but the app closed before it was tidied up"
-                + (f"; {problems[0]}." if problems else "; that is done now."))
-    else:
-        for part, had_live in reversed(j.get("parts") or []):
-            if part not in PARTS:
-                continue
-            live, old, new = (os.path.join(root, part), os.path.join(parked, part),
-                              os.path.join(incoming, part))
+    path = os.path.join(root, "updates", LOCK)
+    for _ in range(2):
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
             try:
-                if had_live and os.path.exists(old):
-                    if os.path.exists(live):
-                        if os.path.exists(new):
-                            problems.append(f"{part}: both {live} and {new} exist")
-                            continue
-                        os.makedirs(incoming, exist_ok=True)
-                        _move_retrying(live, new)
-                    _move_retrying(old, live)
-                    moved.append(part)
-                elif not had_live and os.path.exists(live) and not os.path.exists(new):
-                    os.makedirs(incoming, exist_ok=True)
-                    _move_retrying(live, new)
-                    moved.append(part)
-            except OSError as e:
-                problems.append(f"{part} could not be put back: {e}")
-            if had_live and not os.path.exists(live):
-                problems.append(f"{part} is missing from {root}")
-        if problems:
-            text = (f"The {what} was interrupted and could not be fully reversed "
-                    f"({'; '.join(problems)}). It will be tried again on the next start; if "
-                    f"the app does not start, run the installer again. Your studies are not "
-                    f"affected. Details: {os.path.join(root, 'updates', 'last-update.log')}")
-        else:
-            _drop_journal(root)
-            if os.path.isdir(parked) and not _holds_parts(parked):
-                shutil.rmtree(parked, ignore_errors=True)
-            text = (f"The {what} was interrupted, so it was reversed: you are on "
-                    f"{_version(root)}, as before.")
+                age = time.time() - os.path.getmtime(path)
+            except OSError:
+                continue                                    # just released: try again
+            try:
+                with open(path, encoding="utf-8") as fh:
+                    holder = int(fh.read().strip() or 0)
+            except (OSError, ValueError):
+                holder = 0
+            if age < STALE_LOCK and (holder == 0 or _alive(holder)):
+                return None
+            try:
+                os.remove(path)
+            except OSError:
+                return None
+            continue
+        except OSError:
+            return None
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(str(os.getpid()))
+        return path
+    return None
+
+
+def _tell(root, text):
+    """Log `text` and add it to what the app shows on its next start."""
     _log(root, text)
     try:
         with open(os.path.join(root, "updates", "last-result.txt"), "a", encoding="utf-8") as fh:
             fh.write(text + "\n")
     except OSError:
         pass
+
+
+def recover(root):
+    """Finish or reverse a swap whose helper died. Returns (message or None, [parts moved]).
+
+    Nothing to do without a journal, or while the helper that wrote it is still running
+    (its own check and compile steps start interpreters too), or while another process
+    holds the lock. Once per process per install: sitecustomize and app/__main__.py run in
+    the same process, and a second try straight after a failed one would fail the same way
+    and say so twice. Never raises: a failure is logged and the app starts as it can.
+    """
+    tried = TRIED_ENV + hashlib.sha1(os.path.abspath(root).encode("utf-8")).hexdigest()[:10]
+    path = journal_path(root)
+    if os.environ.get(tried) == str(os.getpid()) or not os.path.exists(path):
+        return None, []
+    try:
+        with open(path, encoding="utf-8") as fh:
+            j = json.load(fh)
+    except OSError:
+        return None, []
+    except ValueError:
+        j = None
+    if isinstance(j, dict) and _alive(j.get("pid")):
+        return None, []
+    lock = _take_lock(root)
+    if lock is None:
+        return None, []
+    os.environ[tried] = str(os.getpid())
+    try:
+        return _recover_locked(root, j)
+    except Exception as e:                                  # noqa: BLE001
+        _log(root, f"recovering the interrupted update failed: {e!r}")
+        return None, []
+    finally:
+        try:
+            os.remove(lock)
+        except OSError:
+            pass
+
+
+def _valid_journal(j):
+    if not isinstance(j, dict) or j.get("phase") not in ("swapping", "swapped"):
+        return False
+    if not all(isinstance(j.get(k), str) and j.get(k) for k in ("parked", "incoming")):
+        return False
+    parts = j.get("parts")
+    return isinstance(parts, list) and all(
+        isinstance(p, list) and len(p) == 2 and p[0] in PARTS and isinstance(p[1], bool)
+        for p in parts)
+
+
+def _recover_locked(root, j):
+    """recover(), with the lock held. Part by part, from what is on disk now:
+
+      had a live copy, old copy in parked   the live one (if any) is the new one: back
+                                            to `incoming`, then the old one back in
+      had a live copy, none in parked       it never moved; nothing to do
+      new part, live and not in incoming    it is the new one: back to `incoming`
+
+    so it works wherever the crash fell, including between moving the live `app` out and
+    the new one in. "swapped" means the new version passed its check and only the filing
+    of the old one was cut short; that is finished instead. A reversal that fails is
+    retried on later starts, saying so the first time, and given up after MAX_ATTEMPTS.
+    """
+    log = os.path.join(root, "updates", "last-update.log")
+    if not _valid_journal(j):
+        bad = journal_path(root) + f".bad-{_stamp()}"
+        try:
+            os.replace(journal_path(root), bad)
+        except OSError:
+            bad = journal_path(root)
+        text = (f"An update left a journal that cannot be read ({bad}), so nothing was put "
+                f"back. If the app misbehaves, run the installer again; your studies are not "
+                f"affected. Details: {log}")
+        _tell(root, text)
+        return text, []
+    mode = j.get("mode") or "apply"
+    what = "update" if mode == "apply" else "undo of the last update"
+    parked, incoming = j["parked"], j["incoming"]
+    updates = os.path.join(root, "updates")
+    moved, problems = [], []
+    if j["phase"] == "swapped":
+        if mode == "apply" and os.path.isdir(parked) and not _hand_over(root, parked):
+            problems.append(f"the version it replaced is kept in {parked}")
+        _drop_journal(root)
+        left = sorted(n for n in os.listdir(updates)
+                      if n.startswith(("undone-", "previous-old-"))) if os.path.isdir(updates) else []
+        if left:
+            _log(root, "left behind by the interrupted swap, safe to delete: " + ", ".join(left))
+        text = (f"The {what} finished, but the app closed before it was tidied up"
+                + (f"; {problems[0]}." if problems else "; that is done now."))
+        _tell(root, text)
+        return text, moved
+    attempts = int(j.get("attempts") or 0)
+    if attempts >= MAX_ATTEMPTS:
+        return None, []                                     # said so when it gave up
+    for part, had_live in reversed(j["parts"]):
+        live, old, new = (os.path.join(root, part), os.path.join(parked, part),
+                          os.path.join(incoming, part))
+        try:
+            if had_live and os.path.exists(old):
+                if os.path.exists(live):
+                    if os.path.exists(new):
+                        problems.append(f"{part}: both {live} and {new} exist")
+                        continue
+                    os.makedirs(incoming, exist_ok=True)
+                    _move_retrying(live, new)
+                _move_retrying(old, live)
+                moved.append(part)
+            elif not had_live and os.path.exists(live) and not os.path.exists(new):
+                os.makedirs(incoming, exist_ok=True)
+                _move_retrying(live, new)
+                moved.append(part)
+        except OSError as e:
+            problems.append(f"{part} could not be put back: {e}")
+        if had_live and not os.path.exists(live):
+            problems.append(f"{part} is missing from {root}")
+    if not problems:
+        _drop_journal(root)
+        if os.path.isdir(parked) and not _holds_parts(parked):
+            shutil.rmtree(parked, ignore_errors=True)
+        text = f"The {what} was interrupted, so it was reversed: you are on {_version(root)}, as before."
+        _tell(root, text)
+        return text, moved
+    attempts += 1
+    try:
+        _write_journal(root, dict(j, attempts=attempts))
+    except OSError as e:
+        _log(root, f"could not count the recovery attempt: {e}")
+    detail = "; ".join(problems)
+    if attempts == 1:
+        text = (f"The {what} was interrupted and could not be fully reversed ({detail}). It "
+                f"will be tried again on the next start; if the app does not start, run the "
+                f"installer again. Your studies are not affected. Details: {log}")
+    elif attempts >= MAX_ATTEMPTS:
+        text = (f"The {what} was interrupted, and putting the old version back failed "
+                f"{attempts} times ({detail}). It will not be tried again: run the installer "
+                f"again. Your studies are not affected. Details: {log}")
+    else:
+        _log(root, f"recovery attempt {attempts} failed: {detail}")
+        return None, moved
+    _tell(root, text)
     return text, moved
 
 

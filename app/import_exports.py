@@ -223,6 +223,9 @@ def rebuild(plates_csv, landmarks_csv=None, k=None, regions_csv=None, frame_of=N
                 e["assigned"] = True
             e["fav"] = r.get("favorite") == "1"
             e["hard"] = r.get("difficult") == "1"
+            # The operator's exclusion only. `not_carried` (the pipeline did not
+            # carry the section when it was exported) is deliberately NOT read:
+            # stored as `excl` it would outlive its reason. 04q does the same.
             e["excl"] = r.get("excluded") == "1"
             e["noroi"] = (r.get("status") or "") == "no_roi"
             try:

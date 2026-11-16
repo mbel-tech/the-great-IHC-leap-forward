@@ -17,7 +17,7 @@
 const { env, load, chk, note, done } = require("./harness");
 const { els, blobs, fire } = env;   // els: the animal picker
 
-const X = load(`{PLATES, DATA, PROWS, P_BY, S, st, rows, select, onSlideUser,
+const X = load(`{PLATES, DATA, PROWS, P_BY, CARRIED, S, st, rows, select, onSlideUser,
   exportCsv, drawSec, secDown, commitPoly, polysOf, ringCrosses, beginExport,
   dl, toggleGuided, dropVertex,
   get guided(){return guided}, get draft(){return draft},
@@ -38,12 +38,17 @@ note("(1) sections outside this build are exported from their stored record\n");
   // Five are used below; asserted, so a smaller study fails here rather than
   // quietly skipping the checks that need them.
   chk("the synthetic study has sections this build does not carry", out.length >= 5, true);
-  const [O1, O2, NOFRAME, DROPPED] = out.map(p => p.scene_uid);
-  // One the pipeline no longer carries (04a never reformatted it), and the
-  // rest that it does - set here so the checks below do not depend on what
-  // the synthetic study happens to say about them.
-  const GONE = (out.find(p => p.status === "not_reformatted") || out[4]).scene_uid;
-  for(const p of out) p.status = p.scene_uid === GONE ? "not_reformatted" : "reformatted";
+  // Five DISTINCT sections, by position, so no two names can alias one record.
+  const [O1, O2, NOFRAME, DROPPED, GONE] = out.slice(0, 5).map(p => p.scene_uid);
+  chk("...five distinct ones", new Set([O1, O2, NOFRAME, DROPPED, GONE]).size, 5);
+  // What the pipeline carries is decided here, not left to the synthetic
+  // study: the first four are in a reformat_index, GONE is in none. GONE's
+  // provenance says "measured" - 04p's status is the furthest point a section
+  // ever reached, so a section placed and measured and THEN excluded by 04a
+  // still reads measured. The rule must not be fooled by it.
+  for(const u of [O1, O2, NOFRAME, DROPPED]) X.CARRIED.add(u);
+  X.CARRIED.delete(GONE);
+  for(const p of out.slice(0, 5)) p.status = p.scene_uid === GONE ? "measured" : "reformatted";
   const pi = Math.max(0, X.PLATES.findIndex(P => (P.hulls || []).length));
   const P = X.PLATES[pi];
   // O1: curated on a 768 composite in an earlier build - frame stamped.
@@ -57,15 +62,19 @@ note("(1) sections outside this build are exported from their stored record\n");
   // frame, one the provenance table has never heard of.
   X.S[NOFRAME] = {plate: pi, assigned: true,
                   pairs: [[10, 10, 0, 0, 0, 4, "bg"]], polys: []};
-  // Curated in full (an ROI and a background disc), then dropped in Review -
-  // so the next build does not carry it - and one with the same work that
-  // 04a never reformatted. Exported live, 05a would try to place both, find no
-  // reformat_index row and fail on every run.
+  // Curated in full (an ROI and a background disc). DROPPED was then dropped
+  // in Review but 04a has not run since, so the index still carries it: it is
+  // placeable, and goes out live like any other. GONE is in no index: exported
+  // live, 05a would try to place it, find no reformat_index row and fail on
+  // every run.
   const full = () => ({plate: pi, plate_id: P.id, assigned: true, frame: 256,
     pairs: [[110, 50, 0, 0, 0, 11, "bg"]],
     polys: [{v: [100, 50, 140, 50, 140, 90, 100, 90], roi: 1, region: "Rx", part: 1}]});
   X.S[DROPPED] = Object.assign(full(), {rev: {act: "drop", why: "fold"}});
   X.S[GONE] = full();
+  // And one section this build carries, curated the same way.
+  const INB = X.DATA[0].uid;
+  X.S[INB] = full();
   X.S["ZZ999_s99a_sc99"] = {plate: pi, assigned: true, frame: 256,
                              pairs: [[10, 10, 0, 0, 0, 4, "bg"]], polys: []};
 
@@ -89,18 +98,26 @@ note("(1) sections outside this build are exported from their stored record\n");
   chk("the status line says how many came from outside the build",
       /4 of \d+ row\(s\) came from outside this build/.test(E("expStat").textContent), true);
   chk("...and how many of them the pipeline no longer carries",
-      /2 section\(s\) the pipeline no longer carries, exported as excluded/.test(E("expStat").textContent), true);
+      /1 section\(s\) the pipeline no longer carries, marked not_carried/.test(E("expStat").textContent), true);
   const plRow = u => pl.find(r => r[0] === u) || [];
-  chk("a section dropped in Review is exported as excluded",
-      [plRow(DROPPED)[col(pl, "excluded")], plRow(DROPPED)[col(pl, "status")]].join(), "1,excluded");
-  chk("...and one 04a never reformatted", plRow(GONE)[col(pl, "excluded")], "1");
-  chk("...while a live one outside the build is not", plRow(O1)[col(pl, "excluded")], "0");
-  chk("...and the dropped one's regions still go out", rg.some(r => r[0] === DROPPED), true);
+  const at = (u, c) => plRow(u)[col(pl, c)];
+  chk("roi_plates has a not_carried column", col(pl, "not_carried") > col(pl, "difficult"), true);
+  chk("a section in no reformat_index is marked not_carried, though provenance says measured",
+      at(GONE, "not_carried"), "1");
+  // NOT excluded=1: that column is the operator's judgement, and both
+  // importers store it as one. Written here it would come back as an operator
+  // exclusion and still hold once the pipeline carried the section again.
+  chk("...and NOT as the operator's exclusion", at(GONE, "excluded"), "0");
+  chk("...its status is its work, as for any section", at(GONE, "status"), "plate_only");
+  chk("...and its regions still go out", rg.some(r => r[0] === GONE), true);
+  chk("a section the index still carries is not marked", at(DROPPED, "not_carried"), "0");
+  chk("...nor a live one outside the build", [at(O1, "not_carried"), at(O1, "excluded")].join(), "0,0");
+  chk("an in-build section is never marked", at(INB, "not_carried"), "0");
 
-  // END TO END: 05a's own analysis_set, on these very files. The dropped and
-  // never-reformatted sections leave it as "excluded by the operator" - they
-  // reach build() not at all, so they cannot fail its reformat_index lookup -
-  // while O1 is kept to be placed.
+  // END TO END: 05a's own analysis_set, on these very files. The section no
+  // index carries leaves it under its own reason - it reaches build() not at
+  // all, so it cannot fail the reformat_index lookup - while O1 and DROPPED
+  // (still carried) are kept to be placed.
   {
     const fs = require("fs"), os = require("os"), path = require("path");
     const { spawnSync } = require("child_process");
@@ -127,10 +144,10 @@ print(json.dumps({"keep": keep, "dropped": dict(dropped)}))
     fs.rmSync(dir, {recursive: true, force: true});
     chk("05a's analysis set could be run on the export", !!res, true);
     if(res){
-      chk("05a: the Review-dropped section is excluded, not placed",
-          res.dropped[DROPPED], "excluded by the operator");
-      chk("05a: so is the never-reformatted one", res.dropped[GONE], "excluded by the operator");
-      chk("05a: the live outside section is kept", res.keep.includes(O1), true);
+      chk("05a: the section no index carries is left out, under its own reason",
+          res.dropped[GONE], "not carried by the pipeline (in no reformat_index)");
+      chk("05a: the live outside sections are kept",
+          res.keep.includes(O1) && res.keep.includes(DROPPED), true);
     }
   }
   chk("a record with no provenance row is not exported", uidsIn(pl).has("ZZ999_s99a_sc99"), false);
@@ -139,7 +156,7 @@ print(json.dumps({"keep": keep, "dropped": dict(dropped)}))
   chk("a record with positions and no frame is not exported", uidsIn(pl).has(NOFRAME), false);
   chk("...and is named, with why",
       E("expWarn").textContent.includes(NOFRAME + " (no frame"), true);
-  for(const u of [O1, O2, NOFRAME, DROPPED, GONE, "ZZ999_s99a_sc99"]) delete X.S[u];
+  for(const u of [O1, O2, NOFRAME, DROPPED, GONE, INB, "ZZ999_s99a_sc99"]) delete X.S[u];
   blobs.length = 0; X.exportCsv();
   chk("with nothing left out, the header notice goes", E("expWarn").style.display, "none");
 }
@@ -171,7 +188,7 @@ note("\n(3) a self-intersecting polygon is refused\n");
   X.commitPoly();
   chk("a bowtie cannot be closed", X.polysOf(X.st(uid)).length, n0);
   chk("...the ring is left open to be fixed", X.draft && X.draft.length, 8);
-  chk("...and the header says why", /crosses itself/.test(E("polyWarn").textContent), true);
+  chk("...and the header says why", /crosses or touches itself/.test(E("polyWarn").textContent), true);
   // z takes the corners back; nothing was stored.
   X.dropVertex(); X.dropVertex(); X.dropVertex(); X.dropVertex();
   chk("z clears the refused ring", X.draft, null);
@@ -183,7 +200,7 @@ note("\n(3) a self-intersecting polygon is refused\n");
   click(100, 100); click(220, 220); click(220, 100); click(100, 220);
   X.commitPoly();
   chk("a symmetric bowtie is refused as crossing, with a message",
-      /crosses itself/.test(E("polyWarn").textContent), true);
+      /crosses or touches itself/.test(E("polyWarn").textContent), true);
   X.dropVertex(); X.dropVertex(); X.dropVertex(); X.dropVertex();
   // Three corners in a line enclose nothing - said, not ignored.
   click(100, 100); click(150, 150); click(200, 200);

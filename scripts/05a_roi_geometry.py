@@ -574,7 +574,7 @@ def scene_rects(czi_path):
 def analysis_set(regions, plates):
     """Which sections are measurable, and a full account of what was dropped.
 
-    Three conditions, and each rejects for a different reason:
+    Four conditions, and each rejects for a different reason:
 
       * at least one ROI - there is nothing to measure otherwise;
       * at least one BACKGROUND disc - the positivity cut is per section and is
@@ -583,7 +583,9 @@ def analysis_set(regions, plates):
         substitute a different piece of tissue for the control;
       * not excluded - `excluded` is the operator's own judgement recorded in
         roi_plates.csv, and measuring a section they threw out would quietly
-        overrule it.
+        overrule it;
+      * still carried - `not_carried` marks a curated section no reformat_index
+        holds any more, which build() could not place.
 
     Reported rather than filtered silently, because the counts are a result in
     their own right: how many sections were curated but cannot be used, and why,
@@ -595,11 +597,18 @@ def analysis_set(regions, plates):
         d = bg if r.get("roi_kind") == "background" else roi
         d[u] = d.get(u, 0) + 1
     excluded = {r["scene_uid"] for r in plates if r.get("excluded") == "1"}
+    # `not_carried` (04l, since 2026-11-16): a curated section that no
+    # reformat_index carries any more - 04a has excluded it or never made it.
+    # Not the operator's exclusion, so not folded into `excluded`, but just as
+    # unplaceable: build() would find no index row and fail the run on it.
+    gone = {r["scene_uid"] for r in plates if r.get("not_carried") == "1"}
 
     keep, dropped = [], []
     for u in sorted(set(roi) | set(bg)):
         if u in excluded:
             dropped.append((u, "excluded by the operator"))
+        elif u in gone:
+            dropped.append((u, "not carried by the pipeline (in no reformat_index)"))
         elif not roi.get(u):
             dropped.append((u, f"no ROI ({bg.get(u, 0)} background only)"))
         elif not bg.get(u):
@@ -635,6 +644,15 @@ def build(regions_csv, limit=None, plates_csv=None, require_background=True,
             print(f"    dropped {n:3d}: {k}")
         kept = set(keep)
         regions = [r for r in regions if r["scene_uid"] in kept]
+    else:
+        # --all-sections takes every section the curation names, excluded or
+        # not - but a not_carried one has no reformat_index row to be placed
+        # from, so it is left out here too, and said.
+        gone = {r["scene_uid"] for r in plates if r.get("not_carried") == "1"}
+        n_gone = len({r["scene_uid"] for r in regions} & gone)
+        if n_gone:
+            print(f"    dropped {n_gone:3d}: not carried by the pipeline")
+            regions = [r for r in regions if r["scene_uid"] not in gone]
     focus = {r["scene_uid"]: r for r in load_csv(FOCUS_CSV)}
     man = {r["scene_uid"]: r for r in load_csv(MANIFEST_CSV)}
 
@@ -855,7 +873,7 @@ def build(regions_csv, limit=None, plates_csv=None, require_background=True,
         if len(shapeless) > 10:
             print(f"    ... and {len(shapeless) - 10} more")
     if crossed:
-        print(f"  REFUSED {len(crossed)} polygon ROI row(s) whose outline crosses "
+        print(f"  REFUSED {len(crossed)} polygon ROI row(s) whose outline crosses or touches "
               f"itself - no single area, so not placed:")
         for _u, _reg in crossed[:10]:
             print(f"    {_u} {_reg}")
@@ -1300,7 +1318,7 @@ def not_placed(marker, skipped, crossed=()):
               f"them. Fix the cause and run this again.")
     if crossed:
         print(f"!! {len(crossed)} {marker} polygon ROI(s) REFUSED (outline crosses "
-              f"itself; see REFUSED above) - redraw them in the curator and export "
+              f"or touches itself; see REFUSED above) - redraw them in the curator and export "
               f"again.")
     return 1 if (skipped or crossed) else 0
 

@@ -48,7 +48,7 @@ In every curator, **a dashed amber border is a proposal the program made; a soli
 
 ## Export
 
-Export writes three files to your exports folder, which Measure reads: `roi_plates.csv` (plate and status per section), `roi_landmarks.csv` and `roi_regions.csv` (every region and background disc). It includes every section you have curated, also those not in the current build of the page, and says how many came from outside it (one the pipeline no longer uses, such as one dropped in Review, goes out as excluded); a curated section it cannot write correctly is named in red and left out until the page is rebuilt with it. In a browser without a chosen folder the three files download a moment apart, and the line under the tools lists each as a link to download again if the browser refused one.
+Export writes three files to your exports folder, which Measure reads: `roi_plates.csv` (plate and status per section), `roi_landmarks.csv` and `roi_regions.csv` (every region and background disc). It includes every section you have curated, also those not in the current build of the page, and says how many came from outside it (one the reformat has set aside goes out marked *not carried*, so Measure leaves it out; it is not recorded as your exclusion); a curated section it cannot write correctly is named in red and left out until the page is rebuilt with it. In a browser without a chosen folder the three files download a moment apart, and the line under the tools lists each as a link to download again if the browser refused one.
 
 Review's own export (`section_review_<date>.csv`) is applied by the next reformat run with overrides, which takes the newest one in the exports folder.
 

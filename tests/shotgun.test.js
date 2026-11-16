@@ -19,7 +19,7 @@ const { els, concat } = env;
 
 const X = load(`{DATA, PLATES, MARKERS, S, GROUPS, st, roiPairs,
   shotPick, shotSlides, shotWhyNot, shotBtnState, shotBuild, zipStore, crc32,
-  markerOnly, secRegions}`);
+  markerOnly, secRegions, get expCur(){return expCur}}`);
 
 // ---- a curation state of our own -------------------------------------------
 // Cleared first: the page may have been generated with the operator's curation
@@ -168,6 +168,9 @@ global.fetch = url => { fetched++; return Promise.resolve(
 X.shotBuild().then(res => {
   chk("built every slide", res.slides, 4);
   chk("built every section", res.sections, pick.take.length);
+  // Two files go out - the deck and its manifest - so the download fallback
+  // has to expect two, not say "expect 1 file" and then deliver a second.
+  chk("the export expects both of its files", X.expCur && X.expCur.want, 2);
 
   const names = res.files.map(f => f.name);
   const need = ["[Content_Types].xml", "_rels/.rels", "ppt/presentation.xml",

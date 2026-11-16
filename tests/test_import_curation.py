@@ -227,6 +227,14 @@ def main():
 
     # ---- the decision flags ------------------------------------------------
     chk("a named plate reads as assigned", state["A_s01a_sc00"]["assigned"], True)
+    # `not_carried` (04l): the pipeline no longer carried the section when it
+    # was exported. A derived state, not the operator's: `excluded` stays 0 on
+    # such a row, and the rebuilt record must not come back excluded, or it
+    # would still be left out once the pipeline carries the section again.
+    nc, _s = Q.build([dict(PLATES[0], not_carried="1")], LANDMARKS, [], k_of)
+    chk("a not_carried row is not stored as the operator's exclusion",
+        nc["A_s01a_sc00"]["excl"], False)
+    chk("...and its work comes back", len(nc["A_s01a_sc00"]["pairs"]), 2)
     # THE ID WINS. The index is kept as a record of what the array looked like
     # and used only when there is no id at all.
     chk("...and the plate comes from the id", state["A_s01a_sc00"]["plate_id"], "plate_010")

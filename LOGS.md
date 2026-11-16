@@ -61,9 +61,12 @@ spaces the files of one export `EXP_GAP_MS` (800 ms) apart and lists each, with 
 expect, as a link that downloads it again. The app's "Open in browser" button is removed.
 Review fixes: the build is a set of (scene_uid, marker), and under multiplex (`ACQ_LAYOUT`, now
 embedded) an outside section is written for every declared marker the build lacks, which also
-covers a `--worklist` build narrowed on the first marker only; a section the pipeline no longer
-carries (Review drop, or provenance status excluded / censored_out / not_reformatted) goes out with
-`excluded=1`; 05a exits 1 on a refused crossed polygon, after writing the boxes it placed, with the
+covers a `--worklist` build narrowed on the first marker only; a section no reformat_index carries
+(`CARRIED`, embedded from every marker's index; not 04p's ranked `status`, which says `measured`
+for ever once a section was measured) goes out with a new appended `not_carried=1` column, not
+`excluded=1` - `excluded` is the operator's and both importers store it, so a derived state there
+would outlive its reason - and 05a's analysis set (and `--all-sections`) leaves it out under its
+own reason; Shotgun expects its two files; the crossing messages say "crosses or touches"; 05a exits 1 on a refused crossed polygon, after writing the boxes it placed, with the
 count as its last line; each export keeps its own stamp and counts while queued behind another
 (`expCur`); the crossing test runs before the area floor, which now says why; a stored crossed
 region is named when its section is shown; 04a prints its review counts even when zero.

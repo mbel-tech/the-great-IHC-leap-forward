@@ -4027,7 +4027,19 @@
      "name": "excluded",
      "type": "0/1",
      "units": "",
-     "meaning": "1 when excluded in the curator."
+     "meaning": "1 when excluded in the curator: the operator's own judgement, which the importers store as one."
+    },
+    {
+     "name": "difficult",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when marked difficult in the curator."
+    },
+    {
+     "name": "not_carried",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 for a section exported from the saved curation (subset `outside_build`) that no reformat_index carried when the page was built: 04a has excluded it or never reformatted it. 05a leaves it out (\"not carried by the pipeline\"); it is NOT an operator exclusion, and the importers do not read it."
     }
    ]
   },

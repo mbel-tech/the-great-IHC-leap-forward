@@ -248,6 +248,8 @@ def build(plates, landmarks, regions, k_of):
             fav=cell(r, "favorite") == "1",
             hard=cell(r, "difficult") == "1",
             rot=tidy(num(cell(r, "view_rotation_deg"))),
+            # The operator's exclusion only; `not_carried` is deliberately not
+            # read (a derived state, see app/import_exports.py, its mirror).
             excl=cell(r, "excluded") == "1",
         )
 

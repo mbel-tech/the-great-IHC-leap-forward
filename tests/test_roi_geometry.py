@@ -629,7 +629,36 @@ with temp_study(acquisition={"layout": "paired",
         P5.ring_crosses([(0, 0), (10, 0), (10, 10), (5, 0), (0, 10)]), True)
     chk("...the refusal names the section and the region",
         any(U1 in ln and "BOWTIE" in ln for ln in _said.splitlines()), True)
-    chk("...and says why", "crosses itself" in _said, True)
+    chk("...and says why", "crosses or touches itself" in _said, True)
+
+    # ---- not_carried ---------------------------------------------------------
+    # 04l marks a curated section no reformat_index carries any more as
+    # `not_carried=1` (and leaves `excluded`, the operator's own, alone). 05a
+    # must leave it out - build() has no index row to place it from, and would
+    # otherwise fail the run on it every time.
+    _rg = [{"scene_uid": "G1", "roi_kind": "roi"}, {"scene_uid": "G1", "roi_kind": "background"},
+           {"scene_uid": "K1", "roi_kind": "roi"}, {"scene_uid": "K1", "roi_kind": "background"}]
+    _pl = [{"scene_uid": "G1", "excluded": "0", "not_carried": "1"},
+           {"scene_uid": "K1", "excluded": "0", "not_carried": "0"}]
+    _keep, _dropped, _, _ = P5.analysis_set(_rg, _pl)
+    chk("analysis set: a not_carried section is left out", _keep, ["K1"])
+    chk("...under its own reason, not the operator's",
+        dict(_dropped).get("G1"), "not carried by the pipeline (in no reformat_index)")
+    # --all-sections skips the analysis set, so the rule is applied there too.
+    _nc_rg = os.path.join(MK.root, "roi_regions_nc.csv")
+    _nc_pl = os.path.join(MK.root, "roi_plates_nc.csv")
+    _wcsv(_nc_rg, [{"scene_uid": "GONE_s01a_sc00", "marker": "Mk1", "roi_kind": "roi",
+                    "region": "R1", "seed_n": "", "sec_x": "128", "sec_y": "128",
+                    "sec_r": "10", "sec_poly": ""}],
+          ["scene_uid", "marker", "roi_kind", "region", "seed_n",
+           "sec_x", "sec_y", "sec_r", "sec_poly"])
+    _wcsv(_nc_pl, [{"scene_uid": "GONE_s01a_sc00", "excluded": "0", "not_carried": "1"}],
+          ["scene_uid", "excluded", "not_carried"])
+    _buf = _bio.StringIO()
+    with _bctx.redirect_stdout(_buf):
+        _g, _b, _sk = P5.build(_nc_rg, plates_csv=_nc_pl, require_background=False)
+    chk("--all-sections: a not_carried section is not tried, so not SKIPPED", _sk, [])
+    chk("...and the drop is said", "not carried by the pipeline" in _buf.getvalue(), True)
 
     # ---- verify() ---------------------------------------------------------
     # Mk1 asked for; Mk2 is the only marker in the unsuffixed index. If the

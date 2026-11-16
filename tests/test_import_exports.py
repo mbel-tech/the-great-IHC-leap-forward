@@ -387,6 +387,20 @@ def main():
         chk("the rebuild still works", n3, 3)
         chk("and says it found none", nbg3, 0)
 
+        print("\na section the pipeline no longer carried at export time:\n")
+        # 04l marks such a section `not_carried=1` and leaves `excluded` as the
+        # operator's own (0). Bringing the export in must not turn the derived
+        # state into a stored operator exclusion: once the pipeline carries the
+        # section again it would still be shown red and left out of 05a.
+        nc = PLATES.replace("view_rotation_deg,excluded\n",
+                            "view_rotation_deg,excluded,difficult,not_carried\n")
+        nc = nc.replace(",registered,1,0.0,0\n", ",registered,1,0.0,0,0,1\n")
+        pl_nc = write(d, "roi_plates_nc.csv", nc)
+        S4, n4, _ = IE.rebuild(pl_nc, lm, k=3.0, regions_csv=rg)
+        e4 = S4["LS22_s01a_sc00"]
+        chk("its work comes back", (n4, e4["assigned"]), (3, True))
+        chk("...and it is NOT stored as excluded by the operator", e4["excl"], False)
+
         replace_guard(d, pl)
         other_study_kept(d, pl)
         moved_study_kept(d, pl)

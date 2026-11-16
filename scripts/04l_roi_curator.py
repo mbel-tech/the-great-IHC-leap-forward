@@ -1560,6 +1560,11 @@ const MARKERS = __MARKERS__;          // [{id, label, n, sub, colour}]
 // in S serves every marker of its scene; exportCsv needs to know that to write
 // a section outside this build for each of them.
 const ACQ_LAYOUT = __ACQLAYOUT__;
+// Every scene uid in any marker's reformat_index when this page was built -
+// the sections the pipeline still carries, and the very files 05a looks a
+// section up in. A curated section outside it cannot be placed. A Set, so a
+// suite can take one out.
+const CARRIED = new Set(__CARRIED__);
 // The Review pane's colour filters, computed in Python by review_filters()
 // from the SAME ls_channels.marker_colours() that 04o_section_rgb builds the
 // composites with. The page installs them; it does not know the arithmetic.
@@ -3035,7 +3040,7 @@ addEventListener("mouseup", ()=>{
     const pg = active ? (st(active).polys || [])[vDrag.pi] : null;
     if(pg && vDrag.was && ringCrosses(pg.v)){
       pg.v = vDrag.was;
-      polyRefuse("MOVE UNDONE - that would make the outline cross itself, so it has"
+      polyRefuse("MOVE UNDONE - that would make the outline cross or touch itself, so it has"
                + " no single area. Move the corner to a place that keeps the edges apart.");
     } else polyRefuse("");
     vDrag = null;
@@ -3633,7 +3638,7 @@ function commitPoly(){
   // first and refused it with no word - Enter seemed to do nothing. The ring
   // stays open, so z can take back the corner that crossed.
   if(ringCrosses(draft)){
-    polyRefuse("NOT CLOSED - this outline crosses itself, so it has no single area."
+    polyRefuse("NOT CLOSED - this outline crosses or touches itself, so it has no single area."
              + " Press z to take back corners, then close it again.");
     drawSec(); status();
     return;
@@ -3717,7 +3722,7 @@ function dropCorner(ix, iy){
       // meet in its place cut through the rest), and that is refused like a drag.
       const rest = pg.v.slice(0, i).concat(pg.v.slice(i + 2));
       if(ringCrosses(rest)){
-        polyRefuse("NOT REMOVED - without that corner the outline would cross itself.");
+        polyRefuse("NOT REMOVED - without that corner the outline would cross or touch itself.");
         return true;
       }
       polyRefuse("");
@@ -4312,7 +4317,7 @@ function select(uid, keep){
   // about it here rather than only from 05a's log.
   const crossed = (s.polys || []).filter(pg => ringCrosses(pg.v));
   polyRefuse(crossed.length
-    ? `REDRAW - ${crossed.length} region(s) on this section cross themselves (`
+    ? `REDRAW - ${crossed.length} region(s) on this section cross or touch themselves (`
       + crossed.map(pg => pg.region || "?").join(", ")
       + `), so 05a will refuse them. Drag a corner until the edges no longer cross, or remove the region and draw it again.`
     : "");
@@ -4688,7 +4693,11 @@ function exportCsv(){
              "favorite","view_rotation_deg",
              "excluded",
              // Appended, like every new column: readers index by header.
-             "difficult"]];
+             "difficult",
+             // 1: a section outside this build that no reformat_index carries
+             // any more (see the build-set comment below). 05a leaves it out;
+             // it is not the operator's exclusion, which is `excluded`.
+             "not_carried"]];
   // seed_n / seed_region say whether a landmark was placed against a numbered
   // atlas seed (guided) or free-clicked, and which one. A guided pair is the
   // operator asserting a region position, so the spline reproduces it exactly
@@ -4757,19 +4766,27 @@ function exportCsv(){
   // provenance marker IS the scan's marker, so one row, and only when the uid
   // is not in the build at all.
   //
-  // A SECTION THE PIPELINE NO LONGER CARRIES is exported as excluded. A section
-  // curated and later dropped in Review, or one 04a now excludes, censors out
-  // or never reformatted, is not in the next build - that is exactly why it is
-  // outside. Exported as a live section, 05a would try to place it, find no
-  // reformat_index row and fail on every run, and the operator could not clear
-  // it from a page that does not show it. excluded=1 is the true statement:
-  // 05a's analysis set leaves it out as "excluded by the operator", and
-  // roi_plates.csv still records the work.
+  // A SECTION THE PIPELINE NO LONGER CARRIES - not in any reformat_index
+  // (CARRIED): 04a excluded it (a Review drop it has applied, a threshold, a
+  // censor) or never reformatted it. Exported as a live section, 05a would try
+  // to place it, find no reformat_index row and fail on every run, and the
+  // operator could not clear it from a page that does not show it.
+  //
+  // Decided from the index itself, not from 04p's provenance `status`: that is
+  // "the furthest point the section reached", so a section once placed or
+  // measured reads curated/measured for ever, whatever 04a has done since.
+  //
+  // And marked in a column of its own, `not_carried`, NOT as `excluded=1`.
+  // `excluded` is the operator's judgement and the importers (04q, the app's
+  // Bring in browser exports) store it as one: a derived state written there
+  // would come back as an operator exclusion and outlive the reason for it -
+  // once the pipeline carried the section again it would still be left out,
+  // red, as if someone had pressed x. 05a's analysis set leaves a not_carried
+  // row out under its own reason; the importers do not read the column.
   const keyOf = (uid, m) => uid + "\t" + m;
   const inBuild = new Set(DATA.map(d => keyOf(d.uid, d.m)));
   const uidInBuild = new Set(DATA.map(d => d.uid));
   const allMarkers = MARKERS.map(mk => mk.id);
-  const GONE_STATUS = new Set(["excluded", "censored_out", "not_reformatted"]);
   const outside = [], cannot = [];
   let nGone = 0;
   for(const uid of Object.keys(S).sort()){
@@ -4793,7 +4810,7 @@ function exportCsv(){
                   ? "no animal or marker for it in the provenance table"
               : (placed && !s.frame && !uidInBuild.has(uid)) ? "no frame stamped on its record" : "";
     if(why){ cannot.push(uid + " (" + why + ")"); continue; }
-    const gone = (s.rev && s.rev.act === "drop") || !!(p && GONE_STATUS.has(p.status));
+    const gone = !CARRIED.has(uid);
     if(gone) nGone++;
     for(const m of missing)
       outside.push({uid, animal: meta.animal, m, sub: "outside_build",
@@ -4814,7 +4831,7 @@ function exportCsv(){
     const chosen = hasPlateWork(s);   // is the plate a decision, or still the default?
     // isExcl(), not s.excl: a Review-mode reinstatement beats the flag, and the
     // strip already honours that. The two must not disagree.
-    const excl = isExcl(d.uid) || !!d.gone;
+    const excl = isExcl(d.uid);
     const status = excl ? "excluded"
                  : s.noroi ? "no_roi" : n>=3 ? "registered"
                  : chosen ? "plate_only"
@@ -4868,7 +4885,7 @@ function exportCsv(){
              chosen?(s.verified||""):"",
              chosen?(P.labelled?1:0):"", n, nBg, T?T.kind:"", status,
              s.fav?1:0, (s.rot||0).toFixed(1),
-             excl?1:0, s.hard?1:0]);
+             excl?1:0, s.hard?1:0, d.gone?1:0]);
     // Gate on the landmarks themselves, NOT on status - a section that was
     // landmarked and then excluded still has that work, and keying this on
     // status would silently drop it from both files the moment the exclude
@@ -4962,7 +4979,7 @@ function exportCsv(){
   beginExport(3);
   expCur.note = outside.length
     ? `${outside.length} of ${pl.length - 1} row(s) came from outside this build`
-      + (nGone ? ` (${nGone} section(s) the pipeline no longer carries, exported as excluded)` : "")
+      + (nGone ? ` (${nGone} section(s) the pipeline no longer carries, marked not_carried)` : "")
     : "";
   const w = el("expWarn");
   if(w){
@@ -5835,7 +5852,7 @@ async function shotBuild(by){
   // Named apart so a region deck cannot silently overwrite a plate one, and so
   // the pair of files that belong together stay recognisable as a pair.
   const tag = mode === "region" ? "by-region_" : "";
-  beginExport();
+  beginExport(2);                       // the deck and its manifest
   shotSave(blob, "shotgun_" + tag + PLATE_SET + ".pptx");
   dl(manifest, "shotgun_manifest" + (mode === "region" ? "_by-region" : "") + ".csv");
 
@@ -6770,11 +6787,19 @@ def main():
     # Both channels go into one page. They are separate physical sections and
     # stay independently curated - this shares the TOOL, not the decisions - so
     # each channel is assembled on its own terms and tagged with its own subset.
+    # Every section any marker's reformat_index carries, BEFORE the worklist /
+    # analysis-set / animal narrowing: the sections the pipeline can still
+    # place. 05a looks a section up in exactly these files (all markers'), so
+    # a curated section outside this set would fail 05a's placement. See
+    # CARRIED in the page.
+    carried = set()
+
     def build(marker):
         index_csv, img_dir = marker_paths(marker)
         rgb_dir = rgb_dirs()[marker]["rgb"]
         with open(index_csv, newline="", encoding="utf-8") as fh:
             rows = [r for r in csv.DictReader(fh) if r["kind"] == "section"]
+        carried.update(r["id"] for r in rows)
         before, subset = len(rows), "all"
 
         # MARKERS[0], not "AF568". Both of these read `== "AF568"`, so under
@@ -6927,7 +6952,7 @@ def main():
     page = IO.fill(PAGE, {
         "__ATLASSCOPE__": scope,
         "__SEED__": seed, "__ROISEL__": roisel, "__CUSTOM__": custom, "__PROV__": load_provenance(), "__DATA__": data,
-        "__PLATES__": pl, "__PLATESET__": PLATE_SET, "__MARKERS__": markers, "__ACQLAYOUT__": LAYOUT,
+        "__PLATES__": pl, "__PLATESET__": PLATE_SET, "__MARKERS__": markers, "__ACQLAYOUT__": LAYOUT, "__CARRIED__": sorted(carried),
         "__STUDY__": STUDY_ID, "__TOKEN__": token,
         # The page compares aspect ratios exactly as `ls_atlas.plate_status`
         # does, so it is handed THAT number rather than repeating it. A literal

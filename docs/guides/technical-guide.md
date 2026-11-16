@@ -1453,9 +1453,12 @@ repository (about 6,500 lines, most of it the page's JavaScript). Chapter 7 desc
   `--worklist` / `--analysis-set` narrowing applies to the first marker only), under paired once, under
   its provenance marker. A section outside the build takes its animal and order from the embedded
   provenance table and is divided by the frame stamped on its record; one with no provenance row, or with
-  positions and no stored frame, is named in the page header and left out. One the pipeline no longer
-  carries (dropped in Review, or provenance status `excluded`, `censored_out` or `not_reformatted`) is
-  written with `excluded=1`, so 05a's analysis set leaves it out instead of failing to place it.
+  positions and no stored frame, is named in the page header and left out. One that no reformat_index
+  carried when the page was built (`CARRIED`, every marker's index before any narrowing - the files 05a
+  looks a section up in) is written with `not_carried=1`, so 05a's analysis set leaves it out instead of
+  failing to place it. It is decided from the index, not from 04p's `status` (the furthest point a
+  section ever reached, so a section once measured reads `measured` for ever), and it is kept out of
+  `excluded`, which is the operator's judgement and which 04q and the app's import store as one.
 - **How:** Python collects the data and fills twenty placeholders (`__DATA__`, `__PLATES__`, `__SEED__` and the rest) in one HTML template with `ls_io.fill`, which escapes the JSON for a `<script>` block.
 - **Settings:** `acquisition`, `atlas_source`, `atlas_scope` (`existing_regions`, `regions_to_add`),
   `atlas_polygon_mirror`, `export_dir`, `display`, and `groups` (only to build the blinded Shotgun deck
@@ -3653,7 +3656,9 @@ One row per section with any curation work: the plate it was matched to and how 
 | `status` | text |  | `registered`, `plate_only`, `favourite_only`, `no_roi` or `excluded`. |
 | `favorite` | 0/1 |  | 1 when starred. |
 | `view_rotation_deg` | float | degrees | How the section was turned for viewing; geometry is unaffected. |
-| `excluded` | 0/1 |  | 1 when excluded in the curator. |
+| `excluded` | 0/1 |  | 1 when excluded in the curator: the operator's own judgement, which the importers store as one. |
+| `difficult` | 0/1 |  | 1 when marked difficult in the curator. |
+| `not_carried` | 0/1 |  | 1 for a section exported from the saved curation (subset `outside_build`) that no reformat_index carried when the page was built: 04a has excluded it or never reformatted it. 05a leaves it out ("not carried by the pipeline"); it is NOT an operator exclusion, and the importers do not read it. |
 
 #### `roi_landmarks.csv (curator export)`
 

@@ -44,7 +44,7 @@ In every curator, **a dashed amber border is a proposal the program made; a soli
 
 ## Review: bringing sections back
 
-**Review** shows every scanned section and what happened to it, including those set aside automatically. **Reinstate** puts an excluded section back; **Reject mask** discards an artifact mask that covered real tissue. **Clear** takes back the Review decision only, and **u** undoes it. Keys: ↑ ↓ move, **d** DAPI, **k** marker, **v** artifact mask, **c** censored pixels, **f** full screen, **u** undo.
+**Review** shows every scanned section and what happened to it, including those set aside automatically. **Reinstate** puts an excluded section back; **Reject mask** discards an artifact mask that covered real tissue. **Clear** takes back the Review decision only. Keys: ↑ ↓ move, **d** DAPI, **k** marker, **v** artifact mask, **c** censored pixels, **f** full screen, **u** undo the last change to the section shown.
 
 ## Export
 

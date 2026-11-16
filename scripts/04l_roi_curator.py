@@ -1343,7 +1343,8 @@ canvas{display:block;width:100%;height:100%;object-fit:contain;cursor:crosshair;
         <button id="revUnmask" class="btn-rot" onclick="revAct('unmask')">Reject mask</button>
         <button class="btn-edit" onclick="revAct('')">Clear</button>
       </div>
-      <div class="kv" id="revState" style="margin-top:5px"></div></div>
+      <div class="kv" id="revState" style="margin-top:5px"></div>
+      <div class="kv" id="revUndone" style="margin-top:3px;color:var(--dim)"></div></div>
     <div class="card"><h3>EXPORT</h3>
       <div class="kv" id="revCount">-</div>
       <button class="primary" onclick="exportReview()" style="margin-top:5px">
@@ -1980,6 +1981,15 @@ function takeTheirs(entry){
     SEEN[u] = now; BASE[u] = recJson(S[u]);
     took.push(u);
   }
+  // An undo snapshot of a section taken from another tab is a snapshot of THIS
+  // tab's version from before: undoing it would put that back over the other
+  // tab's work, silently. The section's history here ends where the other tab's
+  // version came in.
+  if(took.length){
+    const gone = new Set(took);
+    for(let i = UNDO.length - 1; i >= 0; i--) if(gone.has(UNDO[i].uid)) UNDO.splice(i, 1);
+    undoState();
+  }
   return took;
 }
 const TAB = Math.random().toString(36).slice(2);
@@ -1992,6 +2002,9 @@ if(CHAN) CHAN.onmessage = m => {
   if(!d || d.study !== STUDY || d.from === TAB) return;
   const lost = (d.uids || []).filter(u => WROTE.has(u));
   if(!lost.length) return;
+  // Told once. Until this tab saves the section again its version is not the one
+  // anyone is overwriting, so a later race between two OTHER tabs is not news here.
+  lost.forEach(u => WROTE.delete(u));
   const box = el("syncNote");
   if(box){
     box.textContent = `Another tab saved over this tab's work on ${lost.length} section(s):`
@@ -2136,7 +2149,21 @@ addEventListener("storage", e => {
   // nothing new (takeTheirs is idempotent) and costs one pass.
   if(!took.length) return;
   plateNotice();
-  if(active && took.includes(active)) select(active, true);
+  // REDRAWN, NOT SELECTED. select() puts the slider's plate into a record that has
+  // no plate work (a favourite, an exclusion, a tilt) and saves it - so two tabs
+  // showing that section at different slider positions took each other's save,
+  // wrote their own slider back, and did so forever, each write firing the other
+  // tab's listener. Here nothing is written: the slider follows the record as the
+  // other tab saved it.
+  if(active && took.includes(active)){
+    const s = S[active];
+    const v = s ? s.plate : Math.min(PLATES.length - 1, +el("slider").value || 0);
+    // Gone from the store: a looked-at record again, never saved until decided.
+    if(!s) st(active).plate = v;
+    el("slider").value = v;
+    showPlate(v);
+    drawSec();
+  }
   took.forEach(u => paintCell(u));
   status();
 });
@@ -4128,6 +4155,11 @@ function navState(){
 
 function onSlide(v){
   const s=st(active); s.plate=+v; save();
+  showPlate(v);
+}
+// What onSlide shows, without the assignment and the save: for a redraw that must not
+// write (the storage listener - see there).
+function showPlate(v){
   gSync();                     // a different plate is a different seed list
   const P = PLATES[+v] || BLANK_PLATE;
   el("plName").textContent = P.id;
@@ -4201,7 +4233,9 @@ const isExcl   = uid => !!S[uid]?.excl && S[uid]?.rev?.act !== "restore";
 const isReinstated = uid => S[uid]?.rev?.act === "restore";
 // Plate chosen deliberately but not landmarked - a real decision, and one the
 // export used to discard.
-const isPlateOnly = uid => !!S[uid]?.assigned && !isDone(uid) && !isNoRoi(uid);
+// hasPlateWork, as the export decides it: a section with drawn regions and no
+// landmarks is plate-only in roi_plates.csv, so it is drawn and counted as one.
+const isPlateOnly = uid => hasPlateWork(S[uid]) && !isDone(uid) && !isNoRoi(uid);
 
 // One source of truth for a cell's appearance, so the full build and the
 // single-cell update cannot drift apart.
@@ -4470,7 +4504,7 @@ addEventListener("keydown", e=>{
     // `u` is the same general undo as on the curating screen, so a Review
     // verdict - Clear above all, the easy one to press by mistake - is taken
     // back from where it was made. Unlike x or b it edits nothing new.
-    else if(e.key==="u" || e.key==="U"){ undoLast(); revDetail(); revRender(); revCount(); }
+    else if(e.key==="u" || e.key==="U"){ revUndo(); }
     // Escape closes it. With native fullscreen refused there is no
     // fullscreenchange to listen for, so the key has to be handled directly -
     // otherwise the only way out of a maximised card is the button, and a
@@ -4937,8 +4971,11 @@ try { if(!(STUDY in openStudy(KEY)._studies) && Object.keys(S).length) save(); }
 function adoptSeed(){
   const before = Object.keys(S).length;
   for(const [uid, v] of Object.entries(SEED_STATE || {}))
-    if(hasDecision(v) && !hasDecision(S[uid])) S[uid] = v;
+    // Through resolvePlate, like every record that enters S (initState,
+    // takeTheirs, the backup): a seed can be older than the atlas on disk.
+    if(hasDecision(v) && !hasDecision(S[uid])) S[uid] = resolvePlate(v, PLATES);
   save();
+  plateNotice();
   el("seedOffer").style.display = "none";
   render(); status();
   console.log(`adopted seed: ${before} -> ${Object.keys(S).length} sections`);
@@ -6226,6 +6263,29 @@ function revAct(act){
   revRender();
   render();          // the strip, so the section is curatable without a reload
   status();
+}
+
+// `u` in Review: the last change made to THE SECTION SHOWN, and only that. The
+// general undo pops whatever was done last anywhere - a landmark on a section
+// behind this screen - and nothing here would say so. So the newest undo entry
+// for this section is taken out of the stack (entries above it are other
+// sections', and snapshots are per section, so they are unaffected) and the line
+// under the decision says what was undone.
+function revUndo(){
+  const box = el("revUndone");
+  if(!revSel) return;
+  let i = UNDO.length - 1;
+  while(i >= 0 && UNDO[i].uid !== revSel) i--;
+  if(i < 0){ if(box) box.textContent = "nothing to undo on this section"; return; }
+  const e = UNDO.splice(i, 1)[0];
+  // As undoLast: shown first, restored second, because select() writes the slider's
+  // plate into the record it shows.
+  if(active === e.uid) select(e.uid, true);
+  if(e.prev === null) delete S[e.uid]; else S[e.uid] = JSON.parse(e.prev);
+  save();
+  syncReinstated();
+  revDetail(); revRender(); revCount(); undoState();
+  if(box) box.textContent = `undone: ${e.label} on ${e.uid}`;
 }
 
 function revCount(){

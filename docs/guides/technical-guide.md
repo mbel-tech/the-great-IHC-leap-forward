@@ -2313,7 +2313,10 @@ later save keeps it and tells the other tab on a `BroadcastChannel`, which says 
 the browser refuses (a full `localStorage`) is caught: the header shows NOT SAVED with the reason until a
 save succeeds, and the next change retries every section not yet written. In the app, the injected
 `setItem` mirror writes to disk even when the browser's own write throws
-(`state.Bridge.saveFromRefused`) and shows the curator's warning.
+(`state.Bridge.saveFromRefused`) and shows the curator's warning. The key is then `behind`
+(`state.SaveGuard`): each later load seeds it from the file over `localStorage`, and a load where even
+that is refused sends its saves of the key aside (`saveFromStale`, under `curation/_backup_*/from_stale_page`)
+rather than over the newer file, until a save the page's own storage accepts.
 
 The page is regenerated freely: when it opens, the saved curation embedded by the stage (`__SEED__`, read
 from `curation/ls_roi_curator_v1.json`) is merged with what `localStorage` holds, so rebuilding the page

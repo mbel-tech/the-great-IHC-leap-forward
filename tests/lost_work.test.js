@@ -39,6 +39,7 @@ const deliver = data => channels.forEach(c => c.onmessage && c.onmessage({ data 
 const X = load(`{KEY, STUDY, BACKUP_KEY, PLATES, DATA, PROWS, st, rows, select, save,
   onSlideUser, exportCsv, revAct, revPick, undoLast, usedRois, firstUnusedRoi, polysOf,
   commitPoly, secDown, drawSec, toggleFav, toggleHard, addRoi, status, roiRestoreBackup, openStudy,
+  UNDO, isPlateOnly, toggleReview, adoptSeed, SEED_STATE,
   get S(){return S}, set S(v){S=v},
   set active(v){active=v}, get active(){return active},
   get gTarget(){return gTarget}, set gTarget(v){gTarget=v}}`);
@@ -97,6 +98,31 @@ chk("...and the other tab is told which section it lost",
 deliver({ type: "overwrote", study: X.STUDY, uids: [a], from: "another tab" });
 chk("the losing tab says so in the header", /another tab/i.test(byId("syncNote").textContent)
     && byId("syncNote").textContent.includes(a), true);
+byId("syncNote").textContent = "";
+deliver({ type: "overwrote", study: X.STUDY, uids: [a], from: "a third tab" });
+chk("...once: a later race on it between two other tabs is not news here",
+    byId("syncNote").textContent, "");
+
+// The section on screen, taken from another tab, is redrawn - not selected, which
+// writes this tab's slider plate into a favourite and saves it. Two tabs at
+// different slider positions then answered each other's save for ever.
+const f = uidAt(10);
+X.select(f, true);
+X.toggleFav();
+chk("this tab can undo its change to the section", X.UNDO.some(e => e.uid === f), true);
+const there = X.S[f].plate + 7;
+let writes = 0;
+const realSet = global.localStorage.setItem;
+global.localStorage.setItem = (k, v) => { writes++; realSet(k, v); };
+try {
+  otherTab(e => { e[f] = record({ assigned: false, fav: true, hard: true, plate: there }); }, true);
+} finally {
+  global.localStorage.setItem = realSet;
+}
+chk("taking the section on screen writes nothing back", writes, 0);
+chk("...and the slider shows the plate that tab saved", String(els["slider"].value), String(there));
+chk("...and this tab's undo no longer reaches over that tab's version",
+    X.UNDO.some(e => e.uid === f), false);
 
 });
 
@@ -118,6 +144,7 @@ const plRow = csvRows(blobs[0]).slice(1).find(r => r[0] === poly) || [];
 const hdr = csvRows(blobs[0])[0];
 chk("the export names its plate", plRow[hdr.indexOf("plate_id")], X.PLATES[pp].id);
 chk("...and calls it a plate decision, not a favourite", plRow[hdr.indexOf("status")], "plate_only");
+chk("...as the strip does", X.isPlateOnly(poly), true);
 
 });
 
@@ -134,6 +161,20 @@ chk("Clear keeps a record that holds polygons", !!X.S[rv.scene_uid] && X.S[rv.sc
 chk("...clearing the review decision only", !!(X.S[rv.scene_uid] || {}).rev, false);
 X.undoLast();
 chk("...and undo puts the decision back", ((X.S[rv.scene_uid] || {}).rev || {}).act, "restore");
+
+// `u` on the Review screen undoes the section shown, not whatever was last done.
+X.revAct("drop");
+const other = uidAt(11);
+X.select(other, true);
+X.toggleFav();                              // the newest change, on another section
+X.toggleReview();
+X.revPick(rv.scene_uid);
+fire("keydown", { key: "u", target: { tagName: "BODY" }, preventDefault() {} });
+chk("u in Review undoes the shown section's last verdict",
+    ((X.S[rv.scene_uid] || {}).rev || {}).act, "restore");
+chk("...not the newer change on another section", !!(X.S[other] || {}).fav, true);
+chk("...and says what it undid", /review: drop/.test(byId("revUndone").textContent), true);
+X.toggleReview();
 
 });
 
@@ -171,6 +212,13 @@ store[X.BACKUP_KEY] = JSON.stringify({ _studies: { [X.STUDY]: { at: "earlier", m
                       verified: "ok" }) } } } });
 X.roiRestoreBackup();
 chk("a stale 'ok' does not survive an atlas change", X.S[rb] && X.S[rb].verified, "changed");
+// The seed offer takes records into S the same way.
+const sd = uidAt(12);
+delete X.S[sd];
+X.SEED_STATE[sd] = record({ plate_id: P0.id, plate_fp: "not-this-atlas", plate_px: "10x1000",
+                            verified: "ok" });
+X.adoptSeed();
+chk("...nor one adopted from the page's seed", X.S[sd] && X.S[sd].verified, "changed");
 
 });
 

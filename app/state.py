@@ -41,6 +41,11 @@ KEYS = [
     "ls_atlas_curator_v1",         # 04b's page, retired but a browser may hold it
 ]
 
+# Keys whose refusal by the page's own storage is not news to the operator: the rolling
+# snapshot is a second copy of the curation, the largest write and the first refused near
+# the quota, and the page already treats losing it as harmless. On disk it is still kept.
+QUIET_KEYS = {"ls_roi_curator_v1_backup"}
+
 
 class CurationStore:
     """The curators' state: in the project file when there is one, else one JSON file per key.
@@ -176,6 +181,15 @@ class SaveGuard:
     the one open before it. What such a page still sends - its unload save, a decision on
     its way to disk - is that project's work, so it is written to that project's store,
     never to the one open now and never dropped.
+
+    `behind` is the keys whose file on disk is NEWER than the page's localStorage: the page's
+    own setItem refused a save (a full store) that the mirror wrote to disk anyway. The page
+    that made it holds the newest state in memory and goes on saving it, which is fine; a
+    page LOADED from that localStorage holds an older copy, and its first save would send it
+    over the newer file. So while a key is behind every load is seeded with it from disk over
+    whatever localStorage holds, and a load where even that is refused marks the key stale
+    and its saves of it are kept aside, never written (see `seed_script`). A save of the key
+    that the page's storage accepts means the two agree again and ends it.
     """
 
     def __init__(self):
@@ -186,6 +200,8 @@ class SaveGuard:
         self.holding = set()
         self.held = {}
         self.retired = {}
+        self.behind = set()
+        self.stale_aside = None
 
     def replaced(self, keys, aside=None):
         """The store now holds an import of `keys`: retire every page loaded before it."""
@@ -200,7 +216,7 @@ class Bridge(QObject):
     whether the page saving is still allowed to, then goes through `save`."""
 
     def __init__(self, store, on_save=None, on_error=None, guard=None, on_aside=None,
-                 on_page_error=None):
+                 on_page_error=None, on_behind=None):
         super().__init__()
         self.store = store
         self.on_save = on_save
@@ -214,6 +230,9 @@ class Bridge(QObject):
         self.guard = guard or SaveGuard()
         # `on_aside(key, path)`: a save from a page older than an import, kept at `path`.
         self.on_aside = on_aside
+        # `on_behind()`: `guard.behind` changed, or the file it is seeded from did: the
+        # injected script has to be rebuilt so the NEXT load starts from the file.
+        self.on_behind = on_behind
 
     @Slot(str, str, str)
     def saveFrom(self, gen, key, text):
@@ -230,6 +249,31 @@ class Bridge(QObject):
         showed the older copy the page still holds.
         """
         self._route(gen, key, text, why)
+
+    @Slot(str, str, str)
+    def saveFromStale(self, gen, key, text):
+        """A save from a load whose localStorage is older than the file (`SaveGuard.behind`).
+
+        Kept aside, never written: it is the older copy plus whatever was done since, and
+        writing it would put the older copy back over the newer file. Kept, because the part
+        done since is someone's work.
+        """
+        g = self.guard
+        g.stale_aside = g.stale_aside or os.path.join(backup_folder(), "from_stale_page")
+        try:
+            path = self.store.set_aside(g.stale_aside, key, text)
+        except Exception as e:                              # noqa: BLE001
+            msg = save_error_text(self.store, key, e)
+        else:
+            msg = (f"{key} was NOT saved: this page loaded an older copy than the file on "
+                   f"disk, because its own storage is full. What it sent is kept in {path}. "
+                   "Free the browser storage, or restart the app, then reload")
+        print(msg, file=sys.stderr)
+        if key in QUIET_KEYS:
+            return
+        report = self.on_page_error or self.on_error
+        if report:
+            report(key, msg)
 
     def _route(self, gen, key, text, page_error):
         g = self.guard
@@ -272,13 +316,26 @@ class Bridge(QObject):
             if self.on_error:
                 self.on_error(key, msg)
             return
+        g = self.guard
         if page_error:
+            # The file is now ahead of the page's storage: the next load must start from it.
+            g.behind.add(key)
+            if self.on_behind:
+                self.on_behind()
             msg = page_store_error_text(store, key, page_error)
             print(msg, file=sys.stderr)
+            if key in QUIET_KEYS:
+                # On disk, which is what a snapshot is for; not a decision the page lacks.
+                return
             report = self.on_page_error or self.on_error
             if report:
                 report(key, msg)
             return
+        if key in g.behind:
+            # The page's storage took this one: it and the file agree again.
+            g.behind.discard(key)
+            if self.on_behind:
+                self.on_behind()
         if self.on_save:
             self.on_save(key, len(text))
 
@@ -299,8 +356,9 @@ def save_error_text(store, key, exc):
 def page_store_error_text(store, key, why):
     """One line for a save that reached disk while the page's own storage refused it."""
     return (f"{key} was saved to {store.where()}, but the curator page's own storage refused "
-            f"it ({why}) - reloading the page now would show its older copy. Free the "
-            "browser storage, or restart the app, before reloading")
+            f"it ({why}). A reload starts from the file; if the browser storage is still "
+            "full then, that page's saves are kept aside rather than written. Free the "
+            "browser storage, or restart the app (its browser storage is not kept)")
 
 
 def seed_script(store, guard=None):
@@ -321,9 +379,10 @@ def seed_script(store, guard=None):
     """
     guard = guard or SaveGuard()
     seed = {k: v for k, v in ((k, store.read(k)) for k in KEYS) if v is not None}
+    behind = sorted(k for k in guard.behind if k in seed)
     return """
 (function () {
-  var SEED = %s, GEN = %s, FORCE = %s;
+  var SEED = %s, GEN = %s, FORCE = %s, BEHIND = %s, STALE = {};
   try {
     // Still the browser's own setItem here, so none of this is mirrored back.
     var fresh = localStorage.getItem("ls_app_seed_gen") !== GEN;
@@ -334,6 +393,12 @@ def seed_script(store, guard=None):
     if (fresh) FORCE.forEach(function (k) { if (!(k in SEED)) localStorage.removeItem(k); });
     if (fresh) localStorage.setItem("ls_app_seed_gen", GEN);
   } catch (e) {}
+  // A key whose file is newer than this localStorage (SaveGuard.behind): taken from the
+  // file over what is here, on every load until they agree. Refused again (still full),
+  // this load holds the older copy, and its saves of the key go aside, not to disk.
+  BEHIND.forEach(function (k) {
+    try { localStorage.setItem(k, SEED[k]); } catch (e) { STALE[k] = 1; }
+  });
 
   var queue = [], bridge = null;
   window.__lsQueueSize = function () { return queue.length; };
@@ -344,7 +409,8 @@ def seed_script(store, guard=None):
   // page afterwards, which has its own NOT SAVED notice; the app shows its own.
   var orig = Storage.prototype.setItem;
   function send(k, v, why) {
-    if (why) bridge.saveFromRefused(GEN, k, v, why);
+    if (STALE[k]) bridge.saveFromStale(GEN, k, v);
+    else if (why) bridge.saveFromRefused(GEN, k, v, why);
     else bridge.saveFrom(GEN, k, v);
   }
   Storage.prototype.setItem = function (k, v) {
@@ -368,7 +434,7 @@ def seed_script(store, guard=None):
   }
   connect();
 })();
-""" % (json.dumps(seed), json.dumps(guard.gen), json.dumps(guard.force))
+""" % (json.dumps(seed), json.dumps(guard.gen), json.dumps(guard.force), json.dumps(behind))
 
 
 EXPORT_PAGE = """<!doctype html>

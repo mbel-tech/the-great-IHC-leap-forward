@@ -439,11 +439,44 @@ chk("...saying the page's own storage refused it",
 chk("...and logs it", any("NOT SAVED" in s and "refused" in s for s in lines), True)
 for b in boxes():
     b.close()
+
+# The file is now NEWER than the page's storage. A reload reads localStorage, and the seed
+# used to fill only empty keys - so the page came back without the decision, and its first
+# save sent that older copy over the file. While the store is still full the reload cannot
+# take the file in either: then its saves are kept aside, never written.
+view.view.reload()
+chk("reloaded with the store still full, the page has only its older copy",
+    settle(lambda: page_state() == {}), True)
+js("S.LS1_s2 = {plate: 'after reload'}; true")
+spin(1000)
+chk("...and its saves do not put that older copy over the file", stored(), FULL)
+stale = glob.glob(os.path.join(out, "curation", "_backup_*", "from_stale_page", KEY + ".json"))
+chk("...they are kept aside instead",
+    any(json.load(open(p, encoding="utf-8")).get("LS1_s2") == {"plate": "after reload"}
+        for p in stale), True)
+chk("...and the banner says so", "NOT saved" in view.save_warning.text(), True)
+for b in boxes():
+    b.close()
+
 js("Object.keys(localStorage).filter(function (k) { return k.indexOf('fill') === 0; })"
    ".forEach(function (k) { localStorage.removeItem(k); }); true")
+view.view.reload()
+chk("with room again, a reload starts from the file", settle(lambda: page_state() == FULL), True)
+js("S.LS1_s3 = {plate: 'caught up'}; true")
+caught = dict(FULL, LS1_s3={"plate": "caught up"})
+chk("...a decision then is saved on top of it", settle(lambda: stored() == caught), True)
 chk("once the store has room again the banner goes",
     settle(lambda: not view.save_warning.isVisible()), True)
+chk("...and the next load is back to filling only empty keys", view.guard.behind, set())
 server.stop()
+
+print("--- a refused snapshot is not a refused save ---")
+quiet = []
+qbr = ST.Bridge(ST.CurationStore(os.path.join(tmp, "quiet")),
+                on_error=lambda k, m: quiet.append(k), on_page_error=lambda k, m: quiet.append(k))
+qbr.saveFromRefused(qbr.guard.gen, "ls_roi_curator_v1_backup", '{"S": {}}', "QuotaExceededError")
+chk("the backup key reaching disk only raises no warning", quiet, [])
+chk("...it is on disk", qbr.store.read("ls_roi_curator_v1_backup"), '{"S": {}}')
 
 print()
 print("FAILED: %d" % fails if fails else "ALL PASS")

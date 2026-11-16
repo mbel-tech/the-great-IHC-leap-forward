@@ -424,7 +424,7 @@ This is the main curation job, and the only stop in a normal run. For each secti
 
 **Hide DAPI** and **Hide \<marker>** (the button carries your marker's name, for example *Hide pERK*) switch one colour off, so you can see the other on its own.
 
-**Review** shows every scanned section and what happened to it, including those the pipeline excluded. Its keys: ↑ ↓ move between sections; **d** DAPI, **k** marker, **v** artifact mask, **c** censored pixels, **m** apply mask; **f** full screen; **u** undo. **Reinstate** puts an excluded section back into the pipeline, including one the program set aside automatically; **Reject mask** discards an artifact mask that covered real tissue. **Clear** takes back the Review decision only (regions drawn on the section stay), and **u** undoes any of the three.
+**Review** shows every scanned section and what happened to it, including those the pipeline excluded. Its keys: ↑ ↓ move between sections; **d** DAPI, **k** marker, **v** artifact mask, **c** censored pixels, **m** apply mask; **f** full screen; **u** undoes the last change to the section shown and says what it undid. **Reinstate** puts an excluded section back into the pipeline, including one the program set aside automatically; **Reject mask** discards an artifact mask that covered real tissue. **Clear** takes back the Review decision only (regions drawn on the section stay); **u** puts back whichever of the four you pressed last on that section.
 
 **Reading the strip.** Purple border: registered (three or more landmarks). Blue: plate assigned only. Gold inner edge: favourite. Red and greyed: excluded. Faded: no ROI.
 

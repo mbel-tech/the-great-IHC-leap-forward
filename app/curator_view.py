@@ -175,6 +175,10 @@ class CuratorView(QWidget):
             f"background:{T.DANGER};color:#ffffff;font-weight:600;padding:6px 8px")
         self.save_warning.setVisible(False)
         self._save_failing = False
+        # Which keys are failing now. A save of ANOTHER key succeeding says nothing about
+        # them - the 60 s snapshot reaching disk does not mean the curation does - so the
+        # warning goes only when every failing key has saved again.
+        self._failing_keys = set()
 
         bar = QHBoxLayout()
         bar.addWidget(self.title, 1)
@@ -293,14 +297,21 @@ class CuratorView(QWidget):
         page = self.view.page()
         self.bridge = ST.Bridge(self.store, on_save=self._saved, on_error=self._save_failed,
                                 guard=self.guard, on_aside=self._set_aside,
-                                on_page_error=self._page_store_failed)
+                                on_page_error=self._page_store_failed,
+                                on_behind=self._reseed)
         # Whose curation a page loaded from this seed shows; `project_changed` needs it once
         # the store already answers with the next project.
         self.seeded_project = self.store._project()
         self.channel = QWebChannel(page)
         self.channel.registerObject("lsbridge", self.bridge)
         page.setWebChannel(self.channel)
+        self._insert_seed_script()
 
+    def _insert_seed_script(self):
+        """(Re)insert the script every load of the page runs first: qwebchannel.js and the seed."""
+        page = self.view.page()
+        for sc in page.scripts().find("ls_state_bridge"):
+            page.scripts().remove(sc)
         from PySide6.QtCore import QFile, QIODevice
         f = QFile(":/qtwebchannel/qwebchannel.js")
         qwc = ""
@@ -317,9 +328,19 @@ class CuratorView(QWidget):
         sc.setSourceCode(src)
         page.scripts().insert(sc)
 
+    def _reseed(self):
+        """The file is ahead of the page's storage (`ST.SaveGuard.behind`), or caught up again.
+
+        Only the script is rebuilt, not the bridge: the page on screen is still saving
+        through this one. The next load - Reload, the page's own reload, any navigation -
+        then starts from the file as it is now.
+        """
+        self._insert_seed_script()
+
     def _saved(self, key, n):
         self.logged.emit(f"saved   {key}  ({n/1024:.1f} KB)")
-        if self._save_failing:
+        self._failing_keys.discard(key)
+        if self._save_failing and not self._failing_keys:
             self._save_failing = False
             self.save_warning.setVisible(False)
             self.logged.emit("curation saves are reaching disk again")
@@ -338,6 +359,7 @@ class CuratorView(QWidget):
         stop the work the operator is trying to save.
         """
         self.logged.emit(f"NOT SAVED  {message}")
+        self._failing_keys.add(key)
         self.save_warning.setText(lead + message)
         self.save_warning.setVisible(True)
         if not self._save_failing:

@@ -196,11 +196,20 @@ def run_stale(files, info=None):
 
 
 print("--- a file whose name does not fit the grammar ---")
+MAP_8A = os.path.join(M.SLIDEMAP_DIR, "LS45_8a.png")
+if os.path.exists(MAP_8A):
+    os.remove(MAP_8A)
 code, out = run_stale({"LS45_8a.czi": (0.65, "AF568"), "not_a_slide.czi": (0.65, "AF568")})
 chk("exit code is non-zero", code != 0, True)
 chk("neither manifest table is replaced", stale_both(), [True, True])
 chk("the failure is counted", "failures         : 1" in out, True)
 chk("the reason is the last line", "could not be read" in last_line(out), True)
+# app/runner.py shows only the last line, so it must name the file and say
+# what to do about THIS cause.
+chk("...naming the file", "not_a_slide.czi" in last_line(out), True)
+chk("...with the remedy for a name", "rename it" in last_line(out), True)
+chk("a refused run draws no slide map for the manifest it did not write",
+    os.path.exists(MAP_8A), False)
 
 
 def no_scenes(px, marker):
@@ -217,6 +226,9 @@ code, out = run_stale({"LS45_8a.czi": (0.65, "AF568"), "LS45_8b.czi": (0.65, "AF
 chk("exit code is non-zero", code != 0, True)
 chk("neither manifest table is replaced", stale_both(), [True, True])
 chk("the file is named", "LS45_8b.czi" in out and "no scenes" in out, True)
+chk("...in the last line, with a remedy that is not renaming",
+    "LS45_8b.czi" in last_line(out) and "re-copy or re-export" in last_line(out)
+    and "rename" not in last_line(out), True)
 
 
 def short_scenes(px, marker):
@@ -231,10 +243,24 @@ chk("exit code is non-zero (it was only printed)", code != 0, True)
 chk("neither manifest table is replaced", stale_both(), [True, True])
 chk("the message says SizeS", "SizeS is 3" in out, True)
 
+
+def single_scene_no_sizes(px, marker):
+    d = fake_info(px, marker)
+    d["scenes"] = d["scenes"][:1]
+    d["size_s"] = 0          # ZEN leaves SizeS out of a single-scene header
+    return d
+
+
+print("--- a single-scene file whose header states no SizeS ---")
+code, out = run_stale({"LS45_8a.czi": (0.65, "AF568")}, single_scene_no_sizes)
+chk("is read, not refused", code, 0)
+chk("...and the manifest is written", stale_both(), [False, False])
+
 print("--- no CZI at all ---")
 code, out = run_stale({})
 chk("exit code is non-zero", code != 0, True)
 chk("the reason is the last line", "found no CZI" in last_line(out), True)
+chk("...and last run's tables are left alone", stale_both(), [True, True])
 
 print("--- an empty table is written header-only ---")
 os.makedirs(M.QC_DIR, exist_ok=True)

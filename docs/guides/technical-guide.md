@@ -927,7 +927,8 @@ alike, without decoding a pixel, and builds the tables every later stage keys on
 - **Settings:** `slide_naming`, `pixel_size_um`, `section_order_convention`, `acquisition`.
 - **Failure and re-run:** cheap (headers only) and rewrites every output on each run. Exits 1, writing
   neither manifest table, when no CZI is found or any file cannot be read: a name that does not fit the
-  grammar, no scenes in the header, a scene count that disagrees with `SizeS`, an archive that will not
+  grammar, no scenes in the header, a scene count that disagrees with a stated `SizeS` (a header
+  without one, as ZEN writes for a single scene, is not compared), an archive that will not
   open, or a `source_files` name found nowhere. A QC table with no rows is written header-only. A paired
   study whose `acquisition.markers` do not name the scans' channels stops after the tables are written.
   `--accept-suggestions` writes the suggested row counts into `layout_overrides.csv`.
@@ -944,7 +945,8 @@ came from.
   end to end and compares the CRC (about 420 GB on the LS study). `--watch` polls until extraction ends.
 - **Failure and re-run:** a mismatch is a row with its status, not an exception, but any corrupt, missing
   or still-extracting file, or an unreadable archive, makes the run exit 1 with the counts as its last
-  line. No zips at all is nothing to verify, and exits 0. Re-running rechecks everything.
+  line. No zips at all is nothing to verify, and exits 0. With `source_files`, only the named zips and
+  the named CZIs inside zips are checked, as in 00. Re-running rechecks everything.
 
 ### `00c_channel_identity.py`
 
@@ -1053,6 +1055,10 @@ section, before and after correction.
   pitch. The reported amplitude is the peak-to-trough of the folded profile as a percentage of the mean:
   how much more signal a detection near a tile centre sees than one near an edge.
 - **Settings:** `pixel_size_um`.
+- **Failure and re-run:** exits 1 when no section is found, and when any named or found section was
+  not measured (missing, too little tissue, or no usable profile), with the count as the last line;
+  when nothing was measured it writes no summary. A FAIL verdict is a result, not a failed run: the
+  measurement before correction is expected to find the artifact.
 
 ### `01d_contactsheets.py`
 
@@ -1063,6 +1069,8 @@ Stage `contactsheets`. One contact sheet per animal and a browsable gallery.
 - **How:** sections in rostro-caudal order across the page, so a gradient along the brain reads as a
   gradient on the page. Sections flagged by QC are marked, not dropped. `--kind`, `--cols` and `--thumb`
   choose the channel and the layout.
+- **Failure and re-run:** a section in `qc/focus.csv` with no overview PNG of the chosen kind is left off
+  the sheets and counted, and the run exits 1 naming the first few; re-run 01 for them.
 
 ### `01e_tile_geometry.py`
 
@@ -1087,6 +1095,9 @@ and checks it.
   anatomy, and takes the per-pixel median across thousands of cells. Tissue falls at random positions
   relative to the grid, so the median keeps only illumination. Normalised to mean 1 and smoothed.
 - **Settings:** `pixel_size_um`.
+- **Failure and re-run:** stops when there are no sections; `build` exits 1 naming any channel with no
+  usable section (the other channels' fields are still written), and `verify` exits 1 counting the
+  sections it had no field for.
 
 ### `01g_saturation_map.py`
 
@@ -1099,7 +1110,9 @@ costs.
 - **How:** four numbers per section: the fraction of clipping inside tissue, its edge affinity, the size
   of the largest clipped blob (at 5.2 µm per pixel any large blob cannot be nuclei), and the fraction of
   tissue clipped. `--proxy` reproduces the old 8-bit proxy for comparison only.
-- **Failure and re-run:** refuses when the raw masks are missing; run 01 (or 01k) first.
+- **Failure and re-run:** a section with no raw mask falls back to the 8-bit proxy, which undercounts
+  by about 2x, and the run names how many did; run 01 (or 01k) first. A section with no overview pair
+  is counted and the run exits 1; when no section was measured it writes no CSV.
 
 ### `01h_tilefield_raw.py`
 
@@ -1112,6 +1125,10 @@ stitched domain.
   the stitched image repeats every 1836 px, it reads each tile's rectangle and M index and applies the
   documented rule (within a scene, the subblock with the highest M index wins) to derive exactly which
   part of each tile survives stitching. `--files` and `--tiles` set the sample.
+- **Failure and re-run:** czifile reads loose CZIs only, so manifest files not on disk are counted and
+  not sampled; with no tile collected it stops saying how many were absent or unreadable. A channel
+  with fewer than 40 usable tiles gets no field, and that or an unreadable file makes the run exit 1;
+  the fields it did build are still written.
 
 ### `01i_multisection_review.py`
 

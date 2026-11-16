@@ -60,6 +60,13 @@ sentence rather than a row of `=` as its last line; 01g on sections with no over
 no census when nothing was measured; 01d on focus.csv sections with no overview PNG, counted. Each
 prints its reason last. Checks in `tests/test_manifest_checks.py`, `test_empty_guards.py` and
 `test_atomic_outputs.py`.
+After review: 00 compares the scene count with `SizeS` only when the header states one (ZEN
+leaves it out of a single-scene file); its last line names the first files that failed and the
+remedy for each cause; and a refused run draws no slide maps. 00b honours `source_files` with 00's
+matching, so a subset study is not failed on slides outside it. 01c counts a named section that is
+not there and exits 1 when any section was not measured; 01h says how many manifest files were
+absent when it collected no tile. The technical guide gives 01c, 01d, 01f, 01g and 01h their
+failure behaviour (01g's old line said it refused without raw masks; it falls back to the proxy).
 
 **Why:** found on review (REVIEW.md rules 2 and 3). Each of these printed its problem and exited
 0, so the app showed the step done; a partial 00 left the two manifest tables describing different

@@ -326,6 +326,37 @@ chk("...and writes no saturation csv for the app to read as done",
 chk("...saying why, last", "no _MARK/_DAPI overview" in _last_line(said.getvalue()), True)
 
 print()
+print("--- 01g: some sections without an overview: census written, run fails ---")
+from PIL import Image  # noqa: E402
+import numpy as np  # noqa: E402
+ov = os.path.join(G.OVERVIEW_DIR, "LS01", mk)
+os.makedirs(ov, exist_ok=True)
+yy, xx = np.mgrid[0:120, 0:120]
+disk = ((yy - 60) ** 2 + (xx - 60) ** 2) < 45 ** 2
+Image.fromarray(np.where(disk, 180, 5).astype(np.uint8)).save(
+    os.path.join(ov, "LS01_s05a_sc00_DAPI.png"))
+Image.fromarray(np.where(disk, 120, 10).astype(np.uint8)).save(
+    os.path.join(ov, "LS01_s05a_sc00_MARK.png"))
+with open(G.QC_CSV, "a", newline="", encoding="utf-8") as fh:
+    csv.DictWriter(fh, fieldnames=QC_FIELDS).writerow(
+        {"scene_uid": "LS01_s06a_sc00", "animal": "LS01", "slide": "6",
+         "marker_channel": mk, "section_order": "2", "um_px": "5.2",
+         "saturated_fraction": "0", "saturated_fraction_raw": "0"})
+try:
+    sys.argv = ["01g", "--figures", "0"]
+    with contextlib.redirect_stdout(io.StringIO()) as said:
+        rc = G.main()
+finally:
+    sys.argv = argv
+chk("01g with one of two overviews missing returns 1", rc, 1)
+chk("...counting the missing one last",
+    "1 of 2" in _last_line(said.getvalue())
+    and "LS01_s06a_sc00" in _last_line(said.getvalue()), True)
+with open(census, newline="", encoding="utf-8") as fh:
+    chk("...and still writes the census of the one it measured",
+        [r["scene_uid"] for r in csv.DictReader(fh)], ["LS01_s05a_sc00"])
+
+print()
 print("--- 04a atlas extract: an empty gaps table replaces last run's ---")
 AX = load_stage("04a_atlas_extract.py")
 gaps = os.path.join(STUDY.out_root, "gaps_probe.csv")
@@ -338,8 +369,11 @@ with open(gaps, newline="", encoding="utf-8") as fh:
         [["plate_id", "page", "image_file", "reason"]])
 with open(os.path.join(SCRIPTS, "04a_atlas_extract.py"), encoding="utf-8") as fh:
     src = fh.read()
+import re  # noqa: E402
+# Whitespace-blind: the call may be reflowed, but it must pass the columns.
 chk("04a passes gaps.csv its columns",
-    '"gaps.csv"), gap_rows,\n               ["plate_id", "page", "image_file", "reason"])' in src, True)
+    re.search(r'"gaps\.csv"\)\s*,\s*gap_rows\s*,\s*\[\s*"plate_id"\s*,\s*"page"\s*,'
+              r'\s*"image_file"\s*,\s*"reason"\s*\]', src) is not None, True)
 
 print("\n" + ("ALL PASS" if not fails else f"{fails} FAILED"))
 raise SystemExit(1 if fails else 0)

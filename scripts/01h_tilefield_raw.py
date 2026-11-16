@@ -208,8 +208,15 @@ def main():
     failed = []
     stacks = collect_tiles(chosen, args.tiles, rng, failed)
     if not stacks:
-        raise SystemExit("no tiles collected"
-                         + (f": {len(failed)} file(s) could not be read" if failed else ""))
+        # The absent count is often the whole reason: a study that keeps its
+        # CZIs inside zips has none on disk for czifile to read.
+        why = []
+        if absent:
+            why.append(f"{len(absent)} of {len(rows)} manifest file(s) are not in "
+                       f"{SOURCE_DIR} (czifile reads loose CZIs only)")
+        if failed:
+            why.append(f"{len(failed)} file(s) could not be read")
+        raise SystemExit("no tiles collected" + (": " + "; ".join(why) if why else ""))
 
     print("\nderiving the stitched-domain mapping from real tile geometry ...")
     mapping = stitch_map(chosen[0][0])

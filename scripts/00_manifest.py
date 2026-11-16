@@ -638,6 +638,10 @@ def main():
         scene_rows = []
         layout_rows = []
         seen_names = {}
+        # Drawn only once the run is known to be written: a refused run left
+        # the slide maps describing it while both manifests described the
+        # last good one.
+        slidemaps = []
 
         for n_done, (source, member, container, opener) in enumerate(entries):
             PG.report(n_done, len(entries), "slide files")
@@ -678,7 +682,11 @@ def main():
             if not scenes:
                 failures.append((source, member, "no scenes in metadata"))
                 continue
-            if len(scenes) != info["size_s"]:
+            # Only where the header states a count: ZEN leaves SizeS out of a
+            # single-scene acquisition, czi_meta reads that as 0, and refusing
+            # it would stop the whole study over a file whose every scene is
+            # placed.
+            if info["size_s"] and len(scenes) != info["size_s"]:
                 failures.append((source, member,
                                  f"{len(scenes)} scene(s) in the Scenes block but "
                                  f"SizeS is {info['size_s']}; the sections it cannot "
@@ -783,14 +791,14 @@ def main():
                 }
             )
 
-            render_slidemap(
+            slidemaps.append((
                 os.path.join(SLIDEMAP_DIR, base.replace(".czi", ".png")),
                 base,
                 scenes,
                 rows_idx,
                 cols_idx,
                 serials,
-            )
+            ))
 
     # Before anything is written for downstream to read: a stale manifest from
     # an earlier good run is safer than a fresh one that is wrong.
@@ -816,9 +824,7 @@ def main():
         for f in failures:
             print(f"    !! {f[0]} :: {f[1]} :: {f[2]}")
         print("=" * 72)
-        print(f"!! 00_manifest: {len(failures)} slide file(s) could not be read, so "
-              f"neither manifest table was written - fix or rename them, or leave "
-              f"them out with source_files.")
+        print(failure_line(failures))
         return 1
 
     refused = refusals(file_rows, scene_rows, CONFIG["pixel_size_um"])
@@ -828,6 +834,9 @@ def main():
         for line in refused:
             print(line)
         return 1
+
+    for args in slidemaps:
+        render_slidemap(*args)
 
     if accepted:
         merged = dict(overrides)
@@ -855,6 +864,29 @@ def main():
     # sat after `return 0` and never ran.
     CH.require_manifest_markers(CONFIG, scene_rows, CONFIG_PATH)
     return 0
+
+
+def _remedy(reason):
+    """What to do about one failure, worded for its cause: renaming does not
+    mend a damaged file, and source_files is a list of the files to KEEP."""
+    if reason.startswith("filename did not match"):
+        return "rename it to fit slide_naming.pattern, or list only the files to keep in source_files"
+    if reason.startswith("named in source_files"):
+        return "correct or remove that name in source_files"
+    return ("re-copy or re-export it, or list only the files to keep in source_files")
+
+
+def failure_line(failures, shown=3):
+    """The one line app/runner.py shows for a refused run: which files, why,
+    and what to do - the log above it has the full list."""
+    parts = []
+    for source, member, reason in failures[:shown]:
+        name = os.path.basename(member) or source
+        parts.append(f"{name} ({reason}; {_remedy(reason)})")
+    more = len(failures) - shown
+    return (f"!! 00_manifest wrote no manifest: {len(failures)} slide file(s) could not "
+            f"be read - " + "; ".join(parts)
+            + (f"; and {more} more, listed above" if more > 0 else ""))
 
 
 # slide_layout_summary.csv / slide_layout_review.csv, pinned so a table with no

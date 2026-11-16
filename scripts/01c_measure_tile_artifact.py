@@ -293,7 +293,11 @@ def main():
     # Returning None here recorded "the pass/fail test" as passed with nothing
     # measured. A named pattern that matches nothing (01f verify wrote no
     # corrected copies) is the same failure, not a traceback from tifffile.
+    absent = [p for p in targets if not os.path.exists(p)]
     targets = [p for p in targets if os.path.exists(p)]
+    if absent and targets:
+        # Counted, not dropped: `01c a.tif gone.tif` measured a.tif and passed.
+        print(f"{len(absent)} named section(s) not found: {', '.join(absent[:5])}")
     if not targets:
         print("No test sections found%s. Run 01b_export_section.groovy first "
               "(or 01f_tilefield.py verify for the corrected set)."
@@ -372,6 +376,13 @@ def main():
     if not amps:
         print(f"no section could be measured: all {len(results)} had too little "
               f"tissue or no usable profile")
+        return 1
+    # Some measured is still not all: the verdict above is over fewer
+    # sections than were asked for, and says so last.
+    if unmeasured or absent:
+        print(f"{len(unmeasured) + len(absent)} of {len(results) + len(absent)} section(s) "
+              f"not measured ({len(unmeasured)} with too little tissue or no usable "
+              f"profile, {len(absent)} not found); the verdict covers the rest")
         return 1
     return 0
 

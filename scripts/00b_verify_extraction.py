@@ -56,20 +56,36 @@ def zip_inventory(problems=None):
     and per member that two archives disagree on. Both used to be printed and
     passed over, so a corrupt transfer zip - whose CZIs are then never checked
     at all - ended in a run that exited 0.
+
+    A `source_files` list narrows this exactly as it narrows 00_manifest's
+    discovery: a named zip takes every CZI in it, a named CZI takes that member
+    of whichever zip holds it, and anything else in the folder is not this
+    study's. Without that, a subset study - the case source_files exists for,
+    where the rest of the folder is often never extracted - failed here on
+    slides it never asked for. An unreadable archive nobody named is likewise
+    not a problem of this run.
     """
     problems = problems if problems is not None else []
+    only = CONFIG.get("source_files") or None
+    if only:
+        only = {os.path.basename(n) for n in only}
     inventory = {}
     for zpath in sorted(glob.glob(os.path.join(SOURCE_DIR, "*.zip"))):
+        zname = os.path.basename(zpath)
+        whole = not only or zname in only
         try:
             zf = zipfile.ZipFile(zpath)
         except (zipfile.BadZipFile, OSError) as exc:
-            print(f"  !! unreadable archive: {os.path.basename(zpath)}")
-            problems.append(f"unreadable archive {os.path.basename(zpath)}: {exc}")
+            if whole:
+                print(f"  !! unreadable archive: {zname}")
+                problems.append(f"unreadable archive {zname}: {exc}")
             continue
         with zf:
             for info in zf.infolist():
                 name = os.path.basename(info.filename)
                 if not name.lower().endswith(".czi"):
+                    continue
+                if not whole and name not in only:
                     continue
                 if name in inventory and inventory[name]["size"] != info.file_size:
                     print(f"  !! {name} differs between archives - keeping first")

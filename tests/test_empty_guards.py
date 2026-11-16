@@ -189,6 +189,31 @@ try:
     rc, out = call_main(V, ["00b"])
     chk("00b with every CZI matching returns 0", rc, 0)
 
+    # A source_files subset: the rest of the folder is not this study's, so a
+    # zip nobody named that is broken, or holds members never extracted, is
+    # not a failure. Matching as 00 matches: by zip name or member name.
+    with zipfile.ZipFile(os.path.join(src, "other.zip"), "w") as z:
+        z.writestr("B_2a.czi", b"never extracted")
+    with open(os.path.join(src, "broken.zip"), "wb") as fh:
+        fh.write(b"not a zip")
+    rc, out = call_main(V, ["00b"])
+    chk("00b over the whole folder fails on them", rc, 1)
+    saved_only = V.CONFIG.get("source_files")
+    try:
+        V.CONFIG["source_files"] = ["A_1a.czi", "A_1b.czi"]
+        rc, out = call_main(V, ["00b"])
+        chk("00b with source_files naming members checks only those: 0", rc, 0)
+        V.CONFIG["source_files"] = ["batch.zip"]
+        rc, out = call_main(V, ["00b"])
+        chk("...naming the zip takes all of it: 0", rc, 0)
+        V.CONFIG["source_files"] = ["other.zip"]
+        rc, out = call_main(V, ["00b"])
+        chk("...and a named zip's unextracted member still fails", rc, 1)
+    finally:
+        V.CONFIG["source_files"] = saved_only
+    os.remove(os.path.join(src, "broken.zip"))
+    os.remove(os.path.join(src, "other.zip"))
+
     # 01f: build with no usable section, verify with no field.
     F = load("f", "01f_tilefield.py")
     F.FIELD_DIR = os.path.join(tmp, "flatfield")
@@ -212,6 +237,18 @@ try:
     chk("...saying so last", "no section could be measured" in last_line(out), True)
     chk("...and writes no summary for the app to read as done",
         os.path.exists(C.summary_path(tmp)), False)
+    # Some measured is not all: a named section that is not there is counted
+    # and fails the run, as a section with no usable profile does.
+    yy, xx = np.mgrid[0:600, 0:600]
+    tissue = (1000 + 200 * np.sin(2 * np.pi * xx / 50.0)
+              + 200 * np.sin(2 * np.pi * yy / 50.0)).astype(np.uint16)
+    good = os.path.join(tmp, "tissue_5.2um.tif")
+    tifffile.imwrite(good, tissue)
+    rc, out = call_main(C, ["01c", good])
+    chk("01c with its one section measured returns 0", rc, 0)
+    rc, out = call_main(C, ["01c", good, os.path.join(tmp, "gone.tif")])
+    chk("01c with a named section missing returns 1", rc, 1)
+    chk("...counting it last", "1 not found" in last_line(out), True)
 
     # 01h: a channel with too few tiles is counted and fails the run.
     H = load("h", "01h_tilefield_raw.py")
@@ -234,6 +271,12 @@ try:
     chk("...naming the channel and the unreadable file last",
         "no field for DAPI" in last_line(out) and "A_1a.czi" in last_line(out), True)
     chk("...and counts the manifest file not on disk", "1 of 2 file(s)" in out, True)
+    # Nothing on disk at all (CZIs kept in zips): the absent count IS the reason.
+    H.collect_tiles = lambda paths, n, rng, failed=None: {}
+    rc, out = call_main(H, ["01h", "--files", "2"])
+    chk("01h with no tile collected stops", rc, 1)
+    chk("...saying how many files were absent", "1 of 2 manifest file(s)" in last_line(out),
+        True)
 
     # 01d: a focus.csv section with no overview PNG is counted, and fails.
     D = load("d", "01d_contactsheets.py")

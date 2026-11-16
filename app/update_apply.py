@@ -14,9 +14,19 @@ puts back. If any move fails, or the new code does not import, every move made
 so far is reversed and the app starts on the version it had. If even a reversal
 fails, nothing is deleted: the old parts stay under updates\\ and the message on
 the next start says where.
+
+The helper can also die half way (power cut, killed by antivirus, the PC shut
+down). Before it moves anything it writes updates\\swap-journal.json, saying
+which parts it is about to move and where, and removes it once the swap is
+settled. `recover()` reads a leftover journal and puts every part back where it
+was before the swap started. It is run at the start of every interpreter by the
+bundled runtime's sitecustomize.py (the only place that still runs when the
+`app` folder itself is the part that went missing), and again by app/__main__.py
+for installs whose runtime predates that.
 """
 
 import datetime
+import json
 import os
 import shutil
 import subprocess
@@ -73,7 +83,33 @@ def default_check(root):
     return r.returncode == 0
 
 
-def _swap(root, incoming, parked, check):
+JOURNAL = "swap-journal.json"
+
+
+def journal_path(root):
+    return os.path.join(root, "updates", JOURNAL)
+
+
+def _write_journal(root, data):
+    """Replace the journal in one step, so a crash leaves the old one or the new one, never half."""
+    path = journal_path(root)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=1)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, path)
+
+
+def _drop_journal(root):
+    try:
+        os.remove(journal_path(root))
+    except OSError:
+        pass
+
+
+def _swap(root, incoming, parked, check, mode="apply"):
     """Move each live part present in `incoming` to `parked`, and the new one in.
 
     "ok"      swapped and the check passed
@@ -81,7 +117,23 @@ def _swap(root, incoming, parked, check):
     "stuck"   something failed and a move could not be reversed; whatever did
               not go back is still in `parked` or `incoming`, which the caller
               must then keep
+
+    The journal is written before the first move: which parts will move, whether
+    each had a live copy, and the two folders. That is enough for `recover()` to
+    tell, part by part, where the old copy is after a crash at any point. It is
+    removed here when everything went back ("undone"); after "ok" the caller
+    removes it once the old version is filed away; after "stuck" it stays, so the
+    next start tries the reversal again.
     """
+    parts = [[part, os.path.exists(os.path.join(root, part))] for part in PARTS
+             if os.path.exists(os.path.join(incoming, part))]
+    try:
+        _write_journal(root, {"mode": mode, "phase": "swapping", "pid": os.getpid(),
+                              "incoming": os.path.abspath(incoming),
+                              "parked": os.path.abspath(parked), "parts": parts})
+    except OSError as e:
+        _log(root, f"could not write the swap journal, so nothing was moved: {e}")
+        return "undone"
     os.makedirs(parked)
     done = []                                   # (src, dst) in the order moved
     try:
@@ -96,6 +148,14 @@ def _swap(root, incoming, parked, check):
             _move_retrying(new, live)
             done.append((new, live))
         if check(root):
+            try:
+                with open(journal_path(root), encoding="utf-8") as fh:
+                    journal = json.load(fh)
+                _write_journal(root, dict(journal, phase="swapped"))
+            except (OSError, ValueError) as e:
+                # Still "swapping" on disk: a crash before the journal goes would put the
+                # old version back, which is safe, only one update behind.
+                _log(root, f"could not mark the swap journal as done: {e}")
             return "ok"
         _log(root, "the new version did not pass its check")
     except OSError as e:
@@ -107,7 +167,57 @@ def _swap(root, incoming, parked, check):
         except OSError as e:
             _log(root, f"could not put back {src} (it is still at {dst}): {e}")
             outcome = "stuck"
+    if outcome == "undone":
+        _drop_journal(root)
     return outcome
+
+
+def _holds_parts(folder):
+    return any(os.path.exists(os.path.join(folder, part)) for part in PARTS)
+
+
+def _discard(folder, root):
+    """Delete a parked folder only when no managed part is left in it; otherwise keep it and say so."""
+    if not os.path.exists(folder):
+        return
+    if _holds_parts(folder):
+        _log(root, f"kept {folder}: it still holds parts of an installed version")
+        LAST_KEPT[:] = [folder]
+        return
+    shutil.rmtree(folder, ignore_errors=True)
+
+
+def _hand_over(root, parked):
+    """File `parked` as updates/previous, the copy Help > Undo puts back. True if it is there.
+
+    The undo copy already there is moved aside (one rename) rather than deleted first:
+    deleting a tree half way (a file held open on Windows) and then failing to move
+    `parked` in would leave neither a whole `previous` nor `parked`. On any failure the
+    old undo copy goes back, `parked` is kept, and the caller must not delete it.
+    """
+    updates = os.path.join(root, "updates")
+    previous = os.path.join(updates, "previous")
+    aside = None
+    if os.path.exists(previous):
+        aside = os.path.join(updates, f"previous-old-{_stamp()}")
+        try:
+            _move_retrying(previous, aside)
+        except OSError as e:
+            _log(root, f"could not keep the previous version for undo (its old copy is in use): {e}")
+            return False
+    try:
+        _move_retrying(parked, previous)
+    except OSError as e:
+        _log(root, f"could not keep the previous version for undo: {e}")
+        if aside:
+            try:
+                _move_retrying(aside, previous)
+            except OSError as e2:
+                _log(root, f"the undo copy from before is left at {aside}: {e2}")
+        return False
+    if aside:
+        shutil.rmtree(aside, ignore_errors=True)
+    return True
 
 
 def _stamp():
@@ -117,37 +227,145 @@ def _stamp():
 def apply(root, new_dir, check=default_check):
     """Swap new_dir in. The replaced parts become updates/previous only on success,
     so a failed update keeps the undo of the one before it."""
+    LAST_KEPT[:] = []
     updates = os.path.join(root, "updates")
     parked = os.path.join(updates, f"parked-{_stamp()}")
-    outcome = _swap(root, new_dir, parked, check)
+    outcome = _swap(root, new_dir, parked, check, "apply")
     if outcome == "stuck":
         LAST_KEPT[:] = [parked]
         return outcome
     if outcome == "ok":
-        previous = os.path.join(updates, "previous")
-        shutil.rmtree(previous, ignore_errors=True)
-        try:
-            _move_retrying(parked, previous)
-        except OSError as e:
-            _log(root, f"could not keep the previous version for undo: {e}")
-    shutil.rmtree(parked, ignore_errors=True)
+        # `parked` is the version just replaced: it is deleted only by becoming `previous`.
+        # A hand-over that fails (files held open on Windows) keeps it where it is.
+        if not _hand_over(root, parked):
+            LAST_KEPT[:] = [parked]
+        _drop_journal(root)
+    else:
+        _discard(parked, root)
     shutil.rmtree(new_dir, ignore_errors=True)
     return outcome
 
 
 def undo(root, check=default_check):
+    LAST_KEPT[:] = []
     updates = os.path.join(root, "updates")
     previous = os.path.join(updates, "previous")
     parked = os.path.join(updates, f"undone-{_stamp()}")
-    outcome = _swap(root, previous, parked, check)
+    outcome = _swap(root, previous, parked, check, "undo")
     if outcome == "stuck":
         LAST_KEPT[:] = [parked]
         return outcome
     if outcome == "ok":
         # One step back only: the version just left is not kept for a redo.
         shutil.rmtree(previous, ignore_errors=True)
-    shutil.rmtree(parked, ignore_errors=True)
+        shutil.rmtree(parked, ignore_errors=True)
+        _drop_journal(root)
+    else:
+        _discard(parked, root)
     return outcome
+
+
+def _alive(pid):
+    """Is process `pid` still running? Never this process; never kills anything to find out."""
+    if not isinstance(pid, int) or pid <= 0 or pid == os.getpid():
+        return False
+    if sys.platform == "win32":
+        # os.kill(pid, 0) on Windows TERMINATES the process: ask for its exit code instead.
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        h = k32.OpenProcess(0x1000, False, pid)          # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return False
+        code = ctypes.c_ulong()
+        ok = k32.GetExitCodeProcess(h, ctypes.byref(code))
+        k32.CloseHandle(h)
+        return bool(ok) and code.value == 259            # STILL_ACTIVE
+    try:
+        os.kill(pid, 0)
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def recover(root):
+    """Finish or reverse a swap whose helper died. Returns (message or None, [parts moved]).
+
+    Nothing to do without a journal, or while the helper that wrote it is still running
+    (its own check and compile steps start interpreters too). A journal still "swapping"
+    is reversed part by part from what is on disk now, so it works wherever the crash
+    fell, including between moving the live `app` out and the new one in:
+
+      had a live copy, old copy in parked   the live one (if any) is the new one: back
+                                            to `incoming`, then the old one back in
+      had a live copy, none in parked       it never moved; nothing to do
+      new part, live and not in incoming    it is the new one: back to `incoming`
+
+    "swapped" means the new version passed its check and only the filing of the old
+    one was cut short; that is finished instead. The outcome is added to
+    updates/last-result.txt, which the app shows on start.
+    """
+    path = journal_path(root)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            j = json.load(fh)
+    except (OSError, ValueError):
+        return None, []
+    if not isinstance(j, dict) or _alive(j.get("pid")):
+        return None, []
+    mode = j.get("mode") or "apply"
+    what = "update" if mode == "apply" else "undo of the last update"
+    parked, incoming = j.get("parked") or "", j.get("incoming") or ""
+    moved, problems = [], []
+    if j.get("phase") == "swapped":
+        if mode == "apply" and os.path.isdir(parked) and not _hand_over(root, parked):
+            problems.append(f"the version it replaced is kept in {parked}")
+        _drop_journal(root)
+        text = (f"The {what} finished, but the app closed before it was tidied up"
+                + (f"; {problems[0]}." if problems else "; that is done now."))
+    else:
+        for part, had_live in reversed(j.get("parts") or []):
+            if part not in PARTS:
+                continue
+            live, old, new = (os.path.join(root, part), os.path.join(parked, part),
+                              os.path.join(incoming, part))
+            try:
+                if had_live and os.path.exists(old):
+                    if os.path.exists(live):
+                        if os.path.exists(new):
+                            problems.append(f"{part}: both {live} and {new} exist")
+                            continue
+                        os.makedirs(incoming, exist_ok=True)
+                        _move_retrying(live, new)
+                    _move_retrying(old, live)
+                    moved.append(part)
+                elif not had_live and os.path.exists(live) and not os.path.exists(new):
+                    os.makedirs(incoming, exist_ok=True)
+                    _move_retrying(live, new)
+                    moved.append(part)
+            except OSError as e:
+                problems.append(f"{part} could not be put back: {e}")
+            if had_live and not os.path.exists(live):
+                problems.append(f"{part} is missing from {root}")
+        if problems:
+            text = (f"The {what} was interrupted and could not be fully reversed "
+                    f"({'; '.join(problems)}). It will be tried again on the next start; if "
+                    f"the app does not start, run the installer again. Your studies are not "
+                    f"affected. Details: {os.path.join(root, 'updates', 'last-update.log')}")
+        else:
+            _drop_journal(root)
+            if os.path.isdir(parked) and not _holds_parts(parked):
+                shutil.rmtree(parked, ignore_errors=True)
+            text = (f"The {what} was interrupted, so it was reversed: you are on "
+                    f"{_version(root)}, as before.")
+    _log(root, text)
+    try:
+        with open(os.path.join(root, "updates", "last-result.txt"), "a", encoding="utf-8") as fh:
+            fh.write(text + "\n")
+    except OSError:
+        pass
+    return text, moved
 
 
 LAST_KEPT = []          # where a stuck rollback left the parts it could not put back
@@ -157,7 +375,11 @@ def result_text(mode, outcome, old, new, root):
     """The one line the app shows on its next start."""
     log = os.path.join(root, "updates", "last-update.log")
     if outcome == "ok":
-        return f"Updated to {new}." if mode == "apply" else f"Undid the update; back on {new}."
+        done = f"Updated to {new}." if mode == "apply" else f"Undid the update; back on {new}."
+        if LAST_KEPT:
+            done += (f" The version it replaced could not be kept for Help > Undo (files in "
+                     f"use); it is in {LAST_KEPT[0]}. Details: {log}")
+        return done
     if outcome == "undone":
         what = f"The update to {new}" if mode == "apply" else "Undoing the update"
         return f"{what} failed, and nothing was changed: you are still on {old}. Details: {log}"
@@ -180,7 +402,6 @@ def _log(root, text):
 
 
 def _version(path):
-    import json
     try:
         with open(os.path.join(path, "VERSION.json"), encoding="utf-8") as fh:
             return json.load(fh).get("version", "?")

@@ -170,6 +170,7 @@ class MainWindow(QMainWindow):
         # The open project: the study config plus the app's record of working on it.
         # Held in memory; stages read the saved file, so a run saves it first.
         self.session = ProjectSession(LP.Project.open(self.config_path), self)
+        self.session.idle_for = self._idle_for     # Save As / a moved out_root wait for a running stage
         self._pending_log = []
         for key, _old, new in self.session.project.reanchored:
             self._pending_log.append(

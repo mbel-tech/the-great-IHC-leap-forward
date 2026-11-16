@@ -33,6 +33,11 @@ class ProjectSession(QObject):
         super().__init__(parent)
         self.project = project
         self._was_dirty = project.dirty
+        # The window's run guard: idle_for(action) is True when no stage is running, and otherwise
+        # tells the person why `action` has to wait. Save As points the runner at another file and
+        # a saved change of out_root re-roots the curator, both under a stage still writing; the
+        # session asks here so every way of saving (menu, Ctrl+S, the save-before prompts) is held.
+        self.idle_for = lambda action: True
         if project.path:
             LC.remember_project(project.path)
 
@@ -66,10 +71,17 @@ class ProjectSession(QObject):
 
     # ---- saving ---------------------------------------------------------------
 
+    def _moves_out_root(self):
+        """True if saving would change the out_root the stages and the curator are rooted at."""
+        p = self.project
+        return bool(p.path) and p.get("out_root") != p.saved_get("out_root")
+
     def save(self, parent=None):
         """Write the project. True if it is saved afterwards."""
         if not self.project.path:
             return self.save_as(parent)
+        if self._moves_out_root() and not self.idle_for("save a new output folder (out_root)"):
+            return False
         try:
             self.project.save()
         except LP.ProjectConflict as exc:
@@ -92,6 +104,8 @@ class ProjectSession(QObject):
         return True
 
     def save_as(self, parent=None):
+        if not self.idle_for("save the project under another name"):
+            return False
         start = self.project.path or os.path.join(LC.studies_dir(), LC.slugify(self.project.name) + ".json")
         path, _ = QFileDialog.getSaveFileName(parent, "Save project as", start, "Project (*.json)")
         if not path:

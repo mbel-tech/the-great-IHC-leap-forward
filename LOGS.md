@@ -9,6 +9,40 @@ where things landed, not which plausible-looking route was tried and abandoned, 
 
 ---
 
+## 2026-11-16 - The study file and the installed app survive concurrency and crashes (project / app / updates)
+
+**Changed:** the partial writers of the study file (`write_curation`, `_mark_synced`,
+`record_run`) compare the stamp they hold with the one on disk before they read it. If it moved,
+they compare what is there with the last save minus what they own (`_settings_view`: curation,
+`project.runs`, `project.synced`, `project.id`/`created`, `detection.auto`). Only those moved:
+memory takes them in and nothing is asked. Anything else moved: the write still goes ahead (only
+its own keys) and `_foreign` makes the next full save raise `ProjectConflict` until a reload or a
+forced save. File > Save As, and a Save that would change `out_root`, ask the window's run guard
+(`ProjectSession.idle_for`, wired to `MainWindow._idle_for`) and are refused with the same
+message as Open/New while a stage runs. `update_apply` writes `updates/swap-journal.json` before
+moving anything and removes it when the swap is settled; `recover()` puts every part back from
+a leftover journal (skipped while the helper that wrote it is alive), called from the bundled
+runtime's `sitecustomize.py` (Windows and macOS) and from `app/__main__.py`. The replaced version
+is filed as `previous` by moving the old `previous` aside first; when that fails `parked` is
+kept, the old undo copy is put back whole, and the start-up message names the folder. Checks in
+`tests/test_project.py`, `tests/test_project_session.py`, `tests/test_updates.py`.
+
+**Why:** found on review. Each partial writer took the stamp on disk as its own, so B saving a
+setting, then A recording one curation decision, then A saving, lost B's change without a word.
+Save As rebound the runner and re-rooted the curator under a running stage. A helper that died
+between moving `app` out and the new one in left an install with no `app` folder, which nothing
+looked for; and a hand-over to `previous` that failed on a locked file was logged and then the
+only copy of the replaced version (`parked`) was deleted.
+
+**Cost:** a second copy of the app saving the study file now makes this copy's next Save ask
+"The file changed on disk"; so does anything else writing the file while the app has it open
+(`00c_channel_identity.py --accept` from a terminal writes `marker_identity`, which the next Save
+used to drop silently once a run or a curation decision had refreshed the stamp). Recovery when `app/` itself is gone needs
+the new `sitecustomize.py`, which only a fresh install brings (the runtime is not updated in
+place), and the journal only exists from the second update after this one, because the helper
+that runs an update is the copy from the version being replaced. An update cut short is reversed,
+not finished: the person runs it again.
+
 ## 2026-11-16 - One sheet row is one animal; 06b's groups and workbook date the results (06b / app)
 
 **Changed:** `ls_sampling.join` reports each sheet row two or more animals match (`shared`, from

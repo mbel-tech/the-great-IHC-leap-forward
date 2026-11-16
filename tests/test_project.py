@@ -226,6 +226,48 @@ chk("saving over a hand edit is refused", raises(c1.save, P.ProjectConflict, "ch
 c1.save(force=True)
 chk("...unless forced", read(target)["display"]["nuclear_colour"], "cyan")
 
+# Two copies of the app on one study file. The partial writers (a curation decision, a sync
+# mark, a run row) used to take whatever stamp was on disk as their own, so B's saved setting
+# was silently overwritten by A's next full save. They must still write (only their own keys),
+# but A's later save has to stop and say the file changed.
+for label, partial in (
+        ("a curation decision", lambda q, out: q.write_curation("ls_note", "x")),
+        ("a sync mark", lambda q, out: q._mark_synced("ls_sync_probe", "abc123")),
+        ("a run row", lambda q, out: q.record_run("s_conflict", True, "a", "b"))):
+    cfp, _cfd = fresh("conflict_" + label.split()[-1])
+    pa, pb = P.Project.open(cfp), P.Project.open(cfp)
+    pb.set("pixel_size_um", 0.77, by="B")
+    pb.save()
+    partial(pa, None)
+    on = read(cfp)
+    chk("%s from A after B saved keeps B's setting on disk" % label, on["pixel_size_um"], 0.77)
+    pa.set("section_thickness_um", 33.0, by="A")
+    chk("...and A's next save is refused, not B's change lost (%s)" % label,
+        raises(pa.save, P.ProjectConflict, "changed on disk"), True)
+    chk("...leaving B's setting in the file (%s)" % label, read(cfp)["pixel_size_um"], 0.77)
+    pa.reload()
+    pa.set("section_thickness_um", 33.0, by="A")
+    pa.save()
+    chk("...until A reloads, after which it saves both (%s)" % label,
+        (read(cfp)["pixel_size_um"], read(cfp)["section_thickness_um"]), (0.77, 33.0))
+
+# What the partial writers own moving under them is not a conflict: another copy's curation
+# decision, or a stage's detection.auto, are taken in (memory follows disk for them) and the
+# next save neither asks nor drops them.
+bfp, _bfd = fresh("benign")
+qa, qb = P.Project.open(bfp), P.Project.open(bfp)
+qb.write_curation("ls_from_b", "1")
+qa.write_curation("ls_from_a", "2")
+disk = read(bfp)
+disk.setdefault("detection", {})["auto"] = {"AF488": {"threshold": 3}}
+ls_jsonio.write_json_atomic(bfp, disk, compact=P.COMPACT)    # a stage tuning detection
+qa.record_run("05b_tune_detection", True, "a", "b")
+qa.set("pixel_size_um", 0.66, by="A")
+chk("another copy's curation and a stage's output are not a conflict", qa.save() == bfp, True)
+on = read(bfp)
+chk("...and the save keeps both of them",
+    (sorted(on["curation"]), on["detection"]["auto"]), (["ls_from_a", "ls_from_b"], {"AF488": {"threshold": 3}}))
+
 print("--- bad files ---")
 bad = os.path.join(d, "bad.json")
 open(bad, "w").write("{nope")

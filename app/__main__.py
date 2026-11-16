@@ -117,6 +117,9 @@ def main():
     if "--check-install" in sys.argv:
         return _check_install()
 
+    if _recover_interrupted_update():
+        return 0
+
     _mac_menu_name("The Great IHC Leap Forward")
     _windows_app_id()
     app = QApplication(sys.argv)
@@ -154,6 +157,31 @@ def main():
     except BaseException as e:                              # noqa: BLE001
         _report(type(e), e, e.__traceback__)
         return 1
+
+
+def _recover_interrupted_update():
+    """Put back the version an interrupted update left half swapped. True: a fresh start was launched.
+
+    The bundled runtime's sitecustomize.py does this before the app is imported; this is
+    the same step for an install whose runtime is older than that (the runtime is never
+    updated in place). It can only help when `app` itself is still there - without it
+    this code never runs, and then only the newer sitecustomize, or the installer, can.
+    When the part put back is `app`, this process was started from the code just moved
+    away and the rest of its imports would come from the old one: it starts the app
+    again and steps aside rather than run on a mixture.
+    """
+    if FROZEN:
+        return False
+    try:
+        import update_apply
+        _text, moved = update_apply.recover(REPO)
+    except Exception:                                       # noqa: BLE001
+        return False
+    if "app" not in moved:
+        return False
+    import subprocess
+    subprocess.Popen([sys.executable, "-m", "app", *sys.argv[1:]], cwd=REPO)
+    return True
 
 
 def _mac_menu_name(name):

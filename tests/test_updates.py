@@ -400,6 +400,125 @@ try:
     chk("rollback blocked: result names the folder",
         "updates" in UA.result_text("apply", ok, "1.2", "1.3", inst), True)
 
+    # The helper dies half way (power cut, killed): nothing in-process catches that, so it is
+    # simulated by a move raising something that is not an OSError.
+    class Killed(BaseException):
+        pass
+
+    journal = UA.journal_path
+
+    def kill_on(pred):
+        def move(src, dst):
+            if pred(src, dst):
+                raise Killed()
+            return real_move(src, dst)
+        return move
+
+    # Between the two moves of `app`: the live one is parked, the new one not yet in.
+    inst = fresh_install("killed-between-moves")
+    new = make_update(inst)
+    UA._move = kill_on(lambda src, dst: os.path.relpath(src, inst).startswith("updates")
+                       and os.path.basename(src) == "app")
+    try:
+        UA.apply(inst, new, check=lambda r: True)
+        chk("killed: the swap was interrupted", "finished", "killed")
+    except Killed:
+        pass
+    finally:
+        UA._move = real_move
+    chk("killed: no app folder is left, as in the field",
+        os.path.exists(os.path.join(inst, "app")), False)
+    chk("killed: the journal says what was going on", os.path.exists(journal(inst)), True)
+    text, moved = UA.recover(inst)
+    chk("recover: the old app is back", marker(inst), "app")
+    chk("recover: the whole install is the old version again",
+        (marker(inst, "scripts"), marker(inst, "analysis"), UP.installed_info(inst)["version"]),
+        ("scripts", "analysis", "1.2"))
+    chk("recover: reports the parts it moved", moved, ["app"])
+    chk("recover: the journal and the empty parked folder are gone",
+        (os.path.exists(journal(inst)),
+         [n for n in os.listdir(os.path.join(inst, "updates")) if n.startswith("parked-")]), (False, []))
+    chk("recover: the next start says what happened", "reversed" in (UP.last_result(inst) or ""), True)
+    chk("recover: a second call has nothing to do", UA.recover(inst), (None, []))
+    chk("recover: the update can be applied again afterwards",
+        (UA.apply(inst, make_update(inst), check=lambda r: True), marker(inst)), ("ok", "new app"))
+
+    # Later: app swapped, killed while moving scripts. Everything goes back, the new app too.
+    inst = fresh_install("killed-later")
+    new = make_update(inst)
+    UA._move = kill_on(lambda src, dst: os.path.relpath(src, inst) == "scripts")
+    try:
+        UA.apply(inst, new, check=lambda r: True)
+    except Killed:
+        pass
+    finally:
+        UA._move = real_move
+    chk("killed later: the new app was already in", marker(inst), "new app")
+    text, moved = UA.recover(inst)
+    chk("recover later: back to the old app and scripts",
+        (marker(inst), marker(inst, "scripts"), UP.installed_info(inst)["version"]), ("app", "scripts", "1.2"))
+    chk("recover later: the new app is back where it was staged", marker(new), "new app")
+
+    # A journal whose helper is still running is left alone (the helper starts interpreters
+    # of its own, for the check and compileall, and each one runs this at start-up).
+    import subprocess as _sp
+    inst = fresh_install("helper-alive")
+    UA._move = kill_on(lambda src, dst: os.path.relpath(src, inst).startswith("updates")
+                       and os.path.basename(src) == "app")
+    try:
+        UA.apply(inst, make_update(inst), check=lambda r: True)
+    except Killed:
+        pass
+    finally:
+        UA._move = real_move
+    with open(journal(inst), encoding="utf-8") as fh:
+        j = json.load(fh)
+    helper = _sp.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        with open(journal(inst), "w", encoding="utf-8") as fh:
+            json.dump(dict(j, pid=helper.pid), fh)
+        chk("a live helper's journal is not touched",
+            (UA.recover(inst), os.path.exists(os.path.join(inst, "app"))), ((None, []), False))
+    finally:
+        helper.kill()
+        helper.wait()
+    chk("...and once it is gone, recovery runs", (UA.recover(inst)[1], marker(inst)), (["app"], "app"))
+
+    # A hand-over to previous/ that fails (files held open on Windows) must not lose the
+    # version just replaced, nor leave a half-deleted undo copy.
+    inst = fresh_install("handover-fails")
+    UA.apply(inst, make_update(inst), check=lambda r: True)          # previous/ = 1.2
+    second = make_update(inst)
+    with open(os.path.join(second, "VERSION.json"), "w") as fh:
+        json.dump(dict(same, version="1.4"), fh)
+    UA._move, UA.RETRY_DELAY = kill_on(lambda src, dst: False), 0
+
+    def handover_locked(src, dst):
+        if os.path.basename(src).startswith("parked-") and os.path.basename(dst) == "previous":
+            raise PermissionError("in use")
+        return real_move(src, dst)
+
+    UA._move = handover_locked
+    try:
+        ok = UA.apply(inst, second, check=lambda r: True)
+    finally:
+        UA._move, UA.RETRY_DELAY = real_move, 1.0
+    chk("hand-over fails: the update itself is ok", (ok, UP.installed_info(inst)["version"]), ("ok", "1.4"))
+    parked_left = [n for n in os.listdir(os.path.join(inst, "updates")) if n.startswith("parked-")]
+    chk("hand-over fails: parked (1.3) is kept",
+        [UP.installed_info(os.path.join(inst, "updates", n))["version"] for n in parked_left], ["1.3"])
+    chk("hand-over fails: the old undo copy is whole again",
+        UP.installed_info(os.path.join(inst, "updates", "previous"))["version"], "1.2")
+    chk("hand-over fails: the message says where the replaced version is",
+        parked_left[0] in UA.result_text("apply", ok, "1.3", "1.4", inst), True)
+    chk("hand-over fails: no journal is left to undo a good update", os.path.exists(journal(inst)), False)
+
+    # The bundled runtime runs the recovery before `-m app` is looked for.
+    for plat in ("windows", "macos"):
+        site = open(os.path.join(REPO, "packaging", plat, "sitecustomize.py")).read()
+        chk("%s sitecustomize recovers an interrupted update" % plat,
+            "swap-journal.json" in site and "recover(" in site, True)
+
     src_main = open(os.path.join(REPO, "app", "__main__.py")).read()
     chk("app/__main__.py handles --check-install", "--check-install" in src_main, True)
 

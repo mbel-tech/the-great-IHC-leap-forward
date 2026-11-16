@@ -153,6 +153,30 @@ chk("saving over a hand edit asks; No leaves the file", (s2.save(None), read(s2.
 answers["The file changed on disk"] = QMessageBox.Yes
 chk("Yes saves over it", (s2.save(None), read(s2.project.path)["section_thickness_um"]), (True, 15.0))
 
+print("--- saving while a stage runs ---")
+# Save As rebinds the runner and a saved out_root re-roots the curator, both under a stage
+# that is still writing. The window's run guard (idle_for) is asked first, like Open / New.
+g = session_on("guard")
+guard_asked = []
+g.idle_for = lambda action: (guard_asked.append(action), False)[1]
+g_path = g.project.path
+picked["save"] = os.path.join(TMP, "guard", "elsewhere.json")
+chk("Save As is refused while a stage runs, before any dialog",
+    (g.save_as(None), os.path.exists(picked["save"]), g.project.path), (False, False, g_path))
+g.project.set("out_root", os.path.join(TMP, "guard", "moved_out"), by="t")
+chk("Save that would move out_root is refused while a stage runs",
+    (g.save(None), read(g_path)["out_root"] == g.project.get("out_root"), g.dirty), (False, False, True))
+chk("...each with the guard's own question",
+    guard_asked, ["save the project under another name", "save a new output folder (out_root)"])
+g.project.revert()
+g.project.set("pixel_size_um", 0.42, by="t")
+chk("an ordinary Save still goes through while a stage runs",
+    (g.save(None), read(g_path)["pixel_size_um"]), (True, 0.42))
+g.idle_for = lambda action: True
+g.project.set("out_root", os.path.join(TMP, "guard", "moved_out"), by="t")
+chk("...and once idle, the out_root change saves", (g.save(None), read(g_path)["out_root"]),
+    (True, os.path.join(TMP, "guard", "moved_out")))
+
 print("--- revert ---")
 s.project.set("pixel_size_um", 3.3, by="t")
 s.touch()
@@ -469,6 +493,18 @@ if MW:
     w.session.touch()
     w._file_actions["save"].trigger()
     chk("File > Save writes it", (read(path)["pixel_size_um"], "*" in w.windowTitle()), (0.32, False))
+    w._thread = object()                       # a stage is running
+    asked.clear()
+    picked["save"] = os.path.join(TMP, "win", "save_as_while_running.json")
+    w._file_actions["save_as"].trigger()
+    w.session.project.set("out_root", os.path.join(TMP, "win", "other_out"), by="t")
+    w._file_actions["save"].trigger()
+    chk("while a stage runs, File > Save As and a Save moving out_root are refused",
+        (asked.count("info:A step is running"), os.path.exists(picked["save"]),
+         w.config_path == os.path.abspath(path), read(path)["out_root"] == w.out_root), (2, False, True, True))
+    w._thread = None
+    w.session.project.revert()
+    w.session.touch()
     w._fill_recent()
     chk("the project is in Open Recent", [a.text() for a in w._recent_actions][:1], [os.path.basename(path)])
     other_path = study("win2")

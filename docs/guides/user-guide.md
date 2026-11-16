@@ -72,7 +72,7 @@ There are three places where the pipeline waits for you. All three are on the **
 
 - **Installing it (Windows):** download the newest `The-Great-IHC-Leap-Forward-Setup-<version>.exe` from the repository's Releases page and run it. It needs no administrator rights and brings everything with it, including Python, StarDist for Measure and R for the figures. Start **The Great IHC Leap Forward** from the Start menu. Installing a newer version over it upgrades in place; your studies and settings live in `%USERPROFILE%\.ls-pipeline` and survive upgrades.
 - **Installing it (Mac):** Apple Silicon (M1 or later) with macOS 14 or newer. From the same Releases page get `The-Great-IHC-Leap-Forward-<version>-mac.dmg`, open it and drag the app onto Applications. The app is not signed with a paid Apple developer certificate, so the first time macOS refuses to open it: click **Done**, then **System Settings > Privacy & Security > Open Anyway**. After that it opens normally. It works as on Windows, except that R is not included (the R figures are switched off anyway) and a new version comes as a new disk image.
-- **Updates.** The app checks for a newer release each time it starts (offline it just carries on), and **Help > Check for updates** checks on demand. A release that changes only code installs in place: the app closes, swaps in the new code, checks it and starts again, and **Help > Undo last update** goes back one version. A release that needs new libraries, or any update on a Mac, links the new installer or disk image instead. Studies, settings and results are never touched.
+- **Updates.** The app checks for a newer release each time it starts (offline it just carries on), and **Help > Check for updates** checks on demand. A release that changes only code installs in place: the app closes, swaps in the new code, checks it and starts again, and **Help > Undo last update** goes back one version. If the computer stops in the middle of an update, the next start puts the version you had back and says so. A release that needs new libraries, or any update on a Mac, links the new installer or disk image instead. Studies, settings and results are never touched.
 - **From the code:** double-click `run_app.bat`. The first time, run `build_app.bat` once; it sets up a Python 3.13 environment in `work/appenv`. Python 3.13 is needed because the library that reads Zeiss CZI files has no 3.14 version yet.
 - **Checking a copy on another computer:** start the app with `--self-test`. It reports PASS or FAIL for each check in `lsapp-selftest.log`.
 
@@ -97,7 +97,7 @@ Nucleus detection needs StarDist. The installer and `work/appenv` both have it. 
 
 | Menu | Item | What it does |
 | --- | --- | --- |
-| File | New, Open, Open Recent, Save, Save As, Revert | Work with the project file. Ctrl+N, Ctrl+O, Ctrl+S as usual. |
+| File | New, Open, Open Recent, Save, Save As, Revert | Work with the project file. Ctrl+N, Ctrl+O, Ctrl+S as usual. While a stage is running, New, Open, Save As, and a Save that changes the output folder wait until it finishes; an ordinary Save does not. If the file was saved by another copy of the app since you opened it, Save asks before writing over it. |
 | File | Project history | Every stage that ran in this project, and when. |
 | File | Export a copy | A copy of the project to share or archive. |
 | View | One item per screen, All stages, Refresh status | Jump to a screen; see every stage in one list; re-read progress from disk. |

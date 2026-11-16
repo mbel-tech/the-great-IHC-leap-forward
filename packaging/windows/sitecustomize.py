@@ -29,6 +29,24 @@ _keras = os.path.join(_root, "keras")
 if os.path.isdir(_keras):
     os.environ.setdefault("KERAS_HOME", _keras)
 
+# An update whose helper died half way can leave the install without its `app`
+# folder, and then `-m app` cannot even be found. The helper keeps a journal
+# while it swaps (app/update_apply.py); its own copy in updates/ - outside every
+# folder it moves - knows how to put the old version back, so it is loaded from
+# there, before anything is imported from app/. Silent: the app reports what
+# happened on its next start, and nothing here may stop the interpreter.
+if os.path.exists(os.path.join(_root, "updates", "swap-journal.json")):
+    try:
+        import importlib.util
+        _spec = importlib.util.spec_from_file_location(
+            "_lsapp_update_recover", os.path.join(_root, "updates", "update_apply.py"))
+        _mod = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        _mod.recover(_root)
+        del _spec, _mod
+    except Exception:                                       # noqa: BLE001
+        pass
+
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
 
 del _root, _rscript, _keras

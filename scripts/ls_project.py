@@ -180,6 +180,36 @@ def _core(cfg):
     return {k: v for k, v in cfg.items() if k != "curation"}
 
 
+#: What the partial writers (a curation decision, a sync mark, a run row) keep in step with the
+#: file: they rewrite these on disk without a save, and memory follows disk for them. `id` and
+#: `created` are here because a file with no `project` block yet gets one from whichever copy
+#: writes first; another copy opened beside it made up its own, and that is not a change anyone saved.
+FOLLOWS_DISK = ("project.runs", "project.synced", "project.id", "project.created") + STAGE_WRITTEN
+
+
+def _settings_view(cfg):
+    """`cfg` without the parts memory takes from disk, for telling another writer's change apart.
+
+    Two copies of a project on one file both write curation and run rows into it all the time;
+    that is not a conflict. Anything else that differs - a setting, a note, a decision, the
+    `modified` time a full save stamps - means someone saved over this file, and a later full
+    save from here would put the old values back.
+    """
+    view = copy.deepcopy(_core(cfg))
+    blk = view.get("project")
+    if isinstance(blk, dict) and (blk.get("project_version") or 1) < PROJECT_VERSION:
+        try:
+            view["project"] = _upgrade(blk)    # the same lift Project.open gives memory
+        except ProjectError:
+            pass
+    for dotted in FOLLOWS_DISK:
+        parts = dotted.split(".")
+        found, parent = _get(view, parts[:-1])
+        if found and isinstance(parent, dict):
+            parent.pop(parts[-1], None)
+    return view
+
+
 def _norm(path):
     return os.path.normcase(os.path.normpath(os.path.abspath(path)))
 
@@ -326,6 +356,9 @@ class Project:
         self.read_only = read_only
         self._snapshot = copy.deepcopy(cfg)
         self._stamp = _stamp(path) if path else None
+        # Set when a partial writer found the file saved over by someone else: it still writes its
+        # own keys, but the next full save must stop and ask instead of putting the old values back.
+        self._foreign = False
 
     # ---- creating and opening -------------------------------------------------
 
@@ -401,6 +434,13 @@ class Project:
 
     def get(self, key, default=None):
         found, value = _get(self.cfg, key.split("."))
+        return value if found else default
+
+    def saved_get(self, key, default=None):
+        """`get` as of the last save (or open); `default` for a project never saved."""
+        if self._snapshot is None:
+            return default
+        found, value = _get(self._snapshot, key.split("."))
         return value if found else default
 
     def validate(self):
@@ -587,7 +627,7 @@ class Project:
     # ---- saving ---------------------------------------------------------------
 
     def _check_disk_unchanged(self):
-        if self.path and self._stamp is not None and _stamp(self.path) != self._stamp:
+        if self.path and (self._foreign or (self._stamp is not None and _stamp(self.path) != self._stamp)):
             raise ProjectConflict(
                 "%s changed on disk since this project last read or wrote it. Reload it, or "
                 "save over it with force=True." % self.path)
@@ -605,6 +645,7 @@ class Project:
         ls_jsonio.write_json_atomic(self.path, self.cfg, backups=BACKUPS, compact=COMPACT)
         self._snapshot = copy.deepcopy(self.cfg)
         self._stamp = _stamp(self.path)
+        self._foreign = False
         LC.clear_cache()
         return self.path
 
@@ -639,6 +680,55 @@ class Project:
     def _synced(self):
         syn = self.block.get("synced")
         return syn if isinstance(syn, dict) else {}
+
+    # ---- writing part of the file -----------------------------------------------------
+    #
+    # A curation decision, a sync mark and a run row are written into the file as it is on disk
+    # (never the person's unsaved edits), and then the stamp moves on. Taking the new stamp as
+    # ours without looking was how another copy's save got lost: B saves a setting, A records a
+    # decision (stamp refreshed), A saves - and nothing says B's setting was just overwritten.
+    # So the stamp held is compared with the one on disk BEFORE the read; if it moved, what moved
+    # is looked at. Only curation, runs, sync marks or stage output: memory takes them in, no harm.
+    # Anything else: the partial write still goes ahead (it touches only its own keys, so B's
+    # change stays on disk), and `_foreign` makes the next full save raise ProjectConflict.
+
+    def _read_disk(self, what):
+        seen = _stamp(self.path)
+        try:
+            with open(self.path, encoding="utf-8") as fh:
+                disk = json.load(fh)
+        except (OSError, ValueError) as e:
+            raise ProjectError("%s could not be read to %s: %s" % (self.path, what, e))
+        if not isinstance(disk, dict):
+            raise ProjectError("%s is not a project" % self.path)
+        return disk, seen
+
+    def _write_partial(self, disk, seen):
+        """Write `disk` (the file as read plus this writer's own keys); returns True if it had moved."""
+        moved = seen != self._stamp
+        benign = True
+        if moved:
+            mine = self._snapshot if self._snapshot is not None else self.cfg
+            benign = _canon(_settings_view(disk)) == _canon(_settings_view(mine))
+            if not benign:
+                self._foreign = True
+        ls_jsonio.write_json_atomic(self.path, disk, compact=COMPACT)
+        if moved and benign and not self._foreign:
+            # Another writer's curation, run rows, marks or stage output: memory follows disk, so
+            # the next full save carries them instead of putting back what this copy last saw.
+            # (After a conflict memory is left alone: it is what a forced save would write.)
+            for target in (self.cfg, self._snapshot):
+                if target is None:
+                    continue
+                if isinstance(disk.get("curation"), dict):
+                    target["curation"] = dict(disk["curation"])
+                else:
+                    target.pop("curation", None)
+                for dotted in FOLLOWS_DISK:
+                    _carry(disk, target, dotted.split("."))
+        self._stamp = _stamp(self.path)
+        LC.clear_cache()
+        return moved
 
     def write_curation(self, key, text, out_root=None):
         """Store one curator's state in the project file, now.
@@ -676,13 +766,7 @@ class Project:
         return not unchanged
 
     def _patch_disk_curation(self, key, value, mark, unchanged):
-        try:
-            with open(self.path, encoding="utf-8") as fh:
-                disk = json.load(fh)
-        except (OSError, ValueError) as e:
-            raise ProjectError("%s could not be read to record curation: %s" % (self.path, e))
-        if not isinstance(disk, dict):
-            raise ProjectError("%s is not a project" % self.path)
+        disk, seen = self._read_disk("record curation")
         block = disk.get("project")
         if block is None:
             seed = (self._snapshot or self.cfg).get("project")
@@ -693,7 +777,7 @@ class Project:
             disk.setdefault("curation", {})[key] = value
         if mark is not None:
             block.setdefault("synced", {})[key] = mark
-        ls_jsonio.write_json_atomic(self.path, disk, compact=COMPACT)
+        self._write_partial(disk, seen)
         # Memory follows disk. The value object is shared between the working copy and the snapshot
         # on purpose (copying a few hundred KB per decision is the slow part); nothing edits a curation
         # value in place - it is only ever replaced whole.
@@ -703,8 +787,6 @@ class Project:
                     target.setdefault("curation", {})[key] = value
                 if mark is not None:
                     target.setdefault("project", _new_block()).setdefault("synced", {})[key] = mark
-        self._stamp = _stamp(self.path)
-        LC.clear_cache()
 
     def _mark_synced(self, key, sha):
         """Record that the copy on disk and the project agree on `sha`, without a decision or a dirty mark."""
@@ -712,14 +794,12 @@ class Project:
             return
         if self.path and os.path.exists(self.path):
             try:
-                with open(self.path, encoding="utf-8") as fh:
-                    disk = json.load(fh)
+                disk, seen = self._read_disk("record a sync mark")
                 blk = disk.get("project")
                 if isinstance(blk, dict) and (blk.get("project_version") or 1) <= PROJECT_VERSION:
                     blk.setdefault("synced", {})[key] = sha
-                    ls_jsonio.write_json_atomic(self.path, disk, compact=COMPACT)
-                    self._stamp = _stamp(self.path)
-            except (OSError, ValueError):
+                    self._write_partial(disk, seen)
+            except (OSError, ProjectError):
                 return
         for target in (self.cfg, self._snapshot):
             if target is not None:
@@ -834,6 +914,7 @@ class Project:
         fresh = Project.open(self.path)
         self.cfg, self.read_only = fresh.cfg, fresh.read_only
         self._snapshot, self._stamp = fresh._snapshot, fresh._stamp
+        self._foreign = False
         self.reanchored = fresh.reanchored
 
     # ---- the run history ------------------------------------------------------
@@ -859,13 +940,7 @@ class Project:
             self.block.setdefault("runs", []).append(rec)
             _cap(self.block)
             return rec
-        try:
-            with open(self.path, encoding="utf-8") as fh:
-                disk = json.load(fh)
-        except (OSError, ValueError) as e:
-            raise ProjectError("%s could not be read to record the run: %s" % (self.path, e))
-        if not isinstance(disk, dict):
-            raise ProjectError("%s is not a project" % self.path)
+        disk, seen = self._read_disk("record the run")
         rec["config_sha"] = config_sha(disk)
         block = disk.get("project")
         if block is None:
@@ -877,7 +952,7 @@ class Project:
             raise ProjectError("%s: its project block cannot be extended by this version" % self.path)
         block.setdefault("runs", []).append(rec)
         _cap(block)
-        ls_jsonio.write_json_atomic(self.path, disk, compact=COMPACT)
+        self._write_partial(disk, seen)
         # Memory follows disk for runs, and for what a stage wrote; everything else the person
         # has not saved stays unsaved.
         for target in (self.cfg, self._snapshot):
@@ -886,6 +961,4 @@ class Project:
                 tb["runs"] = copy.deepcopy(block["runs"])
                 for dotted in STAGE_WRITTEN:
                     _carry(disk, target, dotted.split("."))
-        self._stamp = _stamp(self.path)
-        LC.clear_cache()
         return rec

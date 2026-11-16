@@ -386,14 +386,17 @@ with temp_study(acquisition={"layout": "paired",
     import io  # noqa: E402
     import re  # noqa: E402
 
-    def run4i():
+    def run4i(*argv):
         out = io.StringIO()
         P4.derive_rotation = _derive
+        saved_argv = sys.argv
+        sys.argv = ["04i", *argv]
         try:
             with contextlib.redirect_stdout(out):
                 P4.main()
         finally:
             P4.derive_rotation = _saved
+            sys.argv = saved_argv
         with open(P4.OUT_CSV, newline="", encoding="utf-8") as fh:
             return {r["perk_scene_uid"]: r for r in csv.DictReader(fh)}, out.getvalue()
 
@@ -459,6 +462,10 @@ with temp_study(acquisition={"layout": "paired",
                               os.path.basename(bak[0]))), True)
         with open(bak[0], encoding="utf-8") as fh:
             chk("...holding the file as it was", fh.read(), before)
+    # One naming rule, in ls_io: 04i used to import all of 04q to reach it,
+    # running that stage's top level on every 04i import.
+    chk("04i takes backup_path from ls_io, not from 04q",
+        (P4.backup_path is P4.IO.backup_path, hasattr(P4, "_IQ")), (True, False))
     n_bak = len(backups())
     run4i()
     chk("a re-run that changes nothing takes no backup", len(backups()), n_bak)
@@ -479,9 +486,109 @@ with temp_study(acquisition={"layout": "paired",
     got, text = run4i()
     chk("legacy file: a row equal to the derivation is derived",
         got[u_tgt].get("source"), "derived")
-    chk("legacy file: a row 04i did not derive is kept as a hand row",
+    # Kept, and still UNMARKED, so --rederive-legacy can reach it on any later
+    # run rather than only the first.
+    chk("legacy file: a row 04i did not derive is kept, still unmarked",
         (got.get(other, {}).get("excluded"), got.get(other, {}).get("source")),
-        ("1", "manual"))
+        ("1", ""))
+
+    print()
+    print("--- a legacy row in the mirror frame is kept, named, and re-derivable ---")
+    # A pre-fix 04i wrote flip 0 for every section. With the source flipped by
+    # the operator today's derivation says flip 1, so the old row differs and
+    # is kept (where a legacy file came from cannot be known) - which leaves
+    # that section in the mirror frame of its partner. It must be NAMED, must
+    # not be counted as a flip carried, and --rederive-legacy must replace it.
+    u_src2, u_tgt2 = "AB12_2b-s0", "AB12_2a-s0"
+    u_src3, u_tgt3 = "AB12_3b-s0", "AB12_3a-s0"
+    _wcsv(P4.PAIRS_CSV,
+          [{"section_uid": f"AB12_sec00{k}", "status": "matched",
+            "mk1_scene_uid": t, "mk2_scene_uid": s_}
+           for k, (s_, t) in enumerate(((u_src, u_tgt), (u_src2, u_tgt2),
+                                        (u_src3, u_tgt3)), 1)],
+          ["section_uid", "status", "mk1_scene_uid", "mk2_scene_uid"])
+    _wcsv(os.path.join(reformat_dir, "reformat_index.csv"),
+          [{"id": u_src, "kind": "section", "angle": "12.0", "manual_flip": "1"},
+           {"id": u_src2, "kind": "section", "angle": "12.0", "manual_flip": "0"}],
+          ["id", "kind", "angle", "manual_flip"])
+    _wcsv(os.path.join(reformat_dir, "excluded_sections.csv"),
+          [{"scene_uid": u_src3}], ["scene_uid"])
+    _wcsv(os.path.join(P4.OUT_ROOT, "qc", "focus.csv"),
+          [{"scene_uid": u, "animal": "AB12", "marker_channel": m, "um_px": "5.20"}
+           for u, m in ((u_src, SRC), (u_tgt, TGT), (u_src2, SRC), (u_tgt2, TGT),
+                        (u_src3, SRC), (u_tgt3, TGT))],
+          ["scene_uid", "animal", "marker_channel", "um_px"])
+    for _marker, _uid in ((SRC, u_src2), (TGT, u_tgt2)):
+        open(os.path.join(P4.OVERVIEW_DIR, "AB12", _marker, _uid + "_DAPI.png"),
+             "wb").close()
+    EXTRA[0] = 7.0
+    cols = legacy_cols + ["source", "derived_as"]
+    legacy_file = [
+        # Unmarked, pre-fix: same rotation as today, flip 0 against manual_flip 1.
+        {"perk_scene_uid": u_tgt, "pcna_scene_uid": u_src, "animal": "AB12",
+         "extra_rotation": "7", "flip": "0", "excluded": "0", "source": ""},
+        # Marked manual: --rederive-legacy must never touch it.
+        {"perk_scene_uid": u_tgt2, "pcna_scene_uid": u_src2, "animal": "AB12",
+         "extra_rotation": "33", "flip": "0", "excluded": "0", "source": "manual"}]
+    write_overrides(legacy_file, cols)
+    got, text = run4i()
+    mm_path = P4.mismatch_path(P4.OUT_CSV)
+    chk("the mismatch report sits beside the overrides file",
+        os.path.basename(mm_path),
+        os.path.splitext(os.path.basename(P4.OUT_CSV))[0] + "_flip_mismatch.csv")
+    with open(mm_path, newline="", encoding="utf-8") as fh:
+        mm = list(csv.DictReader(fh))
+    chk("legacy flip-0 row against manual_flip 1 is kept, still unmarked",
+        (got[u_tgt]["flip"], got[u_tgt]["source"]), ("0", ""))
+    chk("...and is in the mismatch report",
+        [(m["target_scene_uid"], m["source_scene_uid"], m["row_flip"],
+          m["source_manual_flip"], m["row_source"]) for m in mm],
+        [(u_tgt, u_src, "0", "1", "legacy")])
+    chk("...named on screen as in the mirror frame",
+        "MIRROR FRAME" in text and u_tgt in text.split("MIRROR FRAME", 1)[1], True)
+    chk("the flip count is of rows written, so it does not include it",
+        "rows written flipped   : 0" in text, True)
+
+    had = set(backups())
+    got, text = run4i("--rederive-legacy")
+    chk("--rederive-legacy replaces the unmarked row with flip 1",
+        (got[u_tgt]["flip"], got[u_tgt]["source"]), ("1", "derived"))
+    chk("...and says how many", "replaced 1 unmarked row(s)" in text, True)
+    chk("...after a backup", len(set(backups()) - had), 1)
+    chk("...and leaves a row marked manual alone",
+        (got[u_tgt2]["extra_rotation"], got[u_tgt2]["source"]), ("33", "manual"))
+    with open(mm_path, newline="", encoding="utf-8") as fh:
+        rd = csv.DictReader(fh)
+        chk("...the mismatch report is header-only now",
+            (rd.fieldnames, list(rd)), (P4.MISMATCH_KEYS, []))
+    chk("the flip count now includes the written flip",
+        "rows written flipped   : 1" in text, True)
+
+    print()
+    print("--- an exclusion from the partner reaches a hand row ---")
+    # A hand-corrected rotation must not keep a section in the analysis whose
+    # partner the operator excluded: exclusions go straight through pairs.csv.
+    # The reverse is not automatic - excluding only one scan is a choice.
+    write_overrides([
+        {"perk_scene_uid": u_tgt3, "pcna_scene_uid": u_src3, "animal": "AB12",
+         "extra_rotation": "21", "flip": "1", "excluded": "0", "source": "manual"},
+        {"perk_scene_uid": u_tgt2, "pcna_scene_uid": u_src2, "animal": "AB12",
+         "extra_rotation": "33", "flip": "0", "excluded": "1", "source": "manual",
+         "reason": "torn on this scan only"}], cols)
+    got, text = run4i()
+    chk("the partner's exclusion is applied on top of the hand row",
+        (got[u_tgt3]["excluded"], got[u_tgt3]["extra_rotation"], got[u_tgt3]["flip"]),
+        ("1", "21", "1"))
+    chk("...with the reason saying it came from the partner",
+        got[u_tgt3]["reason"], "PCNA partner excluded by the operator")
+    chk("...and the run says how many",
+        "applied on top of 1 hand row(s)" in text, True)
+    chk("a hand exclusion whose partner is kept stays excluded",
+        (got[u_tgt2]["excluded"], got[u_tgt2]["reason"]),
+        ("1", "torn on this scan only"))
+    chk("...and is listed as disagreeing",
+        "partner is NOT excluded" in text
+        and u_tgt2 in text.split("partner is NOT excluded", 1)[1], True)
 
 # `--limit 40` is the documented way to try 04i on a subset first. It used to
 # write those 40 rows over the whole overrides file, which 04a reads as the

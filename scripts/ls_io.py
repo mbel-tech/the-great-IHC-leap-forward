@@ -23,6 +23,7 @@ Imported by path, like every other cross-script import here:
 
 import contextlib
 import csv
+import datetime
 import html
 import json
 import os
@@ -199,3 +200,19 @@ def fill(template, values, text=None):
         return embed(both[name])
 
     return pattern.sub(one, template)
+
+
+def backup_path(path, now=None):
+    """`<path>.<YYYYMMDD-HHMMSS>.backup`, or `...-2`, `-3`... if that is taken.
+
+    Never an existing name: a backup is the only copy of what a write replaced,
+    and the old single `.backup` was overwritten by the very next import. One
+    rule for every curation file a stage backs up before rewriting it (04q's
+    seed, 04i's overrides file).
+    """
+    stamp = (now or datetime.datetime.now()).strftime("%Y%m%d-%H%M%S")
+    cand, n = "%s.%s.backup" % (path, stamp), 1
+    while os.path.exists(cand):
+        n += 1
+        cand = "%s.%s-%d.backup" % (path, stamp, n)
+    return cand

@@ -645,7 +645,14 @@ OPTIONS = {
             "0.01 is 1%. Saturated pixels in the sections that stay are flagged, not "
             "removed.", default=0.01, cli_default=0.01, minimum=0.0, maximum=1.0),
     ],
-    "propagate_perk": [_limit()],
+    "propagate_perk": [
+        _limit(),
+        Opt("--rederive-legacy", "bool", "Re-derive old unmarked rows",
+            "Rows written before this step marked its own rows are kept when they "
+            "differ, since nothing says whether a person wrote them. This replaces "
+            "them with a fresh alignment (the old file is backed up first). Rows "
+            "marked as hand corrections are never replaced."),
+    ],
     "worklist": [
         Opt("--min-sections", "int", "Hold out animals with fewer sections",
             "Animals with fewer measurable sections than this go to the end of the "

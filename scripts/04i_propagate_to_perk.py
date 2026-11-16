@@ -39,8 +39,17 @@ A flip hypothesis is scored alongside rotation as a check, not as a correction:
 the two scans are the same slide the same way up, so flips should essentially
 never win. If they do, the pairing is suspect.
 
+**Hand corrections in the overrides file are kept** (see merge_hand_rows). A
+row written before 04i marked its rows (no `source` column) that differs from
+today's derivation is kept too, since nothing says whether a person wrote it;
+`--rederive-legacy` replaces those unmarked rows by today's derivation, after
+the backup, and never touches a row marked `manual`. Kept rows whose flip
+differs from their partner's `manual_flip` are listed and written to
+`<overrides stem>_flip_mismatch.csv`.
+
 Run:  python 04i_propagate_to_perk.py --limit 40      # try a subset first (writes a .trial40 file)
       python 04i_propagate_to_perk.py
+      python 04i_propagate_to_perk.py --rederive-legacy  # replace unmarked old rows
 """
 
 import sys
@@ -103,14 +112,9 @@ _lsio = importlib.util.spec_from_file_location(
 IO = importlib.util.module_from_spec(_lsio)
 _lsio.loader.exec_module(IO)
 
-# 04q's backup naming, imported rather than restated: one rule for what a
-# curation file's backups are called, `<name>.<YYYYMMDD-HHMMSS>.backup`.
-_SPEC_Q = importlib.util.spec_from_file_location(
-    "import_curation_mod",
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "04q_import_curation.py"))
-_IQ = importlib.util.module_from_spec(_SPEC_Q)
-_SPEC_Q.loader.exec_module(_IQ)
-backup_path = _IQ.backup_path
+# The backup naming 04q uses too, `<name>.<YYYYMMDD-HHMMSS>.backup`: one rule
+# for what a curation file's backups are called, kept in ls_io.
+backup_path = IO.backup_path
 
 # The pass being propagated ONTO: the one that does not own the unsuffixed
 # names. 04i is paired-only (ls_layouts.RESTRICTED), so there are exactly two
@@ -414,48 +418,138 @@ def decision_of(row):
                        for k in ("extra_rotation", "flip", "excluded")])
 
 
-def merge_hand_rows(derived, existing):
+MISMATCH_KEYS = ["target_scene_uid", "source_scene_uid", "row_flip",
+                 "source_manual_flip", "row_source"]
+
+
+def mismatch_path(overrides):
+    """`<overrides stem>_flip_mismatch.csv`, beside the overrides file."""
+    root, ext = os.path.splitext(overrides)
+    return f"{root}_flip_mismatch{ext}"
+
+
+def _flag(v):
+    """A 0/1 column as 0 or 1; anything not spelling 1 is 0, as 04a reads it."""
+    return 1 if _norm(v) == "1" else 0
+
+
+def merge_hand_rows(derived, existing, partner_of=None, excluded_sources=(),
+                    rederive_legacy=False):
     """This run's derived rows with the existing file's hand rows kept.
 
-    Returns (rows, n_kept). An existing row is MANUAL when it says so, when
-    its decision differs from its own `derived_as`, or - for a file written
-    before rows were marked - when it differs from this run's derivation for
-    that section or this run derived nothing for it. That last rule keeps a
-    legacy row that may be stale rather than dropping one that may be hand
-    work; the run says how many it kept, and deleting a row hands that
-    section back to 04i.
+    An existing row is MANUAL when it says so, when its decision differs from
+    its own `derived_as`, or - for a LEGACY row, written before rows were
+    marked, with no `source` at all - when it differs from this run's
+    derivation for that section or this run derived nothing for it. That last
+    rule keeps a legacy row that may be stale rather than dropping one that may
+    be hand work, because where a legacy file came from cannot be known from
+    here. `rederive_legacy` (--rederive-legacy) is the operator saying it: a
+    legacy row that differs is then replaced by today's derivation, after the
+    backup. Rows marked `manual` are never replaced, flag or not.
 
     A hand row replaces the derived row for its section in place; `derived_as`
     is updated to what 04i would say now, so the difference stays visible.
+
+    EXCLUSIONS ARE COPIED STRAIGHT THROUGH THE PAIRING, hand row or not. When
+    the partner is excluded, the hand row keeps its rotation and flip and gets
+    `excluded` = 1 with the derived row's reason - otherwise a rotation typed in
+    by hand would keep a section in the analysis whose partner was excluded.
+    The reverse is not automatic: a hand row that excludes a section whose
+    partner is NOT excluded may be the operator excluding only this scan, so it
+    is kept and listed as disagreeing.
+
+    `partner_of` maps a target uid to (source uid, the source's manual_flip, or
+    None when the source is not in the index). A kept hand row whose flip
+    differs from its source's manual_flip is listed: that section is in the
+    mirror frame of its partner.
+
+    A kept legacy row is written still unmarked (`source` empty), so a later
+    --rederive-legacy can reach it; a kept marked row is written `manual`.
+
+    Returns a dict: rows, n_kept, n_legacy (of n_kept), n_rederived, n_excl_on_hand,
+    flip_mismatch (rows for MISMATCH_KEYS), excl_disagree ([(target, source)]).
     """
+    partner_of = partner_of or {}
+    excluded_sources = set(excluded_sources)
     by_uid = {r["perk_scene_uid"]: r for r in derived}
     manual = {}
+    n_rederived = 0
     for r in existing:
         uid = (r.get("perk_scene_uid") or "").strip()
         if not uid:
             continue
         src = (r.get("source") or "").strip()
         mark = (r.get("derived_as") or "").strip()
+        fresh = by_uid.get(uid)
+        legacy = src not in ("manual", "derived")
         if src == "manual":
             hand = True
         elif src == "derived" and mark:
             hand = decision_of(r) != mark
         else:
-            fresh = by_uid.get(uid)
             hand = fresh is None or decision_of(r) != decision_of(fresh)
+        if hand and legacy and rederive_legacy and fresh is not None:
+            n_rederived += 1
+            continue
         if hand:
             row = {k: r.get(k, "") for k in OVERRIDE_KEYS}
-            row["source"] = "manual"
-            if uid in by_uid:
-                row["derived_as"] = by_uid[uid]["derived_as"]
+            # A kept legacy row stays UNMARKED: marking it manual would put it
+            # out of --rederive-legacy's reach from the next run on, and it is
+            # still not known to be hand work.
+            row["source"] = "" if legacy else "manual"
+            row["_origin"] = "legacy" if legacy else "manual"
+            if fresh is not None:
+                row["derived_as"] = fresh["derived_as"]
             manual.setdefault(uid, []).append(row)
+
+    n_excl_on_hand = 0
+    for uid, hand_rows in manual.items():
+        fresh = by_uid.get(uid)
+        if fresh is None or _flag(fresh["excluded"]) != 1:
+            continue
+        for row in hand_rows:
+            if _flag(row.get("excluded")) != 1:
+                row["excluded"] = 1
+                row["reason"] = fresh["reason"]
+                n_excl_on_hand += 1
+
     out = []
     for r in derived:
         out.extend(manual.pop(r["perk_scene_uid"], [r]))
     for rows in manual.values():
         out.extend(rows)
-    n_kept = sum(1 for r in out if r["source"] == "manual")
-    return out, n_kept
+
+    flip_mismatch, excl_disagree = [], []
+    n_kept = n_legacy = 0
+    for r in out:
+        origin = r.pop("_origin", None)
+        if origin is None:
+            continue
+        n_kept += 1
+        n_legacy += origin == "legacy"
+        uid = r["perk_scene_uid"]
+        source, src_flip = partner_of.get(
+            uid, ((r.get("pcna_scene_uid") or "").strip(), None))
+        if src_flip is not None and _flag(r.get("flip")) != int(src_flip):
+            flip_mismatch.append({"target_scene_uid": uid, "source_scene_uid": source,
+                                  "row_flip": _flag(r.get("flip")),
+                                  "source_manual_flip": int(src_flip),
+                                  "row_source": origin})
+        if (_flag(r.get("excluded")) == 1 and source
+                and source not in excluded_sources):
+            excl_disagree.append((uid, source))
+    return {"rows": out,
+            "n_kept": n_kept, "n_legacy": n_legacy,
+            "n_rederived": n_rederived, "n_excl_on_hand": n_excl_on_hand,
+            "flip_mismatch": flip_mismatch, "excl_disagree": excl_disagree}
+
+
+def _listed(pairs, cap=15):
+    """Print up to `cap` lines, then how many more."""
+    for line in pairs[:cap]:
+        print(f"    {line}")
+    if len(pairs) > cap:
+        print(f"    ... and {len(pairs) - cap} more")
 
 
 def _as_text(rows, keys):
@@ -483,6 +577,10 @@ def write_overrides(path, rows):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--rederive-legacy", action="store_true",
+                    help="replace rows with no `source` mark (written before 04i "
+                         "marked its rows) by today's derivation, after a backup. "
+                         "Rows marked manual are never replaced")
     args = ap.parse_args()
 
     with open(PAIRS_CSV, newline="", encoding="utf-8") as fh:
@@ -506,7 +604,7 @@ def main():
             chan[r["scene_uid"]] = (r["animal"], r["marker_channel"])
             um_px[r["scene_uid"]] = _RF.overview_um_px(r)
 
-    rows, n_excl, n_nopair, failed, n_flip = [], 0, 0, 0, 0
+    rows, n_excl, n_nopair, failed = [], 0, 0, 0
     todo = list(kept.items())
     if args.limit:
         todo = todo[: args.limit]
@@ -571,7 +669,6 @@ def main():
         if d is None:
             failed += 1
             continue
-        n_flip += int(src_flip)
         score = d["align_iou"]
         rows.append({"perk_scene_uid": u_target, "pcna_scene_uid": uid,
                      "animal": animal_target,
@@ -588,7 +685,7 @@ def main():
     print(f"\r  aligned {len(todo)} sections            ")
 
     out_csv = output_path(args.limit)
-    n_kept, written, bak = 0, True, None
+    written, bak, merged = True, None, None
     if out_csv == OUT_CSV:
         # A full run: the real file, which may hold hand corrections. They are
         # merged back in, and the old file is backed up before it changes.
@@ -596,9 +693,21 @@ def main():
         if os.path.exists(OUT_CSV):
             with open(OUT_CSV, newline="", encoding="utf-8") as fh:
                 existing = list(csv.DictReader(fh))
+        # Each target's partner and the flip the operator gave it, for the
+        # flip check on kept hand rows. None for a partner not in the index
+        # (excluded), whose flip is not recorded anywhere.
+        partner_of = {t: (s, ((kept[s].get("manual_flip") or "0").strip() == "1")
+                          if s in kept else None)
+                      for s, t in target_of.items()}
         derived = rows
-        rows, n_kept = merge_hand_rows(derived, existing)
+        merged = merge_hand_rows(derived, existing, partner_of, excluded,
+                                 rederive_legacy=args.rederive_legacy)
+        rows = merged["rows"]
         written, bak = write_overrides(OUT_CSV, rows)
+        # Header-only when there are none: an absent file reads as "never
+        # checked", which is a different fact.
+        IO.atomic_write_csv(mismatch_path(OUT_CSV), merged["flip_mismatch"],
+                            MISMATCH_KEYS)
     else:
         # A trial goes beside the real file and never replaces it, so there is
         # nothing in it to keep and nothing to back up.
@@ -620,12 +729,27 @@ def main():
               f"to write it)")
     if bak:
         print(f"  backed up the previous file -> {os.path.basename(bak)}")
-    if out_csv == OUT_CSV:
-        print(f"  kept {n_kept} hand-edited row(s) from the existing file "
-              f"(source=manual; delete a row to hand it back to 04i)")
+    if merged is not None:
+        print(f"  kept {merged['n_kept']} hand-edited row(s) from the existing file "
+              f"({merged['n_kept'] - merged['n_legacy']} marked manual, "
+              f"{merged['n_legacy']} unmarked from before 04i marked its rows; "
+              f"delete a row to hand it back to 04i)")
+        if merged["n_legacy"] and not args.rederive_legacy:
+            print("  unmarked rows that differ from today's derivation are kept, since")
+            print("  nothing says whether a person wrote them; --rederive-legacy")
+            print("  replaces them (after a backup), never a row marked manual")
+        if args.rederive_legacy:
+            print(f"  --rederive-legacy: replaced {merged['n_rederived']} unmarked "
+                  f"row(s) by today's derivation")
+        if merged["n_excl_on_hand"]:
+            print(f"  partner exclusion applied on top of {merged['n_excl_on_hand']} "
+                  f"hand row(s) (rotation and flip kept, excluded = 1)")
     print(f"  exclusions transferred : {n_excl}")
     print(f"  rotations derived      : {len(live)}")
-    print(f"  operator flips carried : {n_flip}")
+    # From the rows WRITTEN, not from the derivations: a derived flip that a
+    # kept hand row replaced never reaches 04a.
+    print(f"  rows written flipped   : "
+          f"{sum(1 for r in rows if _flag(r.get('flip')) == 1)}")
     print(f"  curated sections with no {TARGET_MARKER} partner : {n_nopair}")
     print(f"  failed to reformat     : {failed}")
     if len(s):
@@ -651,6 +775,27 @@ def main():
         print("  This is a shape alignment between two images of the SAME physical")
         print("  section, so a low IoU means the pairing is wrong, not that the tissue")
         print("  is ambiguous. Inspect the low-confidence rows before trusting them.")
+    if merged is not None and merged["flip_mismatch"]:
+        mm = merged["flip_mismatch"]
+        print()
+        print("!" * 74)
+        print(f"{len(mm)} kept hand row(s) have a flip that differs from their partner's")
+        print("manual_flip, so these sections are in the MIRROR FRAME of their partner")
+        print("(left and right hemispheres swapped between the two passes):")
+        _listed([f"{m['target_scene_uid']:<24} flip {m['row_flip']}, partner "
+                 f"{m['source_scene_uid']} manual_flip {m['source_manual_flip']} "
+                 f"({m['row_source']} row)" for m in mm])
+        print(f"  full list: {mismatch_path(OUT_CSV)}")
+        print(f"  To fix: set `flip` in {os.path.basename(OUT_CSV)} to the partner's")
+        print("  manual_flip, or delete the row so 04i derives it; for rows written")
+        print("  before 04i marked its rows, --rederive-legacy replaces all of them.")
+        print("!" * 74)
+    if merged is not None and merged["excl_disagree"]:
+        dis = merged["excl_disagree"]
+        print()
+        print(f"{len(dis)} hand row(s) exclude a section whose partner is NOT excluded")
+        print("(kept: the operator may have excluded only this scan; check them):")
+        _listed([f"{t:<24} partner {s_}" for t, s_ in dis])
     print("=" * 74)
 
 

@@ -3097,7 +3097,7 @@
      "name": "source",
      "type": "text",
      "units": "",
-     "meaning": "`derived` (written by 04i) or `manual` (a hand correction a re-run keeps)."
+     "meaning": "`derived` (written by 04i), `manual` (a hand correction a re-run keeps), or empty for a row from before 04i marked its rows."
     },
     {
      "name": "derived_as",
@@ -3106,7 +3106,50 @@
      "meaning": "The decision 04i derived for this row (pairing, rotation, flip, excluded). A row whose values differ from it was edited by hand."
     }
    ],
-   "format": "`--limit N` writes `<name>.trialN.csv`. A trial run writes beside this file and never over it; nothing reads the trial file and the app's Done check does not count it. A full run keeps rows marked `manual` or edited away from their `derived_as`, and backs the old file up to `<name>.<YYYYMMDD-HHMMSS>.backup` before changing it."
+   "format": "`--limit N` writes `<name>.trialN.csv`. A trial run writes beside this file and never over it; nothing reads the trial file and the app's Done check does not count it. A full run keeps rows marked `manual` or edited away from their `derived_as`, and backs the old file up to `<name>.<YYYYMMDD-HHMMSS>.backup` before changing it. A kept row with no `source` (written before 04i marked its rows) is written back still unmarked; `--rederive-legacy` replaces such rows by today's derivation. An exclusion carried from the partner is applied on top of a hand row."
+  },
+  {
+   "path": "reformatted/rotation_overrides[_<marker>]_flip_mismatch.csv",
+   "names": [
+    "rotation_overrides_flip_mismatch.csv",
+    "perk_overrides_flip_mismatch.csv",
+    "rotation_overrides_{marker}_flip_mismatch.csv"
+   ],
+   "writer": "04i_propagate_to_perk.py",
+   "what": "Kept hand rows of the overrides file whose flip differs from their partner's manual_flip: those sections are in the mirror frame of their partner. Header-only when there are none; written by every full run.",
+   "columns_from": "04i_propagate_to_perk.py:MISMATCH_KEYS",
+   "columns": [
+    {
+     "name": "target_scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "The second scan's section (the overrides file's `perk_scene_uid`)."
+    },
+    {
+     "name": "source_scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "Its partner in the curated pass."
+    },
+    {
+     "name": "row_flip",
+     "type": "0/1",
+     "units": "",
+     "meaning": "The `flip` the kept row says."
+    },
+    {
+     "name": "source_manual_flip",
+     "type": "0/1",
+     "units": "",
+     "meaning": "The partner's `manual_flip` in its reformat index."
+    },
+    {
+     "name": "row_source",
+     "type": "text",
+     "units": "",
+     "meaning": "`manual` (a row marked or edited by hand) or `legacy` (unmarked, from before 04i marked its rows)."
+    }
+   ]
   },
   {
    "path": "reformatted/section_review.csv",

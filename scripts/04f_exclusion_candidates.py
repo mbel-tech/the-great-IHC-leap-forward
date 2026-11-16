@@ -157,13 +157,26 @@ def carry_excluded(indexed):
     before, and one with no previous row has nothing to carry (its exclusion
     lives in the override file or section_review.csv, which persist).
     """
-    try:
-        with open(EXCLUDED_CSV, newline="", encoding="utf-8") as fh:
-            excluded = {r["scene_uid"] for r in csv.DictReader(fh)}
-        with open(CANDIDATES_CSV, newline="", encoding="utf-8") as fh:
-            prior = list(csv.DictReader(fh))
-    except OSError:
+    # A file that is not there is the ordinary case (no final reformat yet, or
+    # a first run) and needs no word. One that IS there and cannot be read is
+    # different: carrying nothing then drops the excluded sections this exists
+    # to keep, so it is said, with the reason.
+    def read(path):
+        if not os.path.exists(path):
+            return None
+        try:
+            with open(path, newline="", encoding="utf-8") as fh:
+                return list(csv.DictReader(fh))
+        except (OSError, UnicodeDecodeError, csv.Error) as e:
+            print(f"!! could not read {path} ({e}); no excluded section carried "
+                  f"from it")
+            return None
+
+    ex_rows = read(EXCLUDED_CSV)
+    prior = read(CANDIDATES_CSV) if ex_rows is not None else None
+    if ex_rows is None or prior is None:
         return []
+    excluded = {r.get("scene_uid") for r in ex_rows}
     return [r for r in prior if r.get("uid") in excluded and r["uid"] not in indexed]
 
 

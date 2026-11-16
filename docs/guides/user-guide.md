@@ -341,7 +341,7 @@ There is no stop here any more. Prepare carries straight on to Part 4.
 | --- | --- | --- | --- |
 | 04j Censor clipped pixels (PCNA) | Takes the exclusions, sets aside sections with too much saturated tissue, and flags saturated pixels in the rest | The PCNA analysis set | Set-aside threshold (default 0.01 = 1%) |
 | 04a Reformat final (PCNA) | Final pictures: rotations and exclusions applied, artifacts masked, saturation flagged | `reformatted/sections/` |  |
-| 04i Carry curation to pERK | Copies the PCNA exclusions onto the matching pERK scans and lines each pERK section up with its PCNA twin | pERK overrides | First N |
+| 04i Carry curation to pERK | Copies the PCNA exclusions onto the matching pERK scans and lines each pERK section up with its PCNA twin. Corrections you typed into the overrides file are kept, and any kept row flipped differently from its twin is listed | pERK overrides | First N; re-derive old unmarked rows |
 | 04j Censor clipped pixels (pERK) | The same set-aside and flagging for pERK; writes the list of measurable sections | The pERK analysis set | Set-aside threshold |
 | 04a Reformat final (pERK) | Final pERK pictures, ready for measuring, plus pictures of excluded sections for Review | pERK pictures and index |  |
 | 04m Every section and its fate | A table of every pERK section and what happened to it | sections dataset |  |

@@ -36,6 +36,7 @@ What you change is remembered in the project. **Reset to defaults** undoes it.
 
 - **Sections with no usable tissue** (largest piece under 2.5 mm², or no resolvable nuclear detail) are set aside automatically. You bring back any wrong one in the ROI curator's Review.
 - **Saturation.** A section with at least 1% of its tissue saturated is set aside. Saturated pixels in sections that stay are flagged, not removed, and nuclei under them count as positive. Changing this tolerance changes which sections are analysed, so agree it before measuring.
+- **Carrying the curation onto the second marker (04i).** Corrections you typed into its overrides file are kept on every re-run, and an exclusion of the twin section still reaches them. Rows from before the step marked its own rows are kept too when they differ; the option **Re-derive old unmarked rows** replaces them (the old file is backed up first). Any kept row flipped differently from its twin is listed, and saved beside the overrides file as `..._flip_mismatch.csv`: those sections are mirrored relative to their twin.
 - **Levelling.** Each section is turned so its long axis is level. There is no separate rotation curator; you can still rotate the view in the ROI curator.
 
 ## What good looks like

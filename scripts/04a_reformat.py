@@ -1084,6 +1084,14 @@ def main():
             print(f"    ... and {len(lost) - 15} more")
         print(f"  full list: {path}")
         print("!" * 74)
+    elif os.path.exists(paths["lost"]):
+        # Nothing lost this run, so an earlier run's list is stale - and one
+        # written before excluded sections were kept out of it may name
+        # sections that were never meant to survive. A full run is the whole
+        # answer; --only returned above and never gets here.
+        os.remove(paths["lost"])
+        print(f"removed {os.path.basename(paths['lost'])} from an earlier run: "
+              f"no kept section was lost this time")
     report_excluded_failures(excl_failed)
     if n_excluded:
         print(f"excluded {n_excluded} section(s) marked as too damaged in the curator;")

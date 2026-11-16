@@ -1256,7 +1256,7 @@ padded square and resized.
 - **Failure and re-run:** `--apply-overrides` re-applies the operator's decisions; `--render-excluded`
   also draws the excluded sections so Review mode can show them (an excluded section whose picture cannot
   be made is reported in its own count, never in `lost_sections`, which lists only kept sections that
-  vanished); `--only` limits the run to named uids.
+  vanished, and is removed by a full run that lost nothing); `--only` limits the run to named uids.
   A kept section that did not survive (it is in `lost_sections`) or a section neither kept nor excluded
   fails the run: the index is still written, and the last line says how many.
   A changed angle moves every ROI placed on that section, so 05a refuses a section whose recorded angle no
@@ -1315,7 +1315,8 @@ Stage `exclusion`. Proposes the sections that cannot be measured, conservatively
   `04a --apply-overrides`, and can be reinstated in the ROI curator's Review mode.
 - **Failure and re-run:** it measures the sections in `reformat_index.csv`. A section already in
   `excluded_sections.csv` and no longer in the index (a final reformat left it out) keeps its previous
-  row unchanged, and the run says how many it carried; dropping it would put it back into the analysis at
+  row unchanged, and the run says how many it carried (and why, when an existing exclusions or candidates
+  file cannot be read); dropping it would put it back into the analysis at
   the next final reformat. A section whose overview cannot be read is named and fails the run (exit 1, the
   count as the last line); the sections that were measured are written.
 
@@ -1348,7 +1349,8 @@ other pass of the same physical sections.
 
 - **Reads:** `pairs.csv`, both passes' reformatted masks, and the curated pass's overrides.
 - **Writes:** `reformatted/rotation_overrides[_<marker>].csv` for the other pass, with the alignment
-  score of each section.
+  score of each section, and beside it `<that name>_flip_mismatch.csv`: the kept hand rows whose flip
+  differs from their partner's `manual_flip` (header-only when there are none).
 - **How:** exclusions are copied straight through `pairs.csv` (it is one section imaged twice). Rotations
   are **re-derived**, not copied: the other pass is reformatted, and the rotation that best aligns its
   tissue mask with the curated pass's mask is searched over the full 360°, on a shared physical grid
@@ -1361,9 +1363,13 @@ other pass of the same physical sections.
 - **Failure and re-run:** `--limit N` writes a `.trialN` file instead of the real one. A full run keeps
   hand corrections: each row says `source` (`derived` or `manual`) and `derived_as` (what 04i wrote), and a
   row marked manual, or whose values no longer match its `derived_as`, is kept in place of the derived one
-  (in a file written before these columns, a row that differs from this run's derivation is kept). The
-  run says how many it kept; deleting a row hands that section back to 04i. Before it changes the file it
-  copies it to `<name>.<YYYYMMDD-HHMMSS>.backup`, the same naming 04q uses.
+  (in a file written before these columns, a row that differs from this run's derivation is kept, and
+  written back still unmarked). The run says how many it kept; deleting a row hands that section back to
+  04i, and `--rederive-legacy` replaces every unmarked row by today's derivation (never a row marked
+  `manual`). An exclusion carried from the partner is applied on top of a hand row (its rotation and flip
+  stay); a hand row that excludes a section whose partner is kept is left as it is and listed. Kept rows
+  in the mirror frame of their partner are listed by name. Before it changes the file it copies it to
+  `<name>.<YYYYMMDD-HHMMSS>.backup` (`ls_io.backup_path`, which 04q uses too).
 
 ### `04j_censor_clipped.py`
 
@@ -2049,6 +2055,7 @@ straight from `sys.argv`) without running it. A script with no options says "(no
 | `04g_artifact_mask.py` | `--marker` | `_default` | which marker to process (default <_default>) Choices: MARKERS. |
 | `04g_artifact_mask.py` | `--include-excluded` | off | mask every scanned section of the marker, from focus.csv, excluded ones included, so they can be reviewed with a mask like every other section. Needs no reformat first. Excluded ones are marked excluded=1 in the summary. |
 | `04i_propagate_to_perk.py` | `--limit` | `0` |  |
+| `04i_propagate_to_perk.py` | `--rederive-legacy` | off | replace rows with no `source` mark (written before 04i marked its rows) by today's derivation, after a backup. Rows marked manual are never replaced |
 | `04j_censor_clipped.py` | `--tolerance` | `0.01` | section is set aside at or above this clipped fraction |
 | `04j_censor_clipped.py` | `--allow-partial` | off | write the analysis set even if it has unmeasured sections and the file on disk is complete |
 | `04j_censor_clipped.py` | `--marker` | `_default` | which marker to process (default <_default>) Choices: MARKERS. |
@@ -3310,7 +3317,7 @@ Per section: the rotation and exclusion carried onto the second scan. The LS stu
 
 - **Written by:** 04i_propagate_to_perk.py (the second scan of a paired study); older studies carry the removed rotation curator's export
 - **Read by:** ls_bundle.py
-- **Format:** `--limit N` writes `<name>.trialN.csv`. A trial run writes beside this file and never over it; nothing reads the trial file and the app's Done check does not count it. A full run keeps rows marked `manual` or edited away from their `derived_as`, and backs the old file up to `<name>.<YYYYMMDD-HHMMSS>.backup` before changing it.
+- **Format:** `--limit N` writes `<name>.trialN.csv`. A trial run writes beside this file and never over it; nothing reads the trial file and the app's Done check does not count it. A full run keeps rows marked `manual` or edited away from their `derived_as`, and backs the old file up to `<name>.<YYYYMMDD-HHMMSS>.backup` before changing it. A kept row with no `source` (written before 04i marked its rows) is written back still unmarked; `--rederive-legacy` replaces such rows by today's derivation. An exclusion carried from the partner is applied on top of a hand row.
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
@@ -3325,8 +3332,23 @@ Per section: the rotation and exclusion carried onto the second scan. The LS stu
 | `flip_margin` | float |  | How much better the chosen side is than the mirrored one. |
 | `confidence` | text |  | `high`, or `low` when align_iou is under the threshold and the transfer is worth a look. |
 | `reason` | text |  | Why, in words. |
-| `source` | text |  | `derived` (written by 04i) or `manual` (a hand correction a re-run keeps). |
+| `source` | text |  | `derived` (written by 04i), `manual` (a hand correction a re-run keeps), or empty for a row from before 04i marked its rows. |
 | `derived_as` | text |  | The decision 04i derived for this row (pairing, rotation, flip, excluded). A row whose values differ from it was edited by hand. |
+
+#### `reformatted/rotation_overrides[_<marker>]_flip_mismatch.csv`
+
+Kept hand rows of the overrides file whose flip differs from their partner's manual_flip: those sections are in the mirror frame of their partner. Header-only when there are none; written by every full run.
+
+- **Written by:** 04i_propagate_to_perk.py
+- **Read by:** a person
+
+| Column | Type | Units | Meaning |
+|------------|------|------|---------------------------|
+| `target_scene_uid` | text |  | The second scan's section (the overrides file's `perk_scene_uid`). |
+| `source_scene_uid` | text |  | Its partner in the curated pass. |
+| `row_flip` | 0/1 |  | The `flip` the kept row says. |
+| `source_manual_flip` | 0/1 |  | The partner's `manual_flip` in its reformat index. |
+| `row_source` | text |  | `manual` (a row marked or edited by hand) or `legacy` (unmarked, from before 04i marked its rows). |
 
 #### `reformatted/section_review.csv`
 

@@ -81,7 +81,6 @@ import sys
 import argparse
 import csv
 import json
-import datetime
 import os
 import shutil
 
@@ -106,6 +105,7 @@ import ls_curation as CU  # noqa: E402
 # written with open(..., "w") and json.dump, so a crash mid-write left a
 # truncated file where the operator's curation had been.
 import ls_jsonio  # noqa: E402
+import ls_io as IO  # noqa: E402
 
 OUT_ROOT = CONFIG["out_root"]
 STUDY_ID = CU.study_id(OUT_ROOT)
@@ -390,18 +390,11 @@ def merged(state, old, replace=False):
     return dict({u: old[u] for u in kept}, **state), kept
 
 
-def backup_path(path, now=None):
-    """`<path>.<YYYYMMDD-HHMMSS>.backup`, or `...-2`, `-3`... if that is taken.
-
-    Never an existing name: a backup is the only copy of what a write replaced,
-    and the old single `.backup` was overwritten by the very next import.
-    """
-    stamp = (now or datetime.datetime.now()).strftime("%Y%m%d-%H%M%S")
-    cand, n = "%s.%s.backup" % (path, stamp), 1
-    while os.path.exists(cand):
-        n += 1
-        cand = "%s.%s-%d.backup" % (path, stamp, n)
-    return cand
+# `<path>.<YYYYMMDD-HHMMSS>.backup`, with a -N counter on a clash. It lives in
+# ls_io now, because 04i backs up the overrides file by the same rule and
+# importing this whole stage to reach one helper ran its top level on every
+# 04i import. The name stays here for anything that reached it through 04q.
+backup_path = IO.backup_path
 
 
 def counts(state):

@@ -55,6 +55,14 @@ previous row, unchanged, for a section in `excluded_sections.csv` that is no lon
 section that cannot be rendered in its own count, not in `lost_sections`. Checks in
 `tests/test_propagate_frames.py`, `tests/test_proposed_exclusions.py` and
 `tests/test_section_review.py`.
+After review: a kept unmarked (legacy) row stays unmarked, and the new `04i --rederive-legacy`
+(also an option on the stage) replaces such rows by today's derivation after the backup, never a
+row marked manual. Kept hand rows whose flip differs from their partner's `manual_flip` are listed
+by name and written to `<overrides stem>_flip_mismatch.csv` (header-only when none); the flip count
+is of rows written, not derivations. An exclusion carried from the partner is applied on top of a
+hand row (rotation and flip kept); a hand row excluding a section whose partner is kept is listed.
+`backup_path` moved to `ls_io` (04q keeps the name). 04f says why when an existing exclusions or
+candidates file cannot be read. 04a removes a stale `lost_sections` file when nothing was lost.
 
 **Why:** found on review (REVIEW.md rule 4). A full 04i run rewrote `perk_overrides.csv` from
 derived rows only, so a correction typed into it was lost; a section the operator flipped got a
@@ -64,8 +72,10 @@ excluded sections from `exclusion_candidates.csv`, and for a study with no overr
 final reformat put them back into the analysis. 04a called an excluded section's failed picture a
 kept section that "did not survive".
 
-**Cost:** two more columns in the overrides file. A legacy file's rows that are stale (not hand
-edits) are kept as manual on the first run until someone deletes them; the run prints the count.
+**Cost:** two more columns in the overrides file, and one more report file beside it. A legacy
+file's rows that differ from today's derivation are kept (stale or hand-made, the code cannot tell)
+until someone deletes them or runs `--rederive-legacy`; the run prints the count, and any in the
+mirror frame of their partner by name.
 A carried 04f row is not re-measured, so a changed threshold does not reach it.
 
 ## 2026-11-15 - Boxes carry the marker they were placed for; multiplex bookkeeping per marker

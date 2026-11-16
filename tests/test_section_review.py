@@ -244,6 +244,20 @@ def test_excluded_render_failure_is_not_lost():
             "1 excluded section(s) could not be rendered" in text, True)
         tail = text.split("could not be rendered", 1)
         chk("...and is named", len(tail) == 2 and excl in tail[1], True)
+
+        # The operator now excludes the kept one too: nothing is lost this
+        # run, so the list left by the run above is stale and must go - a list
+        # from before this fix could name excluded sections as lost.
+        with open(paths["overrides"], "a", newline="", encoding="utf-8") as fh:
+            csv.writer(fh).writerow([kept, 0, 0, 1, "manual", "torn too"])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = RF.main()
+        chk("nothing lost: the run succeeds", rc or 0, 0)
+        chk("...an earlier run's lost list is removed",
+            os.path.exists(paths["lost"]), False)
+        chk("...and the run says so", "removed " + os.path.basename(paths["lost"])
+            in out.getvalue(), True)
     finally:
         RF.PLATE_DIR, RF.REVIEW_CSV, sys.argv = keep
         for p in made:

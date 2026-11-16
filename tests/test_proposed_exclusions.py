@@ -137,6 +137,28 @@ with temp_study(**PAIRED):
     chk("the run says how many it carried",
         "carried 1 already-excluded section(s)" in out.getvalue())
 
+    # A missing file is the ordinary case and says nothing; one that exists
+    # and cannot be read used to be the same silent [] - and then the excluded
+    # sections this exists to keep were dropped without a word.
+    keep_ex = F.EXCLUDED_CSV
+    try:
+        F.EXCLUDED_CSV = os.path.join(os.path.dirname(keep_ex), "no_such_file.csv")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            got_c = F.carry_excluded(set())
+        chk("a missing exclusions file carries nothing, quietly",
+            (got_c, out.getvalue()), ([], ""))
+        F.EXCLUDED_CSV = os.path.join(os.path.dirname(keep_ex), "a_directory")
+        os.makedirs(F.EXCLUDED_CSV, exist_ok=True)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            got_c = F.carry_excluded(set())
+        chk("an exclusions file that cannot be read carries nothing...", got_c, [])
+        chk("...and says why", "could not read" in out.getvalue()
+            and "a_directory" in out.getvalue())
+    finally:
+        F.EXCLUDED_CSV = keep_ex
+
 print()
 print("--- 04f: areas at each section's own scale; an unmeasured section fails the run ---")
 # The areas used to be converted with the LS study's 5.20 um/px as a literal,

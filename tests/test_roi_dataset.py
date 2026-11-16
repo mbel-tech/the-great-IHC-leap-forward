@@ -272,10 +272,14 @@ def two_marker_check(tmp):
     close("two-marker: AF568 h", float(h["AF568"]), 10.0, 0.005)
     close("two-marker: AF488 h", float(h["AF488"]), 6.0, 0.005)
 
+    # ONLY a missing openpyxl is a skip: any other error loading 06c (a syntax
+    # error, a broken import) is a failure of 06c, not a reason to skip.
     try:
         G6C = load("g6c2", "06c_excel_dataset.py")
         from openpyxl import load_workbook
-    except Exception as exc:                                   # noqa: BLE001
+    except ModuleNotFoundError as exc:
+        if exc.name != "openpyxl":
+            raise
         print(f"skip  two-marker 06c ({exc})")
         return
     G6C.NUCLEI_CSV, G6C.MEAS_CSV = npath, mpath
@@ -312,11 +316,9 @@ def behind_check(tmp, paths):
     file does not have means the two are not from the same run at all.
     """
     npath, bpath, mpath = paths
-    try:
-        G6C = load("g6c3", "06c_excel_dataset.py")
-    except Exception as exc:                                   # noqa: BLE001
-        print(f"skip  behind-check ({exc})")
-        return
+    # No guard: 06c imports openpyxl only when it writes, so a failure to load
+    # it is a broken 06c, and that must fail the suite rather than skip.
+    G6C = load("g6c3", "06c_excel_dataset.py")
     G6C.G5.all_boxes = lambda: G6C.G5.load_csv(bpath)
     G6C.animal_environment = lambda: {}
     out = os.path.join(tmp, "behind.xlsx")
@@ -1010,10 +1012,14 @@ def multiplex_unmeasured_check(tmp):
     # from the done log) and no row in roi_nuclei.csv - there was nothing to
     # write - and 06c's consistency check called that "not from the same run"
     # and returned 1 for any study with one such section.
+    # ONLY a missing openpyxl is a skip: any other error loading 06c (a syntax
+    # error, a broken import) is a failure of 06c, not a reason to skip.
     try:
         G6C = load("g6c_mxun", "06c_excel_dataset.py")
         from openpyxl import load_workbook
-    except Exception as exc:                                   # noqa: BLE001
+    except ModuleNotFoundError as exc:
+        if exc.name != "openpyxl":
+            raise
         print(f"skip  06c measured-empty ({exc})")
         return
     G6C.NUCLEI_CSV = npath
@@ -1053,10 +1059,14 @@ def multiplex_coverage_check(tmp):
     finished that was never started, on the one sheet that exists to say what
     is still missing. X1 and X2 both have M1 nuclei; M2 was never run.
     """
+    # ONLY a missing openpyxl is a skip: any other error loading 06c (a syntax
+    # error, a broken import) is a failure of 06c, not a reason to skip.
     try:
         G6C = load("g6c_mxcov", "06c_excel_dataset.py")
         from openpyxl import load_workbook
-    except Exception as exc:                                   # noqa: BLE001
+    except ModuleNotFoundError as exc:
+        if exc.name != "openpyxl":
+            raise
         print(f"skip  06c multiplex coverage ({exc})")
         return
     nuc, boxes, nid = [], [], 0
@@ -1473,11 +1483,8 @@ def cross_check(tmp, paths, meas):
     would have noticed.
     """
     npath, bpath, mpath = paths
-    try:
-        G6C = load("g6c", "06c_excel_dataset.py")
-    except Exception as exc:                                   # noqa: BLE001
-        print(f"skip  06c cross-check ({exc})")
-        return
+    # No guard: see behind_check - a 06c that does not load is a failure.
+    G6C = load("g6c", "06c_excel_dataset.py")
     if not hasattr(G6C, "MEAS_CSV"):
         print("skip  06c cross-check (06c has no MEAS_CSV - not refactored?)")
         return
@@ -1490,7 +1497,9 @@ def cross_check(tmp, paths, meas):
     out = os.path.join(tmp, "roi_dataset.xlsx")
     try:
         rc = G6C.main(["--out", out])
-    except ModuleNotFoundError as exc:                         # openpyxl
+    except ModuleNotFoundError as exc:
+        if exc.name != "openpyxl":
+            raise
         print(f"skip  06c cross-check ({exc})")
         return
     chk("06c exits 0", rc, 0)

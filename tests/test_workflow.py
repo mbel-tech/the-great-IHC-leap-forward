@@ -162,8 +162,12 @@ chk("skipped scenes are counted", W.shortfall("scene_renders", _out), "3 scenes 
 chk("one skipped scene", W.shortfall("scene_renders", "  1 not drawn:\n"), "1 scene not drawn")
 chk("a full run has no shortfall", W.shortfall("scene_renders", "wrote 40 scenes\n"), None)
 chk("other stages are not read for it", W.shortfall("manifest", _out), None)
-chk("colour pictures not built are counted",
-    W.shortfall("rgb_perk", "wrote 9 composites\n  2 not built:\n"), "2 pictures not built")
+# 04o's "N not built:" list only ever precedes a failure (rc 1), and an
+# excluded section with no composite is not a shortfall of a finished run:
+# no entry for the rgb stages, so neither is summarised as one.
+chk("04o's picture stages are not read for a shortfall",
+    [W.shortfall(sid, "wrote 9 composites\n  2 not built:\n")
+     for sid in ("rgb_perk", "rgb_pcna")], [None, None])
 print("--- 06i detection overlays: a Results button, on request only ---")
 chk("overlays are a stage", "detection_overlays" in S.BY_ID)
 chk("...run by hand, never by Run all remaining", "detection_overlays" in W.BY_HAND)

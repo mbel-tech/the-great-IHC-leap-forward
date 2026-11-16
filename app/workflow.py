@@ -1529,11 +1529,12 @@ def curators(study):
 #: would read as a full run.
 SHORTFALL = {
     "scene_renders": (re.compile(r"^\s*(\d+) not drawn:", re.M), "scene", "not drawn"),
-    # 04o: a section whose CZI or scene is missing, or with no tissue mask.
     # 06i: a section whose outlines do not agree with 06a's counts is not drawn.
     "detection_overlays": (re.compile(r"^\s*(\d+) not drawn:", re.M), "scene", "not drawn"),
-    "rgb_perk": (re.compile(r"^\s*(\d+) not built:", re.M), "picture", "not built"),
-    "rgb_pcna": (re.compile(r"^\s*(\d+) not built:", re.M), "picture", "not built"),
+    # Not 04o (rgb_perk / rgb_pcna): a kept section it cannot build fails the
+    # run ("!! N ... NOT BUILT"), so its "N not built:" list never ends a
+    # finished run; an excluded section with no composite is not a shortfall
+    # (04a --render-excluded's rule, also not listed here).
 }
 
 

@@ -211,8 +211,11 @@ if (anyDuplicated(dup)) {
 
 if (!"environment" %in% names(animal) ||
     all(is.na(animal$environment) | animal$environment == "")) {
-  stop("no environment column - rebuild the dataset:\n",
-       "  python scripts/06c_excel_dataset.py")
+  # Blank for every animal is what 06c writes before 06b has joined the
+  # sampling sheet: 06c takes the environment from animal_metadata.csv only.
+  stop("no environment column, or it is blank for every animal - run 06b, ",
+       "then 06c:\n",
+       "  python scripts/06b_join_sampling.py && python scripts/06c_excel_dataset.py")
 }
 
 GROUP_LEVELS <- c("brackish control", "brackish exercise",

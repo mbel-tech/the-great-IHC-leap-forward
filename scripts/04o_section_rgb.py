@@ -835,9 +835,16 @@ def main():
     overrides, _ = RF.load_overrides(paths)
     os.makedirs(out_dir, exist_ok=True)
 
+    # Selected the way 04a selects them (RF.frames_for), not by
+    # `marker_channel == args.marker`. Under multiplex 00_manifest writes ONE
+    # row per scan, its marker_channel the file's second channel - one marker
+    # only - so that filter found nothing for every other marker, each indexed
+    # section came out "not in focus.csv", and the run failed for good with
+    # nothing the operator could do about it. Under paired it is the same
+    # filter it always was.
     with open(FOCUS_CSV, newline="", encoding="utf-8") as fh:
-        secs = {r["scene_uid"]: r for r in csv.DictReader(fh)
-                if r["marker_channel"] == args.marker}
+        secs = {r["scene_uid"]: r
+                for r in RF.frames_for(csv.DictReader(fh), args.marker)}
 
     if args.include_excluded:
         # focus.csv is the whole scanned set for this marker - the same list 04p
@@ -892,6 +899,23 @@ def main():
         return 1
     made = skipped = mismatched = existing = 0
     missing = []
+    # EXCLUDED sections (reached only through --include-excluded) that got no
+    # composite. Kept apart from `missing`, 04a --render-excluded's rule
+    # (excl_failed there): an excluded section is never going into the
+    # analysis, and excluded sections are exactly the torn, empty or debris
+    # ones that form no tissue mask. Counted as a failure, the stage could
+    # never pass - excluding the section again changes nothing - and Run all
+    # stopped at it every time. What is missing is a picture to LOOK at in
+    # Review mode, which is said, not failed.
+    excl_failed = []
+
+    def not_built(uid, why):
+        # --verify keeps its own accounting: a section it could not check is
+        # not a pass, excluded or not.
+        if args.include_excluded and not args.verify and uid not in in_index:
+            excl_failed.append((uid, why))
+        else:
+            missing.append((uid, why))
     if args.thumbs and not args.verify:
         os.makedirs(out_dir + "_thumb", exist_ok=True)
 
@@ -920,12 +944,18 @@ def main():
             continue
         r = secs.get(uid)
         if r is None:
-            missing.append((uid, "not in focus.csv"))
+            not_built(uid, "not in focus.csv")
             continue
-        base = os.path.join(OUT_ROOT, "overviews", r["animal"], args.marker, uid)
+        # The row's own marker_channel, as 04a builds the path: that is the
+        # folder 01 wrote this scan's overviews into. Under paired it IS
+        # args.marker; under multiplex it is the scan's one overview folder, so
+        # every marker's overview-route composite takes that scan's _MARK.png
+        # (per-marker overview naming is the owner's open decision; the czi
+        # route reads each marker's own plane).
+        base = os.path.join(OUT_ROOT, "overviews", r["animal"], r["marker_channel"], uid)
         dapi, mark = base + "_DAPI.png", base + "_MARK.png"
         if not os.path.exists(dapi) or not os.path.exists(mark):
-            missing.append((uid, "overview PNG missing"))
+            not_built(uid, "overview PNG missing")
             continue
 
         extra, flip = overrides.get(uid, (0.0, False))
@@ -941,10 +971,10 @@ def main():
                                  None if excluded_here else load_artifact_native(uid),
                                  args.um_px)
             except CziUnavailable as exc:
-                missing.append((uid, str(exc)))
+                not_built(uid, str(exc))
                 continue
             if got is None:
-                missing.append((uid, "no tissue mask could be formed"))
+                not_built(uid, "no tissue mask could be formed")
                 continue
             img, comp = got
             Image.fromarray(composite(comp, img, colour, NUCLEAR_COLOUR)).save(out_path)
@@ -957,7 +987,7 @@ def main():
                           artifact=art, censor=cen, companion=mark,
                           render_scale=1 if args.verify else args.scale)
         if out is None:
-            missing.append((uid, "no tissue mask could be formed"))
+            not_built(uid, "no tissue mask could be formed")
             continue
         img, _mask, _angle, _a, _c, comp = out
 
@@ -975,7 +1005,7 @@ def main():
                 # Nothing to compare with. This fell through to the save
                 # below and wrote a 256 px render (verify renders at scale 1)
                 # over the composite path - a check that changed the output.
-                missing.append((uid, "no greyscale section to compare with"))
+                not_built(uid, "no greyscale section to compare with")
             continue
 
         Image.fromarray(composite(comp, img, colour, NUCLEAR_COLOUR)).save(out_path)
@@ -994,6 +1024,15 @@ def main():
         print(f"  {len(missing)} not {'verified' if args.verify else 'built'}:")
         for uid, why in missing[:10]:
             print(f"    {uid}  {why}")
+    if excl_failed:
+        # Not "N not built:" - that line is the failure's list, and these are
+        # not a failure (see excl_failed above).
+        print(f"  {len(excl_failed)} excluded section(s) got no composite for "
+              f"Review mode (still excluded; nothing is lost from the analysis):")
+        for uid, why in excl_failed[:10]:
+            print(f"    {uid}  {why}")
+        if len(excl_failed) > 10:
+            print(f"    ... and {len(excl_failed) - 10} more")
     # Every composite rebuilt above already re-shrank its own thumbnail; this
     # fills in the ones that were left alone and never had one.
     if args.thumbs and not args.verify:
@@ -1002,6 +1041,7 @@ def main():
     # the whole of it and the run returned None, so the app showed the stage
     # done and the curator showed those sections grey. What was built stays;
     # printed last, because app/runner.py shows the last line as the reason.
+    # A KEPT section, that is: excluded ones are `excl_failed`, said above.
     if args.verify:
         # A check that finds a failure must not end in success (REVIEW.md
         # rule 2): a mismatch means a landmark placed on the composite does not

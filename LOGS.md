@@ -9,6 +9,37 @@ where things landed, not which plausible-looking route was tried and abandoned, 
 
 ---
 
+## 2026-11-16 - Final review fixes: stages that could never pass (04o / 04g / 05a / app / tests / docs)
+
+**Changed:** 04o takes its sections from `focus.csv` the way 04a does (`frames_for`): under
+`multiplex` every row, not only those whose `marker_channel` is the marker being built, and the
+overview folder from each row's own `marker_channel`. 04g and 04o list an EXCLUDED section
+(reached through `--include-excluded`) that cannot be masked or composited apart, by name, and do
+not fail the run for it - 04a `--render-excluded`'s rule; a kept section still fails it, reason
+last. 05a fails the run (`!! N <marker> ROI row(s) REFUSED (no shape ...`, last line) on a ROI row
+with neither `sec_r` nor `sec_poly`, as it does on a crossed polygon; the boxes it placed are
+written. The app's dead `SHORTFALL` entries for `rgb_perk` / `rgb_pcna` are gone.
+`tests/test_roi_dataset.py` skips 06c only when `openpyxl` is missing; any other load error fails
+the suite. `tests/test_rgb_per_marker.py`'s multiplex study writes `focus.csv` as 00 does (one row
+per scan) and checks the run's return code, not only that nothing was raised. The technical guide
+says twenty-two placeholders and that `not_carried` is as of the last page build; the R figures'
+blank-environment stop says to run 06b, then 06c.
+
+**Why:** the final whole-branch review. Since "a skipped section fails the run", two stages could
+fail for good with nothing the operator could do, and stop Run all remaining each time: 04o for
+every multiplex marker but the first (focus.csv names one marker per scan, so every section was
+"not in focus.csv"), and 04g/04o on an excluded section with no tissue (the app always passes
+`--include-excluded`, and excluding it again changes nothing). The test fixture wrote a focus row
+per marker, which no study has, and hid the first. A shapeless ROI row was curated work silently
+not measured with the run reading done. Five broad `except Exception` guards turned a broken 06c
+into five "skip" lines.
+
+**Cost:** under `multiplex`, every marker's overview-route composite uses the scan's one
+`_MARK.png` (the first marker's plane) until the owner decides per-marker overview naming; the CZI
+route reads each marker's own plane. An excluded section with no mask or composite no longer fails
+anything - its absence from Review mode is said in the run's output, not as a failure. An old
+export carrying a shapeless row now fails 05a until the region is redrawn.
+
 ## 2026-11-16 - Loose ends from the reviews (00 / 00b / 01c / 02 / 04g / 04i / 04o / 04q / 05a / 06c / app)
 
 **Changed:** The in-sample false-positive rate is called in-sample, and the leave-one-disc-out rate

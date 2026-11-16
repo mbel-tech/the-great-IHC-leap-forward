@@ -1374,7 +1374,9 @@ otherwise good tissue and masks them.
   summary, which is left as it was and is what the app's Done check looks for. A section it could not mask
   (overview missing, or no tissue mask) is named, its `_artifact.png` from an earlier run is removed so it
   cannot be read as current, and the run exits 1 with the count as its last line. A trial counts only the
-  sections it was told to do.
+  sections it was told to do. An EXCLUDED section (`--include-excluded`, which the app always passes) that
+  cannot be masked is listed apart and does not fail the run, as with `04a --render-excluded`: it is not
+  going into the analysis, and excluding it again would change nothing.
 
 ### `04i_propagate_to_perk.py`
 
@@ -1458,8 +1460,10 @@ repository (about 6,500 lines, most of it the page's JavaScript). Chapter 7 desc
   looks a section up in) is written with `not_carried=1`, so 05a's analysis set leaves it out instead of
   failing to place it. It is decided from the index, not from 04p's `status` (the furthest point a
   section ever reached, so a section once measured reads `measured` for ever), and it is kept out of
-  `excluded`, which is the operator's judgement and which 04q and the app's import store as one.
-- **How:** Python collects the data and fills twenty placeholders (`__DATA__`, `__PLATES__`, `__SEED__` and the rest) in one HTML template with `ls_io.fill`, which escapes the JSON for a `<script>` block.
+  `excluded`, which is the operator's judgement and which 04q and the app's import store as one. The
+  flag is as of the last curator page build: a section carried again since then stays `not_carried=1`
+  until the page is rebuilt.
+- **How:** Python collects the data and fills twenty-two placeholders (`__DATA__`, `__PLATES__`, `__SEED__` and the rest) in one HTML template with `ls_io.fill`, which escapes the JSON for a `<script>` block.
 - **Settings:** `acquisition`, `atlas_source`, `atlas_scope` (`existing_regions`, `regions_to_add`),
   `atlas_polygon_mirror`, `export_dir`, `display`, and `groups` (only to build the blinded Shotgun deck
   order, never shown).
@@ -1516,7 +1520,9 @@ frame.
   A composite it could not build
   (overview missing, no tissue mask, the CZI unreadable) is named and the run exits 1 with the count as its
   last line, as does a marker with no `display.colours` entry; what was built is kept, and a re-run builds
-  only what is missing.
+  only what is missing. An excluded section (`--include-excluded`) with no composite is listed apart and
+  does not fail the run, as with `04a --render-excluded`. Under `multiplex` the sections are taken from
+  `focus.csv` as 04a takes them (one row per scan), so every marker finds them.
 
 ### `04p_section_provenance.py`
 
@@ -1618,7 +1624,8 @@ real slide pixels.
   an older export can still carry one) has no single area - the shoelace and 05c's even-odd membership
   disagree - so it is refused and listed under `REFUSED` by section and region; the rest of the section is
   placed and written, and the run exits 1 with `!! N <marker> polygon ROI(s) REFUSED ...` as its last
-  line (`not_placed`).
+  line (`not_placed`). A ROI row with no shape at all (neither `sec_r` nor `sec_poly`; only a damaged
+  or legacy export has one) is refused the same way, with `!! N <marker> ROI row(s) REFUSED (no shape ...`.
 
 ### `05b_tune_detection.py`
 

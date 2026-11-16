@@ -372,6 +372,67 @@ with temp_study() as st:
     chk("...too little physical core at 0.60 um/px: nothing is judged",
         G2.detect(im2, tis, 6.0e-4)[1], [])
 
+print()
+print("--- 04g --include-excluded: an EXCLUDED section with no tissue does not fail it ---")
+# The app always runs 04g with --include-excluded, so every scanned section is
+# masked, excluded ones too - and excluded ones are exactly the torn, empty or
+# debris sections whose overview forms no tissue mask. Counted as NOT MASKED,
+# one of them failed the stage for good (excluding it again changes nothing).
+# 04a --render-excluded's rule instead: counted apart, named, not a failure.
+# A KEPT section that cannot be masked still fails the run.
+
+with temp_study() as st:
+    G = load_stage("04g_artifact_mask.py", name="lsstage_04g_excl")
+    marker = G.MARKERS[0]
+    uids = [f"LS01_s01a_sc{i:02d}" for i in range(3)]
+    write(G.QC_CSV, [{"scene_uid": u, "animal": "LS01", "section_order": str(i),
+                      "marker_channel": marker, "saturated_fraction": "0",
+                      "um_px": "5.20"} for i, u in enumerate(uids)])
+    # uids[2] is excluded by the curation; its overview is blank.
+    write(G._RF.marker_paths(marker)["overrides"], [
+        {"scene_uid": uids[2], "extra_rotation": "0", "flip": "0",
+         "excluded": "1", "decision": "manual", "reason": "torn"}])
+    d = os.path.join(G.OVERVIEW_DIR, "LS01", marker)
+    os.makedirs(d, exist_ok=True)
+    for i, u in enumerate(uids):
+        Image.fromarray(np.full((40, 40), 0 if i == 2 else 100, np.uint8)).save(
+            os.path.join(d, u + "_DAPI.png"))
+    # No tissue in a blank overview, as tissue_mask says for one.
+    G.load_tissue = lambda im: None if im.max() == 0 else np.ones(im.shape, bool)
+    G.detect = lambda im, tis, mm_px: (np.zeros(im.shape, np.uint8), [])
+
+    def run_04g(*extra):
+        buf = io.StringIO()
+        saved = sys.argv
+        sys.argv = ["04g", "--marker", marker, "--include-excluded", *extra]
+        try:
+            with contextlib.redirect_stdout(buf):
+                rc = G.main()
+        finally:
+            sys.argv = saved
+        return rc, buf.getvalue()
+
+    rc, out = run_04g()
+    said = [ln for ln in out.splitlines() if ln.strip()]
+    chk("an excluded section with no tissue does not fail 04g", rc, None)
+    chk("...it is counted apart, as an excluded section",
+        "1 excluded section(s) could not be masked" in out, True)
+    chk("...and named", any(uids[2] in ln for ln in said), True)
+    chk("...not reported as NOT MASKED", "NOT MASKED" in out, False)
+    chk("the summary holds the sections that were masked",
+        sorted(r["scene_uid"] for r in read(G.summary_csv(marker))), uids[:2])
+
+    # The same blank overview on a KEPT section is still a failure.
+    Image.fromarray(np.zeros((40, 40), np.uint8)).save(
+        os.path.join(d, uids[0] + "_DAPI.png"))
+    rc, out = run_04g()
+    said = [ln for ln in out.splitlines() if ln.strip()]
+    chk("a KEPT section with no tissue still fails 04g", rc, 1)
+    chk("...with the kept one's count as the last line",
+        bool(said) and "1 section(s) NOT MASKED" in said[-1], True)
+    chk("...and the excluded one still counted apart",
+        "1 excluded section(s) could not be masked" in out, True)
+
 # ---------------------------------------------------------------- 01 / 01k
 
 

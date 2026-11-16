@@ -459,6 +459,15 @@ def main():
     # and the section's `_artifact.png` from an earlier run stayed on disk
     # looking like this run's answer - 04a and 05c read it as current.
     not_masked = []
+    # EXCLUDED sections (only --include-excluded reaches them) that could not
+    # be masked. Kept apart from `not_masked`, 04a --render-excluded's rule
+    # (excl_failed there): excluded sections are exactly the torn, empty or
+    # debris ones whose overview forms no tissue mask, and they are never going
+    # into the analysis. The app always runs 04g with --include-excluded, so
+    # counted as a failure one such section failed the stage for good -
+    # excluding it again changes nothing - and Run all stopped at it every time.
+    # What is missing is a mask to compare with in Review mode: said, not failed.
+    excl_not_masked = []
     for i, r in enumerate(index):
         go, write_masks = run_plan(args.preview, len(previews))
         if not go:
@@ -466,14 +475,16 @@ def main():
         uid = r["id"]
         src = os.path.join(OVERVIEW_DIR, r["animal"], chan.get(uid, args.marker), uid + "_DAPI.png")
         if not os.path.exists(src):
-            not_masked.append((uid, "overview PNG missing"))
+            (excl_not_masked if r["excluded"] else not_masked).append(
+                (uid, "overview PNG missing"))
             if write_masks and not args.limit:
                 drop_stale_mask(uid)
             continue
         im = np.asarray(Image.open(src).convert("L")).astype(np.float32)
         tis = load_tissue(im)
         if tis is None:
-            not_masked.append((uid, "no tissue mask could be formed"))
+            (excl_not_masked if r["excluded"] else not_masked).append(
+                (uid, "no tissue mask could be formed"))
             if write_masks and not args.limit:
                 drop_stale_mask(uid)
             continue
@@ -496,7 +507,7 @@ def main():
     # A preview that found no artifact in its first few sections reports; only
     # a full run with nothing masked is a missing-input error.
     if not rows and not args.preview:
-        report_not_masked(not_masked)
+        report_not_masked(not_masked + excl_not_masked)
         raise SystemExit("nothing masked - run 01_overviews.py first, or "
                          "04a_reformat.py when running without --include-excluded")
 
@@ -534,6 +545,7 @@ def main():
     print("resolution) and channel-specific antibody aggregates (would need the")
     print("marker channel, which would break the blinding).")
     print("=" * 74)
+    report_excluded_not_masked(excl_not_masked)
     # A SKIPPED SECTION FAILS THE RUN - 05c's rule. What was masked is
     # written and stays; the failure is what makes someone look at the list.
     # Printed last, because app/runner.py shows the last line printed as the
@@ -573,6 +585,24 @@ def report_not_masked(not_masked):
         print(f"    {uid:<24} {why}")
     if len(not_masked) > 15:
         print(f"    ... and {len(not_masked) - 15} more")
+
+
+def report_excluded_not_masked(excl):
+    """Name the EXCLUDED sections this run could not mask - not a failure.
+
+    The section stays excluded and out of the analysis either way; what is
+    missing is the mask Review mode would compare against. Worth saying, in
+    words that cannot read as a kept section going unmasked (04a's
+    report_excluded_failures, same rule).
+    """
+    if not excl:
+        return
+    print(f"  {len(excl)} excluded section(s) could not be masked for Review "
+          f"mode (still excluded; nothing is lost from the analysis):")
+    for uid, why in excl[:15]:
+        print(f"    {uid:<24} {why}")
+    if len(excl) > 15:
+        print(f"    ... and {len(excl) - 15} more")
 
 
 def overlay(previews):

@@ -767,6 +767,28 @@ with temp_study(acquisition={"layout": "paired",
         sorted(r["region"] for r in P5.load_csv(P5.box_csv("Mk1"))),
         ["HOURGLASS", "SQUARE"])
 
+    # A row with NO shape (neither sec_r nor sec_poly - a damaged or legacy
+    # export) is a curated region that will not be measured, like a crossed
+    # one. It was printed as REFUSED and the run returned 0, so the app showed
+    # 05a done with the region silently missing. Same rule as the bowtie.
+    _shapeless = os.path.join(MK.root, "roi_regions_shapeless.csv")
+    _wcsv(_shapeless,
+          [{"scene_uid": U1, "marker": "Mk1", "roi_kind": "roi",
+            "region": "R1", "seed_n": "1", "sec_x": "128", "sec_y": "128",
+            "sec_r": "10", "sec_poly": ""},
+           {"scene_uid": U1, "marker": "Mk1", "roi_kind": "roi",
+            "region": "NOSHAPE", "seed_n": "2", "sec_x": "140", "sec_y": "140",
+            "sec_r": "", "sec_poly": ""}], _RCOLS)
+    _rc, _said = _main(_shapeless, "--marker", "Mk1")
+    chk("a ROI row with no shape makes main() return 1", _rc, 1)
+    _last = [ln for ln in _said.splitlines() if ln.strip()][-1]
+    chk("...the last line names the refusal and its count",
+        _last.startswith("!! 1 Mk1 ROI row(s) REFUSED (no shape"), True)
+    chk("...the row is named above it",
+        any(U1 in ln and "NOSHAPE" in ln for ln in _said.splitlines()), True)
+    chk("...and the box it could place is written",
+        sorted(r["region"] for r in P5.load_csv(P5.box_csv("Mk1"))), ["R1"])
+
     # --marker stays an assertion: with it, only that marker is touched. The
     # other marker's boxes are curation-derived work and must survive as-is.
     _sentinel = "scene_uid,roi_index\nKEEP-ME,0\n"

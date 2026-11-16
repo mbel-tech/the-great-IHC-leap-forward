@@ -86,6 +86,15 @@ chk("a row two animals match is named, with both animals",
     j.get("shared"), [("1", ["LS01", "LS1"]), ("22", ["LS22", "LS22b"])])
 chk("...neither of them is joined to it", sorted(j["meta"]), ["LS5"])
 chk("...and neither is called missing", j["missing"], [])
+# With more columns than the ID and the group, the other columns are carried
+# under their own names beside a refused row (the refusal once reused the
+# column-name table for its animals: IndexError, or a column called "LS1").
+H3 = ["Fish", "Group", "Tank", "Sex"]
+R3 = [{0: "1", 1: "control", 2: "305", 3: "F"}, {0: "5", 1: "exercise", 2: "303", 3: "M"}]
+j = S.join(["LS1", "LS01", "LS5"], H3, R3, m)
+chk("a refused row leaves the other columns carried by name",
+    (j["shared"], {k: v for k, v in j["meta"]["LS5"].items() if k not in S.RESERVED}),
+    ([("1", ["LS01", "LS1"])], {"group": "exercise", "tank": "303", "sex": "M"}))
 with tempfile.TemporaryDirectory() as tmp:
     path = os.path.join(tmp, "s.tsv")
     S.write_text(path, [dict(enumerate(H))] + R)
@@ -106,6 +115,8 @@ R = [{0: "1", 2: "3"}, {0: "2", 2: "303"}]
 m = {"id_column": "Fish", "group_columns": ["Group"], "match": "number",
      "fill": [{"when": "Tank", "is": "303", "set": "Group", "to": "exercise"}]}
 j = S.join(["LS1", "LS2"], H, R, m)
+chk("fish_id follows the same rule: one run of digits, else none",
+    [S.fish_id(a) for a in ("LS22", "LS-022", "T1F22", "LS2-1")], ["22", "022", "", ""])
 chk("a string `is` is that one value",
     {a: x["treatment"] for a, x in j["meta"].items()}, {"LS1": "", "LS2": "exercise"})
 

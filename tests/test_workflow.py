@@ -352,6 +352,31 @@ for _r in _old["project"]["runs"]:
 os.utime(_meta, (_T0 + 60, _T0 + 60))           # when 06b wrote it, before the results
 chk("a results run recorded before 06b was an input is not put out of date",
     W.outdated(S.BY_ID["build_results"], study(_old)), None)
+# Running the results alone after the workbook changed must not make them
+# current: their groups are still 06b's, from the old workbook. While 06b is out
+# of date for what decides the groups, so are the results.
+_record(_cfgw, "build_results")
+chk("results re-run alone after a workbook change are still out of date",
+    "workbook" in (W.outdated(S.BY_ID["build_results"], study(_cfgw)) or ""), True)
+_record(_cfgw, "join_sampling", "build_results")
+chk("...until 06b and then the results run",
+    W.outdated(S.BY_ID["build_results"], study(_cfgw)), None)
+# 06b's result depends on groups.by_animal (a blank the key covers passes), so
+# it is a setting 06b reads.
+chk("06b is current before the group key changes",
+    W.outdated(S.BY_ID["join_sampling"], study(_cfg)), None)
+_cfgg = json.loads(json.dumps(_cfg))
+_cfgg.setdefault("groups", {})["by_animal"] = {"LS1": "control"}
+chk("...a changed groups.by_animal puts 06b out of date",
+    bool(W.outdated(S.BY_ID["join_sampling"], study(_cfgg))), True)
+# A 06b run recorded before it read the key holds no hash for it, and is not
+# put out of date for that alone.
+_old = json.loads(json.dumps(_cfg))
+for _r in _old["project"]["runs"]:
+    if _r["stage"] == "join_sampling":
+        _r["inputs"]["settings"].pop("groups.by_animal", None)
+chk("...a 06b run recorded before it read the key stays current",
+    W.outdated(S.BY_ID["join_sampling"], study(_old)), None)
 
 # What the 14 Oct notice said by hand is a stage status now.
 os.utime(_nuc, (W.ROI_FIX_AT - 3600, W.ROI_FIX_AT - 3600))

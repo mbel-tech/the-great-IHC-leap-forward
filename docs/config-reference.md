@@ -61,7 +61,7 @@ A key marked *required* has to be present before any stage will run.
 | `curation` | raw |  | `app` | The curation decisions (ROI polygons, which ROIs to draw, rotations, levels), kept inside the project file. |
 | `sampling` | raw |  | `06b`, `app` | Which sampling-sheet column is the animal and which hold the treatment. |
 | `groups.order` | list_str | `[]` | `04l`, `06c`, `06d` | Which treatment is the LEFT half of every Shotgun slide, and the order the halves are drawn in. |
-| `groups.by_animal` | raw | `{}` | `04l`, `05c`, `06c`, `06d` | Subject ID -> treatment, using exactly the labels in groups.order. |
+| `groups.by_animal` | raw | `{}` | `04l`, `05c`, `06b`, `06c`, `06d` | Subject ID -> treatment, using exactly the labels in groups.order. |
 
 ## Keys removed in schema v1
 

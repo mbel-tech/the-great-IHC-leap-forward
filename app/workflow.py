@@ -1894,14 +1894,20 @@ def _fixed_reason(st, study):
 
 
 def _settings_changed(st, study):
-    """The settings `st` reads that differ from its last recorded run's, in order."""
+    """The settings `st` reads that differ from its last recorded run's, in order.
+
+    A setting the record holds no hash for was not read by that run (it was
+    recorded before the stage read it: 06b and groups.by_animal), so it is not a
+    change; the next run records it. Counted as one, adding a setting to a
+    stage put every study's run of it out of date at once.
+    """
     rec = _last_ok(study, st.sid)
     then = rec.get("inputs") if rec else None
     if not isinstance(then, dict):
         return []
     now = fingerprint(st.sid, study)
     was = then.get("settings") or {}
-    return [k for k in now["settings"] if now["settings"][k] != was.get(k)]
+    return [k for k in now["settings"] if k in was and now["settings"][k] != was[k]]
 
 
 def _files_changed(st, study, now, was, made):
@@ -1967,6 +1973,39 @@ def _own_reason(st, study):
     return None
 
 
+def _groups_reason(study):
+    """Why 06b's groups no longer follow from the workbook and the choice, or None.
+
+    Only what decides the groups: the workbook's content and the settings 06b
+    reads, not 06a's table (06b goes out of date whenever 06e re-runs 06a, and
+    that changes no group). The results take their groups from 06b's table, so
+    while this holds they are out of date too, whatever their own record says:
+    run alone after a workbook change, Build results recorded the new workbook
+    beside the old groups and read Done.
+    """
+    st = S.BY_ID["join_sampling"]
+    if not applies(st, study)[0] or not st.done(study.out_root, study.names):
+        return None
+    made = _made_at(st, study)
+    rec = _last_ok(study, st.sid)
+    then = rec.get("inputs") if rec else None
+    if isinstance(then, dict):
+        now = fingerprint(st.sid, study)
+        if "workbook" in _files_changed(st, study, now["files"], then.get("files") or {}, made):
+            return "the sampling workbook changed since it ran"
+        keys = _settings_changed(st, study)
+        if keys:
+            import ls_config as LC
+            label = {k.path: k.label for k in LC.SPEC}
+            return "a setting it reads changed since it ran: %s" % ", ".join(
+                label.get(k, k) for k in keys)
+        return None
+    if made is not None and any(os.path.getmtime(p) > made
+                                for p in _extra_inputs(st.sid, study).get("workbook", ())):
+        return "the sampling workbook is newer than its results"
+    return None
+
+
 def outdated(stage, study, _seen=None):
     """Why a finished stage's results no longer match what they were made from, or None.
 
@@ -1990,6 +2029,11 @@ def outdated(stage, study, _seen=None):
             if applies(n, study)[0] and outdated(n, study, seen):
                 why = "%s is out of date" % display_title(n, study)
                 break
+        if why is None and stage.sid == "build_results":
+            groups = _groups_reason(study)
+            if groups:
+                why = "%s is out of date: %s" % (
+                    display_title(S.BY_ID["join_sampling"], study), groups)
     seen[stage.sid] = why
     return why
 

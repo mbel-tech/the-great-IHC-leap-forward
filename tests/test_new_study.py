@@ -313,5 +313,46 @@ try:
 finally:
     QMessageBox.question = _q
 
+print("--- a sheet row two animals match: refused in red, left out by name ---")
+import screens as SC                                             # noqa: E402
+shared_book = os.path.join(STUDY.root, "shared.xlsx")
+wb = openpyxl.Workbook()
+for r in (["Fish", "Group", "Tank", "Sex"], [1, "control", 305, "F"], [5, "exercise", 303, "M"]):
+    wb.active.append(r)
+wb.save(shared_book)
+_h, _r = SAMPLING.table(shared_book)
+_m = {"id_column": "Fish", "group_columns": ["Group"], "match": "number", "fill": []}
+_sum = SM.summary(_h, _r, ["LS1", "LS01", "LS5"], _m)
+chk("Match the sheet: a shared row on a four-column sheet is named",
+    (_sum["shared"], _sum["matched"]), ([("1", ["LS01", "LS1"])], 1))
+_join = SAMPLING.join
+SAMPLING.join = lambda *a, **k: (_ for _ in ()).throw(ValueError("boom"))
+try:
+    _sum = SM.summary(_h, _r, ["LS5"], _m)
+    chk("...and a fault in the join is a problem shown, not raised out of the slot",
+        any("boom" in p for p in _sum["problems"]), True)
+finally:
+    SAMPLING.join = _join
+_rep = SAMPLING.check(shared_book, {"LS1": 1, "LS01": 1, "LS5": 1}, _m)
+s._load_groups_after_check = False
+s._workbook_checked(_rep)
+chk("Check workbook: a shared row is shown in red",
+    SC.COLOUR["failed"] in s.workbook_line.styleSheet(), True)
+_dup = SAMPLING.check(shared_book, {"LS5": 1}, _m)
+_dup["duplicate"] = ["LS7"]
+s._workbook_checked(_dup)
+chk("...and so is an animal on two rows", SC.COLOUR["failed"] in s.workbook_line.styleSheet(),
+    True)
+_told = []
+QMessageBox.question = staticmethod(
+    lambda _p, _t, text, *a, **k: (_told.append(text), QMessageBox.No)[1])
+try:
+    s._keep_groups(_rep)
+finally:
+    QMessageBox.question = _q
+chk("Load the groups: the shared animals are listed as left out",
+    bool(_told) and "Left out" in _told[0] and "LS01" in _told[0].split("Left out")[-1]
+    and "LS1" in _told[0].split("Left out")[-1], True)
+
 print("\n%s" % ("FAILED: %s" % failures if failures else "all passed"))
 sys.exit(1 if failures else 0)

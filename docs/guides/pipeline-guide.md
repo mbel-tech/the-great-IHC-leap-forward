@@ -1611,7 +1611,8 @@ partition cleanly (303/304/307/308 exercise, 305/306/309/310 control) and only t
 typed at timepoint 1, so the LS choice carries those tanks as rules. A blank no rule fills stops the
 join and names the animals, unless `groups.by_animal` gives them a group or the study has no groups at
 all (no animal has one in the sheet and `groups.by_animal` is empty). Re-running this step, or
-changing the workbook, puts the results built from it out of date.
+changing the workbook, puts the results built from it out of date, and they stay out of date
+until this step has run on the new workbook. `groups.by_animal` is a setting of this step.
 
 **Which columns.** The study says which sheet column names the animal and which column (or
 columns) hold the treatment; two or more make one group, such as "exercise · 1". The person chooses

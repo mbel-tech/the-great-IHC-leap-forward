@@ -55,6 +55,12 @@ has no groups at all (no group in the sheet and `groups.by_animal` empty, the "n
 keeps). `workflow.fingerprint` takes the sampling workbook's content for `join_sampling` and
 `build_results`, and `animal_metadata.csv` for `build_results` under 06b's key
 (`_extra_inputs`); a key a run record lacks is judged by date, as the per-marker keys are.
+While 06b is out of date for its workbook or a setting it reads, the results are too
+(`_groups_reason`), so re-running Build results alone after a workbook change no longer reads
+Done. `groups.by_animal` is a setting of `join_sampling`; a setting a run record holds no hash
+for is not a change (`_settings_changed`), so adding it did not put every 06b run out of date.
+`fish_id` follows `_number`'s one-run-of-digits rule. Check workbook shows a shared row or an
+animal on two rows in red, and Load the groups lists them as left out.
 `_last_ok` skips `--limit` trial runs. The study picker no longer opens `<repo>/config.json`
 unasked when the last study is gone and none is active (`ensure_study`); LS_CONFIG naming it
 still does. `workbook_path` moved to `ls_sampling` so the app's check and its out-of-date test
@@ -73,7 +79,9 @@ the checkout as the study (REVIEW.md rule 6).
 **Cost:** a sheet whose IDs only matched because digits were glued together, or that numbered two
 animals alike, now stops 06b until it is fixed. A study whose sheet leaves some treatments blank
 must fill them, add a rule, or list them in `groups.by_animal`. Results built before 06b last ran
-(06b's table newer than them) show out of date once. 06c still reads the environment column from
+(06b's table newer than them) show out of date once. IDs with two runs of digits
+(`Fish 22 (rep 2)`, `2025-03-01`, `22.5`, `T1F22`) now match nobody by number: those animals
+read as missing and 06b stops, loudly, where before they could join the wrong row. 06c still reads the environment column from
 the default workbook path, not `--xlsx`; unchanged here.
 
 ## 2026-11-16 - Section order survives a re-scan; resumed QC rows are current (00 / 01 / 01k)

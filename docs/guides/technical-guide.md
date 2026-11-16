@@ -1673,7 +1673,7 @@ Stage `join_sampling`. The unblinding step: joins the per-ROI numbers to the exp
   treatment columns make one group. Without a block, a sheet with the LS headers gets the LS mapping
   (Fish ID by number, `treatment`, and the tank fill rule). Each row carries `treatment_source`
   (`sheet`, `rule` or `unresolved`). Every other sheet column not marked Ignore is carried through.
-- **Settings:** `sampling`.
+- **Settings:** `sampling`, `groups.by_animal` (an animal blank in the sheet passes only when it names it).
 - **Failure and re-run:** refuses a sheet it cannot map, and says to choose the columns in Set up.
   Refuses an animal on two rows, one row two animals match (LS1 and LS01 by number), and a blank
   treatment no fill rule fills unless `groups.by_animal` names the animal or the study has no groups

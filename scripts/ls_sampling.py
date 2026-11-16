@@ -246,8 +246,13 @@ def workbook_path(cfg, options):
 
 
 def fish_id(animal):
-    """The LS sheet's Fish ID for an animal: LSnn -> nn."""
-    return re.sub(r"\D", "", animal)
+    """The LS sheet's Fish ID for an animal: LSnn -> nn; "" unless it has one number.
+
+    The rule `_number` matches by: one run of digits is an ID, two are not one
+    ("LS2-1" is not fish 21). The digits are kept as written (LS07 -> "07").
+    """
+    runs = re.findall(r"\d+", animal or "")
+    return runs[0] if len(runs) == 1 else ""
 
 
 def sheet_names(path):
@@ -461,8 +466,8 @@ def join(animals, headers, rows, mapping):
     values = [r.get(idc, "") for r in rows]
     found, rule, dup = match_ids(values, animals, mapping.get("match", "auto"))
     shared = shared_rows(found, values)
-    for _sid, names in shared:
-        for a in names:
+    for _sid, who in shared:            # not `names`: that is the column-name table
+        for a in who:
             found.pop(a, None)
 
     def _is(v):
@@ -497,7 +502,7 @@ def join(animals, headers, rows, mapping):
                    **{names[i]: str(r.get(i, "") or "") for i in keep}}
     ids = {_id_text(r.get(idc, "")) for r in rows} - {""}
     used = {meta[a]["sheet_id"] for a in meta} | {sid for sid, _names in shared}
-    claimed = {a for _sid, names in shared for a in names}
+    claimed = {a for _sid, who in shared for a in who}
     return {"rule": rule, "missing": [a for a in animals if a not in found and a not in dup
                                       and a not in claimed],
             "duplicate": dup, "shared": shared, "meta": meta, "unresolved": unresolved,

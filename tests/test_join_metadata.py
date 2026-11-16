@@ -338,13 +338,15 @@ with tempfile.TemporaryDirectory() as tmp:
                      for a in ("LS1", "LS01", "LS2")])
     book = os.path.join(tmp, "s.xlsx")
     wb = openpyxl.Workbook()
-    for r in (["Fish", "Group"], [1, "control"], [2, "exercise"]):
+    for r in (["Fish", "Group", "Tank", "Sex"], [1, "control", 305, "F"],
+              [2, "exercise", 303, "M"]):
         wb.active.append(r)
     wb.save(book)
     choice = {"id_column": "Fish", "group_columns": ["Group"], "match": "number", "fill": []}
     code, last = run_06b(book, choice)
     chk("one sheet row joined to two animals stops 06b", code, 1)
-    chk("...naming both animals", ("LS1" in last and "LS01" in last), True)
+    chk("...naming both animals in its last line",
+        (last.startswith("FAIL") and "LS1" in last and "LS01" in last), True)
     chk("...and writes no metadata", os.path.exists(B.META_CSV), False)
 
     with open(B.MEAS_CSV, "w", newline="", encoding="utf-8") as fh:

@@ -51,6 +51,13 @@ def summary(headers, rows, animals, mapping):
         return out
     try:
         j = SAMPLING.join(list(animals), headers, rows, probe)
+    except Exception as exc:                        # noqa: BLE001
+        # SystemExit is the join's own refusal, and it is not an Exception;
+        # anything else is a fault in the join. Either is shown in the window:
+        # raised out of the Qt slot that calls this, it left the text and the
+        # Save button as they were for the previous choice.
+        out["problems"] = ["the sheet could not be joined (%s)" % exc]
+        return out
     except SystemExit as exc:
         out["problems"] = [str(exc)]
         return out

@@ -765,12 +765,16 @@ STAGES = [
           needs=["roi_dataset"],
           made_from=["roi_dataset"],
           # Which columns are the animal and the treatment: choosing again
-          # changes the groups, so the joined tables are out of date.
-          settings=["sampling"],
+          # changes the groups, so the joined tables are out of date. And the
+          # group key: an animal blank in the sheet passes only when it names
+          # it. The workbook's content is fingerprinted too (workflow._extra_inputs).
+          settings=["sampling", "groups.by_animal"],
           blurb="THE UNBLINDING STEP - the first stage permitted to read a group "
                 "label. Joins each animal to its row of the sampling workbook, by "
-                "the columns chosen in Set up > Slides > Match the sheet, and stops "
-                "if any animal has no row or more than one."),
+                "the columns chosen in Set up > Slides > Match the sheet. Stops if "
+                "any animal has no row or more than one, if one row matches two "
+                "animals, or if a treatment is blank and no fill rule or "
+                "groups.by_animal gives it a group."),
 
     Stage("excel_sample", "06c  Spreadsheet - per sample", "Beyond blinding",
           script="06c_excel_dataset.py",

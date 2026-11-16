@@ -361,6 +361,24 @@ chk("results re-run alone after a workbook change are still out of date",
 _record(_cfgw, "join_sampling", "build_results")
 chk("...until 06b and then the results run",
     W.outdated(S.BY_ID["build_results"], study(_cfgw)), None)
+# An animal measured after 06b ran has no group: Build results run alone must
+# not read Done with it in no comparison.
+_meas = os.path.join(_res, "roi_measurements.csv")
+_meas_was = open(_meas, encoding="utf-8").read()
+_meta_was = open(_meta, encoding="utf-8").read()
+_put(_meta, "animal,treatment\nLS1,control\n", os.path.getmtime(_meta))
+_put(_meas, "animal,roi_kind\nLS1,roi\nLS9,roi\n", os.path.getmtime(_meas))
+_record(_cfgw, "join_sampling", "build_results")
+chk("an animal measured with no row in 06b's table puts the results out of date",
+    "LS9" in (W.outdated(S.BY_ID["build_results"], study(_cfgw)) or ""), True)
+_put(_meta, "animal,treatment\nLS1,control\nLS9,exercise\n", os.path.getmtime(_meta))
+_record(_cfgw, "join_sampling", "build_results")
+chk("...and once 06b has a row for it, they are current",
+    W.outdated(S.BY_ID["build_results"], study(_cfgw)), None)
+_put(_meas, _meas_was, os.path.getmtime(_meas))
+_put(_meta, _meta_was, os.path.getmtime(_meta))
+_record(_cfgw, "join_sampling", "build_results")
+
 # 06b's result depends on groups.by_animal (a blank the key covers passes), so
 # it is a setting 06b reads.
 chk("06b is current before the group key changes",
@@ -377,6 +395,15 @@ for _r in _old["project"]["runs"]:
         _r["inputs"]["settings"].pop("groups.by_animal", None)
 chk("...a 06b run recorded before it read the key stays current",
     W.outdated(S.BY_ID["join_sampling"], study(_old)), None)
+# ...but only while the key is still unset: one set since was not what that
+# run read, and the run must not stay current over it.
+_oldg = json.loads(json.dumps(_old))
+_oldg.setdefault("groups", {})["by_animal"] = {"LS1": "control"}
+chk("...a key missing from the record but SET now is a change",
+    bool(W.outdated(S.BY_ID["join_sampling"], study(_oldg))), True)
+_oldg["groups"]["by_animal"] = {}
+chk("...and one set to nothing (empty) is not",
+    W.outdated(S.BY_ID["join_sampling"], study(_oldg)), None)
 
 # What the 14 Oct notice said by hand is a stage status now.
 os.utime(_nuc, (W.ROI_FIX_AT - 3600, W.ROI_FIX_AT - 3600))

@@ -14,6 +14,8 @@ is done on the window's thread under a wait cursor rather than on a worker.
 """
 
 import html
+import sys
+import traceback
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -56,7 +58,12 @@ def summary(headers, rows, animals, mapping):
         # anything else is a fault in the join. Either is shown in the window:
         # raised out of the Qt slot that calls this, it left the text and the
         # Save button as they were for the previous choice.
-        out["problems"] = ["the sheet could not be joined (%s)" % exc]
+        # The type is named because a bare message ("0", "'Group'") says
+        # nothing on its own, and the traceback goes to the console log
+        # (stderr) so the fault can be found, not only seen.
+        traceback.print_exception(type(exc), exc, exc.__traceback__, file=sys.stderr)
+        out["problems"] = ["the sheet could not be joined (%s: %s)"
+                           % (type(exc).__name__, exc)]
         return out
     except SystemExit as exc:
         out["problems"] = [str(exc)]

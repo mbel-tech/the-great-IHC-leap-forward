@@ -695,6 +695,25 @@ try:
     chk("journal not writable: counted in a side file, said once, then given up once",
         (lines, side), ([1, 1, 2, 2], {"attempts": UA.MAX_ATTEMPTS, "told": True}))
 
+    # A count left beside an earlier journal must not carry over to a new swap: read with
+    # the new journal, an interrupted update would give up at once without trying.
+    inst = fresh_install("tries-left-over")
+    os.makedirs(os.path.join(inst, "updates"), exist_ok=True)
+    with open(journal(inst) + ".tries", "w", encoding="utf-8") as fh:
+        json.dump({"attempts": UA.MAX_ATTEMPTS, "told": True}, fh)
+    UA._move = kill_on(lambda src, dst: os.path.relpath(src, inst) == "scripts")
+    try:
+        UA.apply(inst, make_update(inst), check=lambda r: True)
+    except Killed:
+        pass
+    finally:
+        UA._move = real_move
+    chk("a new swap clears an old journal's recovery count",
+        os.path.exists(journal(inst) + ".tries"), False)
+    new_start()
+    chk("...so the interrupted update is put back on the next start",
+        (UA.recover(inst)[1] != [], marker(inst)), (True, "app"))
+
     # A stale lock is taken over by renaming it aside; one that turned fresh in between (another
     # process took it over) is given back. The lock is released only if it is still ours.
     inst = fresh_install("lock-race")
@@ -725,6 +744,44 @@ try:
         holder2.wait()
     chk("a lock taken over between judging and renaming is given back",
         (took, held), (None, str(holder2.pid)))
+
+    # ...but never over a THIRD process's lock written at the path while it was aside:
+    # "it is free" checked, then that process writes its lock, then the put-back. The
+    # check is made to say "free" once, which is that window.
+    with open(lock, "w") as fh:
+        fh.write("999999999")
+    calls.clear()
+    third = "777777777"
+
+    def racing_holder3(path):
+        got = real_holder(path)
+        calls.append(path)
+        if len(calls) == 1:
+            os.remove(lock)
+            with open(lock, "w") as fh:
+                fh.write(str(holder2.pid))
+        elif len(calls) == 2:                                  # the aside is being checked
+            with open(lock, "w") as fh:
+                fh.write(third)
+        return got
+
+    real_exists = UA.os.path.exists
+    UA.os.path.exists = lambda p: False if p == lock else real_exists(p)
+    holder2 = _sp.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    UA._lock_holder = racing_holder3
+    try:
+        took = UA._take_lock(inst)
+        held = open(lock).read()
+    finally:
+        UA._lock_holder = real_holder
+        UA.os.path.exists = real_exists
+        holder2.kill()
+        holder2.wait()
+    chk("a third process's fresh lock is never overwritten by the put-back",
+        (took, held), (None, third))
+    for _n in os.listdir(os.path.dirname(lock)):
+        if ".stale-" in _n:
+            os.remove(os.path.join(os.path.dirname(lock), _n))
     with open(lock, "w") as fh:
         fh.write(str(holder2.pid + 1 if holder2.pid + 1 != os.getpid() else holder2.pid + 2))
     UA._release_lock(lock)

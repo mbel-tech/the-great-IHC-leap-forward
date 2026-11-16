@@ -328,9 +328,18 @@ chk("Match the sheet: a shared row on a four-column sheet is named",
 _join = SAMPLING.join
 SAMPLING.join = lambda *a, **k: (_ for _ in ()).throw(ValueError("boom"))
 try:
-    _sum = SM.summary(_h, _r, ["LS5"], _m)
+    import contextlib as _cl
+    import io as _sio
+    _err = _sio.StringIO()
+    with _cl.redirect_stderr(_err):
+        _sum = SM.summary(_h, _r, ["LS5"], _m)
     chk("...and a fault in the join is a problem shown, not raised out of the slot",
         any("boom" in p for p in _sum["problems"]), True)
+    chk("...naming the exception's type",
+        any("ValueError: boom" in p for p in _sum["problems"]), True)
+    chk("...with its traceback logged",
+        ("Traceback" in _err.getvalue(), "ValueError: boom" in _err.getvalue()),
+        (True, True))
 finally:
     SAMPLING.join = _join
 _rep = SAMPLING.check(shared_book, {"LS1": 1, "LS01": 1, "LS5": 1}, _m)

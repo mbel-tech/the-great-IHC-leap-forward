@@ -137,6 +137,16 @@ def replace_guard(d, plates):
     # store is this study's, so it is what the merge read and kept.
     chk("...and keeps the unmentioned section",
         "LS22_s01b_sc00" in kept["_studies"][studies[-1]], True)
+    # The merge still OVERWROTE the section the export holds: what it was is
+    # kept first, as 04q keeps its seed.
+    cur = os.path.join(out_root, "curation")
+    baks = sorted(n for n in os.listdir(cur) if n.endswith(".backup"))
+    chk("...after a timestamped backup of what it replaced",
+        [n.startswith(IE.ROI_KEY + ".json.") for n in baks], [True])
+    if baks:
+        with open(os.path.join(cur, baks[0]), encoding="utf-8") as fh:
+            chk("...holding the store as it was",
+                sorted(json.load(fh)), ["LS22_s01a_sc00", "LS22_s01b_sc00"])
 
 
 def other_study_kept(d, plates):

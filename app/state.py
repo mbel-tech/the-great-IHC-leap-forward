@@ -50,6 +50,12 @@ KEYS = [
 QUIET_KEYS = {"ls_roi_curator_v1_backup", "ls_roi_curator_v1_size",
               "ls_roi_curator_v1_rois", "ls_roi_curator_v1_custom"}
 
+# ...but only the snapshot stays quiet on a STALE page (a load that started from an older
+# copy than the file, whose saves are set aside, not written). There the file does NOT have
+# what the page saved: a radius, an ROI choice or an added ROI set on that page is lost on
+# reload like any decision, so it is reported like one.
+STALE_QUIET_KEYS = {"ls_roi_curator_v1_backup"}
+
 
 class CurationStore:
     """The curators' state: in the project file when there is one, else one JSON file per key.
@@ -119,15 +125,24 @@ class CurationStore:
     def all_present(self):
         return {k: self.read(k) for k in KEYS if self.read(k) is not None}
 
-    def set_aside(self, folder, key, text):
+    def set_aside(self, folder, key, text, fresh=False, path=None):
         """Keep `text` as curation/<folder>/<key>.json, out of the way. Returns the path.
 
         For curation that is being replaced rather than lost: what an import overwrote,
         and what a page still showing the old state tried to save after it. A subfolder,
         so neither the stages nor the project's reconcile (top-level files only) take it
         for the live copy.
+
+        `fresh` picks a name no earlier set-aside holds (`<key>.json`, then `<key>.2.json`,
+        ...), so two pages' saves of one key never overwrite each other; `path` rewrites a
+        set-aside made earlier (the same page saving again).
         """
-        path = os.path.join(self.dir, folder, key + ".json")
+        if path is None:
+            path = os.path.join(self.dir, folder, key + ".json")
+            n = 1
+            while fresh and os.path.exists(path):
+                n += 1
+                path = os.path.join(self.dir, folder, "%s.%d.json" % (key, n))
         os.makedirs(os.path.dirname(path), exist_ok=True)
         tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
@@ -206,6 +221,10 @@ class SaveGuard:
         self.retired = {}
         self.behind = set()
         self.stale_aside = None
+        # (gen, load, key) -> the set-aside file of that stale load's saves of `key`. One
+        # file per load: its later saves hold its earlier ones, but another stale load's
+        # must not overwrite them.
+        self.stale_paths = {}
 
     def replaced(self, keys, aside=None):
         """The store now holds an import of `keys`: retire every page loaded before it."""
@@ -262,7 +281,7 @@ class Bridge(QObject):
     def loadStale(self, gen, load, keys):
         """The load `load` could not take the file in for `keys` (comma separated): say so now."""
         for key in keys.split(","):
-            if key and key not in QUIET_KEYS:
+            if key and key not in STALE_QUIET_KEYS:
                 self._stale(load, key, stale_load_text(key))
 
     @Slot(str, str, str, str)
@@ -281,14 +300,17 @@ class Bridge(QObject):
             return
         store = g.retired.get(gen, self.store)
         g.stale_aside = g.stale_aside or os.path.join(backup_folder(), "from_stale_page")
+        slot = (gen, load, key)
         try:
-            path = store.set_aside(g.stale_aside, key, text)
+            path = store.set_aside(g.stale_aside, key, text, fresh=slot not in g.stale_paths,
+                                   path=g.stale_paths.get(slot))
         except Exception as e:                              # noqa: BLE001
             msg = save_error_text(store, key, e)
         else:
+            g.stale_paths[slot] = path
             msg = stale_save_text(key, path)
         print(msg, file=sys.stderr)
-        if key not in QUIET_KEYS:
+        if key not in STALE_QUIET_KEYS:
             self._stale(load, key, msg)
 
     def _stale(self, load, key, msg):

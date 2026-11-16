@@ -182,6 +182,7 @@ class CuratorView(QWidget):
         # them - the 60 s snapshot reaching disk does not mean the curation does - so the
         # warning goes only when every failing key has saved again.
         self._failing_keys = set()
+        self._quiet_disk_failed = set()     # quiet keys in _failing_keys by a failed disk write
         # Page loads already warned that they started from an older copy (one box each).
         self._stale_loads = set()
 
@@ -344,6 +345,12 @@ class CuratorView(QWidget):
     def _saved(self, key, n):
         self.logged.emit(f"saved   {key}  ({n/1024:.1f} KB)")
         self._failing_keys.discard(key)
+        # A failed disk write of a key saved only when its own control is used (the
+        # radius, the ROI choice, the added ROIs) would otherwise hold the warning up
+        # until that control is used again, through any amount of curation that reaches
+        # disk: a save that succeeds shows the disk is writable again.
+        self._failing_keys -= self._quiet_disk_failed
+        self._quiet_disk_failed.clear()
         if self._save_failing and not self._failing_keys:
             self._save_failing = False
             self.save_warning.setVisible(False)
@@ -385,6 +392,8 @@ class CuratorView(QWidget):
         """
         self.logged.emit(f"NOT SAVED  {message}")
         self._failing_keys.add(key)
+        if key in ST.QUIET_KEYS:
+            self._quiet_disk_failed.add(key)
         self.save_warning.setText(lead + message)
         self.save_warning.setVisible(True)
         if not self._save_failing:

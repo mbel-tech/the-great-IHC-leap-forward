@@ -1897,9 +1897,12 @@ def _settings_changed(st, study):
     """The settings `st` reads that differ from its last recorded run's, in order.
 
     A setting the record holds no hash for was not read by that run (it was
-    recorded before the stage read it: 06b and groups.by_animal), so it is not a
-    change; the next run records it. Counted as one, adding a setting to a
-    stage put every study's run of it out of date at once.
+    recorded before the stage read it: 06b and groups.by_animal). That is no
+    change only while the setting is still UNSET now - the run read nothing
+    and nothing is there. Counted as a change regardless, adding a setting to
+    a stage put every study's run of it out of date at once; counted as none
+    regardless, a value set since (a group key typed in after 06b ran) never
+    put the stage out of date at all.
     """
     rec = _last_ok(study, st.sid)
     then = rec.get("inputs") if rec else None
@@ -1907,7 +1910,12 @@ def _settings_changed(st, study):
         return []
     now = fingerprint(st.sid, study)
     was = then.get("settings") or {}
-    return [k for k in now["settings"] if k in was and now["settings"][k] != was[k]]
+    return [k for k, h in now["settings"].items()
+            if (h != was[k] if k in was else h not in _UNSET_HASHES)]
+
+
+#: What an unset setting hashes to: absent (None), or an empty value.
+_UNSET_HASHES = {_hash(v) for v in (None, {}, [], "")}
 
 
 def _files_changed(st, study, now, was, made):
@@ -1986,6 +1994,13 @@ def _groups_reason(study):
     st = S.BY_ID["join_sampling"]
     if not applies(st, study)[0] or not st.done(study.out_root, study.names):
         return None
+    # An animal measured since 06b ran has no group at all: running only
+    # Build results after a new animal was measured used to read Done, with
+    # that animal in no comparison.
+    new = _unjoined_animals(study.out_root)
+    if new:
+        return "%d measured animal(s) have no row in its table: %s" % (
+            len(new), ", ".join(new[:5]) + (" ..." if len(new) > 5 else ""))
     made = _made_at(st, study)
     rec = _last_ok(study, st.sid)
     then = rec.get("inputs") if rec else None
@@ -2004,6 +2019,32 @@ def _groups_reason(study):
                                 for p in _extra_inputs(st.sid, study).get("workbook", ())):
         return "the sampling workbook is newer than its results"
     return None
+
+
+def _unjoined_animals(out_root):
+    """Animals in 06a's roi_measurements.csv with no row in 06b's animal_metadata.csv.
+
+    Empty when either file is missing or has no `animal` column: that is not
+    this check's question (06b's own status answers whether it ran).
+    """
+    import csv as _csv
+    res = os.path.join(out_root, "results")
+
+    def animals(name):
+        try:
+            with open(os.path.join(res, name), newline="", encoding="utf-8") as fh:
+                rd = _csv.DictReader(fh)
+                if "animal" not in (rd.fieldnames or []):
+                    return None
+                return {(r.get("animal") or "").strip() for r in rd} - {""}
+        except (OSError, UnicodeDecodeError, _csv.Error):
+            return None
+
+    measured = animals("roi_measurements.csv")
+    joined = animals("animal_metadata.csv") if measured else None
+    if not measured or joined is None:
+        return []
+    return sorted(measured - joined)
 
 
 def outdated(stage, study, _seen=None):

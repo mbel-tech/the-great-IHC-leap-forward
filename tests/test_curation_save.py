@@ -160,6 +160,24 @@ with held_open():
 chk("a new failure streak shows a box again", len(boxes()), 1)
 for b in boxes():
     b.close()
+view.bridge.save(KEY, GOOD)
+# A key saved only when its own control is used (the radius here): its failed disk write
+# must not hold the warning up until that control is used again, through curation that
+# reaches disk.
+with held_open():
+    view.bridge.save("ls_roi_curator_v1_size", "3")
+chk("a failed disk write of the radius is shown", view.save_warning.isVisible(), True)
+for b in boxes():
+    b.close()
+view.bridge.save(KEY, NEW)
+chk("...and a later save that reaches disk clears it", view.save_warning.isVisible(), False)
+# On a STALE page (started from an older copy than the file) the radius is reported like
+# any key, in the load-time box and the banner: what it saves is set aside, not on disk.
+view.bridge.loadStale(view.guard.gen, "load-q", "ls_roi_curator_v1_size")
+chk("a stale page's radius is reported at load: banner and box",
+    (view.save_warning.isVisible(), len(boxes())), (True, 1))
+for b in boxes():
+    b.close()
 server.stop()
 
 print("--- an import is not saved over by the page that was open before it ---")
@@ -490,6 +508,30 @@ chk("...it is on disk", qbr.store.read("ls_roi_curator_v1_backup"), '{"S": {}}')
 for k in ("ls_roi_curator_v1_size", "ls_roi_curator_v1_rois", "ls_roi_curator_v1_custom"):
     qbr.saveFromRefused(qbr.guard.gen, k, "1", "QuotaExceededError")
 chk("...nor does the radius, the ROI choice or the added ROIs", quiet, [])
+
+print("--- a stale page's saves of the radius, ROIs and added ROIs are reported ---")
+seen = []
+rbr = ST.Bridge(ST.CurationStore(os.path.join(tmp, "stale-quiet")),
+                on_stale=lambda load, k, m: seen.append(k))
+rbr.loadStale(rbr.guard.gen, "L1", ",".join(sorted(ST.QUIET_KEYS)))
+chk("at load: the three, not the snapshot",
+    sorted(seen), sorted(ST.QUIET_KEYS - {"ls_roi_curator_v1_backup"}))
+seen.clear()
+for k in sorted(ST.QUIET_KEYS):
+    rbr.saveFromStale(rbr.guard.gen, "L1", k, "1")
+chk("...and each save set aside, not on disk, is reported too",
+    sorted(seen), sorted(ST.QUIET_KEYS - {"ls_roi_curator_v1_backup"}))
+
+print("--- two stale loads in one session do not overwrite each other's set-aside ---")
+rbr.saveFromStale(rbr.guard.gen, "L1", KEY, '{"a": 1}')
+rbr.saveFromStale(rbr.guard.gen, "L2", KEY, '{"b": 2}')
+rbr.saveFromStale(rbr.guard.gen, "L1", KEY, '{"a": 3}')
+# KEY.json and KEY.<n>.json - not KEY_size.json and the like.
+kept = glob.glob(os.path.join(tmp, "stale-quiet", "curation", "_backup_*", "from_stale_page",
+                              KEY + ".*json"))
+chk("one file per load, each holding that load's last save",
+    sorted(json.dumps(json.load(open(p, encoding="utf-8"))) for p in kept),
+    sorted(json.dumps(d) for d in ({"a": 3}, {"b": 2})))
 
 print("--- a stale page of a project closed since keeps its saves with that project ---")
 stale_seen = []

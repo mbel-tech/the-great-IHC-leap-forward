@@ -135,6 +135,17 @@ def _swap(root, incoming, parked, check, mode="apply"):
     except OSError as e:
         _log(root, f"could not write the swap journal, so nothing was moved: {e}")
         return "undone"
+    # A count left beside an EARLIER journal (its removal failed) belongs to that
+    # journal, not this one: read with it, a later interrupted update would give up
+    # at once. If it cannot be removed, nothing is moved.
+    try:
+        os.remove(journal_path(root) + ".tries")
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        _log(root, f"could not clear an old recovery count, so nothing was moved: {e}")
+        _drop_journal(root)
+        return "undone"
     os.makedirs(parked)
     done = []                                   # (src, dst) in the order moved
     try:
@@ -344,12 +355,9 @@ def _take_lock(root):
             except OSError:
                 return None                                 # someone else is handling it
             if _lock_holder(aside) != seen:
-                # Not the one judged stale: another process took it over in between. Give it back.
-                try:
-                    if not os.path.exists(path):
-                        os.replace(aside, path)
-                except OSError:
-                    pass
+                # Not the one judged stale: another process took it over in between. Give it back
+                # - but never over a lock a THIRD process has written at `path` since.
+                _put_back(aside, path)
                 return None
             try:
                 os.remove(aside)
@@ -362,6 +370,29 @@ def _take_lock(root):
             fh.write(str(os.getpid()))
         return path
     return None
+
+
+def _put_back(aside, path):
+    """Move `aside` back to `path` only if `path` is free; True if it went back.
+
+    Never replaces: "check it is free, then os.replace" left a window in which a third
+    process could write a fresh lock at `path`, and the replace then overwrote it - that
+    process went on believing it held the lock while the file named another. A hard link
+    (POSIX) or a rename (Windows, where rename refuses an existing target) fails instead of
+    overwriting. When it fails the aside is left where it is: `path` belongs to someone else.
+    """
+    try:
+        if os.name == "nt":
+            os.rename(aside, path)
+        else:
+            os.link(aside, path)
+            try:
+                os.remove(aside)
+            except OSError:
+                pass
+        return True
+    except OSError:
+        return False
 
 
 def _release_lock(path):

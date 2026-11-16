@@ -9,6 +9,40 @@ where things landed, not which plausible-looking route was tried and abandoned, 
 
 ---
 
+## 2026-11-16 - Loose ends from the reviews (00 / 00b / 01c / 02 / 04g / 04i / 04o / 04q / 05a / 06c / app)
+
+**Changed:** The in-sample false-positive rate is called in-sample, and the leave-one-disc-out rate
+named as the independent check, in the pipeline guide, the methods, the nuclei-detection note and
+the R figure caption (which now quotes the leave-one-disc-out median beside it). 04q: a report-only
+run says "would keep", `--replace` without `--write` says it needs `--write`, and an unreadable
+stored file is named before it is backed up and replaced. `app.import_exports` takes 04q's
+timestamped backup before it writes. 04g `--limit` never removes a real mask. 05a's closing line
+names the placed markers only if there are any. 04o `--verify` ends with "does not reproduce" or
+"could not be checked", whichever it was. 04i reads `source` stripped and case-blind, and its
+`--rederive-legacy` wording says unmarked rows with no derivation are kept. 00 and 02 refuse a
+`chosen_variants.csv` missing a column by name. 00 and 00b share `source_files` matching
+(`scripts/ls_sources.py`), and 00b now fails on a named CZI found nowhere (its zip unreadable).
+01c's partial-run line says what to do. The guides say pixel stages read extracted CZIs. 06c takes
+`environment` from 06b's `animal_metadata.csv` by animal (`ls_sampling.fish_id` removed). In the
+app: the results are out of date while a measured animal has no row in 06b's table; a setting
+missing from an old run record is a change when it is set now; the sheet-match join fault names
+its exception type and logs the traceback; a stale lock is put back without overwriting; a swap
+clears an old journal's `.tries`; on a stale page the radius, ROI choice and added ROIs are
+reported, a failed disk write of them clears once a later save succeeds, and two stale loads keep
+separate set-aside files (`<key>.json`, `<key>.2.json`, ...). The Task 13 entry's re-run list now
+names 04e and 04j.
+
+**Why:** each was parked by a task review (Tasks 6-16): wording that overstated a check, messages
+that described a run as having done what it had not, a trial run that could delete a real mask
+under a stage still reading done, 06c reading a different sheet than 06b's join, two copies of one
+matching rule, and app states that read current or quiet when they were not.
+
+**Cost:** 06c's environment column is blank until 06b has run (and says so); before, it was filled
+from the default workbook whatever 06b read. 00b fails a subset study whose named CZI is in no
+readable archive, where it used to pass. A study whose `groups.by_animal` was set after 06b's last
+recorded run sees 06b out of date once. Stale-page set-asides are one file per page load, not one
+per key.
+
 ## 2026-11-16 - Curator exports and review decisions reach the pipeline (04l / 04a / 05a / app)
 
 **Changed:** `exportCsv` in `04l_roi_curator.py` writes every section the saved state holds work
@@ -211,8 +245,9 @@ and identity, and a section gone from the manifest kept its row for good.
 replicate letters for one marker, or a slide whose only scan has a letter the rest of the animal
 does not): every section from that slide on is renumbered. Such a study must re-run 00, then 01
 (which now refreshes `focus.csv` and `saturation_raw.csv` without re-exporting) and everything
-after it that copies the column - 01d, 01g, 01l, 04a (`reformat_index`), 04b/04c, 04f, 04g, 04m,
-04n, 04p and the registration report. Curator exports already saved (`atlas_levels.csv`,
+after it that copies the column - 01d, 01g, 01l, 04a (`reformat_index`), 04b/04c, 04e (the
+registration report), 04f, 04g, 04j (its analysis rows take `section_order` from `focus.csv`), 04m,
+04n and 04p. Curator exports already saved (`atlas_levels.csv`,
 `roi_plates.csv`, `roi_landmarks.csv`) keep the old numbers in their `section_order` column; they
 join by `scene_uid`, but anything reading their order should be checked. Studies with no re-scan
 get the same numbers as before. A person who overrides `chosen_variants.csv` after 00 has run gets

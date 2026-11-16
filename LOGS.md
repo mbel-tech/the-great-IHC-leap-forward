@@ -9,6 +9,43 @@ where things landed, not which plausible-looking route was tried and abandoned, 
 
 ---
 
+## 2026-11-16 - The ROI curator does not lose work (04l / app)
+
+**Changed:** `save()` in `04l_roi_curator.py` writes per section. Each tab keeps, per section,
+what the key held (`SEEN`) and what its own record was (`BASE`) when it last synced; a save
+writes only the sections whose record moved from `BASE`, on top of what the key holds now, and
+takes in, through `resolvePlate`, the sections another tab saved. A `storage` listener does the
+same between saves and redraws the section on screen if it was one of them. A section both tabs
+changed is kept by the later save, which tells the other tab on a `BroadcastChannel`; that tab
+says so in the header (`syncNote`). An idle tab's autosave now writes nothing. `save()` catches
+a refused write, shows a red NOT SAVED line with the browser's reason (`saveWarn`) until a save
+succeeds, and retries on the next change (a section stays changed until it is written);
+"saved HH:MM:SS" is only claimed for a save that happened. `hasPlateWork` (assigned, a
+landmark, or a drawn region) is the one rule for "the plate is a decision", used by `select()`,
+`exportCsv` and Shotgun, and `hasRoiWork` is built on it; Review's Clear keeps any record
+`hasDecision` keeps and takes an undo mark, as do Reinstate, Drop and Reject mask, and `u`
+undoes in Review too. `roiRestoreBackup` goes through `initState`. Polygons record the plate
+they were drawn on (`pl`) and `usedRois` counts them on that plate only (an older polygon counts
+when the plate's ROI of that number names its region). ADD ROI names, scene uids and animal ids
+go through `esc`, now declared beside `el`. In the app, the injected `setItem` mirror catches the
+browser's refusal, writes to disk anyway (`Bridge.saveFromRefused`) and shows the curator's
+banner, saying the file has it and the page does not. Checks in `tests/lost_work.test.js` (a new
+page suite, so 23 of 23) and `tests/test_curation_save.py`.
+
+**Why:** found on review. A second tab's 60 s autosave or unload save wrote the store it loaded
+over everything the other tab had saved since. A section curated only with polygons moved onto
+the slider's plate when revisited and exported as a favourite with no plate. Review's Clear
+deleted a reinstated section's polygons with no undo. A full browser store threw out of the
+click with nothing on screen, and the app's mirror, reached only after the browser's write
+returned, never saw those saves. A restored snapshot kept a stale `verified: "ok"`. After a
+plate change the guided walk skipped a region whose ROI number an old polygon had used. A
+region name typed into ADD ROI went into the page as markup.
+
+**Cost:** each save compares every record in the tab with its last synced copy (one
+`JSON.stringify` pass over the store), and reads the key once more when another tab has written
+it. Polygons carry one more field. The app's mirror still rethrows the browser's refusal after
+the disk write, so the page sees it as it would without the app, and says NOT SAVED too.
+
 ## 2026-11-16 - The study file and the installed app survive concurrency and crashes (project / app / updates)
 
 **Changed:** the partial writers of the study file (`write_curation`, `_mark_synced`,

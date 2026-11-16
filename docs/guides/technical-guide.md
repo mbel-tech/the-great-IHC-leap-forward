@@ -2302,7 +2302,18 @@ and writes only its own study's entry and carries the others through untouched.
 
 The ROI curator saves on every change, writes a snapshot under `ls_roi_curator_v1_backup` every 60
 seconds, and keeps the last 80 actions for undo. Restoring the snapshot is deliberately not a button
-(`roiRestoreBackup()` in the browser console), because it replaces the live state wholesale.
+(`roiRestoreBackup()` in the browser console), because it replaces the live state wholesale; it goes
+through `initState`, so every restored plate is checked against the atlas again.
+
+A save writes per section, because two tabs of the page share the key. Each tab remembers, per section,
+what the key held and what its own record was when it last synced (`SEEN`, `BASE`); a save writes only
+the sections whose record changed since, on top of what the key holds now, and takes in the sections
+another tab saved (`takeTheirs`, also run on the `storage` event). When both tabs changed one section the
+later save keeps it and tells the other tab on a `BroadcastChannel`, which says so in its header. A save
+the browser refuses (a full `localStorage`) is caught: the header shows NOT SAVED with the reason until a
+save succeeds, and the next change retries every section not yet written. In the app, the injected
+`setItem` mirror writes to disk even when the browser's own write throws
+(`state.Bridge.saveFromRefused`) and shows the curator's warning.
 
 The page is regenerated freely: when it opens, the saved curation embedded by the stage (`__SEED__`, read
 from `curation/ls_roi_curator_v1.json`) is merged with what `localStorage` holds, so rebuilding the page
@@ -2324,7 +2335,7 @@ The page's JavaScript (about 4,500 lines inside `04l_roi_curator.py`) falls into
 top-level functions:
 
 - **Storage:** `openStudy`, `saveStudy`, `openMine` and `initState` (state per study, merged with the seed),
-  `autosave`, the undo stack (`undoMark`, `undoLast`).
+  `save` and `takeTheirs` (per section, see 7.2), `autosave`, the undo stack (`undoMark`, `undoLast`).
 - **Plates:** `verifyPlate` and `resolvePlate` check each saved plate against the set's fingerprints
   (`ls_atlas`), so a plate that was re-rendered or removed is reported in `plateNotice` rather than used
   silently.

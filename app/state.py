@@ -199,10 +199,15 @@ class Bridge(QObject):
     """What the page calls to persist. One write path, deliberately: `saveFrom` only decides
     whether the page saving is still allowed to, then goes through `save`."""
 
-    def __init__(self, store, on_save=None, on_error=None, guard=None, on_aside=None):
+    def __init__(self, store, on_save=None, on_error=None, guard=None, on_aside=None,
+                 on_page_error=None):
         super().__init__()
         self.store = store
         self.on_save = on_save
+        # `on_page_error(key, message)`: the save reached disk but the page's OWN storage
+        # refused it (a full localStorage). Shown like a failed save: the page now holds
+        # less than the file, and a reload would show the page's older copy.
+        self.on_page_error = on_page_error
         # `on_error(key, message)`: a save that did not reach disk. The page cannot be told -
         # its localStorage already holds the decision - so the app has to show it.
         self.on_error = on_error
@@ -213,9 +218,23 @@ class Bridge(QObject):
     @Slot(str, str, str)
     def saveFrom(self, gen, key, text):
         """A save from the page loaded as `gen`: written, kept aside, or held back."""
+        self._route(gen, key, text, None)
+
+    @Slot(str, str, str, str)
+    def saveFromRefused(self, gen, key, text, why):
+        """The same save, which the page's own localStorage refused with `why`.
+
+        The disk copy is written all the same - it is the one that matters, and the only one
+        left - and the refusal is reported rather than taken for success: the curator saves
+        on every click, so a full browser store would otherwise go unnoticed until a reload
+        showed the older copy the page still holds.
+        """
+        self._route(gen, key, text, why)
+
+    def _route(self, gen, key, text, page_error):
         g = self.guard
         if gen in g.retired:
-            self._write(g.retired[gen], key, text)
+            self._write(g.retired[gen], key, text, page_error)
             return
         if gen != g.gen and key in g.superseded:
             # Not written - it is the curation the import replaced, plus anything done on
@@ -234,13 +253,13 @@ class Bridge(QObject):
         if key in g.holding:
             g.held[key] = text
             return
-        self.save(key, text)
+        self._write(self.store, key, text, page_error)
 
     @Slot(str, str)
     def save(self, key, text):
         self._write(self.store, key, text)
 
-    def _write(self, store, key, text):
+    def _write(self, store, key, text, page_error=None):
         try:
             store.write(key, text)
         except Exception as e:                              # noqa: BLE001
@@ -252,6 +271,13 @@ class Bridge(QObject):
             print(msg, file=sys.stderr)
             if self.on_error:
                 self.on_error(key, msg)
+            return
+        if page_error:
+            msg = page_store_error_text(store, key, page_error)
+            print(msg, file=sys.stderr)
+            report = self.on_page_error or self.on_error
+            if report:
+                report(key, msg)
             return
         if self.on_save:
             self.on_save(key, len(text))
@@ -268,6 +294,13 @@ def save_error_text(store, key, exc):
         text += (" - the file may be open in another program (an editor, a sync client, "
                  "antivirus), or the folder is read-only")
     return text
+
+
+def page_store_error_text(store, key, why):
+    """One line for a save that reached disk while the page's own storage refused it."""
+    return (f"{key} was saved to {store.where()}, but the curator page's own storage refused "
+            f"it ({why}) - reloading the page now would show its older copy. Free the "
+            "browser storage, or restart the app, before reloading")
 
 
 def seed_script(store, guard=None):
@@ -305,13 +338,24 @@ def seed_script(store, guard=None):
   var queue = [], bridge = null;
   window.__lsQueueSize = function () { return queue.length; };
 
+  // Mirrored even when the browser's own setItem throws (a full localStorage): the
+  // disk copy is the one that matters, and a mirror reached only after a successful
+  // setItem lost exactly the saves that most needed it. The throw still reaches the
+  // page afterwards, which has its own NOT SAVED notice; the app shows its own.
   var orig = Storage.prototype.setItem;
+  function send(k, v, why) {
+    if (why) bridge.saveFromRefused(GEN, k, v, why);
+    else bridge.saveFrom(GEN, k, v);
+  }
   Storage.prototype.setItem = function (k, v) {
-    orig.call(this, k, v);
+    var err = null;
+    try { orig.call(this, k, v); } catch (e) { err = e; }
     if (this === window.localStorage) {
-      if (bridge) { bridge.saveFrom(GEN, String(k), String(v)); }
-      else { queue.push([String(k), String(v)]); }
+      var why = err ? String((err.name ? err.name + ": " : "") + (err.message || err)) : "";
+      if (bridge) { send(String(k), String(v), why); }
+      else { queue.push([String(k), String(v), why]); }
     }
+    if (err) throw err;
   };
 
   function connect() {
@@ -319,7 +363,7 @@ def seed_script(store, guard=None):
     new QWebChannel(qt.webChannelTransport, function (ch) {
       bridge = ch.objects.lsbridge;
       window.__lsbridge = bridge;
-      while (queue.length) { var e = queue.shift(); bridge.saveFrom(GEN, e[0], e[1]); }
+      while (queue.length) { var e = queue.shift(); send(e[0], e[1], e[2]); }
     });
   }
   connect();

@@ -292,7 +292,8 @@ class CuratorView(QWidget):
         """
         page = self.view.page()
         self.bridge = ST.Bridge(self.store, on_save=self._saved, on_error=self._save_failed,
-                                guard=self.guard, on_aside=self._set_aside)
+                                guard=self.guard, on_aside=self._set_aside,
+                                on_page_error=self._page_store_failed)
         # Whose curation a page loaded from this seed shows; `project_changed` needs it once
         # the store already answers with the next project.
         self.seeded_project = self.store._project()
@@ -323,7 +324,13 @@ class CuratorView(QWidget):
             self.save_warning.setVisible(False)
             self.logged.emit("curation saves are reaching disk again")
 
-    def _save_failed(self, key, message):
+    def _page_store_failed(self, key, message):
+        """The file has the save, the page's own storage does not: the same warning, said so."""
+        self._save_failed(key, message, lead="Curation is NOT SAVED in the curator page's own "
+                          "storage - the file on disk has it. ")
+
+    def _save_failed(self, key, message, lead="Curation is NOT being saved to disk - "
+                     "decisions made now are in this page only. "):
         """Show a failed save now, and keep showing it until one succeeds.
 
         The strip and the log line repeat for every failure; the message box comes once per
@@ -331,9 +338,7 @@ class CuratorView(QWidget):
         stop the work the operator is trying to save.
         """
         self.logged.emit(f"NOT SAVED  {message}")
-        self.save_warning.setText(
-            "Curation is NOT being saved to disk - decisions made now are in this page only. "
-            + message)
+        self.save_warning.setText(lead + message)
         self.save_warning.setVisible(True)
         if not self._save_failing:
             self._save_failing = True

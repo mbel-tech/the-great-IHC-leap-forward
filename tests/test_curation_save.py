@@ -407,6 +407,44 @@ chk("...and a late save from B's page stays out of it", in_file(pc), C_ROI)
 chk("A's curation is untouched by all of it", in_file(pa).get("LS9_s2"), None)
 w.server.stop()
 
+print("--- a full browser store: the disk still gets the save, and the app says so ---")
+# The page's own localStorage refuses a write once the origin's quota is used up. The
+# mirror used to call the browser's setItem first and reach the bridge only if that
+# returned, so exactly these saves - the ones the browser could not keep - never reached
+# disk either, and the app's banner never showed. Filled with plain property writes,
+# which bypass setItem and so are not mirrored: only the curator's own save goes to disk.
+out = os.path.join(tmp, "full")
+os.makedirs(os.path.join(out, "reformatted"))
+with open(os.path.join(out, "reformatted", "roi.html"), "w", encoding="utf-8") as fh:
+    fh.write(PAGE)
+server = CV.LocalServer(out)
+view = CV.CuratorView(server, out)
+view.show()
+lines = []
+view.logged.connect(lines.append)
+view.show_page("reformatted/roi.html")
+chk("the page starts empty", wait_loaded({}), True)
+# Big pieces until one is refused, then smaller ones into what is left, so that not
+# even the few bytes of a decision fit.
+filled = js("var n = 0, mb = 0; [1 << 20, 1 << 14, 1 << 8, 8, 1].forEach(function (w) {"
+            " for (var i = 0; i < 64; i++) { try { localStorage['fill' + (n++)] = 'x'.repeat(w);"
+            " if (w === 1 << 20) mb++; } catch (e) { break; } } }); mb")
+chk("the browser store fills up before 64 MB", (filled or 0) < 64, True)
+FULL = {"LS1_s1": {"plate": "decided while full"}}
+js("S = {LS1_s1: {plate: 'decided while full'}}; true")
+chk("a save the browser refuses still reaches disk", settle(lambda: stored() == FULL), True)
+chk("...the app shows its banner", view.save_warning.isVisible(), True)
+chk("...saying the page's own storage refused it",
+    "own storage" in view.save_warning.text() and KEY in view.save_warning.text(), True)
+chk("...and logs it", any("NOT SAVED" in s and "refused" in s for s in lines), True)
+for b in boxes():
+    b.close()
+js("Object.keys(localStorage).filter(function (k) { return k.indexOf('fill') === 0; })"
+   ".forEach(function (k) { localStorage.removeItem(k); }); true")
+chk("once the store has room again the banner goes",
+    settle(lambda: not view.save_warning.isVisible()), True)
+server.stop()
+
 print()
 print("FAILED: %d" % fails if fails else "ALL PASS")
 sys.exit(1 if fails else 0)

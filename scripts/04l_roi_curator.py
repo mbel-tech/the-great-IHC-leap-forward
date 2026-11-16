@@ -1403,7 +1403,9 @@ canvas{display:block;width:100%;height:100%;object-fit:contain;cursor:crosshair;
   <main id="centre">
     <div id="notices"><span class="row" id="seedOffer" style="display:none"></span><span
       class="row" id="plateWarn" style="display:none;color:#9a5b00"></span><span
-      class="row" id="studyNote" style="display:none;color:#9a5b00"></span></div>
+      class="row" id="studyNote" style="display:none;color:#9a5b00"></span><span
+      class="row" id="saveWarn" style="display:none;color:#cf222e;font-weight:600"></span><span
+      class="row" id="syncNote" style="display:none;color:#9a5b00"></span></div>
     <!-- The coach line: which mode the mouse is in and what a click does there.
          Pure presentation of state the page already keeps (guided, bgMode,
          rotMode); coach() is called from status(), which every mode change
@@ -1832,9 +1834,22 @@ function resolvePlate(rec, plates){
 // filters the store on every load, so a section curated ENTIRELY with polygons
 // and no landmarks would have been thrown away as an empty record the next time
 // the page opened.
-const hasRoiWork  = r => !!r && !!(r.assigned || r.fav || r.hard || r.excl || r.noroi
-                                   || (r.pairs && r.pairs.length)
-                                   || (r.polys && r.polys.length));
+//
+// hasPlateWork is the part of it that is about the PLATE: work done against a
+// plate - assigned, a landmark, a drawn region - makes the plate it sits on a
+// decision, and a favourite or an exclusion does not. select() (does the slider
+// follow the section?), exportCsv (does roi_plates.csv name the plate?) and
+// Shotgun all ask exactly this, and each used to spell it out for itself as
+// "assigned or landmarked" - so a section curated only with polygons was moved
+// onto whatever plate the slider sat on the next time it was visited, and
+// exported as a favourite with no plate. One definition, used by all of them.
+const BG_MARK = "bg";
+const isBg    = p => p[6] === BG_MARK;
+const hasPlateWork = r => !!r && !!(r.assigned
+                                    || (r.pairs && r.pairs.some(p => !isBg(p)))
+                                    || (r.polys && r.polys.length));
+const hasRoiWork  = r => hasPlateWork(r) || !!(r && (r.fav || r.hard || r.excl || r.noroi
+                                   || (r.pairs && r.pairs.length)));
 const hasDecision = r => hasRoiWork(r) || !!(r && (r.rot || r.rev));
 const decided = obj => Object.fromEntries(
   Object.entries(obj || {}).filter(([, v]) => hasDecision(v)));
@@ -1895,15 +1910,160 @@ function plateNotice(){
 let S = initState(openMine(), SEED_STATE);
 let active = null, pending = null;   // pending section point awaiting its plate partner
 const el = id => document.getElementById(id);
+// Everything interpolated into markup that this page did not write itself goes
+// through esc: a CSV's free text, and names the operator typed or the study
+// supplied - a region added with ADD ROI, a scene uid, an animal id. Up here
+// because the animal list below is the first markup built at load.
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g,
+  c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 if(STUDY_NOTE){
   console.log(STUDY_NOTE);
   const box = el("studyNote");
   if(box){ box.textContent = STUDY_NOTE; box.style.display = ""; }
 }
+// ---- saving: per section, never over another tab's work -------------------
+//
 // Only decisions reach disk. The in-memory record for a section being looked
 // at stays (the plate it is on is needed while it is on screen); it is simply
 // not persisted until something is decided about it.
-const save = () => saveStudy(KEY, decided(S), MY_UIDS);
+//
+// A SECOND TAB OF THIS PAGE SHARES THE KEY. Writing the whole of S on every
+// save meant an idle tab - its 60 s autosave, its unload save - wrote the copy
+// it loaded over everything the busy tab had saved since. So a save writes only
+// the sections THIS tab changed since it last read or wrote the key, on top of
+// what the key holds now, and the `storage` event (below) brings the other
+// tab's sections into S as they are saved.
+//
+// Two maps make "changed" exact, per section uid:
+//   SEEN - the record as the key held it (JSON) when this tab last synced;
+//   BASE - this tab's record (JSON) at that same moment.
+// The two differ even when nothing has happened: resolvePlate adds `verified`
+// and may rescale a resized plate's landmarks. So the key is compared with
+// SEEN (has another tab written this section?) and S with BASE (has this tab?),
+// never S with the key.
+//
+// A section in S that the key's entry does not hold - carried over from an
+// older folder, from before filing, from the seed - has no BASE and so is
+// "changed": the first save writes it, as it always has.
+//
+// Both tabs changed the same section: the one that saves last keeps it (that
+// section only), and the other is told - a tab can see that it is overwriting
+// a version it never saw, and says so to the others on a BroadcastChannel.
+let SEEN = {}, BASE = {};
+// The key's text when this tab last synced with it: unchanged, nobody else has
+// written, and there is nothing to take in.
+let LAST_RAW = null;
+const WROTE = new Set();                // sections this tab has saved, for the notice
+const recJson = r => (r && hasDecision(r)) ? JSON.stringify(r) : undefined;
+const studyEntry = () => {
+  const e = openStudy(KEY)._studies[STUDY];
+  return (e && typeof e === "object" && !Array.isArray(e)) ? e : {};
+};
+(function(){
+  try { LAST_RAW = localStorage.getItem(KEY); } catch(e){}
+  const e = studyEntry();
+  for(const u of Object.keys(e)){ SEEN[u] = JSON.stringify(e[u]); BASE[u] = recJson(S[u]); }
+})();
+// Another tab's sections into S: every one the key holds differently from what
+// this tab last saw, unless this tab has changed it too (then the save decides).
+// Returns the uids taken.
+function takeTheirs(entry){
+  const took = [];
+  for(const u of new Set([...Object.keys(entry), ...Object.keys(SEEN)])){
+    const now = entry[u] === undefined ? undefined : JSON.stringify(entry[u]);
+    if(now === SEEN[u]) continue;
+    if(recJson(S[u]) !== BASE[u]) continue;
+    // Through resolvePlate, as initState does: the other tab's record is checked
+    // against this atlas like every record that enters S.
+    if(entry[u] && hasDecision(entry[u])) S[u] = resolvePlate(entry[u], PLATES);
+    else delete S[u];
+    SEEN[u] = now; BASE[u] = recJson(S[u]);
+    took.push(u);
+  }
+  return took;
+}
+const TAB = Math.random().toString(36).slice(2);
+let CHAN = null;
+try { if(typeof BroadcastChannel === "function") CHAN = new BroadcastChannel(KEY); }
+catch(e){ CHAN = null; }
+const fewUids = us => us.slice(0, 5).join(", ") + (us.length > 5 ? ` and ${us.length - 5} more` : "");
+if(CHAN) CHAN.onmessage = m => {
+  const d = m && m.data;
+  if(!d || d.study !== STUDY || d.from === TAB) return;
+  const lost = (d.uids || []).filter(u => WROTE.has(u));
+  if(!lost.length) return;
+  const box = el("syncNote");
+  if(box){
+    box.textContent = `Another tab saved over this tab's work on ${lost.length} section(s):`
+      + ` ${fewUids(lost)}. Each now shows what that tab saved.`;
+    box.style.display = "";
+  }
+};
+// A SAVE THAT FAILS IS SAID, AND KEPT SAYING. localStorage refuses a write once
+// the origin's quota is full, and the throw used to escape save() in the middle
+// of whatever click caused it - the click half done, and nothing on screen. Now
+// the header says NOT SAVED with the browser's reason until a save succeeds,
+// and nothing is lost meanwhile: a section stays "changed" (S differs from
+// BASE) until it is written, so the next change's save retries all of them.
+function saveFailed(e){
+  const why = (e && (e.name ? e.name + ": " : "") + (e.message || "")) || String(e);
+  const box = el("saveWarn");
+  if(box){
+    box.textContent = "NOT SAVED - this browser refused to store the curation (" + why + ")."
+      + " Your latest decisions are only in this page; each new decision tries again."
+      + " Export now, or free this browser's site storage.";
+    box.style.display = "";
+  }
+  console.warn("NOT SAVED:", why);
+}
+function saveOk(){
+  const box = el("saveWarn");
+  if(box && box.textContent){ box.textContent = ""; box.style.display = "none"; }
+}
+function save(){
+  let took = [];
+  try {
+    // What this tab changed since it last synced. One pass over S; when it is
+    // nothing and the key is as this tab left it, there is nothing to do - the
+    // 60 s autosave of an idle tab writes nothing at all.
+    const changed = [];
+    for(const u of new Set([...Object.keys(S), ...Object.keys(BASE)])){
+      const now = recJson(S[u]);
+      if(now !== BASE[u]) changed.push([u, now]);
+    }
+    const raw = localStorage.getItem(KEY);
+    if(!changed.length && raw === LAST_RAW){ saveOk(); return true; }
+    const cur = openStudy(KEY);
+    const had = STUDY in cur._studies;
+    const entry = (had && cur._studies[STUDY] && typeof cur._studies[STUDY] === "object")
+      ? cur._studies[STUDY] : {};
+    if(raw !== LAST_RAW) took = takeTheirs(entry);
+    const out = Object.assign({}, entry), lost = [];
+    for(const [u, now] of changed){
+      // The key moved under this section since this tab last synced it, and
+      // this tab changed it too: this write wins, and the other tab is told.
+      const there = entry[u] === undefined ? undefined : JSON.stringify(entry[u]);
+      if(there !== SEEN[u]) lost.push(u);
+      if(now === undefined) delete out[u]; else out[u] = S[u];
+    }
+    if(changed.length || !had) saveStudy(KEY, out, MY_UIDS);
+    LAST_RAW = localStorage.getItem(KEY);
+    for(const [u, now] of changed){ SEEN[u] = BASE[u] = now; WROTE.add(u); }
+    if(lost.length && CHAN){
+      try { CHAN.postMessage({type: "overwrote", study: STUDY, uids: lost, from: TAB}); }
+      catch(e){}
+    }
+    saveOk();
+  } catch(e){
+    saveFailed(e);
+    return false;
+  } finally {
+    // Sections another tab saved, taken in on the way: their cells follow. Not
+    // inside the try - a strip that cannot be repainted is not a failed save.
+    for(const u of took){ try { paintCell(u); } catch(e){} }
+  }
+  return true;
+}
 // AUTOSAVE.
 //
 // save() already runs on every change - all twelve mutation sites call it - so
@@ -1918,7 +2078,8 @@ const save = () => saveStudy(KEY, decided(S), MY_UIDS);
 const BACKUP_KEY = KEY + "_backup";
 const AUTOSAVE_MS = 60000;
 function autosave(){
-  save();
+  // "saved HH:MM:SS" is a claim; it is made only when the save did happen.
+  if(!save()) return;
   // Filed per study like the live store, so a restore brings back THIS study's
   // snapshot. A snapshot from before filing is left where it is (not claimed):
   // it is the one copy roiRestoreBackup can still fall back to.
@@ -1954,16 +2115,35 @@ function roiRestoreBackup(){
 
 `
             + `This REPLACES everything currently in the tool.`)) return;
-  S = b.S; save(); render(); status();
+  // Through initState, like every other record that enters S: the snapshot
+  // can be older than the atlas on disk, and a stored verified:"ok" must be
+  // re-checked rather than believed. save() then writes the difference - the
+  // restored sections, and the removal of every section the snapshot lacks.
+  S = initState(b.S, null); save(); plateNotice(); render(); status();
   console.log("restored", n, "sections from", b.at);
 }
 // Leaving the page is exactly when an unsaved change would be lost, and hiding
 // the tab is the usual prelude to it.
 addEventListener("beforeunload", save);
+// Another tab of this page saved: its sections come into S now, rather than at
+// this tab's next save, so what is on screen is what is stored. A section this
+// tab has changed and not yet saved is left alone - its own save decides it.
+addEventListener("storage", e => {
+  if(e && e.key !== null && e.key !== undefined && e.key !== KEY) return;
+  let took = [];
+  try { took = takeTheirs(studyEntry()); } catch(err){ return; }
+  // LAST_RAW is left as it was: the next save takes in again, which finds
+  // nothing new (takeTheirs is idempotent) and costs one pass.
+  if(!took.length) return;
+  plateNotice();
+  if(active && took.includes(active)) select(active, true);
+  took.forEach(u => paintCell(u));
+  status();
+});
 document.addEventListener("visibilitychange", ()=>{ if(document.hidden) autosave(); });
 
 const animals = [...new Set(DATA.map(d=>d.animal))].sort((a,b)=>+a.slice(2)-+b.slice(2));
-el("animal").innerHTML = animals.map(a=>`<option>${a}</option>`).join("");
+el("animal").innerHTML = animals.map(a=>`<option>${esc(a)}</option>`).join("");
 el("slider").max = PLATES.length-1;
 el("marker").innerHTML =
   MARKERS.map(m=>`<option value="${m.id}">${m.label} - ${m.n}</option>`).join("")
@@ -3050,7 +3230,20 @@ const roisOf = s => selectedHulls(allHullsOf(s));
 // Which ROIs this section already answers. Derived from the polygons rather than
 // kept as a separate fact that could disagree with them - the same reason the
 // seed cursor was derived from the pairs.
-const usedRois = s => new Set(polysOf(s).map(pg => pg.roi).filter(n => n));
+//
+// ON THE PLATE IT IS ON NOW. An ROI number is a position in one plate's list,
+// not a region: ROI 1 is Dl on one plate and a tuberal nucleus on another. Read
+// by number alone, a polygon drawn before the plate was changed answered the
+// same number on the new plate, and the guided walk skipped a region nobody had
+// drawn. A polygon records the plate it was drawn against (`pl`, commitPoly);
+// one from before that was recorded counts when the plate's ROI of that number
+// is the region it names - the most that can be said for it.
+const usedRois = s => {
+  const P = plateAt(s);
+  return new Set(polysOf(s).filter(pg => pg.pl ? pg.pl === P.id
+      : (P.hulls || []).some(h => h.roi === pg.roi && h.region === pg.region))
+    .map(pg => pg.roi).filter(n => n));
+};
 // Resume where the section was left off.
 function firstUnusedRoi(s){
   const u = usedRois(s);
@@ -3231,8 +3424,8 @@ let ptDrag = null;                          // {ix, iy, r} while the button is d
 // Stored as a 7th element on an ordinary pair. Pairs are 5 or 6 long already,
 // so this is additive and every existing saved section loads unchanged - the
 // same reason `companion` extends reformat()'s return rather than altering it.
-const BG_MARK = "bg";
-const isBg      = p => p[6] === BG_MARK;
+// BG_MARK and isBg are declared up beside hasRoiWork, which needs them while the
+// page is still loading (decided() runs in initState).
 const roiPairs  = s => s.pairs.filter(p => !isBg(p));
 const bgPairs   = s => s.pairs.filter(isBg);
 // Distinct from ROI blue, pending amber, ambiguous gold and guided green, and
@@ -3351,8 +3544,9 @@ function commitPoly(){
   // `n` is how many landmarks the section carried when this outline closed.
   // That is the whole order stamp: if it still carries that many, nothing has
   // been placed since and this region is the newer of the two. See undoZ.
+  // `pl` is the plate the ROI number belongs to (see usedRois).
   polysOf(s).push({v: draft.slice(), roi: h.roi, region: h.region, part: h.part,
-                   n: s.pairs.length});
+                   n: s.pairs.length, pl: plateAt(s).id});
   draft = null;
   gAdvance();
   save(); drawSec(); drawPl(); status(); paintCell(active);
@@ -3677,7 +3871,7 @@ function status(){
       : "ATLAS PLATE - list finished; click an ROI to go back to it";
     el("lmHint").innerHTML = tgt
       ? `<b style="color:${selColour(tgt)}">ROI ${dispLabel(tgt)}</b> &middot; `
-        + `<b>${nameOf(tgt)}</b> &middot; ${nDone} of ${nRois} drawn`
+        + `<b>${esc(nameOf(tgt))}</b> &middot; ${nDone} of ${nRois} drawn`
         + `<br><span style="color:var(--dim)">click each corner &middot; `
         + `<b>Enter</b>, a double-click or the first corner closes it &middot; `
         + `z drops a corner &middot; Skip if it is not on this section</span>`
@@ -3749,7 +3943,7 @@ function status(){
     const names = [...new Set(P.seeds.filter(isSel).map(x => x.amb || x.region))];
     const gold = new Set(P.seeds.filter(x => x.amb).map(x => x.amb));
     const shown = names.map(n => gold.has(n)
-      ? `<span style="color:#9a6700">${n}</span>` : n).join(", ");
+      ? `<span style="color:#9a6700">${esc(n)}</span>` : esc(n)).join(", ");
     el("regInfo").innerHTML = P.seeds.length
       ? `<b>${roisOf(s).filter(h => usedRois(s).has(h.roi)).length}</b> of `
         + `<b>${roisOf(s).length}</b> drawn: ${shown}`
@@ -3938,7 +4132,7 @@ function onSlide(v){
   const P = PLATES[+v] || BLANK_PLATE;
   el("plName").textContent = P.id;
   el("plLab").innerHTML = P.labelled
-    ? `<span class="lab">${P.seeds.length} region seeds: ${[...new Set(P.seeds.map(x=>x.region))].join(", ")}</span>`
+    ? `<span class="lab">${P.seeds.length} region seeds: ${[...new Set(P.seeds.map(x=>x.region))].map(esc).join(", ")}</span>`
     : `<span class="unlab">no region labels on this plate</span>`;
   drawPl(); status();
   // NO render() here. render -> select -> onSlide -> render was a cycle: on load
@@ -3968,7 +4162,7 @@ function select(uid, keep){
   if(!d) return;                  // not a section this page has at all
   active = uid; pending = null; gSync();
   const s = st(uid);
-  el("secInfo").innerHTML = `<b>${d.uid}</b><br>section ${d.order} &middot; `
+  el("secInfo").innerHTML = `<b>${esc(d.uid)}</b><br>section ${esc(d.order)} &middot; `
     + (i >= 0 ? `${i + 1} of ${list.length}`
               : `<span style="color:var(--warn,#9a6700)">hidden by the current filter</span>`);
   // The plate slider does NOT follow the section. Serial sections sit at
@@ -3981,8 +4175,10 @@ function select(uid, keep){
   // Landmarks, not all pairs: a background disc says where there is no signal,
   // which is no evidence at all about which plate this section is - snapping
   // the slider on one would jump to the default plate and look like a decision.
-  const decided = s.assigned || roiPairs(s).length > 0;
-  const p = decided ? s.plate : Math.min(PLATES.length - 1, +el("slider").value || 0);
+  // A drawn region IS evidence (its region came off that plate), so a section
+  // curated only with polygons keeps its plate too: hasPlateWork, the one rule.
+  const plated = hasPlateWork(s);
+  const p = plated ? s.plate : Math.min(PLATES.length - 1, +el("slider").value || 0);
   el("slider").value = p;
   secImg.src = d.img;
   onSlide(p);
@@ -4089,9 +4285,9 @@ function regionKey(P, s){
               + (h.amb ? `  -  one of ${h.amb}, which cannot be told apart`
                        + ` without the rostrocaudal level` : "")
               + (isDone ? "  -  drawn" : "  -  not drawn yet");
-    return `<div title="${tip}"><i style="background:${selColour(h)}"></i>`
+    return `<div title="${esc(tip)}"><i style="background:${selColour(h)}"></i>`
          + `<b style="${h.amb ? "color:#9a6700" : ""}${isDone ? ";opacity:.45" : ""}">`
-         + `${dispLabel(h)}. ${h.region}${h.unk ? "?" : ""}`
+         + `${esc(dispLabel(h))}. ${esc(h.region)}${h.unk ? "?" : ""}`
          + `${h.n_parts > 1 ? " /" + h.part : ""}</b>`
          + `<span>${isDone ? "\u2713" : ""}</span>`
          + (h.amb ? `<span style="color:#9a6700">&#9670;</span>` : "")
@@ -4149,13 +4345,13 @@ function emptyNote(){
   if(inScope().length) return `Nothing matches these filters. Untick <b>favourites only</b>,`
                             + ` <b>difficult only</b> or <b>hide excluded</b>.`;
   const mine = DATA.filter(d => d.animal === a);
-  if(!mine.length) return `<b>${a}</b> has no sections in this page at all.`;
+  if(!mine.length) return `<b>${esc(a)}</b> has no sections in this page at all.`;
   const label = {}; MARKERS.forEach(k => label[k.id] = k.label);
   const by = {};
   for(const d of mine) by[d.m] = (by[d.m] || 0) + 1;
   const have = Object.keys(by).sort()
-    .map(k => `<b>${by[k]}</b> ${label[k] || k}`).join(" and ");
-  return `<b>${a}</b> has no ${label[m] || m} sections in this subset`
+    .map(k => `<b>${by[k]}</b> ${esc(label[k] || k)}`).join(" and ");
+  return `<b>${esc(a)}</b> has no ${esc(label[m] || m)} sections in this subset`
        + ` - it has ${have}. Change the channel selector to see them.`;
 }
 
@@ -4271,6 +4467,10 @@ addEventListener("keydown", e=>{
     else if(e.key==="c" || e.key==="C"){ revLayer("cen"); }
     else if(e.key==="m" || e.key==="M"){ revLayer("apply"); }
     else if(e.key==="f" || e.key==="F"){ revFull(); }
+    // `u` is the same general undo as on the curating screen, so a Review
+    // verdict - Clear above all, the easy one to press by mistake - is taken
+    // back from where it was made. Unlike x or b it edits nothing new.
+    else if(e.key==="u" || e.key==="U"){ undoLast(); revDetail(); revRender(); revCount(); }
     // Escape closes it. With native fullscreen refused there is no
     // fullscreenchange to listen for, so the key has to be handled directly -
     // otherwise the only way out of a maximised card is the button, and a
@@ -4403,7 +4603,7 @@ function exportCsv(){
     if(!hasRoiWork(s)) continue;
     const P=plateAt(s), n=roiPairs(s).length, nBg=bgPairs(s).length;
     const T=transform(s);
-    const chosen = s.assigned || n>0;   // is the plate a decision, or still the default?
+    const chosen = hasPlateWork(s);   // is the plate a decision, or still the default?
     // isExcl(), not s.excl: a Review-mode reinstatement beats the flag, and the
     // strip already honours that. The two must not disagree.
     const excl = isExcl(d.uid);
@@ -4841,7 +5041,8 @@ const shotSay = m => { el("shotStat").textContent = m; };
 // ---- what goes in ----------------------------------------------------------
 
 // The same rule exportCsv() uses, deliberately: a plate is a decision when it
-// was assigned or landmarked, and never merely because the slider sat there.
+// was assigned, landmarked or drawn on (hasPlateWork), and never merely because
+// the slider sat there.
 // Two definitions of "has a plate" in one file is one too many.
 function shotPick(){
   const take = [], noPlate = [], noGroup = [], excluded = [];
@@ -4849,7 +5050,7 @@ function shotPick(){
     const s = S[d.uid];
     if(!s || !s.fav) continue;
     if(s.excl){ excluded.push(d.uid); continue; }
-    if(!(s.assigned || roiPairs(s).length > 0)){ noPlate.push(d.uid); continue; }
+    if(!hasPlateWork(s)){ noPlate.push(d.uid); continue; }
     const g = GROUPS.by_animal[d.animal];
     if(!g){ noGroup.push(d.uid); continue; }
     take.push({d, s, g});
@@ -5537,11 +5738,8 @@ for(const id of ["revImg", "revMask", "revCensor", "revTissue"]){
 let revOn = false, revSel = null;
 
 // Everything drawn here comes out of a CSV rather than out of this page, so it
-// is escaped. The rest of the curator interpolates values it generated itself -
-// animal ids, plate names - and does not need this; a recorded exclusion reason
-// is operator-typed free text and does.
-const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g,
-  c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+// is escaped - with `esc`, declared up beside `el`: a recorded exclusion reason
+// is operator-typed free text.
 
 // dl() joins fields with commas and quotes nothing, which is fine for the
 // numbers the other exports write. Exclusion reasons are free text and DO carry
@@ -5991,6 +6189,11 @@ function revAct(act){
   // excl:true is exactly what the 227 exclusions the operator really did record
   // look like, so there is no telling them apart afterwards.
   const had = Object.prototype.hasOwnProperty.call(S, revSel);
+  // A review verdict is a change to the section's record like any other, and
+  // Clear is the one most easily pressed by mistake - so every verdict, Clear
+  // included, is one `u` away from undone. Taken before st() can create the
+  // record, so undoing the first touch removes it again (prev: null).
+  undoMark(revSel, act ? "review: " + act : "review: clear");
   const e = st(revSel);
   const mine = e.rev ? e.rev.mine : !had;
   // The exclusion to put back on undo is THE ONE THAT WAS THERE, captured once,
@@ -6009,8 +6212,12 @@ function revAct(act){
   // Undo means undo. A record this call invented, carrying nothing but the
   // exclusion the pipeline already decided, says nothing the pipeline has not
   // said - and roi_plates.csv reports sections the OPERATOR touched.
-  if(!act && mine && !e.assigned && !e.fav && !e.hard && !e.noroi && !e.pairs.length
-     && !e.rot){
+  //
+  // hasDecision, not a list of fields: the list here left out polygons, so
+  // Clear on a reinstated section whose regions had since been drawn deleted
+  // the regions with the verdict. Whatever counts as work everywhere else
+  // keeps the record here too; Clear takes the review decision and only that.
+  if(!act && mine && !hasDecision(e)){
     delete S[revSel];
   }
   save();

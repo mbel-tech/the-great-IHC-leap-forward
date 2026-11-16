@@ -2,7 +2,7 @@
 
 The Curate screen shows one curator page at a time. For most studies the only page you need is the **ROI curator**: for each section you check it should be used, match it to an atlas plate, and draw the brain regions to measure, plus background discs for comparison.
 
-Your work is saved into the project as you go, so closing the app loses nothing, but **only Export hands your decisions to Measure**. **Done: export and go to Measure**, in the bar above the page, exports for you and opens Measure.
+Your work is saved into the project as you go, so closing the app loses nothing, but **only Export hands your decisions to Measure**. **Done: export and go to Measure**, in the bar above the page, exports for you and opens Measure. If a save fails, a red **NOT SAVED** line above the section says why until one succeeds. Two tabs of the same curator each save only the sections they changed; if both change the same section, the later save keeps it and the other tab says so.
 
 The bar above the page also has **Reload** (after Prepare rebuilt its pictures), **Open in browser**, and **Own window** (a window of its own you can make full screen).
 
@@ -44,7 +44,7 @@ In every curator, **a dashed amber border is a proposal the program made; a soli
 
 ## Review: bringing sections back
 
-**Review** shows every scanned section and what happened to it, including those set aside automatically. **Reinstate** puts an excluded section back; **Reject mask** discards an artifact mask that covered real tissue. Keys: ↑ ↓ move, **d** DAPI, **k** marker, **v** artifact mask, **c** censored pixels, **f** full screen.
+**Review** shows every scanned section and what happened to it, including those set aside automatically. **Reinstate** puts an excluded section back; **Reject mask** discards an artifact mask that covered real tissue. **Clear** takes back the Review decision only, and **u** undoes it. Keys: ↑ ↓ move, **d** DAPI, **k** marker, **v** artifact mask, **c** censored pixels, **f** full screen, **u** undo.
 
 ## Export
 

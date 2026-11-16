@@ -182,6 +182,8 @@ class CuratorView(QWidget):
         # them - the 60 s snapshot reaching disk does not mean the curation does - so the
         # warning goes only when every failing key has saved again.
         self._failing_keys = set()
+        # Page loads already warned that they started from an older copy (one box each).
+        self._stale_loads = set()
 
         bar = QHBoxLayout()
         bar.addWidget(self.title, 1)
@@ -300,7 +302,7 @@ class CuratorView(QWidget):
         self.bridge = ST.Bridge(self.store, on_save=self._saved, on_error=self._save_failed,
                                 guard=self.guard, on_aside=self._set_aside,
                                 on_page_error=self._page_store_failed,
-                                on_behind=self._reseed)
+                                on_behind=self._reseed, on_stale=self._stale_page)
         # Whose curation a page loaded from this seed shows; `project_changed` needs it once
         # the store already answers with the next project.
         self.seeded_project = self.store._project()
@@ -351,6 +353,27 @@ class CuratorView(QWidget):
         """The file has the save, the page's own storage does not: the same warning, said so."""
         self._save_failed(key, message, lead="Curation is NOT SAVED in the curator page's own "
                           "storage - the file on disk has it. ")
+
+    def _stale_page(self, load, key, message):
+        """A load that started from an older copy than the file: its saves go aside.
+
+        Its own lead and its own box - not the page-storage one, whose "the file on disk has
+        it" is the opposite of true here - once per load, even inside a streak of failures,
+        because this is the moment the operator must stop working on the page.
+        """
+        self.logged.emit(f"NOT SAVED  {message}")
+        self._failing_keys.add(key)
+        self._save_failing = True
+        self.save_warning.setText("Curation is NOT SAVED - this page's decisions are being set "
+                                  "aside, not written to the file. " + message)
+        self.save_warning.setVisible(True)
+        if load not in self._stale_loads:
+            self._stale_loads.add(load)
+            box = QMessageBox(QMessageBox.Warning, "Curation not saved",
+                              message + "\n\nThe warning above the curator stays until a "
+                              "save reaches the file again.", QMessageBox.Ok, self)
+            box.setAttribute(Qt.WA_DeleteOnClose)
+            box.open()
 
     def _save_failed(self, key, message, lead="Curation is NOT being saved to disk - "
                      "decisions made now are in this page only. "):

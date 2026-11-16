@@ -447,6 +447,10 @@ for b in boxes():
 view.view.reload()
 chk("reloaded with the store still full, the page has only its older copy",
     settle(lambda: page_state() == {}), True)
+# Said as the page loads, before anything is done on it - and not in the words of the
+# page-storage warning, whose "the file on disk has it" is the opposite of true here.
+chk("...and the app says so as it loads, in a box of its own",
+    settle(lambda: any("started from an OLDER copy" in b.text() for b in boxes())), True)
 js("S.LS1_s2 = {plate: 'after reload'}; true")
 spin(1000)
 chk("...and its saves do not put that older copy over the file", stored(), FULL)
@@ -454,7 +458,12 @@ stale = glob.glob(os.path.join(out, "curation", "_backup_*", "from_stale_page", 
 chk("...they are kept aside instead",
     any(json.load(open(p, encoding="utf-8")).get("LS1_s2") == {"plate": "after reload"}
         for p in stale), True)
-chk("...and the banner says so", "NOT saved" in view.save_warning.text(), True)
+LEAD = "Curation is NOT SAVED - this page's decisions are being set aside, not written to the file."
+chk("...the banner opens with what is true", view.save_warning.text().startswith(LEAD), True)
+chk("...says where they are, and that a reload will not bring them back",
+    ("from_stale_page" in view.save_warning.text(),
+     "will not come back" in view.save_warning.text()), (True, True))
+chk("...and the box came once for this page, not once per save", len(boxes()), 1)
 for b in boxes():
     b.close()
 
@@ -477,6 +486,23 @@ qbr = ST.Bridge(ST.CurationStore(os.path.join(tmp, "quiet")),
 qbr.saveFromRefused(qbr.guard.gen, "ls_roi_curator_v1_backup", '{"S": {}}', "QuotaExceededError")
 chk("the backup key reaching disk only raises no warning", quiet, [])
 chk("...it is on disk", qbr.store.read("ls_roi_curator_v1_backup"), '{"S": {}}')
+# Saved only when their own control is used: a warning from one would never clear.
+for k in ("ls_roi_curator_v1_size", "ls_roi_curator_v1_rois", "ls_roi_curator_v1_custom"):
+    qbr.saveFromRefused(qbr.guard.gen, k, "1", "QuotaExceededError")
+chk("...nor does the radius, the ROI choice or the added ROIs", quiet, [])
+
+print("--- a stale page of a project closed since keeps its saves with that project ---")
+stale_seen = []
+old_store = ST.CurationStore(os.path.join(tmp, "closed"))
+sbr = ST.Bridge(ST.CurationStore(os.path.join(tmp, "open")),
+                on_stale=lambda load, k, m: stale_seen.append(m))
+sbr.guard.retired["old-gen"] = old_store
+sbr.saveFromStale("old-gen", "load-1", KEY, '{"x": 1}')
+chk("set aside in the closed project's curation folder",
+    len(glob.glob(os.path.join(tmp, "closed", "curation", "_backup_*", "from_stale_page",
+                               KEY + ".json"))), 1)
+chk("...not the open one's", os.path.exists(os.path.join(tmp, "open", "curation")), False)
+chk("...and never written as that project's live curation", old_store.read(KEY), None)
 
 print()
 print("FAILED: %d" % fails if fails else "ALL PASS")

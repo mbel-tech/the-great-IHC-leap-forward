@@ -2327,7 +2327,8 @@ save succeeds, and the next change retries every section not yet written. In the
 (`state.Bridge.saveFromRefused`) and shows the curator's warning. The key is then `behind`
 (`state.SaveGuard`): each later load seeds it from the file over `localStorage`, and a load where even
 that is refused sends its saves of the key aside (`saveFromStale`, under `curation/_backup_*/from_stale_page`)
-rather than over the newer file, until a save the page's own storage accepts.
+rather than over the newer file, until a save the page's own storage accepts. The app warns as
+such a load starts (`Bridge.loadStale`) that what is done on it will not reach the file.
 
 The page is regenerated freely: when it opens, the saved curation embedded by the stage (`__SEED__`, read
 from `curation/ls_roi_curator_v1.json`) is merged with what `localStorage` holds, so rebuilding the page

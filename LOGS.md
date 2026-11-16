@@ -69,8 +69,13 @@ browser's refusal, writes to disk anyway (`Bridge.saveFromRefused`) and shows th
 banner, saying the file has it and the page does not. The key is then `behind`
 (`SaveGuard`): every load seeds it from the file over localStorage, and a load where even that
 is refused sends its saves of it aside (`saveFromStale`, `from_stale_page`), never over the
-newer file; a save the page's storage accepts ends it. A refused snapshot (`_backup`) is
-written but raises no warning, and the warning stays until every failing key has saved. Checks in `tests/lost_work.test.js` (a new
+newer file; a save the page's storage accepts ends it. Such a stale load is told so as it
+loads (`loadStale`), in its own box, and its banner says the decisions are set aside in
+`from_stale_page`, not written, and will not come back after a reload; a stale page of a project
+closed since sets aside under that project's folder. A refused snapshot (`_backup`), radius,
+ROI choice or added-ROI list is written but raises no warning (those are saved only when their
+own control is used, so the warning could never clear), and the warning stays until every
+failing key has saved. Checks in `tests/lost_work.test.js` (a new
 page suite, so 23 of 23) and `tests/test_curation_save.py`.
 
 **Why:** found on review. A second tab's 60 s autosave or unload save wrote the store it loaded

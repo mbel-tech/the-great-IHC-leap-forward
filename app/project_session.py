@@ -86,16 +86,11 @@ class ProjectSession(QObject):
         try:
             self.project.save()
         except LP.ProjectConflict as exc:
-            ans = BTN.question(parent, "The file changed on disk",
-                               "%s\n\nYes: save over it anyway. The other change to the settings is "
-                               "lost; curation decisions in the file are kept.\n"
-                               "Discard: throw away your unsaved changes here and read the file "
-                               "again.\nCancel: leave both as they are for now." % exc,
-                               BTN.Yes | BTN.Discard | BTN.Cancel, BTN.Cancel)
-            if ans == BTN.Discard:
+            ans = self._ask_conflict(parent, str(exc))
+            if ans == "reload":
                 self.reload(parent)
                 return False
-            if ans != BTN.Yes:
+            if ans != "save":
                 return False
             try:
                 self.project.save(force=True)
@@ -108,6 +103,29 @@ class ProjectSession(QObject):
         LC.remember_project(self.project.path)
         self._after_write()
         return True
+
+    #: The conflict box's own button labels. Qt's standard Discard button is "Don't Save" on
+    #: macOS and "Close without Saving" on GNOME, which reads like a harmless cancel; these say
+    #: what happens, and the text names them.
+    SAVE_OVER = "Save over it"
+    RELOAD = "Discard my changes and reload"
+
+    def _ask_conflict(self, parent, why):
+        """"save", "reload" or "cancel" for a save that found the file changed on disk."""
+        box = QMessageBox(QMessageBox.Warning, "The file changed on disk",
+                          "%s\n\n%s: write your version over the file. The other change to the "
+                          "settings is lost; curation decisions in the file are kept.\n"
+                          "%s: throw away your unsaved changes here and read the file again.\n"
+                          "Cancel: leave both as they are for now." % (why, self.SAVE_OVER, self.RELOAD),
+                          QMessageBox.NoButton, parent)
+        save = box.addButton(self.SAVE_OVER, QMessageBox.AcceptRole)
+        reload = box.addButton(self.RELOAD, QMessageBox.DestructiveRole)
+        cancel = box.addButton(QMessageBox.Cancel)
+        box.setDefaultButton(cancel)
+        box.setEscapeButton(cancel)
+        box.exec()
+        clicked = box.clickedButton()
+        return "save" if clicked is save else "reload" if clicked is reload else "cancel"
 
     def save_as(self, parent=None):
         if not self.idle_for("save the project under another name"):

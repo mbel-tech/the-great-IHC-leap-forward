@@ -56,14 +56,16 @@ memory takes them in and nothing is asked. Anything else moved: the write still 
 its own keys) and `_foreign` makes the next full save raise `ProjectConflict` until a reload or a
 forced save. A full save that finds only those moved (05b's `detection.auto` during a run) takes
 them in and saves without asking; a forced save takes them in first too, so "save over it" never
-erases the other copy's curation decisions, marks or run rows. The conflict box offers Discard,
-which reads the file again (`ProjectSession.reload`); Revert only went back to this copy's save. File > Save As, and a Save that would change `out_root`, ask the window's run guard
+erases the other copy's curation decisions, marks or run rows. The conflict box offers "Discard my changes and reload"
+(its own label, not Qt's platform one), which reads the file again (`ProjectSession.reload`); Revert only went back to this copy's save. File > Save As, and a Save that would change `out_root`, ask the window's run guard
 (`ProjectSession.idle_for`, wired to `MainWindow._idle_for`) and are refused with the same
 message as Open/New while a stage runs. `update_apply` writes `updates/swap-journal.json` before
 moving anything and removes it when the swap is settled; `recover()` puts every part back from
 a leftover journal (skipped while the helper that wrote it is alive), under an exclusive
 `swap-journal.lock`, at most once per process, retried on later starts and given up after three
-failures; a malformed journal is set aside. `app/__main__.py` runs it before the app starts; the
+failures (never while `app/` is missing: nothing else could recover it then); the count is kept
+in the journal or a side file; a stale lock is renamed aside, never deleted from under its
+new owner; a malformed journal is set aside. `app/__main__.py` runs it before the app starts; the
 bundled runtime's `sitecustomize.py` (Windows and macOS) runs it only when `app/` is missing,
 because every stage and worker interpreter passes through there. The replaced version
 is filed as `previous` by moving the old `previous` aside first; when that fails `parked` is

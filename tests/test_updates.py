@@ -604,16 +604,24 @@ try:
     chk("a dead holder's lock is taken over, and released after",
         (UA.recover(inst)[1], marker(inst), os.path.exists(lock)), (["app"], "app", False))
 
-    # A reversal that fails (a locked folder) is said once per start, retried on later starts,
-    # and given up after MAX_ATTEMPTS with a single "run the installer".
-    inst = interrupted("recover-locked")
+    # A reversal that fails (a locked folder) while the app can start is said once, retried on
+    # later starts, and given up after MAX_ATTEMPTS with a single "run the installer".
+    inst = fresh_install("recover-locked")
+    UA._move = kill_on(lambda src, dst: os.path.relpath(src, inst) == "scripts")   # app swapped, then killed
+    try:
+        UA.apply(inst, make_update(inst), check=lambda r: True)
+    except Killed:
+        pass
+    finally:
+        UA._move = real_move
+    new_start()
 
-    def parked_locked(src, dst):
-        if "parked-" in src:
+    def new_app_locked(src, dst):
+        if os.path.relpath(src, inst) == "app" and "new-" in dst:
             raise PermissionError("in use")
         return real_move(src, dst)
 
-    UA._move, UA.RETRY_DELAY = parked_locked, 0
+    UA._move, UA.RETRY_DELAY = new_app_locked, 0
     try:
         first = UA.recover(inst)
         again = UA.recover(inst)                     # same process: sitecustomize, then __main__
@@ -624,12 +632,107 @@ try:
             lines.append(results(inst))
     finally:
         UA._move, UA.RETRY_DELAY = real_move, 1.0
+    chk("failed reversal: the app can still start on what is there", marker(inst), "new app")
     chk("failed reversal: said once, with the reason", ("tried again" in (first[0] or ""), len(lines[0])), (True, 1))
     chk("...not attempted twice in one process", again, (None, []))
     chk("...retried quietly, then given up once, then left alone",
         [len(x) for x in lines], [1, 1, 2, 2])
     chk("...and the last word is to run the installer", "run the installer" in lines[-1][-1], True)
     chk("...the journal is kept for the installer's sake", os.path.exists(journal(inst)), True)
+
+    # Without app/ nothing can start and no screen shows a message, so there is no giving up:
+    # every launch tries again (sitecustomize, once each), and when the lock clears it works.
+    inst = interrupted("recover-locked-no-app")
+
+    def parked_locked(src, dst):
+        if "parked-" in src:
+            raise PermissionError("in use")
+        return real_move(src, dst)
+
+    UA._move, UA.RETRY_DELAY = parked_locked, 0
+    try:
+        tells = []
+        for _ in range(UA.MAX_ATTEMPTS + 2):
+            new_start()
+            UA.recover(inst)
+            tells.append(len(results(inst)))
+    finally:
+        UA._move, UA.RETRY_DELAY = real_move, 1.0
+    chk("no app/: failing launches are not counted, and said only once",
+        (tells, os.path.exists(os.path.join(inst, "app"))), ([1] * (UA.MAX_ATTEMPTS + 2), False))
+    new_start()
+    chk("...and the launch after the lock clears puts app back", (UA.recover(inst)[1], marker(inst)),
+        (["app"], "app"))
+    chk("...leaving no journal or count behind",
+        (os.path.exists(journal(inst)), os.path.exists(journal(inst) + ".tries")), (False, False))
+
+    # If the journal cannot be rewritten the count goes to a side file; if nothing can be
+    # written, the first-failure message is not repeated on every start.
+    inst = fresh_install("tries-side-file")
+    UA._move = kill_on(lambda src, dst: os.path.relpath(src, inst) == "scripts")
+    try:
+        UA.apply(inst, make_update(inst), check=lambda r: True)
+    except Killed:
+        pass
+    finally:
+        UA._move = real_move
+    real_wj = UA._write_journal
+
+    def journal_locked(root, data):
+        raise PermissionError("journal in use")
+
+    UA._write_journal, UA._move, UA.RETRY_DELAY = journal_locked, new_app_locked, 0
+    try:
+        lines = []
+        for _ in range(UA.MAX_ATTEMPTS + 1):
+            new_start()
+            UA.recover(inst)
+            lines.append(len(results(inst)))
+        with open(journal(inst) + ".tries", encoding="utf-8") as fh:
+            side = json.load(fh)
+    finally:
+        UA._write_journal, UA._move, UA.RETRY_DELAY = real_wj, real_move, 1.0
+    chk("journal not writable: counted in a side file, said once, then given up once",
+        (lines, side), ([1, 1, 2, 2], {"attempts": UA.MAX_ATTEMPTS, "told": True}))
+
+    # A stale lock is taken over by renaming it aside; one that turned fresh in between (another
+    # process took it over) is given back. The lock is released only if it is still ours.
+    inst = fresh_install("lock-race")
+    os.makedirs(os.path.join(inst, "updates"), exist_ok=True)
+    lock = os.path.join(inst, "updates", UA.LOCK)
+    with open(lock, "w") as fh:
+        fh.write("999999999")                                  # a dead holder
+    real_holder = UA._lock_holder
+    calls = []
+
+    def racing_holder(path):
+        got = real_holder(path)
+        calls.append(path)
+        if len(calls) == 1:                                    # judged stale... then taken over
+            os.remove(lock)
+            with open(lock, "w") as fh:
+                fh.write(str(holder2.pid))
+        return got
+
+    holder2 = _sp.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    UA._lock_holder = racing_holder
+    try:
+        took = UA._take_lock(inst)
+        held = open(lock).read()
+    finally:
+        UA._lock_holder = real_holder
+        holder2.kill()
+        holder2.wait()
+    chk("a lock taken over between judging and renaming is given back",
+        (took, held), (None, str(holder2.pid)))
+    with open(lock, "w") as fh:
+        fh.write(str(holder2.pid + 1 if holder2.pid + 1 != os.getpid() else holder2.pid + 2))
+    UA._release_lock(lock)
+    chk("another process's lock is never released by us", os.path.exists(lock), True)
+    os.remove(lock)
+    mine = UA._take_lock(inst)
+    UA._release_lock(mine)
+    chk("our own lock is released", (mine == lock, os.path.exists(lock)), (True, False))
 
     # A journal that cannot be read: set aside, said once, nothing moved.
     inst = fresh_install("bad-journal")

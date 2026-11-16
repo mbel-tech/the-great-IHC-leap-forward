@@ -97,7 +97,7 @@ Nucleus detection needs StarDist. The installer and `work/appenv` both have it. 
 
 | Menu | Item | What it does |
 | --- | --- | --- |
-| File | New, Open, Open Recent, Save, Save As, Revert | Work with the project file. Ctrl+N, Ctrl+O, Ctrl+S as usual. While a stage is running, New, Open, Save As, and a Save that changes the output folder wait until it finishes; an ordinary Save does not. If the file was saved by another copy of the app since you opened it, Save asks first: **Yes** saves over the other copy's settings (curation decisions already in the file are kept), **Discard** throws away your unsaved changes and reads the file again, **Cancel** leaves both. |
+| File | New, Open, Open Recent, Save, Save As, Revert | Work with the project file. Ctrl+N, Ctrl+O, Ctrl+S as usual. While a stage is running, New, Open, Save As, and a Save that changes the output folder wait until it finishes; an ordinary Save does not. If the file was saved by another copy of the app since you opened it, Save asks first: **Save over it** writes your version over the other copy's settings (curation decisions already in the file are kept), **Discard my changes and reload** throws away your unsaved changes and reads the file again, **Cancel** leaves both. |
 | File | Project history | Every stage that ran in this project, and when. |
 | File | Export a copy | A copy of the project to share or archive. |
 | View | One item per screen, All stages, Refresh status | Jump to a screen; see every stage in one list; re-read progress from disk. |

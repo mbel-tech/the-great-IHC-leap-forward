@@ -746,8 +746,13 @@ class Project:
                 target["curation"] = dict(disk["curation"])
             else:
                 target.pop("curation", None)
+            # A file with no `project` block yet is seeded from memory, as `_benign` and the
+            # partial writers do: its absence would otherwise drop this copy's id, created date,
+            # run rows and the sync marks `_mark_synced` could only keep in memory.
+            seeded = isinstance(disk.get("project"), dict) or not isinstance(target.get("project"), dict)
             for dotted in FOLLOWS_DISK:
-                _carry(disk, target, dotted.split("."))
+                if seeded or not dotted.startswith("project."):
+                    _carry(disk, target, dotted.split("."))
 
     def _write_partial(self, disk, seen):
         """Write `disk` (the file as read plus this writer's own keys); returns True if it had moved."""

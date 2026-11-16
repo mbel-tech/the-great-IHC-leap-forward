@@ -103,10 +103,11 @@ def _write_journal(root, data):
 
 
 def _drop_journal(root):
-    try:
-        os.remove(journal_path(root))
-    except OSError:
-        pass
+    for path in (journal_path(root), journal_path(root) + ".tries"):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
 
 def _swap(root, incoming, parked, check, mode="apply"):
@@ -301,12 +302,29 @@ MAX_ATTEMPTS = 3        # failed reversals before recovery stops and says "run t
 TRIED_ENV = "LSAPP_UPDATE_RECOVERY_"
 
 
+def _lock_holder(path):
+    """(pid written in a lock file or 0, its mtime) - or None if there is no such file."""
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return int(fh.read().strip() or 0), mtime
+    except (OSError, ValueError):
+        return 0, mtime
+
+
 def _take_lock(root):
     """Create updates/swap-journal.lock exclusively; its path, or None if another process holds it.
 
     O_CREAT|O_EXCL is atomic on NTFS and POSIX alike, so of several interpreters starting
     together exactly one recovers. A lock whose writer is dead, or older than STALE_LOCK, is
-    a leftover from a crash and is taken over. One being written this instant (no pid yet,
+    a leftover from a crash and is taken over - by renaming it aside under a name of our own
+    first, never by deleting `path`: between judging it stale and deleting it, another
+    process may have taken it over and written a fresh lock there, and deleting that would
+    leave two recovering at once. If what was renamed is not the lock judged stale, it is
+    put back and this process stands aside. One being written this instant (no pid yet,
     young) counts as held.
     """
     path = os.path.join(root, "updates", LOCK)
@@ -314,21 +332,29 @@ def _take_lock(root):
         try:
             fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         except FileExistsError:
-            try:
-                age = time.time() - os.path.getmtime(path)
-            except OSError:
+            seen = _lock_holder(path)
+            if seen is None:
                 continue                                    # just released: try again
-            try:
-                with open(path, encoding="utf-8") as fh:
-                    holder = int(fh.read().strip() or 0)
-            except (OSError, ValueError):
-                holder = 0
-            if age < STALE_LOCK and (holder == 0 or _alive(holder)):
+            holder, mtime = seen
+            if time.time() - mtime < STALE_LOCK and (holder == 0 or _alive(holder)):
                 return None
+            aside = f"{path}.stale-{os.getpid()}-{_stamp()}"
             try:
-                os.remove(path)
+                os.replace(path, aside)
             except OSError:
+                return None                                 # someone else is handling it
+            if _lock_holder(aside) != seen:
+                # Not the one judged stale: another process took it over in between. Give it back.
+                try:
+                    if not os.path.exists(path):
+                        os.replace(aside, path)
+                except OSError:
+                    pass
                 return None
+            try:
+                os.remove(aside)
+            except OSError:
+                pass
             continue
         except OSError:
             return None
@@ -336,6 +362,16 @@ def _take_lock(root):
             fh.write(str(os.getpid()))
         return path
     return None
+
+
+def _release_lock(path):
+    """Remove the lock only if it is still ours (after STALE_LOCK another process may own it)."""
+    held = _lock_holder(path)
+    if held is not None and held[0] == os.getpid():
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
 
 def _tell(root, text):
@@ -380,10 +416,36 @@ def recover(root):
         _log(root, f"recovering the interrupted update failed: {e!r}")
         return None, []
     finally:
-        try:
-            os.remove(lock)
-        except OSError:
-            pass
+        _release_lock(lock)
+
+
+def _read_tries(root, j):
+    """{"attempts", "told"}: from the journal, or from its side file when that was all that could
+    be written (whichever counted further)."""
+    tries = {"attempts": int(j.get("attempts") or 0), "told": bool(j.get("told"))}
+    try:
+        with open(journal_path(root) + ".tries", encoding="utf-8") as fh:
+            side = json.load(fh)
+        tries["attempts"] = max(tries["attempts"], int(side.get("attempts") or 0))
+        tries["told"] = tries["told"] or bool(side.get("told"))
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+    return tries
+
+
+def _write_tries(root, j, tries):
+    """Keep the count in the journal, or else in a side file beside it. False if neither took it."""
+    try:
+        _write_journal(root, dict(j, **tries))
+        return True
+    except OSError as e:
+        _log(root, f"could not count the recovery attempt in the journal: {e}")
+    try:
+        with open(journal_path(root) + ".tries", "w", encoding="utf-8") as fh:
+            json.dump(tries, fh)
+        return True
+    except OSError:
+        return False
 
 
 def _valid_journal(j):
@@ -439,8 +501,12 @@ def _recover_locked(root, j):
                 + (f"; {problems[0]}." if problems else "; that is done now."))
         _tell(root, text)
         return text, moved
-    attempts = int(j.get("attempts") or 0)
-    if attempts >= MAX_ATTEMPTS:
+    # Without `app/` only sitecustomize gets here, once per launch, and nothing can run on the
+    # install: giving up would leave it broken for good with a message no screen shows, and
+    # there is no running app for a retry to move folders under. So nothing is counted then.
+    app_missing = not os.path.isdir(os.path.join(root, "app"))
+    tries = _read_tries(root, j)
+    if tries["attempts"] >= MAX_ATTEMPTS and not app_missing:
         return None, []                                     # said so when it gave up
     for part, had_live in reversed(j["parts"]):
         live, old, new = (os.path.join(root, part), os.path.join(parked, part),
@@ -470,22 +536,26 @@ def _recover_locked(root, j):
         text = f"The {what} was interrupted, so it was reversed: you are on {_version(root)}, as before."
         _tell(root, text)
         return text, moved
-    attempts += 1
-    try:
-        _write_journal(root, dict(j, attempts=attempts))
-    except OSError as e:
-        _log(root, f"could not count the recovery attempt: {e}")
     detail = "; ".join(problems)
-    if attempts == 1:
+    if not app_missing:
+        tries["attempts"] += 1
+    if not tries["told"]:
+        tries["told"] = True
         text = (f"The {what} was interrupted and could not be fully reversed ({detail}). It "
                 f"will be tried again on the next start; if the app does not start, run the "
                 f"installer again. Your studies are not affected. Details: {log}")
-    elif attempts >= MAX_ATTEMPTS:
+    elif tries["attempts"] >= MAX_ATTEMPTS and not app_missing:
         text = (f"The {what} was interrupted, and putting the old version back failed "
-                f"{attempts} times ({detail}). It will not be tried again: run the installer "
-                f"again. Your studies are not affected. Details: {log}")
+                f"{tries['attempts']} times ({detail}). It will not be tried again: run the "
+                f"installer again. Your studies are not affected. Details: {log}")
     else:
-        _log(root, f"recovery attempt {attempts} failed: {detail}")
+        text = None
+    if not _write_tries(root, j, tries):
+        # The count could not be kept anywhere, so this would say the same thing on every start.
+        _log(root, f"recovery attempt failed and could not be counted: {detail}")
+        return None, moved
+    if text is None:
+        _log(root, f"recovery attempt {tries['attempts']} failed: {detail}")
         return None, moved
     _tell(root, text)
     return text, moved

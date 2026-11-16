@@ -69,6 +69,23 @@ def question(parent, title, text, buttons=None, default=None):
 QMessageBox.question = staticmethod(question)
 QMessageBox.warning = staticmethod(lambda p, t, x, *a, **k: (asked.append("warn:" + t), texts.append(x)))
 QMessageBox.information = staticmethod(lambda p, t, x, *a, **k: asked.append("info:" + t))
+
+
+def box_exec(box):
+    """A QMessageBox built with its own buttons: click the one whose label is the scripted answer."""
+    asked.append(box.windowTitle())
+    texts.append(box.text())
+    want = answers.get(box.windowTitle())
+    for b in box.buttons():
+        if b.text().replace("&", "") == want:
+            b.click()
+            return 0
+    if box.escapeButton() is not None:
+        box.escapeButton().click()
+    return 0
+
+
+QMessageBox.exec = box_exec
 picked = {}
 QFileDialog.getSaveFileName = staticmethod(lambda *a, **k: (picked.get("save", ""), ""))
 QFileDialog.getOpenFileName = staticmethod(lambda *a, **k: (picked.get("open", ""), ""))
@@ -148,9 +165,9 @@ s2 = session_on("c")
 with open(s2.project.path, "r+", encoding="utf-8") as fh:
     d = json.load(fh); d["pixel_size_um"] = 4; fh.seek(0); json.dump(d, fh, indent=2); fh.truncate()
 s2.project.set("section_thickness_um", 15.0, by="t")
-answers["The file changed on disk"] = QMessageBox.Cancel
+answers["The file changed on disk"] = "Cancel"
 chk("saving over a hand edit asks; Cancel leaves the file", (s2.save(None), read(s2.project.path)["pixel_size_um"]), (False, 4))
-answers["The file changed on disk"] = QMessageBox.Yes
+answers["The file changed on disk"] = PS.ProjectSession.SAVE_OVER
 chk("Yes saves over it", (s2.save(None), read(s2.project.path)["section_thickness_um"]), (True, 15.0))
 
 # The way out that keeps the other change: Discard reads the file again. Revert alone only went
@@ -165,11 +182,14 @@ s3.project.set("section_thickness_um", 16.0, by="t")
 s3.touch()
 reloaded = []
 s3.reloaded.connect(reloaded.append)
-answers["The file changed on disk"] = QMessageBox.Discard
+answers["The file changed on disk"] = PS.ProjectSession.RELOAD
 chk("Discard reads the file again instead of saving",
     (s3.save(None), s3.project.get("pixel_size_um"), s3.project.get("section_thickness_um") == 16.0, s3.dirty),
     (False, 0.71, False, False))
 chk("...and tells the window", reloaded, [s3.project.path])
+chk("the box's buttons carry their own labels, and its text names them",
+    (PS.ProjectSession.RELOAD in texts[-1], PS.ProjectSession.SAVE_OVER in texts[-1],
+     "Discard my changes and reload" == PS.ProjectSession.RELOAD), (True, True, True))
 s3.project.set("section_thickness_um", 17.0, by="t")
 asked.clear()
 chk("...after which Save goes through without asking, keeping the other change",

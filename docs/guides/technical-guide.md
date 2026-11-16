@@ -2462,7 +2462,7 @@ fails; it also does **Help > Undo last update**. Before moving anything it write
 `updates/swap-journal.json`; if the helper dies mid-swap, `update_apply.recover()` reads it and puts the
 old version back under an exclusive `swap-journal.lock`. `app/__main__.py` runs it before the app starts;
 the bundled runtime's `sitecustomize.py` runs it only when `app/` itself is missing. A reversal that fails
-is retried on later starts and given up after three tries. The replaced version is deleted only once it is filed as
+is retried on later starts and given up after three tries, but never while `app/` is missing (then nothing else can help). The replaced version is deleted only once it is filed as
 `updates/previous/`. `update_ui.py` is the window side.
 `packaging/make_update.py` writes the update package at build time.
 

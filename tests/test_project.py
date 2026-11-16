@@ -303,6 +303,25 @@ sa.save()
 chk("a Save during a 05b run neither asks nor drops the tuned values",
     (read(sfp)["detection"]["auto"], read(sfp)["pixel_size_um"]), ({"AF568": {"threshold": 5}}, 0.61))
 
+# The same on a file with no `project` block yet: what only memory holds (a sync mark
+# `_mark_synced` could not write, the block's id and created date) is not dropped because the
+# file has no block to take them from.
+nfp, _nfd = fresh("save_unseeded")
+na = P.Project.open(nfp)
+na._mark_synced("ls_mem_only", "abcabcabc123")
+chk("a sync mark on a file with no project block stays in memory only",
+    ("project" in read(nfp), na.block["synced"].get("ls_mem_only")), (False, "abcabcabc123"))
+nid, ncreated = na.block["id"], na.block["created"]
+disk = read(nfp)
+disk.setdefault("detection", {})["auto"] = {"AF488": {"threshold": 2}}
+ls_jsonio.write_json_atomic(nfp, disk, compact=P.COMPACT)
+na.set("pixel_size_um", 0.62, by="A")
+na.save()
+blk = read(nfp)["project"]
+chk("...and a Save after a stage moved the file keeps it, with the block's id and date",
+    (blk.get("synced", {}).get("ls_mem_only"), blk.get("id"), blk.get("created"),
+     read(nfp)["detection"]["auto"]), ("abcabcabc123", nid, ncreated, {"AF488": {"threshold": 2}}))
+
 print("--- bad files ---")
 bad = os.path.join(d, "bad.json")
 open(bad, "w").write("{nope")

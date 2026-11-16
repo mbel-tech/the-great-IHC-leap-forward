@@ -358,6 +358,53 @@ def parse_poly(text):
     return np.asarray(pts, float) if len(pts) >= 3 else None
 
 
+def ring_crosses(pts):
+    """True when the closed ring `pts` ((N, 2) array) crosses or touches itself.
+
+    A crossed outline has no single area. `outline_area` takes the shoelace, in
+    which a bowtie's two lobes cancel (area about 0), while 05c counts nuclei by
+    even-odd membership, in which both lobes count - so the density 06a divides
+    out of the two is inflated or infinite. The curator refuses such an outline
+    since 2026-11-16; this catches one in an export written before that.
+
+    The same test as the page's `ringCrosses`: consecutive repeats are dropped
+    first (a double-click to close places one point twice), then every pair of
+    non-neighbouring edges is checked, touching included - a ring pinched to a
+    point can wind its two halves opposite ways, the same disagreement.
+    """
+    p = []
+    for x, y in np.asarray(pts, float).tolist():
+        if not p or p[-1] != [x, y]:
+            p.append([x, y])
+    while len(p) > 1 and p[0] == p[-1]:
+        p.pop()
+    n = len(p)
+    if n < 4:
+        return False
+
+    def o(a, b, c):
+        v = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+        return (v > 0) - (v < 0)
+
+    def on(a, b, c):
+        return (min(a[0], b[0]) <= c[0] <= max(a[0], b[0])
+                and min(a[1], b[1]) <= c[1] <= max(a[1], b[1]))
+
+    for i in range(n):
+        a, b = p[i], p[(i + 1) % n]
+        for j in range(i + 2, n):
+            if i == 0 and j == n - 1:
+                continue                    # neighbours through the closing edge
+            c, d = p[j], p[(j + 1) % n]
+            d1, d2, d3, d4 = o(c, d, a), o(c, d, b), o(a, b, c), o(a, b, d)
+            if d1 * d2 < 0 and d3 * d4 < 0:
+                return True
+            if ((d1 == 0 and on(c, d, a)) or (d2 == 0 and on(c, d, b))
+                    or (d3 == 0 and on(a, b, c)) or (d4 == 0 and on(a, b, d))):
+                return True
+    return False
+
+
 def outline_area(X, Y):
     """Shoelace area of a closed outline, in the units of X and Y.
 
@@ -620,6 +667,7 @@ def build(regions_csv, limit=None, plates_csv=None, require_background=True,
 
     geom_rows, box_rows, skipped = [], [], []
     shapeless = []          # ROI rows carrying no geometry at all - see below
+    crossed = []            # polygon rows whose outline crosses itself
     rect_cache = {}
 
     for n, uid in enumerate(uids, 1):
@@ -732,6 +780,13 @@ def build(regions_csv, limit=None, plates_csv=None, require_background=True,
             # that is exactly why a polygon needs nothing new here. A disc was
             # already being turned into a 128-point outline before it was
             # mapped; a drawn region arrives as an outline already.
+            # A crossed outline is refused, not measured: its shoelace area
+            # and 05c's even-odd count disagree (see ring_crosses), so any
+            # density built from the two would be wrong. Named, like a
+            # shapeless row, so the operator knows which region to redraw.
+            if poly is not None and ring_crosses(poly):
+                crossed.append((uid, r.get("region", "")))
+                continue
             if poly is not None:
                 U, V = poly[:, 0], poly[:, 1]
             elif sr > 0:
@@ -796,6 +851,14 @@ def build(regions_csv, limit=None, plates_csv=None, require_background=True,
             print(f"    {_u} {_reg}")
         if len(shapeless) > 10:
             print(f"    ... and {len(shapeless) - 10} more")
+    if crossed:
+        print(f"  REFUSED {len(crossed)} polygon ROI row(s) whose outline crosses "
+              f"itself - no single area, so not placed; redraw these regions in "
+              f"the curator and export again:")
+        for _u, _reg in crossed[:10]:
+            print(f"    {_u} {_reg}")
+        if len(crossed) > 10:
+            print(f"    ... and {len(crossed) - 10} more")
     return geom_rows, box_rows, skipped
 
 

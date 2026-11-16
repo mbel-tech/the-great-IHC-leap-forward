@@ -1406,7 +1406,9 @@ canvas{display:block;width:100%;height:100%;object-fit:contain;cursor:crosshair;
       class="row" id="plateWarn" style="display:none;color:#9a5b00"></span><span
       class="row" id="studyNote" style="display:none;color:#9a5b00"></span><span
       class="row" id="saveWarn" style="display:none;color:#cf222e;font-weight:600"></span><span
-      class="row" id="syncNote" style="display:none;color:#9a5b00"></span></div>
+      class="row" id="syncNote" style="display:none;color:#9a5b00"></span><span
+      class="row" id="polyWarn" style="display:none;color:#cf222e;font-weight:600"></span><span
+      class="row" id="expWarn" style="display:none;color:#cf222e;font-weight:600"></span></div>
     <!-- The coach line: which mode the mouse is in and what a click does there.
          Pure presentation of state the page already keeps (guided, bgMode,
          rotMode); coach() is called from status(), which every mode change
@@ -3020,6 +3022,15 @@ addEventListener("mousemove", e=>{
 addEventListener("mouseup", ()=>{
   if(panDrag){ panDrag = null; return; }
   if(vDrag){
+    // A drag that leaves the outline crossing itself is put back where it
+    // started: a crossed ring has no single area (see ringCrosses), and saving
+    // it would hand 05a and 05c two different answers for the same region.
+    const pg = active ? (st(active).polys || [])[vDrag.pi] : null;
+    if(pg && vDrag.was && ringCrosses(pg.v)){
+      pg.v = vDrag.was;
+      polyRefuse("MOVE UNDONE - that would make the outline cross itself, so it has"
+               + " no single area. Move the corner to a place that keeps the edges apart.");
+    } else polyRefuse("");
     vDrag = null;
     save(); drawSec(); status(); paintCell(active);
     return;
@@ -3514,6 +3525,54 @@ function polyArea(v){
   return Math.abs(a) / 2;
 }
 
+// Does a closed ring cross itself? A crossed outline has no single area: 05a
+// takes the shoelace (a bowtie's two lobes cancel, so its area is about 0) while
+// 05c counts nuclei by even-odd membership (both lobes count), and the density
+// 06a divides out of those two is inflated or infinite. So an outline that
+// crosses itself is never stored: commitPoly refuses it and a corner drag that
+// makes one is put back. 05a_roi_geometry.ring_crosses is the same test, for an
+// export written before this one existed.
+//
+// Consecutive repeats are dropped first: a double-click to close places the
+// same point twice, and two corners on one spot are not a crossing. Touching
+// counts as crossing (a corner on another edge, two corners on one spot that
+// are not neighbours) - a ring pinched to a point is a figure-8 whose halves
+// can wind opposite ways, the same disagreement as a crossing.
+function ringPts(v){
+  const p = [];
+  for(let i = 0; i < v.length; i += 2){
+    const q = p[p.length - 1];
+    if(!q || q[0] !== v[i] || q[1] !== v[i+1]) p.push([v[i], v[i+1]]);
+  }
+  while(p.length > 1 && p[0][0] === p[p.length-1][0] && p[0][1] === p[p.length-1][1]) p.pop();
+  return p;
+}
+function ringCrosses(v){
+  const p = ringPts(v), n = p.length;
+  if(n < 4) return false;              // a triangle cannot cross itself
+  const o = (a, b, c) => Math.sign((b[0]-a[0])*(c[1]-a[1]) - (b[1]-a[1])*(c[0]-a[0]));
+  const on = (a, b, c) => Math.min(a[0], b[0]) <= c[0] && c[0] <= Math.max(a[0], b[0])
+                       && Math.min(a[1], b[1]) <= c[1] && c[1] <= Math.max(a[1], b[1]);
+  for(let i = 0; i < n; i++){
+    const a = p[i], b = p[(i+1) % n];
+    for(let j = i + 2; j < n; j++){
+      if(i === 0 && j === n - 1) continue;          // neighbours through the closing edge
+      const c = p[j], d = p[(j+1) % n];
+      const d1 = o(c, d, a), d2 = o(c, d, b), d3 = o(a, b, c), d4 = o(a, b, d);
+      if(d1 * d2 < 0 && d3 * d4 < 0) return true;
+      if((d1 === 0 && on(c, d, a)) || (d2 === 0 && on(c, d, b))
+         || (d3 === 0 && on(a, b, c)) || (d4 === 0 && on(a, b, d))) return true;
+    }
+  }
+  return false;
+}
+// Said in the header, where it stays until the next outline is accepted: the
+// hint line under the canvas is rewritten by every status() call.
+function polyRefuse(msg){
+  const box = el("polyWarn");
+  if(box){ box.textContent = msg; box.style.display = msg ? "" : "none"; }
+}
+
 // The hull a polygon answers, looked up rather than copied. Colour and the two
 // uncertainty flags are properties of the atlas, and reading them off the plate
 // each time is what stops the panes from ever disagreeing - the same rule the
@@ -3565,6 +3624,15 @@ function commitPoly(){
   // ...and an area, not a sliver. Three collinear clicks pass the count and
   // still enclose nothing.
   if(polyArea(draft) < 4 * imgK() * imgK()){ return; }
+  // ...and one that does not cross itself. The ring stays open, so z can take
+  // back the corner that crossed and the outline be finished from there.
+  if(ringCrosses(draft)){
+    polyRefuse("NOT CLOSED - this outline crosses itself, so it has no single area."
+             + " Press z to take back corners, then close it again.");
+    drawSec(); status();
+    return;
+  }
+  polyRefuse("");
   undoMark(active, "region polygon");
   const s = st(active);
   stampFrame(s, active);
@@ -3595,7 +3663,8 @@ function grabVertex(ix, iy){
     for(let i = 0; i < v.length; i += 2)
       if(Math.hypot(v[i] - ix, v[i+1] - iy) <= tol){
         undoMark(active, "move corner");
-        vDrag = {pi, vi: i};
+        // `was` is the ring before the drag, put back if the drag crosses it.
+        vDrag = {pi, vi: i, was: v.slice()};
         return true;
       }
   }
@@ -3608,8 +3677,9 @@ function grabVertex(ix, iy){
       const mx = (v[i] + v[j]) / 2, my = (v[i+1] + v[j+1]) / 2;
       if(Math.hypot(mx - ix, my - iy) <= tol){
         undoMark(active, "add corner");
+        const was = v.slice();
         v.splice(i, 0, mx, my);
-        vDrag = {pi, vi: i};
+        vDrag = {pi, vi: i, was};
         save(); drawSec(); status();
         return true;
       }
@@ -3629,6 +3699,14 @@ function dropCorner(ix, iy){
       // three. Refusing is better than deleting the shape out from under a
       // mis-aimed key.
       if(pg.v.length <= 6) return false;
+      // Taking a corner out can make the ring cross itself (the two edges that
+      // meet in its place cut through the rest), and that is refused like a drag.
+      const rest = pg.v.slice(0, i).concat(pg.v.slice(i + 2));
+      if(ringCrosses(rest)){
+        polyRefuse("NOT REMOVED - without that corner the outline would cross itself.");
+        return true;
+      }
+      polyRefuse("");
       undoMark(active, "remove corner");
       pg.v.splice(i, 2);
       save(); drawSec(); status(); paintCell(active);
@@ -4626,7 +4704,38 @@ function exportCsv(){
              // Blank on every row that is not a polygon.
              "landmarks_at_draw"]];
 
-  for(const d of DATA){
+  // EVERY SECTION THE STORE HOLDS WORK FOR, not only the sections in this
+  // build. DATA is what this page was built with - the worklist, the analysis
+  // set, one animal - and S is everything this browser has curated. Looping
+  // DATA alone meant that after a rebuild with a different subset the next
+  // export silently left out every curated section the build did not carry,
+  // and 05a reads only the newest roi_regions*: those sections' ROIs were gone
+  // from the analysis without a word.
+  //
+  // A section outside the build is exported from its stored record. Its
+  // coordinates are in the frame stamped on the record (`s.frame`, see
+  // frameIn), so dividing by that is canonical whatever this page shows. What
+  // the record does NOT carry - animal, marker, order - comes from the
+  // provenance table every page embeds (P_BY). A record that lacks either is
+  // not guessed at: no frame on a record with positions would mean dividing
+  // by THIS build's idea of the frame, which for a section it does not show is
+  // a guess; no provenance row means no marker to join by. Those are named in
+  // the header and left out, never dropped in silence.
+  const inBuild = new Set(DATA.map(d => d.uid));
+  const outside = [], cannot = [];
+  for(const uid of Object.keys(S).sort()){
+    const s = S[uid];
+    if(inBuild.has(uid) || !hasRoiWork(s)) continue;
+    const p = P_BY[uid];
+    const placed = (s.pairs && s.pairs.length) || (s.polys && s.polys.length);
+    const why = !p ? "no animal or marker for it in the provenance table"
+              : (placed && !s.frame) ? "no frame stamped on its record" : "";
+    if(why){ cannot.push(uid + " (" + why + ")"); continue; }
+    outside.push({uid, animal: p.animal, m: p.marker, sub: "outside_build",
+                  order: +p.section_order || 0});
+  }
+
+  for(const d of DATA.concat(outside)){
     const s=S[d.uid];
     // A favourite is a decision too, so it is reported even with no plate yet.
     // An exclusion is a judgement in its own right, exactly like a favourite or
@@ -4785,7 +4894,20 @@ function exportCsv(){
                pg.n === undefined ? "" : pg.n]);
     }
   }
-  beginExport();
+  beginExport(3);
+  expNote = outside.length
+    ? `${outside.length} of ${pl.length - 1} section(s) came from outside this build`
+    : "";
+  const w = el("expWarn");
+  if(w){
+    w.style.display = cannot.length ? "" : "none";
+    w.textContent = cannot.length
+      ? `NOT EXPORTED - ${cannot.length} curated section(s) outside this build lack what`
+        + ` the export needs; rebuild the curator with them in it, then export again: `
+        + cannot.join(", ")
+      : "";
+  }
+  expSay("exporting " + (pl.length - 1) + " section(s)");
   dl(pl,"roi_plates.csv");
   dl(lm,"roi_landmarks.csv");
   dl(rg,"roi_regions.csv");
@@ -4821,6 +4943,12 @@ let expStamp = null;                // DD.MM.YYYY_HH.MM for the action in progre
 let expDir = null;                  // chosen directory handle, if there is one
 let expSub = null;                  // the dated folder inside it, for this action
 let expQueue = Promise.resolve();   // writes are serialised - see saveExport
+let expWant = 1;                    // files this action writes
+let expGot = [];                    // [{name, url}] downloaded by the fallback, this action
+let expNote = "";                   // what this action adds to every status message
+let expLastDl = 0;                  // Date.now() of the last fallback download
+// The gap between two fallback downloads. See expWrite.
+const EXP_GAP_MS = 800;
 
 const expPad2 = n => (n < 10 ? "0" : "") + n;
 
@@ -4830,7 +4958,12 @@ function expStampNow(){
        + "_" + expPad2(d.getHours()) + "." + expPad2(d.getMinutes());
 }
 
-function beginExport(){ expStamp = expStampNow(); expSub = null; }
+// `n` is how many files this action writes, so the download fallback can say
+// how many to expect (see expWrite).
+function beginExport(n){
+  expStamp = expStampNow(); expSub = null;
+  expWant = n || 1; expGot = []; expNote = "";
+}
 
 // name.csv -> name_DD.MM.YYYY_HH.MM.csv. The extension stays last so the file
 // still opens by double-click, and 05a's roi_regions*.csv glob still matches.
@@ -4841,7 +4974,13 @@ function expName(base){
   return stem + "_" + (expStamp || expStampNow()) + ext;
 }
 
-function expSay(msg){ const e = el("expStat"); if(e) e.textContent = msg; }
+// expNote rides on every message of one action, so "wrote ..." per file does
+// not overwrite what the export as a whole has to say (how many sections came
+// from outside the build).
+function expSay(msg){
+  const e = el("expStat");
+  if(e) e.textContent = msg + (expNote ? " - " + expNote : "");
+}
 
 function expShow(){
   const e = el("expDirLbl");
@@ -4917,6 +5056,7 @@ function saveExport(blob, base){
 
 async function expWrite(blob, base){
   const name = expName(base);
+  let why = "";
   if(expDir){
     try {
       if(!await expGrant(expDir)) throw new Error("permission not granted");
@@ -4930,14 +5070,47 @@ async function expWrite(blob, base){
     } catch(err){
       // A dropped permission or a deleted folder must not lose the export.
       // Fall through to the download, and say why the folder was not used.
-      expSay("could not write to " + expDir.name + " (" + (err.message || err)
-             + ") - downloaded instead");
+      why = "could not write to " + expDir.name + " (" + (err.message || err)
+          + ") - downloaded instead. ";
+      expSay(why);
     }
   }
+  // THE DOWNLOAD FALLBACK, one file at a time. Three clicks back to back are
+  // what Chrome's "download multiple files" prompt exists to catch, and
+  // refusing it dropped two of the three files with nothing on the page to say
+  // so. A zip would make it one download but needs a library this page does
+  // not carry, and neither 05a nor 04q reads a bundle. So the downloads are
+  // spaced, and the status line lists every file of the action as it goes -
+  // how many to expect, and each one as a link that downloads it again. A
+  // page cannot see whether the browser kept a download; the operator can,
+  // and the link is how one that was refused is still got without exporting
+  // again (a click on a link is the operator's own, so it is never blocked).
+  // From the last download whichever action made it: a second export pressed
+  // while the first is still downloading must not land right on top of it.
+  const wait = expLastDl + EXP_GAP_MS - Date.now();
+  if(wait > 0) await new Promise(r => setTimeout(r, wait));
+  const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
+  a.href = url;
   a.download = name;
   a.click();
+  expLastDl = Date.now();
+  expGot.push({name, url});
+  expListDownloads(why);
+}
+
+// "downloaded 2 of 3 - expect 3 files: a, b, c". Built as markup because the
+// names are links; every name goes through esc.
+function expListDownloads(why){
+  const e = el("expStat");
+  if(!e) return;
+  const links = expGot.map(f =>
+    `<a href="${esc(f.url)}" download="${esc(f.name)}">${esc(f.name)}</a>`).join(", ");
+  e.innerHTML = esc(why || "") + `downloaded ${expGot.length} of ${expWant} - expect ${expWant}`
+    + ` file${expWant === 1 ? "" : "s"} in the download folder: ${links}`
+    + (expWant > 1 ? ". If the browser asked to allow several downloads and one is"
+                   + " missing, click its name to download it again." : "")
+    + (expNote ? " - " + esc(expNote) : "");
 }
 
 function dl(rowsArr,name){
@@ -6307,8 +6480,9 @@ function exportReview(){
       `${restores} section(s) would be put back into the pipeline.\\n\\n`
     + `That changes the analysis set, so 05c_detect_rois.py has to run again for `
     + `the sections it changes - the nuclei already measured do not cover them. `
-    + `Nothing is applied by this export; it writes the decisions for `
-    + `04a_reformat.py --apply-overrides to act on.\\n\\nExport anyway?`)) return;
+    + `Nothing is applied by this export; it writes the decisions, and the next `
+    + `04a_reformat.py --apply-overrides acts on the newest review export it finds `
+    + `(the export folder, or reformatted/section_review.csv).\\n\\nExport anyway?`)) return;
 
   const rows = [["scene_uid", "marker", "extra_rotation", "flip", "excluded",
                  "decision", "mask_rejected", "reason", "prior_status"]];

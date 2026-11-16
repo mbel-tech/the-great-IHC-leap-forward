@@ -145,8 +145,11 @@ class CuratorView(QWidget):
 
         reload_btn = QPushButton("Reload", self)
         reload_btn.clicked.connect(self.view.reload)
-        browser_btn = QPushButton("Open in browser", self)
-        browser_btn.clicked.connect(self._open_external)
+        # No "Open in browser" here any more. It opened this page on the app's
+        # local server, whose port changes every run, in a browser that does not
+        # mirror its storage to disk - so work done there never reached the
+        # curation files and was gone with the next port. Nothing depended on
+        # it; serve_curators and "Bring in browser exports" are the browser route.
         # The page is one screen of controls above two canvases. Inside the app
         # window on a laptop it gets about 840 x 320 px, which its header alone
         # fills, so the canvases vanish and the last row of buttons is cut off.
@@ -185,7 +188,6 @@ class CuratorView(QWidget):
         bar.addWidget(self.done_btn)
         bar.addWidget(self.window_btn)
         bar.addWidget(reload_btn)
-        bar.addWidget(browser_btn)
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -486,11 +488,6 @@ class CuratorView(QWidget):
         self.refresh_seed()
         if self.rel:
             self.show_page(self.rel, self.title.text())
-
-    def _open_external(self):
-        import webbrowser
-        if self.rel:
-            webbrowser.open(self.server.url_for(self.rel).toString())
 
     # ---- loading ----------------------------------------------------------
 

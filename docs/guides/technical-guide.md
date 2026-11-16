@@ -1266,6 +1266,9 @@ every atlas plate) into one 256 by 256 frame: debris removed, long axis horizont
 padded square and resized.
 
 - **Reads:** the DAPI overviews; the operator's overrides (`rotation_overrides*.csv`, exclusions); with
+  `--apply-overrides` the curator's Review decisions, from the newest `section_review*.csv` in
+  `reformatted/`, the export folder (one dated folder deep) or the download folder (only a file whose
+  sections are all this study's), found the way 05a finds `roi_regions*` (`find_review_csv`); with
   `--censor` the raw clipping masks, with `--mask-artifacts` the artifact masks.
 - **Writes:** per marker (names from `ls_paths`) `reformatted/reformat_index[_<marker>].csv`,
   `reformatted/sections[_<marker>]/<uid>.png` and `<uid>_mask.npy`, `excluded_sections[_<marker>].csv`
@@ -1439,7 +1442,11 @@ repository (about 6,500 lines, most of it the page's JavaScript). Chapter 7 desc
   `curation/ls_roi_curator_v1.json`.
 - **Writes:** `reformatted/roi_curator.html`. Its exports are `roi_plates.csv`, `roi_landmarks.csv` and
   `roi_regions.csv`, each with a timestamp added to its name, and Review mode exports
-  `section_review.csv`.
+  `section_review.csv` (stamped the same way). The three ROI files cover every section the saved state
+  holds work for, not only the sections in this build: a section outside the build takes its animal,
+  marker and order from the embedded provenance table and is divided by the frame stamped on its record;
+  one with no provenance row, or with positions and no stored frame, is named in the page header and left
+  out.
 - **How:** Python collects the data and fills twenty placeholders (`__DATA__`, `__PLATES__`, `__SEED__` and the rest) in one HTML template with `ls_io.fill`, which escapes the JSON for a `<script>` block.
 - **Settings:** `acquisition`, `atlas_source`, `atlas_scope` (`existing_regions`, `regions_to_add`),
   `atlas_polygon_mirror`, `export_dir`, `display`, and `groups` (only to build the blinded Shotgun deck
@@ -1594,7 +1601,11 @@ real slide pixels.
   row) is listed under `SKIPPED` and the run exits 1 with the count as its last line, a trial included
   for the sections it was told to place; the boxes that were placed are written. When one run places
   several markers, a closing line after the last marker names the ones that failed. Sections left out by the
-  analysis-set rule (no background disc) are the curation's decision and do not fail the run.
+  analysis-set rule (no background disc) are the curation's decision and do not fail the run. A polygon
+  ROI whose outline crosses or touches itself (`ring_crosses`; the curator refuses one since 2026-11-16,
+  an older export can still carry one) has no single area - the shoelace and 05c's even-odd membership
+  disagree - so it is refused and listed under `REFUSED` by section and region, like a row with no shape;
+  the rest of the section is placed.
 
 ### `05b_tune_detection.py`
 
@@ -2359,10 +2370,14 @@ top-level functions:
 - **Review mode:** `toggleReview`, `revRender` and the `rev*` functions show every section, including
   excluded ones, with its provenance (`__PROV__`, from `section_provenance.csv`), its artifact and
   censor overlays, and lets a person reinstate an excluded section; `exportReview` writes
-  `section_review.csv`.
+  `section_review.csv`, which 04a's `find_review_csv` picks up from the export folder.
 - **Shotgun deck:** `shotgun` builds a PowerPoint file in the browser, with no library: it writes the
   slide XML itself and packs it with a stored zip (`zipStore`, `crc32`). Slides are ordered blind.
-- **Export:** `exportCsv`, `saveExport` and `dl`.
+- **Export:** `exportCsv`, `saveExport` and `dl`. `exportCsv` loops over the saved state, not `DATA`
+  (see `04l_roi_curator.py` above). Without a chosen folder, `expWrite` downloads the files of one action
+  `EXP_GAP_MS` apart and `expListDownloads` lists each as a re-download link with the count to expect.
+- **Polygons:** `ringCrosses` refuses an outline that crosses itself in `commitPoly`, puts back a corner
+  drag that makes one, and refuses a corner removal that would; `polyRefuse` says why in `#polyWarn`.
 
 ### 7.4 The level curator
 
@@ -3406,7 +3421,7 @@ Kept hand rows of the overrides file whose flip differs from their partner's man
 
 #### `reformatted/section_review.csv`
 
-Review decisions made in the ROI curator; 04a merges them over the exclusion list.
+Review decisions made in the ROI curator; 04a merges them over the exclusion list. The page exports it stamped (`section_review_<DD.MM.YYYY_HH.MM>.csv`, into the export folder); 04a takes the newest such file, or this one when it is newer.
 
 - **Written by:** 04l_roi_curator.py (the Review mode's export)
 - **Read by:** 04a_reformat.py

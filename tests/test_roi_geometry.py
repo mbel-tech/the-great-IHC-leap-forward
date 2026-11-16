@@ -587,6 +587,41 @@ with temp_study(acquisition={"layout": "paired",
     chk("roi_boxes_Mk1.csv is written with rows in it",
         len(P5.load_csv(_box_path)) if os.path.exists(_box_path) else 0, 1)
 
+    # ---- a self-intersecting polygon ---------------------------------------
+    # A bowtie has shoelace area 0 (its two lobes cancel) while 05c's even-odd
+    # membership counts both lobes, so the density between them is infinite.
+    # The curator refuses one now; an older export can still carry one, and
+    # 05a must refuse the ROI by name rather than compute an area for it.
+    import io as _bio                                         # noqa: E402
+    import contextlib as _bctx                                # noqa: E402
+    _bow = os.path.join(MK.root, "roi_regions_bowtie.csv")
+    _wcsv(_bow,
+          [{"scene_uid": U1, "marker": "Mk1", "roi_kind": "roi",
+            "region": "BOWTIE", "seed_n": "", "sec_x": "128", "sec_y": "128",
+            "sec_r": "", "sec_poly": "100 100;150 150;150 100;100 150"},
+           {"scene_uid": U1, "marker": "Mk1", "roi_kind": "roi",
+            "region": "SQUARE", "seed_n": "", "sec_x": "125", "sec_y": "125",
+            # A double-clicked corner (the same point twice) is not a crossing.
+            "sec_r": "", "sec_poly": "100 100;150 100;150 150;150 150;100 150"}],
+          ["scene_uid", "marker", "roi_kind", "region", "seed_n",
+           "sec_x", "sec_y", "sec_r", "sec_poly"])
+    _buf = _bio.StringIO()
+    _saved = (P5.RF.reformat, P5.scene_rects)
+    try:
+        P5.RF.reformat = _Reformat()
+        P5.scene_rects = lambda path: {0: (100, 200, 1000, 1000)}
+        P5.use_marker("Mk1")
+        with _bctx.redirect_stdout(_buf):
+            _g, _boxes, _sk = P5.build(_bow, require_background=False)
+    finally:
+        P5.RF.reformat, P5.scene_rects = _saved
+    _said = _buf.getvalue()
+    chk("a bowtie polygon is not placed",
+        sorted(b["region"] for b in _boxes), ["SQUARE"])
+    chk("...the refusal names the section and the region",
+        any(U1 in ln and "BOWTIE" in ln for ln in _said.splitlines()), True)
+    chk("...and says why", "crosses itself" in _said, True)
+
     # ---- verify() ---------------------------------------------------------
     # Mk1 asked for; Mk2 is the only marker in the unsuffixed index. If the
     # file list is still the literal pair, `want` is empty, the note below is

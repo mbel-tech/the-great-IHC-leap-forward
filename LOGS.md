@@ -9,6 +9,40 @@ where things landed, not which plausible-looking route was tried and abandoned, 
 
 ---
 
+## 2026-11-16 - Curator exports and review decisions reach the pipeline (04l / 04a / 05a / app)
+
+**Changed:** `exportCsv` in `04l_roi_curator.py` writes every section the saved state holds work
+for, not only the sections in this build (`DATA`). A section outside the build takes animal,
+marker and order from the embedded provenance table and is divided by the frame stamped on its
+record; its `subset` is `outside_build`, and the status line says how many came from outside. One
+with no provenance row, or with positions and no stored frame, is named in a red header line
+(`expWarn`) and left out. 04a's `apply_review` reads the newest `section_review*.csv` from
+`reformatted/`, the export folder (one dated folder deep) or the download folder (this study's
+sections only), found the way 05a finds `roi_regions*` (`find_review_csv`); `reformatted/section_review.csv`
+is still a candidate. The page refuses an outline that crosses itself (`ringCrosses`): it is not
+closed, a corner drag that makes one is put back, a corner removal that would is refused, and a red
+header line (`polyWarn`) says why. 05a refuses such a polygon from an older export by section and
+region (`ring_crosses`, listed under `REFUSED`) instead of measuring it. The download fallback
+spaces the files of one export `EXP_GAP_MS` (800 ms) apart and lists each, with the count to
+expect, as a link that downloads it again. The app's "Open in browser" button is removed.
+
+**Why:** After a rebuild with a different subset, the next export silently left out curated
+sections, and 05a takes the newest export. Review decisions never reached 04a: the page writes a
+stamped file into the export folder and 04a read only `reformatted/section_review.csv`, while the
+page's confirmation said 04a would act on it. A bowtie has shoelace area 0 in 05a and an even-odd
+area in 05c, so its density was inflated or infinite. Three back-to-back downloads trip the
+browser's multiple-download prompt, and refusing it lost two files with nothing saying how many
+there should be. "Open in browser" opened the page on the app's per-run port in a browser that
+does not mirror to disk, so work done there never reached the curation files; nothing depended on
+it, so removing it was the smaller change than a notice.
+
+**Cost:** A section curated in an older build is exported only if its record carries a frame;
+records imported by 04q and never shown again in an `--rgb` build do not, and are named until the
+page is rebuilt with them. Out-of-build sections take the marker from 04p's provenance row; under
+multiplex that is one marker per scene. A 05a run with a refused crossed polygon still exits 0
+(as a shapeless row does); the region is missing from the analysis until it is redrawn. An export
+in the fallback takes about 1.6 s longer. Blob URLs for the re-download links are not revoked.
+
 ## 2026-11-16 - The ROI curator does not lose work (04l / app)
 
 **Changed:** `save()` in `04l_roi_curator.py` writes per section. Each tab keeps, per section,

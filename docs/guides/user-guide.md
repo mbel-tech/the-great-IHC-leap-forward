@@ -369,7 +369,6 @@ The Curate screen shows one curator page at a time, with a row of buttons above 
 The buttons above the page are:
 
 - **Reload** reloads the page, for example after Prepare has rebuilt its pictures.
-- **Open in browser** opens the same page in your web browser.
 - **Own window** moves the page into a window of its own, which you can make full screen. The button then says **Back to the app** and puts it back.
 - **Done: export and go to Measure** (ROI curator only) exports for you and opens the Measure screen. Measure does not start by itself; you press **Run all remaining** there.
 
@@ -416,7 +415,7 @@ This is the main curation job, and the only stop in a normal run. For each secti
 4. **Optional: landmarks.** With Guided off, click a point on the section, then the matching point on the plate. Landmarks record how well the plate fits; the sidebar lists each with its error, so a mis-click shows up as a large number.
 5. Mark the section if needed: **f** *Favourite* (a section you want in the quantified subset), **No ROI here** (the section is fine but has nothing to measure), or **x** *Exclude* (the section should not be used).
 
-**Editing a finished region.** Drag a corner to move it, click an edge to add a corner, or press Delete over a corner to remove it. **z** undoes the last corner or region; **u** is the general undo; **Clear section** removes everything placed on the section.
+**Editing a finished region.** Drag a corner to move it, click an edge to add a corner, or press Delete over a corner to remove it. An outline may not cross itself: one that would is not closed, a corner dragged across another edge springs back, and a red line above the section says why. (A crossed outline has no single area, so its density could not be measured.) **z** undoes the last corner or region; **u** is the general undo; **Clear section** removes everything placed on the section.
 
 **Zoom and pan.** Scroll to zoom about the cursor, drag with the middle or right button to pan, **+** and **−** zoom about the centre, **0** fits the whole section. Zooming shows the scan's real pixels, not a smoothed version.
 
@@ -435,6 +434,12 @@ This is the main curation job, and the only stop in a normal run. For each secti
 | `roi_plates.csv` | Section you made any decision about, with its plate and status |
 | `roi_landmarks.csv` | Landmark pair, with its error |
 | `roi_regions.csv` | Region or background disc you drew, with its outline |
+
+Export includes every section you have curated, also those not in the current build of the page (for example after the page was rebuilt for a different worklist); the line under the tools says how many came from outside the build. A curated section the export cannot write correctly (no record of the picture size its points were placed on, or not in the study's section list) is named in red above the section, and left out until the page is rebuilt with it.
+
+Without a chosen folder (and outside the app), Export downloads the three files one after another, a moment apart. The line under the tools says how many to expect and lists each file as a link: if the browser asked to allow several downloads and one is missing, click its name to download it again.
+
+**Review decisions** are exported with Review's own Export, as `section_review_<date>.csv` in the exports folder. The next reformat run with overrides (04a) applies the newest such file it finds there (or `reformatted/section_review.csv`).
 
 **Shotgun** and **By region** build a PowerPoint deck of your favourites, split by treatment group, one slide per plate or per region. They are the only curator buttons that read the treatment groups, and are switched off unless the study's settings list the groups.
 

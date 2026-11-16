@@ -3163,7 +3163,7 @@
     "section_review.csv"
    ],
    "writer": "04l_roi_curator.py (the Review mode's export)",
-   "what": "Review decisions made in the ROI curator; 04a merges them over the exclusion list.",
+   "what": "Review decisions made in the ROI curator; 04a merges them over the exclusion list. The page exports it stamped (`section_review_<DD.MM.YYYY_HH.MM>.csv`, into the export folder); 04a takes the newest such file, or this one when it is newer.",
    "columns": [
     {
      "name": "scene_uid",

@@ -130,11 +130,67 @@ def main():
         shutil.rmtree(tmp, ignore_errors=True)
 
     test_select_only()
+    test_review_export_is_found()
     test_excluded_render_failure_is_not_lost()
 
     print()
     print("ALL PASS" if not fails else f"{fails} FAILED")
     return 1 if fails else 0
+
+
+def test_review_export_is_found():
+    """The page's review export reaches 04a.
+
+    The Review mode writes `section_review_<stamp>.csv`, which the app (and a
+    picked folder) files under `export_dir/<stamp>/`. apply_review read only
+    `reformatted/section_review.csv`, a name the page never writes, so every
+    reinstatement and drop stopped at the export folder - while the page's
+    confirmation said 04a would act on it.
+    """
+    import time
+    keep = (RF.REVIEW_CSV, getattr(RF, "EXPORT_DIR", None), os.environ.get("HOME"))
+    # getattr so a 04a without the search fails these checks, not the import.
+    find = getattr(RF, "find_review_csv", lambda: "no find_review_csv")
+    tmp = tempfile.mkdtemp(prefix="lsrevx_")
+    os.environ["HOME"] = tmp        # no stray ~/Downloads of the runner's
+    try:
+        RF.REVIEW_CSV = os.path.join(tmp, "reformatted", "section_review.csv")
+        RF.EXPORT_DIR = os.path.join(tmp, "exports")
+        chk("nothing anywhere: no review file", find(), None)
+
+        stamp = "16.11.2026_10.00"
+        exp = os.path.join(RF.EXPORT_DIR, stamp, f"section_review_{stamp}.csv")
+        os.makedirs(os.path.dirname(exp))
+        write_review(exp, [
+            {"scene_uid": "E1", "marker": "AF568", "excluded": 1,
+             "decision": "manual", "mask_rejected": 0, "reason": "dropped on review"},
+            {"scene_uid": "E2", "marker": "AF568", "excluded": 0,
+             "decision": "restored", "mask_rejected": 0, "reason": "focus was fine"}])
+        chk("a stamped export in the export folder is found",
+            find(), exp)
+        out, _ = RF.apply_review({"E2": ("auto", "no tissue")}, "AF568")
+        chk("...and applied: its drop excludes", out.get("E1", ("", ""))[0], "manual")
+        chk("...and its reinstatement reinstates", "E2" in out, False)
+
+        # The old fixed name still counts, and the newer of the two wins.
+        os.makedirs(os.path.dirname(RF.REVIEW_CSV))
+        write_review(RF.REVIEW_CSV, [
+            {"scene_uid": "E3", "marker": "AF568", "excluded": 1,
+             "decision": "manual", "mask_rejected": 0, "reason": "by hand"}])
+        old = time.time() - 100
+        os.utime(RF.REVIEW_CSV, (old, old))
+        chk("an older reformatted/section_review.csv loses to the export",
+            find(), exp)
+        new = time.time() + 100
+        os.utime(RF.REVIEW_CSV, (new, new))
+        chk("...and a newer one wins", find(), RF.REVIEW_CSV)
+    finally:
+        RF.REVIEW_CSV, RF.EXPORT_DIR, home = keep
+        if home is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = home
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def test_select_only():

@@ -32,6 +32,31 @@ if "SSL_CERT_FILE" not in os.environ:
     except ImportError:
         pass
 
+# An update whose helper died half way can leave the install without its `app`
+# folder, and then `-m app` cannot even be found. The helper keeps a journal
+# while it swaps (app/update_apply.py); its own copy in updates/ - outside every
+# folder it moves - knows how to put the old version back, so it is loaded from
+# there, before anything is imported from app/. Only when `app` is missing: every
+# interpreter of this runtime passes through here (each stage, each worker), and
+# any other half-swapped state is app/__main__.py's to put right, once, before
+# the app runs. Nothing here may stop the interpreter; a failure is logged.
+if (os.path.exists(os.path.join(_root, "updates", "swap-journal.json"))
+        and not os.path.isdir(os.path.join(_root, "app"))):
+    try:
+        import importlib.util
+        _spec = importlib.util.spec_from_file_location(
+            "_lsapp_update_recover", os.path.join(_root, "updates", "update_apply.py"))
+        _mod = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        _mod.recover(_root)
+        del _spec, _mod
+    except Exception as _e:                                 # noqa: BLE001
+        try:
+            with open(os.path.join(_root, "updates", "last-update.log"), "a", encoding="utf-8") as _fh:
+                _fh.write("recovery at start-up could not run: %r\n" % (_e,))
+        except Exception:                                   # noqa: BLE001
+            pass
+
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
 
 del _root, _keras

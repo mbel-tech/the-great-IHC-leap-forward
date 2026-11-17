@@ -2,9 +2,9 @@
 
 The Curate screen shows one curator page at a time. For most studies the only page you need is the **ROI curator**: for each section you check it should be used, match it to an atlas plate, and draw the brain regions to measure, plus background discs for comparison.
 
-Your work is saved into the project as you go, so closing the app loses nothing, but **only Export hands your decisions to Measure**. **Done: export and go to Measure**, in the bar above the page, exports for you and opens Measure.
+Your work is saved into the project as you go, so closing the app loses nothing, but **only Export hands your decisions to Measure**. **Done: export and go to Measure**, in the bar above the page, exports for you and opens Measure. If a save fails, a red **NOT SAVED** line above the section says why until one succeeds. Two tabs of the same curator each save only the sections they changed; if both change the same section, the later save keeps it and the other tab says so.
 
-The bar above the page also has **Reload** (after Prepare rebuilt its pictures), **Open in browser**, and **Own window** (a window of its own you can make full screen).
+The bar above the page also has **Reload** (after Prepare rebuilt its pictures) and **Own window** (a window of its own you can make full screen).
 
 **How far curation has got.** Once there is an export, the screen says so for each marker, for example *pERK curation ● 17 of 24 sections curated*; an excluded section counts as decided. In a paired study the second marker (PCNA) is curated on its own, in the same page: choose it in the curator's *Marker* menu. Its sections are separate physical sections, so nothing decided for one marker reaches the other. **Curate is done when every section of both markers is curated or excluded.**
 
@@ -44,11 +44,15 @@ In every curator, **a dashed amber border is a proposal the program made; a soli
 
 ## Review: bringing sections back
 
-**Review** shows every scanned section and what happened to it, including those set aside automatically. **Reinstate** puts an excluded section back; **Reject mask** discards an artifact mask that covered real tissue. Keys: ↑ ↓ move, **d** DAPI, **k** marker, **v** artifact mask, **c** censored pixels, **f** full screen.
+**Review** shows every scanned section and what happened to it, including those set aside automatically. **Reinstate** puts an excluded section back; **Reject mask** discards an artifact mask that covered real tissue. **Clear** takes back the Review decision only. Keys: ↑ ↓ move, **d** DAPI, **k** marker, **v** artifact mask, **c** censored pixels, **f** full screen, **u** undo the last change to the section shown.
 
 ## Export
 
-Export writes three files to your exports folder, which Measure reads: `roi_plates.csv` (plate and status per section), `roi_landmarks.csv` and `roi_regions.csv` (every region and background disc).
+Export writes three files to your exports folder, which Measure reads: `roi_plates.csv` (plate and status per section), `roi_landmarks.csv` and `roi_regions.csv` (every region and background disc). It includes every section you have curated, also those not in the current build of the page, and says how many came from outside it (one the reformat has set aside goes out marked *not carried*, so Measure leaves it out; it is not recorded as your exclusion); a curated section it cannot write correctly is named in red and left out until the page is rebuilt with it. In a browser without a chosen folder the three files download a moment apart, and the line under the tools lists each as a link to download again if the browser refused one.
+
+Review's own export (`section_review_<date>.csv`) is applied by the next reformat run with overrides, which takes the newest one in the exports folder.
+
+An outline may not cross itself: one that would is not closed, and a corner dragged across another edge springs back, with a red line saying why. A region from earlier work that crosses itself is named in red when its section is opened; redraw it, or ROI placement in Measure fails.
 
 **Shotgun** and **By region** build a PowerPoint deck of your favourites, split by treatment group. They are the only curator buttons that read the groups, and are off unless the study lists them.
 

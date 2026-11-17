@@ -183,8 +183,15 @@ def ensure_study(repo_root, parent=None):
     A study already resolvable - LS_CONFIG, LS_STUDY, or the one last opened -
     is used without asking. Only a first run, or a settings file pointing at a
     study that has since been deleted, brings the picker up.
+
+    Never the repo's own config.json unasked. resolve_path falls back to it so
+    a bare `python scripts/XX.py` keeps working, but here that fallback opened
+    a pre-study config (or one a developer left in the checkout) as the study,
+    with nobody having chosen it (REVIEW.md rule 6). The picker offers it under
+    "Import existing config" instead.
     """
-    if not (os.environ.get("LS_CONFIG") or os.environ.get("LS_STUDY")):
+    named = os.environ.get("LS_CONFIG") or os.environ.get("LS_STUDY")
+    if not named:
         # The study open when the app last closed - which may live in its own
         # output folder, outside the studies folder the slug rule looks in.
         last = LC.read_settings().get("last_project")
@@ -192,7 +199,9 @@ def ensure_study(repo_root, parent=None):
             return os.path.abspath(last)
     try:
         path = LC.resolve_path()
-        if os.path.exists(path):
+        fallback = os.path.abspath(os.path.join(LC.REPO, "config.json"))
+        if os.path.exists(path) and (named or os.path.normcase(os.path.abspath(path))
+                                     != os.path.normcase(fallback)):
             return path
     except SystemExit:
         pass

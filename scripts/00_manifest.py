@@ -47,6 +47,8 @@ if _HERE not in sys.path:
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
 import ls_channels as CH  # noqa: E402
 import ls_io as IO  # noqa: E402
+# source_files matching, shared with 00b so the two cannot drift.
+import ls_sources as SRC  # noqa: E402
 import ls_naming as NM  # noqa: E402
 import ls_progress as PG  # noqa: E402
 
@@ -110,7 +112,7 @@ ROW_SPREAD_FLAG = 0.8
 # ---------------------------------------------------------------- source discovery
 
 
-def discover_sources(stack):
+def discover_sources(stack, skipped=None):
     """Yield (source, member, opener) for every CZI, loose files first.
 
     `source` is either "LOOSE" or the zip filename; `opener` returns a fresh
@@ -123,31 +125,51 @@ def discover_sources(stack):
     a subset into its own directory would say the same thing at the cost of
     moving hundreds of gigabytes, and the slide drive here is exFAT, which
     supports neither hardlinks nor symlinks.
+
+    A name in `source_files` is a loose CZI, a whole zip, or a CZI inside a zip.
+    It used to be matched against the zip's own name only, so naming a member
+    skipped its whole archive and the slide simply never appeared, uncounted.
+
+    `skipped`, a list, receives (source, member, reason) for everything that was
+    meant to be read and could not be: an archive that will not open, and a
+    `source_files` name found nowhere. main() fails the run on any of them;
+    printing "cannot open" and carrying on made a missing slide look like a
+    complete study.
     """
-    only = CONFIG.get("source_files") or None
-    if only:
-        only = {os.path.basename(n) for n in only}
+    skipped = skipped if skipped is not None else []
+    only = SRC.named(CONFIG.get("source_files"))
+    found = set()
+    unreadable = []
 
     entries = []
 
     for path in sorted(glob.glob(os.path.join(SOURCE_DIR, "*.czi"))):
         name = os.path.basename(path)
-        if only and name not in only:
+        if not SRC.takes_loose(name, only):
             continue
+        found.add(name)
         entries.append(("LOOSE", name, path, (lambda p: (lambda: open(p, "rb")))(path)))
 
     for zpath in sorted(glob.glob(os.path.join(SOURCE_DIR, "*.zip"))):
         zname = os.path.basename(zpath)
-        if only and zname not in only:
-            continue
+        whole = SRC.takes_zip(zname, only)
         try:
             zf = stack.enter_context(zipfile.ZipFile(zpath))
-        except zipfile.BadZipFile:
-            print(f"  !! cannot open {zname}, skipping")
+        except (zipfile.BadZipFile, OSError) as exc:
+            # Counted only where it was asked for. With a source_files subset
+            # an unreadable archive nobody named is not this run's business -
+            # unless a named CZI turns out to be missing, which says so below.
+            if whole:
+                skipped.append((zname, "", f"cannot open the archive: {exc}"))
+            else:
+                unreadable.append(zname)
             continue
+        if whole and only:
+            found.add(zname)
         for info in zf.infolist():
-            if not info.filename.lower().endswith(".czi"):
+            if not SRC.takes_member(info.filename, whole, only):
                 continue
+            found.add(os.path.basename(info.filename))
             entries.append(
                 (
                     zname,
@@ -156,6 +178,9 @@ def discover_sources(stack):
                     (lambda z, n: (lambda: z.open(n)))(zf, info.filename),
                 )
             )
+
+    for name, why in SRC.unfound(only, found, unreadable, SOURCE_DIR):
+        skipped.append(("source_files", name, why))
     return entries
 
 
@@ -326,6 +351,88 @@ def serial_numbers(rows, cols, scenes):
         lambda i: (cols[i], rows[i] if cols[i] % 2 == 0 else n_rows - 1 - rows[i])
     )
     return out
+
+
+# ---------------------------------------------------------------- section order
+
+
+CHOSEN_VARIANTS_CSV = os.path.join(MANIFEST_DIR, "chosen_variants.csv")
+#: The columns 00 and 02 both read from it.
+CHOSEN_VARIANT_COLS = ("animal", "slide", "marker_channel", "variant")
+
+
+def _slide_key(value):
+    """A slide number as one spelling: 8, "8" and "08" are the same slide."""
+    text = str(value if value is not None else "").strip()
+    return str(int(text)) if text.isdigit() else text
+
+
+def chosen_variant_overrides():
+    """(animal, slide, marker) -> replicate letter, from chosen_variants.csv.
+
+    The person-written file 02_pair_passes.choose_variants reads. Read here
+    too so the scan a person picked for a re-scanned slide is the one whose
+    sections the next slide's numbers follow on from.
+    """
+    if not os.path.exists(CHOSEN_VARIANTS_CSV):
+        return {}
+    with open(CHOSEN_VARIANTS_CSV, newline="", encoding="utf-8") as fh:
+        rd = csv.DictReader(fh)
+        # A person writes this file: a missing column is a refusal naming the
+        # file and the column, not a bare KeyError from inside the loop.
+        for col in CHOSEN_VARIANT_COLS:
+            IO.pick_column(rd.fieldnames, col, what=CHOSEN_VARIANTS_CSV)
+        return {(r["animal"], _slide_key(r["slide"]), r["marker_channel"]): r["variant"]
+                for r in rd}
+
+
+def assign_section_order(scene_rows, order_key):
+    """Write `section_order` (and `slide_serial`) on every scene row.
+
+    Rostro-caudal position across the whole animal: slide number first, then
+    position within the slide under the confirmed convention (`order_key`).
+
+    One series per (animal, marker), NOT per replicate letter. The letter is
+    which scan of a slide this is, and a slide scanned again (`8c` beside
+    `1b..9b`) is the same physical sections as its first scan. Numbering each
+    letter as its own series gave `8c` 1..k, colliding with slide 1, and 01d
+    (sorted by section_order then slide) and 04b (section_order alone)
+    interleaved the two slides.
+
+    So each slide owns a block of places, and every scan of it is numbered
+    inside that block: place = sections on the earlier slides + serial within
+    the slide. Which scan is used stays Stage 2's decision
+    (02_pair_passes.choose_variants), and each slide's block is as long as the
+    scan that decision picks - the chosen_variants.csv override, else the scan
+    with most scenes, then the earlier letter - so the chosen scans run 1..N
+    without a gap or a repeat whatever letter each slide's chosen scan has. A
+    scan not chosen shares numbers with the chosen one (same sections); if it
+    has more scenes than the chosen scan, its extra ones run past the block.
+
+    Returns (series, re-scanned slides).
+    """
+    overrides = chosen_variant_overrides()
+    series = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
+    for row in scene_rows:
+        series[(row["animal"], row["marker_channel"])][row["slide"]][row["variant"]].append(row)
+
+    rescans = 0
+    for (animal, marker), slides in series.items():
+        offset = 0
+        for slide in sorted(slides, key=lambda s: (s is None, s if s is not None else 0)):
+            scans = slides[slide]
+            pick = overrides.get((animal, _slide_key(slide), marker))
+            if pick not in scans:
+                pick = sorted(scans, key=lambda v: (-len(scans[v]), v))[0]
+            if len(scans) > 1:
+                rescans += 1
+            for rows in scans.values():
+                rows.sort(key=lambda r: r[order_key])
+                for position, row in enumerate(rows, start=1):
+                    row["slide_serial"] = row[order_key]
+                    row["section_order"] = offset + position
+            offset += len(scans[pick])
+    return len(series), rescans
 
 
 # ---------------------------------------------------------------- slide-map figure
@@ -522,14 +629,20 @@ def main():
     # The archives stay open only for as long as the openers are used; the
     # CSVs below are written after they are released.
     with contextlib.ExitStack() as stack:
-        entries = discover_sources(stack)
+        # (source, member, reason) for every slide file meant to be read that
+        # was not. Any entry fails the run and writes no manifest: see below.
+        failures = []
+        entries = discover_sources(stack, failures)
         print(f"Discovered {len(entries)} CZI entries across loose files and zips.")
 
         file_rows = []
         scene_rows = []
         layout_rows = []
         seen_names = {}
-        failures = []
+        # Drawn only once the run is known to be written: a refused run left
+        # the slide maps describing it while both manifests described the
+        # last good one.
+        slidemaps = []
 
         for n_done, (source, member, container, opener) in enumerate(entries):
             PG.report(n_done, len(entries), "slide files")
@@ -558,6 +671,27 @@ def main():
                     info = summarise(read_metadata(fh))
             except Exception as exc:  # noqa: BLE001 - want the reason in the report
                 failures.append((source, member, repr(exc)[:120]))
+                continue
+
+            # Checked before the file gets a row, so manifest_files.csv never
+            # lists a file manifest_scenes.csv has no sections for. Both used
+            # to be "printed and carried on": a file with no Scenes block got a
+            # file row and no scene rows, and a Scenes block that disagreed
+            # with SizeS (sections the header says exist but cannot place)
+            # was a line in the summary of a run that exited 0.
+            scenes = info["scenes"]
+            if not scenes:
+                failures.append((source, member, "no scenes in metadata"))
+                continue
+            # Only where the header states a count: ZEN leaves SizeS out of a
+            # single-scene acquisition, czi_meta reads that as 0, and refusing
+            # it would stop the whole study over a file whose every scene is
+            # placed.
+            if info["size_s"] and len(scenes) != info["size_s"]:
+                failures.append((source, member,
+                                 f"{len(scenes)} scene(s) in the Scenes block but "
+                                 f"SizeS is {info['size_s']}; the sections it cannot "
+                                 f"place would be missing from the study"))
                 continue
 
             channel_names = [c["name"] for c in info["channels"]]
@@ -604,11 +738,6 @@ def main():
             }
             seen_names[base] = {k: row[k] for k in row if k not in ("source", "container", "is_redundant_copy")}
             file_rows.append(row)
-
-            scenes = info["scenes"]
-            if not scenes:
-                failures.append((source, member, "no scenes in metadata"))
-                continue
 
             forced = overrides.get(base)
             rows_idx, cols_idx = build_grid(scenes, forced)
@@ -663,17 +792,42 @@ def main():
                 }
             )
 
-            render_slidemap(
+            slidemaps.append((
                 os.path.join(SLIDEMAP_DIR, base.replace(".czi", ".png")),
                 base,
                 scenes,
                 rows_idx,
                 cols_idx,
                 serials,
-            )
+            ))
 
     # Before anything is written for downstream to read: a stale manifest from
     # an earlier good run is safer than a fresh one that is wrong.
+    #
+    # Nothing found is a failure, not "nothing to write": the old manifest was
+    # left in place and the stage read as done over a study it never saw.
+    if not entries and not failures:
+        print()
+        print(f"!! 00_manifest found no CZI in {SOURCE_DIR}"
+              + (" matching source_files" if CONFIG.get("source_files") else "")
+              + "; manifest not written.")
+        return 1
+    # A file that could not be read is a failure of the whole run, and neither
+    # manifest table is written. Writing the rest used to replace
+    # manifest_files.csv while manifest_scenes.csv kept the previous run's rows
+    # (or lost a file's sections without a count), so the two tables described
+    # different studies and every later stage trusted both.
+    if failures:
+        print()
+        print("=" * 72)
+        print(f"slide files read : {len(file_rows)}")
+        print(f"failures         : {len(failures)}")
+        for f in failures:
+            print(f"    !! {f[0]} :: {f[1]} :: {f[2]}")
+        print("=" * 72)
+        print(failure_line(failures))
+        return 1
+
     refused = refusals(file_rows, scene_rows, CONFIG["pixel_size_um"])
     if refused:
         print()
@@ -681,6 +835,9 @@ def main():
         for line in refused:
             print(line)
         return 1
+
+    for args in slidemaps:
+        render_slidemap(*args)
 
     if accepted:
         merged = dict(overrides)
@@ -691,43 +848,66 @@ def main():
         )
         print(f"  accepted {len(accepted)} row-count suggestion(s) into layout_overrides.csv")
 
-    # Rostro-caudal position across the whole animal: slide number first, then
-    # position within the slide under the confirmed convention. Kept per
-    # variant series so the duplicate re-scans each get a clean 1..N and the
-    # choice between them stays a Stage 1 decision.
     order_key = f"serial_{ORDER_CONVENTION}"
-    series = defaultdict(list)
-    for row in scene_rows:
-        series[(row["animal"], row["marker_channel"], row["variant"])].append(row)
-    for rows_in_series in series.values():
-        rows_in_series.sort(key=lambda r: (r["slide"], r[order_key]))
-        for position, row in enumerate(rows_in_series, start=1):
-            row["slide_serial"] = row[order_key]
-            row["section_order"] = position
-
-    print(f"  section_order written from {order_key} across {len(series)} variant series")
+    n_series, n_rescans = assign_section_order(scene_rows, order_key)
+    print(f"  section_order written from {order_key} across {n_series} series"
+          + (f"; {n_rescans} re-scanned slide(s) numbered inside their slide's "
+             f"places" if n_rescans else ""))
 
     _write_csv(os.path.join(MANIFEST_DIR, "manifest_files.csv"), file_rows)
     _write_csv(os.path.join(MANIFEST_DIR, "manifest_scenes.csv"), scene_rows)
-    _write_csv(os.path.join(QC_DIR, "slide_layout_summary.csv"), layout_rows)
+    _write_csv(os.path.join(QC_DIR, "slide_layout_summary.csv"), layout_rows, LAYOUT_KEYS)
 
-    _report(file_rows, scene_rows, layout_rows, failures)
-    return 0
+    _report(file_rows, scene_rows, layout_rows)
 
     # Written first so the operator can read which channels the scans carry;
-    # then stopped, because every stage after this keys on those names.
+    # then stopped, because every stage after this keys on those names. This
+    # sat after `return 0` and never ran.
     CH.require_manifest_markers(CONFIG, scene_rows, CONFIG_PATH)
+    return 0
 
 
-def _write_csv(path, rows):
-    if not rows:
-        print(f"  !! nothing to write for {path}")
-        return
-    keys = list(rows[0].keys())
+def _remedy(reason):
+    """What to do about one failure, worded for its cause: renaming does not
+    mend a damaged file, and source_files is a list of the files to KEEP."""
+    if reason.startswith("filename did not match"):
+        return "rename it to fit slide_naming.pattern, or list only the files to keep in source_files"
+    if reason.startswith("named in source_files"):
+        return "correct or remove that name in source_files"
+    return ("re-copy or re-export it, or list only the files to keep in source_files")
+
+
+def failure_line(failures, shown=3):
+    """The one line app/runner.py shows for a refused run: which files, why,
+    and what to do - the log above it has the full list."""
+    parts = []
+    for source, member, reason in failures[:shown]:
+        name = os.path.basename(member) or source
+        parts.append(f"{name} ({reason}; {_remedy(reason)})")
+    more = len(failures) - shown
+    return (f"!! 00_manifest wrote no manifest: {len(failures)} slide file(s) could not "
+            f"be read - " + "; ".join(parts)
+            + (f"; and {more} more, listed above" if more > 0 else ""))
+
+
+# slide_layout_summary.csv / slide_layout_review.csv, pinned so a table with no
+# rows is still written - header only - rather than left as last run's file.
+LAYOUT_KEYS = ["file", "animal", "slide", "variant", "n_scenes", "n_rows", "n_cols",
+               "row_counts", "row_spread_ratio", "rows_forced", "suggested_rows",
+               "needs_review"]
+
+
+def _write_csv(path, rows, keys=()):
+    """Every row's columns, `keys` first. A table with no rows is written
+    header-only: skipping it left the previous run's file (a review list of
+    slides that no longer need review) to be read as this run's."""
+    keys = list(keys)
     for r in rows:
         for k in r:
             if k not in keys:
                 keys.append(k)
+    if not keys:
+        raise ValueError(f"no columns for {path}: pass keys for a table that can be empty")
     # Swapped in, not written in place: every later stage reads the manifest
     # as the truth about the study, and a crash part-way through left a
     # truncated one that they read without complaint.
@@ -735,16 +915,13 @@ def _write_csv(path, rows):
     print(f"  wrote {path}  ({len(rows)} rows)")
 
 
-def _report(file_rows, scene_rows, layout_rows, failures):
+def _report(file_rows, scene_rows, layout_rows):
     unique = [r for r in file_rows if not r["is_redundant_copy"]]
     print()
     print("=" * 72)
     print(f"unique CZI files parsed : {len(unique)}")
     print(f"redundant loose copies  : {len(file_rows) - len(unique)}")
     print(f"sections (scenes) total : {len(scene_rows)}")
-    print(f"failures                : {len(failures)}")
-    for f in failures:
-        print(f"    !! {f[0]} :: {f[1]} :: {f[2]}")
 
     by_marker = defaultdict(int)
     for r in unique:
@@ -757,11 +934,6 @@ def _report(file_rows, scene_rows, layout_rows, failures):
     print(f"distinct pixel sizes     : {sorted(odd_px)}")
     shading = {r["shading_reference_mode"] for r in unique}
     print(f"shading reference modes  : {shading}")
-
-    mismatched = [r for r in unique if r["n_scenes"] != r["size_s"]]
-    print(f"n_scenes != SizeS        : {len(mismatched)}  <- must be 0")
-    for r in mismatched[:5]:
-        print(f"    {r['file']}: {r['n_scenes']} scenes vs SizeS {r['size_s']}")
 
     exposures = defaultdict(set)
     for r in unique:
@@ -778,7 +950,7 @@ def _report(file_rows, scene_rows, layout_rows, failures):
         (r for r in layout_rows if r["needs_review"]),
         key=lambda r: -r["row_spread_ratio"],
     )
-    _write_csv(os.path.join(QC_DIR, "slide_layout_review.csv"), review)
+    _write_csv(os.path.join(QC_DIR, "slide_layout_review.csv"), review, LAYOUT_KEYS)
     print(f"slides needing row review: {len(review)}  (worst first, see qc/slide_layout_review.csv)")
     for r in review[:10]:
         print(

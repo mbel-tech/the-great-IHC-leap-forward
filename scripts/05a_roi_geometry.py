@@ -358,6 +358,53 @@ def parse_poly(text):
     return np.asarray(pts, float) if len(pts) >= 3 else None
 
 
+def ring_crosses(pts):
+    """True when the closed ring `pts` ((N, 2) array) crosses or touches itself.
+
+    A crossed outline has no single area. `outline_area` takes the shoelace, in
+    which a bowtie's two lobes cancel (area about 0), while 05c counts nuclei by
+    even-odd membership, in which both lobes count - so the density 06a divides
+    out of the two is inflated or infinite. The curator refuses such an outline
+    since 2026-11-16; this catches one in an export written before that.
+
+    The same test as the page's `ringCrosses`: consecutive repeats are dropped
+    first (a double-click to close places one point twice), then every pair of
+    non-neighbouring edges is checked, touching included - a ring pinched to a
+    point can wind its two halves opposite ways, the same disagreement.
+    """
+    p = []
+    for x, y in np.asarray(pts, float).tolist():
+        if not p or p[-1] != [x, y]:
+            p.append([x, y])
+    while len(p) > 1 and p[0] == p[-1]:
+        p.pop()
+    n = len(p)
+    if n < 4:
+        return False
+
+    def o(a, b, c):
+        v = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+        return (v > 0) - (v < 0)
+
+    def on(a, b, c):
+        return (min(a[0], b[0]) <= c[0] <= max(a[0], b[0])
+                and min(a[1], b[1]) <= c[1] <= max(a[1], b[1]))
+
+    for i in range(n):
+        a, b = p[i], p[(i + 1) % n]
+        for j in range(i + 2, n):
+            if i == 0 and j == n - 1:
+                continue                    # neighbours through the closing edge
+            c, d = p[j], p[(j + 1) % n]
+            d1, d2, d3, d4 = o(c, d, a), o(c, d, b), o(a, b, c), o(a, b, d)
+            if d1 * d2 < 0 and d3 * d4 < 0:
+                return True
+            if ((d1 == 0 and on(c, d, a)) or (d2 == 0 and on(c, d, b))
+                    or (d3 == 0 and on(a, b, c)) or (d4 == 0 and on(a, b, d))):
+                return True
+    return False
+
+
 def outline_area(X, Y):
     """Shoelace area of a closed outline, in the units of X and Y.
 
@@ -527,7 +574,7 @@ def scene_rects(czi_path):
 def analysis_set(regions, plates):
     """Which sections are measurable, and a full account of what was dropped.
 
-    Three conditions, and each rejects for a different reason:
+    Four conditions, and each rejects for a different reason:
 
       * at least one ROI - there is nothing to measure otherwise;
       * at least one BACKGROUND disc - the positivity cut is per section and is
@@ -536,7 +583,9 @@ def analysis_set(regions, plates):
         substitute a different piece of tissue for the control;
       * not excluded - `excluded` is the operator's own judgement recorded in
         roi_plates.csv, and measuring a section they threw out would quietly
-        overrule it.
+        overrule it;
+      * still carried - `not_carried` marks a curated section no reformat_index
+        holds any more, which build() could not place.
 
     Reported rather than filtered silently, because the counts are a result in
     their own right: how many sections were curated but cannot be used, and why,
@@ -548,11 +597,18 @@ def analysis_set(regions, plates):
         d = bg if r.get("roi_kind") == "background" else roi
         d[u] = d.get(u, 0) + 1
     excluded = {r["scene_uid"] for r in plates if r.get("excluded") == "1"}
+    # `not_carried` (04l, since 2026-11-16): a curated section that no
+    # reformat_index carries any more - 04a has excluded it or never made it.
+    # Not the operator's exclusion, so not folded into `excluded`, but just as
+    # unplaceable: build() would find no index row and fail the run on it.
+    gone = {r["scene_uid"] for r in plates if r.get("not_carried") == "1"}
 
     keep, dropped = [], []
     for u in sorted(set(roi) | set(bg)):
         if u in excluded:
             dropped.append((u, "excluded by the operator"))
+        elif u in gone:
+            dropped.append((u, "not carried by the pipeline (in no reformat_index)"))
         elif not roi.get(u):
             dropped.append((u, f"no ROI ({bg.get(u, 0)} background only)"))
         elif not bg.get(u):
@@ -563,7 +619,7 @@ def analysis_set(regions, plates):
 
 
 def build(regions_csv, limit=None, plates_csv=None, require_background=True,
-          marker=None):
+          marker=None, refused=None, no_shape=None):
     regions = load_csv(regions_csv)
     # One marker's rows of an export that carries several - see main(). The
     # paired markers' uids are disjoint, so the plates' `excluded` flags need no
@@ -588,6 +644,15 @@ def build(regions_csv, limit=None, plates_csv=None, require_background=True,
             print(f"    dropped {n:3d}: {k}")
         kept = set(keep)
         regions = [r for r in regions if r["scene_uid"] in kept]
+    else:
+        # --all-sections takes every section the curation names, excluded or
+        # not - but a not_carried one has no reformat_index row to be placed
+        # from, so it is left out here too, and said.
+        gone = {r["scene_uid"] for r in plates if r.get("not_carried") == "1"}
+        n_gone = len({r["scene_uid"] for r in regions} & gone)
+        if n_gone:
+            print(f"    dropped {n_gone:3d}: not carried by the pipeline")
+            regions = [r for r in regions if r["scene_uid"] not in gone]
     focus = {r["scene_uid"]: r for r in load_csv(FOCUS_CSV)}
     man = {r["scene_uid"]: r for r in load_csv(MANIFEST_CSV)}
 
@@ -619,7 +684,13 @@ def build(regions_csv, limit=None, plates_csv=None, require_background=True,
         uids = uids[:limit]
 
     geom_rows, box_rows, skipped = [], [], []
-    shapeless = []          # ROI rows carrying no geometry at all - see below
+    # ROI rows carrying no geometry at all - see below. The caller's list when
+    # it passes one (`no_shape`), for the same reason as `refused`.
+    shapeless = no_shape if no_shape is not None else []
+    # Polygon rows whose outline crosses itself. The caller's list when it
+    # passes one (`refused`), so _place_marker can fail the run on them without
+    # build() changing what it returns to every other caller.
+    crossed = refused if refused is not None else []
     rect_cache = {}
 
     for n, uid in enumerate(uids, 1):
@@ -732,6 +803,13 @@ def build(regions_csv, limit=None, plates_csv=None, require_background=True,
             # that is exactly why a polygon needs nothing new here. A disc was
             # already being turned into a 128-point outline before it was
             # mapped; a drawn region arrives as an outline already.
+            # A crossed outline is refused, not measured: its shoelace area
+            # and 05c's even-odd count disagree (see ring_crosses), so any
+            # density built from the two would be wrong. Named, like a
+            # shapeless row, so the operator knows which region to redraw.
+            if poly is not None and ring_crosses(poly):
+                crossed.append((uid, r.get("region", "")))
+                continue
             if poly is not None:
                 U, V = poly[:, 0], poly[:, 1]
             elif sr > 0:
@@ -796,6 +874,13 @@ def build(regions_csv, limit=None, plates_csv=None, require_background=True,
             print(f"    {_u} {_reg}")
         if len(shapeless) > 10:
             print(f"    ... and {len(shapeless) - 10} more")
+    if crossed:
+        print(f"  REFUSED {len(crossed)} polygon ROI row(s) whose outline crosses or touches "
+              f"itself - no single area, so not placed:")
+        for _u, _reg in crossed[:10]:
+            print(f"    {_u} {_reg}")
+        if len(crossed) > 10:
+            print(f"    ... and {len(crossed) - 10} more")
     return geom_rows, box_rows, skipped
 
 
@@ -1084,26 +1169,51 @@ def main():
     # Every marker is attempted even when an earlier one fails, and a marker
     # that places nothing is NOT written: its existing boxes are curation-
     # derived work, and an empty file would silently replace them.
-    rc = 0
+    failed = []
     for marker in todo:
         if _place_marker(marker, regions, plates, args,
                          only=marker if split else None):
-            rc = 1
-    return rc
+            failed.append(marker)
+    # The reason goes LAST, after every marker has printed its summary.
+    # app/runner.py shows the last line printed as the failure, and the app
+    # runs this with no --marker, so under `paired` a marker that failed and
+    # one placed cleanly after it used to leave the second marker's "====="
+    # separator as the reason.
+    if failed and len(todo) > 1:
+        print(not_placed_line(failed, todo))
+    return 1 if failed else 0
+
+
+def not_placed_line(failed, todo):
+    """The closing "!!" line of a run over several markers, some failed.
+
+    It used to say "the other marker(s) were placed" whatever happened - also
+    when every marker failed and nothing was placed at all. Placed markers are
+    named only when there are some.
+    """
+    placed = [m for m in todo if m not in failed]
+    return (f"!! ROIs not placed for {', '.join(failed)} (see "
+            f"{'that marker' if len(failed) == 1 else 'each marker'}'s output "
+            f"above)"
+            + (f"; {', '.join(placed)} {'was' if len(placed) == 1 else 'were'} "
+               f"placed" if placed else "; no marker was placed")
+            + ". This stage is not complete: fix the cause and run it again.")
 
 
 def _place_marker(marker, regions, plates, args, only=None):
     """Place one marker's ROIs and write that marker's files. 1 on failure."""
     use_marker(marker)
     print(f"marker: {marker}")
+    crossed, shapeless = [], []
     geom, boxes, skipped = build(regions, limit=args.limit, plates_csv=plates,
                                  require_background=not args.all_sections,
-                                 marker=only)
+                                 marker=only, refused=crossed, no_shape=shapeless)
     if not geom:
         print(f"no {marker} section could be placed")
         if skipped:
             for uid, why in skipped[:10]:
                 print(f"    {uid}: {why}")
+        not_placed(marker, skipped, crossed, shapeless)
         return 1
 
     # Written to the SUFFIXED pair always, even when the legacy unsuffixed file
@@ -1132,7 +1242,7 @@ def _place_marker(marker, regions, plates, args, only=None):
         print("=" * 72)
         # Only the N sections the trial was told to place can be skipped
         # here; the rest were never asked for, and are no failure.
-        return not_placed(marker, skipped)
+        return not_placed(marker, skipped, crossed, shapeless)
 
     # Keep the export these boxes were built from, beside them.
     #
@@ -1183,10 +1293,10 @@ def _place_marker(marker, regions, plates, args, only=None):
         for uid, why in skipped[:10]:
             print(f"    {uid}: {why}")
     print("=" * 72)
-    return not_placed(marker, skipped)
+    return not_placed(marker, skipped, crossed, shapeless)
 
 
-def not_placed(marker, skipped):
+def not_placed(marker, skipped, crossed=(), shapeless=()):
     """1, with the reason as the last line printed, when sections were skipped.
 
     A section in `skipped` has ROIs the operator drew and no box: its angle
@@ -1197,13 +1307,31 @@ def not_placed(marker, skipped):
     written and stay; this only makes the gap a failure someone has to read.
     Sections left out by the analysis-set rule (no background disc) are not
     in `skipped` - that is the curation's own decision, printed by build().
+
+    `crossed` are polygon ROIs refused because their outline crosses itself
+    (see ring_crosses). The rest of their section is placed - its background
+    disc included - so without this the section would look complete downstream
+    with a region the operator drew silently missing. Same rule: the boxes that
+    were placed are written, and the run fails with the count as its last line.
+
+    `shapeless` are ROI rows with neither a radius nor an outline (only a
+    damaged or legacy export has one). They are curated regions that will not
+    be measured, exactly as a crossed polygon is, so they fail the run the same
+    way; they were printed as REFUSED and the run returned 0.
     """
-    if not skipped:
-        return 0
-    print(f"!! {len(skipped)} {marker} section(s) with ROIs NOT PLACED (see "
-          f"SKIPPED above): their ROIs have no boxes, so 05c would not measure "
-          f"them. Fix the cause and run this again.")
-    return 1
+    if skipped:
+        print(f"!! {len(skipped)} {marker} section(s) with ROIs NOT PLACED (see "
+              f"SKIPPED above): their ROIs have no boxes, so 05c would not measure "
+              f"them. Fix the cause and run this again.")
+    if crossed:
+        print(f"!! {len(crossed)} {marker} polygon ROI(s) REFUSED (outline crosses "
+              f"or touches itself; see REFUSED above) - redraw them in the curator and export "
+              f"again.")
+    if shapeless:
+        print(f"!! {len(shapeless)} {marker} ROI row(s) REFUSED (no shape: neither "
+              f"sec_r nor sec_poly; see REFUSED above) - their regions will not be "
+              f"measured. Redraw them in the curator and export again.")
+    return 1 if (skipped or crossed or shapeless) else 0
 
 
 if __name__ == "__main__":

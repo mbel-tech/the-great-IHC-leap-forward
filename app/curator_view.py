@@ -145,8 +145,11 @@ class CuratorView(QWidget):
 
         reload_btn = QPushButton("Reload", self)
         reload_btn.clicked.connect(self.view.reload)
-        browser_btn = QPushButton("Open in browser", self)
-        browser_btn.clicked.connect(self._open_external)
+        # No "Open in browser" here any more. It opened this page on the app's
+        # local server, whose port changes every run, in a browser that does not
+        # mirror its storage to disk - so work done there never reached the
+        # curation files and was gone with the next port. Nothing depended on
+        # it; serve_curators and "Bring in browser exports" are the browser route.
         # The page is one screen of controls above two canvases. Inside the app
         # window on a laptop it gets about 840 x 320 px, which its header alone
         # fills, so the canvases vanish and the last row of buttons is cut off.
@@ -175,13 +178,19 @@ class CuratorView(QWidget):
             f"background:{T.DANGER};color:#ffffff;font-weight:600;padding:6px 8px")
         self.save_warning.setVisible(False)
         self._save_failing = False
+        # Which keys are failing now. A save of ANOTHER key succeeding says nothing about
+        # them - the 60 s snapshot reaching disk does not mean the curation does - so the
+        # warning goes only when every failing key has saved again.
+        self._failing_keys = set()
+        self._quiet_disk_failed = set()     # quiet keys in _failing_keys by a failed disk write
+        # Page loads already warned that they started from an older copy (one box each).
+        self._stale_loads = set()
 
         bar = QHBoxLayout()
         bar.addWidget(self.title, 1)
         bar.addWidget(self.done_btn)
         bar.addWidget(self.window_btn)
         bar.addWidget(reload_btn)
-        bar.addWidget(browser_btn)
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -292,14 +301,22 @@ class CuratorView(QWidget):
         """
         page = self.view.page()
         self.bridge = ST.Bridge(self.store, on_save=self._saved, on_error=self._save_failed,
-                                guard=self.guard, on_aside=self._set_aside)
+                                guard=self.guard, on_aside=self._set_aside,
+                                on_page_error=self._page_store_failed,
+                                on_behind=self._reseed, on_stale=self._stale_page)
         # Whose curation a page loaded from this seed shows; `project_changed` needs it once
         # the store already answers with the next project.
         self.seeded_project = self.store._project()
         self.channel = QWebChannel(page)
         self.channel.registerObject("lsbridge", self.bridge)
         page.setWebChannel(self.channel)
+        self._insert_seed_script()
 
+    def _insert_seed_script(self):
+        """(Re)insert the script every load of the page runs first: qwebchannel.js and the seed."""
+        page = self.view.page()
+        for sc in page.scripts().find("ls_state_bridge"):
+            page.scripts().remove(sc)
         from PySide6.QtCore import QFile, QIODevice
         f = QFile(":/qtwebchannel/qwebchannel.js")
         qwc = ""
@@ -316,14 +333,57 @@ class CuratorView(QWidget):
         sc.setSourceCode(src)
         page.scripts().insert(sc)
 
+    def _reseed(self):
+        """The file is ahead of the page's storage (`ST.SaveGuard.behind`), or caught up again.
+
+        Only the script is rebuilt, not the bridge: the page on screen is still saving
+        through this one. The next load - Reload, the page's own reload, any navigation -
+        then starts from the file as it is now.
+        """
+        self._insert_seed_script()
+
     def _saved(self, key, n):
         self.logged.emit(f"saved   {key}  ({n/1024:.1f} KB)")
-        if self._save_failing:
+        self._failing_keys.discard(key)
+        # A failed disk write of a key saved only when its own control is used (the
+        # radius, the ROI choice, the added ROIs) would otherwise hold the warning up
+        # until that control is used again, through any amount of curation that reaches
+        # disk: a save that succeeds shows the disk is writable again.
+        self._failing_keys -= self._quiet_disk_failed
+        self._quiet_disk_failed.clear()
+        if self._save_failing and not self._failing_keys:
             self._save_failing = False
             self.save_warning.setVisible(False)
             self.logged.emit("curation saves are reaching disk again")
 
-    def _save_failed(self, key, message):
+    def _page_store_failed(self, key, message):
+        """The file has the save, the page's own storage does not: the same warning, said so."""
+        self._save_failed(key, message, lead="Curation is NOT SAVED in the curator page's own "
+                          "storage - the file on disk has it. ")
+
+    def _stale_page(self, load, key, message):
+        """A load that started from an older copy than the file: its saves go aside.
+
+        Its own lead and its own box - not the page-storage one, whose "the file on disk has
+        it" is the opposite of true here - once per load, even inside a streak of failures,
+        because this is the moment the operator must stop working on the page.
+        """
+        self.logged.emit(f"NOT SAVED  {message}")
+        self._failing_keys.add(key)
+        self._save_failing = True
+        self.save_warning.setText("Curation is NOT SAVED - this page's decisions are being set "
+                                  "aside, not written to the file. " + message)
+        self.save_warning.setVisible(True)
+        if load not in self._stale_loads:
+            self._stale_loads.add(load)
+            box = QMessageBox(QMessageBox.Warning, "Curation not saved",
+                              message + "\n\nThe warning above the curator stays until a "
+                              "save reaches the file again.", QMessageBox.Ok, self)
+            box.setAttribute(Qt.WA_DeleteOnClose)
+            box.open()
+
+    def _save_failed(self, key, message, lead="Curation is NOT being saved to disk - "
+                     "decisions made now are in this page only. "):
         """Show a failed save now, and keep showing it until one succeeds.
 
         The strip and the log line repeat for every failure; the message box comes once per
@@ -331,9 +391,10 @@ class CuratorView(QWidget):
         stop the work the operator is trying to save.
         """
         self.logged.emit(f"NOT SAVED  {message}")
-        self.save_warning.setText(
-            "Curation is NOT being saved to disk - decisions made now are in this page only. "
-            + message)
+        self._failing_keys.add(key)
+        if key in ST.QUIET_KEYS:
+            self._quiet_disk_failed.add(key)
+        self.save_warning.setText(lead + message)
         self.save_warning.setVisible(True)
         if not self._save_failing:
             self._save_failing = True
@@ -459,11 +520,6 @@ class CuratorView(QWidget):
         self.refresh_seed()
         if self.rel:
             self.show_page(self.rel, self.title.text())
-
-    def _open_external(self):
-        import webbrowser
-        if self.rel:
-            webbrowser.open(self.server.url_for(self.rel).toString())
 
     # ---- loading ----------------------------------------------------------
 

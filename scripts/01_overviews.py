@@ -335,6 +335,39 @@ def mark_failed(qc_rows, failures):
     return list(qc_rows.values())
 
 
+#: The columns a kept row copies from the manifest on every run. They are not
+#: measured from the image: 00 decides them, and a re-run of 00 (a confirmed
+#: mounting convention, changed overrides, a re-scanned slide) can move them.
+IDENTITY_KEYS = ("section_order", "slide", "variant")
+
+
+def refresh_identity(by_uid, scenes, label):
+    """Bring kept rows into line with the manifest as it is now, in place.
+
+    Resume used to keep every row exactly as it was written, so after 00 was
+    re-run focus.csv and saturation_raw.csv carried the old section_order,
+    slide and variant - and 01d, 04b and every stage after them sort by
+    section_order - and a row whose uid had left the manifest was never
+    removed. Each kept row now takes IDENTITY_KEYS from its manifest row, and
+    a row with no manifest row is dropped. Returns (refreshed, dropped).
+    """
+    current = {r["scene_uid"]: r for r in scenes}
+    dropped = [u for u in by_uid if u not in current]
+    for u in dropped:
+        del by_uid[u]
+    refreshed = 0
+    for u, row in by_uid.items():
+        want = {k: str(current[u].get(k, "")) for k in IDENTITY_KEYS}
+        if any(str(row.get(k, "")) != v for k, v in want.items()):
+            row.update(want)
+            refreshed += 1
+    if refreshed or dropped:
+        print(f"  {label}: refreshed {refreshed} kept row(s) from the manifest "
+              f"({', '.join(IDENTITY_KEYS)}), dropped {len(dropped)} whose section "
+              f"is no longer in it")
+    return refreshed, len(dropped)
+
+
 def write_sat_raw(by_uid):
     if by_uid:
         IO.atomic_write_csv(SAT_RAW_CSV, list(by_uid.values()), SAT_RAW_KEYS)
@@ -448,6 +481,8 @@ def load_qc():
 
 def export(scenes, fields, ranges, ceilings, zoom, limit, force):
     qc_rows = load_qc()
+    # Kept rows, --force included, follow the manifest as it is now.
+    refresh_identity(qc_rows, scenes, "focus.csv")
     rid = ranges_id(ranges)
     done_uids = set()
     if qc_rows and not force:
@@ -468,6 +503,7 @@ def export(scenes, fields, ranges, ceilings, zoom, limit, force):
     # Rows for sections exported earlier are kept; a section exported now
     # replaces its row, so --force cannot leave a stale mask row behind.
     sat_raw = load_sat_raw()
+    refresh_identity(sat_raw, scenes, "saturation_raw.csv")
 
     exported = failed = 0
     failures = []

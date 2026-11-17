@@ -39,7 +39,11 @@ SCRIPTS = os.path.join(os.path.dirname(HERE), "scripts")
 # then pass or fail on their data. See tests/_fixture.py.
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
-from _fixture import use_temp_study  # noqa: E402
+from _fixture import private_home, use_temp_study  # noqa: E402
+
+# 04a's apply_review also searches ~/Downloads for a review export; this
+# suite must not read the runner's.
+private_home()
 
 # PAIRED, explicitly. Every assertion below about "the other marker's row"
 # is a statement about the paired layout, where the two markers are separate
@@ -130,11 +134,84 @@ def main():
         shutil.rmtree(tmp, ignore_errors=True)
 
     test_select_only()
+    test_review_export_is_found()
     test_excluded_render_failure_is_not_lost()
 
     print()
     print("ALL PASS" if not fails else f"{fails} FAILED")
     return 1 if fails else 0
+
+
+def test_review_export_is_found():
+    """The page's review export reaches 04a.
+
+    The Review mode writes `section_review_<stamp>.csv`, which the app (and a
+    picked folder) files under `export_dir/<stamp>/`. apply_review read only
+    `reformatted/section_review.csv`, a name the page never writes, so every
+    reinstatement and drop stopped at the export folder - while the page's
+    confirmation said 04a would act on it.
+    """
+    import time
+    keep = (RF.REVIEW_CSV, getattr(RF, "EXPORT_DIR", None),
+            {k: os.environ.get(k) for k in ("HOME", "USERPROFILE")})
+    # getattr so a 04a without the search fails these checks, not the import.
+    find = getattr(RF, "find_review_csv", lambda: "no find_review_csv")
+    tmp = tempfile.mkdtemp(prefix="lsrevx_")
+    # No stray ~/Downloads of the runner's; USERPROFILE is what Windows reads.
+    os.environ["HOME"] = os.environ["USERPROFILE"] = tmp
+    try:
+        RF.REVIEW_CSV = os.path.join(tmp, "reformatted", "section_review.csv")
+        RF.EXPORT_DIR = os.path.join(tmp, "exports")
+        chk("nothing anywhere: no review file", find(), None)
+
+        stamp = "16.11.2026_10.00"
+        exp = os.path.join(RF.EXPORT_DIR, stamp, f"section_review_{stamp}.csv")
+        os.makedirs(os.path.dirname(exp))
+        write_review(exp, [
+            {"scene_uid": "E1", "marker": "AF568", "excluded": 1,
+             "decision": "manual", "mask_rejected": 0, "reason": "dropped on review"},
+            {"scene_uid": "E2", "marker": "AF568", "excluded": 0,
+             "decision": "restored", "mask_rejected": 0, "reason": "focus was fine"}])
+        chk("a stamped export in the export folder is found",
+            find(), exp)
+        out, _ = RF.apply_review({"E2": ("auto", "no tissue")}, "AF568")
+        chk("...and applied: its drop excludes", out.get("E1", ("", ""))[0], "manual")
+        chk("...and its reinstatement reinstates", "E2" in out, False)
+
+        # The old fixed name still counts, and the newer of the two wins.
+        os.makedirs(os.path.dirname(RF.REVIEW_CSV))
+        write_review(RF.REVIEW_CSV, [
+            {"scene_uid": "E3", "marker": "AF568", "excluded": 1,
+             "decision": "manual", "mask_rejected": 0, "reason": "by hand"}])
+        old = time.time() - 100
+        os.utime(RF.REVIEW_CSV, (old, old))
+        chk("an older reformatted/section_review.csv loses to the export",
+            find(), exp)
+        new = time.time() + 100
+        os.utime(RF.REVIEW_CSV, (new, new))
+        chk("...and a newer one wins", find(), RF.REVIEW_CSV)
+
+        # The counts are printed even when they are all zero. When the newest
+        # file changes - another browser's export, holding fewer decisions - a
+        # run that now applies nothing must say so, not look like the last one.
+        import contextlib
+        import io
+        write_review(RF.REVIEW_CSV, [
+            {"scene_uid": "E9", "marker": "AF568", "excluded": 0,
+             "decision": "", "mask_rejected": 0, "reason": ""}])
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            RF.apply_review({}, "AF568")
+        chk("a file that applies nothing still prints its zero counts",
+            "0 reinstated, 0 dropped, 0 mask(s) rejected" in buf.getvalue(), True)
+    finally:
+        RF.REVIEW_CSV, RF.EXPORT_DIR, homes = keep
+        for k, v in homes.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def test_select_only():
@@ -244,6 +321,20 @@ def test_excluded_render_failure_is_not_lost():
             "1 excluded section(s) could not be rendered" in text, True)
         tail = text.split("could not be rendered", 1)
         chk("...and is named", len(tail) == 2 and excl in tail[1], True)
+
+        # The operator now excludes the kept one too: nothing is lost this
+        # run, so the list left by the run above is stale and must go - a list
+        # from before this fix could name excluded sections as lost.
+        with open(paths["overrides"], "a", newline="", encoding="utf-8") as fh:
+            csv.writer(fh).writerow([kept, 0, 0, 1, "manual", "torn too"])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = RF.main()
+        chk("nothing lost: the run succeeds", rc or 0, 0)
+        chk("...an earlier run's lost list is removed",
+            os.path.exists(paths["lost"]), False)
+        chk("...and the run says so", "removed " + os.path.basename(paths["lost"])
+            in out.getvalue(), True)
     finally:
         RF.PLATE_DIR, RF.REVIEW_CSV, sys.argv = keep
         for p in made:

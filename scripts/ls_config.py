@@ -836,7 +836,7 @@ note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
              "Shotgun button disables itself when it is. An animal left out is "
              "reported and skipped rather than guessed at. The metadata-join "
              "sub-project replaces this with a real table join.",
-        consumers=["04l", "05c", "06c", "06d"]),
+        consumers=["04l", "05c", "06b", "06c", "06d"]),
 ]
 
 BY_PATH = {k.path: k for k in SPEC}

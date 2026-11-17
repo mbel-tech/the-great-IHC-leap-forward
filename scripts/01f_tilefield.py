@@ -193,6 +193,10 @@ def accumulate(path, sums, counts):
 
 
 def build(paths):
+    """Build one field per channel. Returns the channels that got none: a
+    channel with no usable section used to be a printed line in a run that
+    exited 0, and verify then found no field for it."""
+    skipped = []
     by_channel = {}
     for path in paths:
         by_channel.setdefault(channel_of(path), []).append(path)
@@ -208,6 +212,7 @@ def build(paths):
             used += int(ok)
         if not used:
             print(f"  channel {channel}: no usable sections")
+            skipped.append(channel)
             continue
 
         with np.errstate(invalid="ignore", divide="ignore"):
@@ -249,6 +254,7 @@ def build(paths):
         fig.tight_layout()
         fig.savefig(os.path.join(FIELD_DIR, name + ".png"), dpi=110)
         plt.close(fig)
+    return skipped
 
 
 def apply_field(image, field, um_px):
@@ -262,15 +268,21 @@ def apply_field(image, field, um_px):
 
 
 def verify(paths):
-    """Apply the field and re-measure, writing corrected copies for 01c."""
+    """Apply the field and re-measure, writing corrected copies for 01c.
+
+    Returns the sections it could not correct. Each used to be a "no field"
+    line and nothing more, so a verify with no field at all wrote nothing,
+    exited 0, and 01c then measured an empty folder."""
     out_dir = os.path.join(OUT_ROOT, "qc", "test_sections_corrected")
     os.makedirs(out_dir, exist_ok=True)
     written = 0
+    skipped = []
     for path in paths:
         channel = channel_of(path)
         field_path = os.path.join(FIELD_DIR, f"tilefield_c{channel}.npy")
         if not os.path.exists(field_path):
             print(f"  !! no field for channel {channel}, run build first")
+            skipped.append(path)
             continue
         field = np.load(field_path)
         image = tifffile.imread(path)
@@ -283,6 +295,7 @@ def verify(paths):
     print(f"  wrote {written} corrected section(s) to {out_dir}")
     print("  now run: python 01c_measure_tile_artifact.py " + os.path.join(out_dir, "*.tif"))
     print("  the tile-pitch peak must drop to noise; if it does not, escalate to BaSiC.")
+    return skipped
 
 
 def main():
@@ -300,10 +313,20 @@ def main():
     print(f"{len(paths)} section(s)\n")
 
     if args.mode == "build":
-        build(paths)
+        skipped = build(paths)
+        if skipped:
+            print(f"no field built for channel(s) {skipped}: no section had enough "
+                  f"tissue to use")
+            return 1
     else:
-        verify(paths)
+        skipped = verify(paths)
+        if skipped:
+            channels = sorted({channel_of(p) for p in skipped})
+            print(f"{len(skipped)} of {len(paths)} section(s) not corrected: no field "
+                  f"for channel(s) {channels} - run 01f build first")
+            return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

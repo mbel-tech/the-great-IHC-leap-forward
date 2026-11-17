@@ -294,7 +294,7 @@
      "name": "section_order",
      "type": "int",
      "units": "",
-     "meaning": "Position of the section along the animal's brain, 1..N within one marker's series."
+     "meaning": "Position of the section along the animal's brain, 1..N within one marker's series. Every scan of a re-scanned slide is numbered inside that slide's places, and the scan Stage 2 uses runs on without a gap."
     }
    ]
   },
@@ -2895,6 +2895,12 @@
      "type": "float",
      "units": "mm²",
      "meaning": "Area of the whole working frame."
+    },
+    {
+     "name": "carried",
+     "type": "text",
+     "units": "",
+     "meaning": "Empty for a row this run measured. `excluded`: the previous row, unchanged, of a section already excluded and no longer in the index. `unreadable`: the previous row of an indexed section whose overview this run could not read (the run fails for it)."
     }
    ]
   },
@@ -3097,7 +3103,7 @@
      "name": "source",
      "type": "text",
      "units": "",
-     "meaning": "`derived` (written by 04i) or `manual` (a hand correction a re-run keeps)."
+     "meaning": "`derived` (written by 04i), `manual` (a hand correction a re-run keeps), or empty for a row from before 04i marked its rows."
     },
     {
      "name": "derived_as",
@@ -3106,7 +3112,50 @@
      "meaning": "The decision 04i derived for this row (pairing, rotation, flip, excluded). A row whose values differ from it was edited by hand."
     }
    ],
-   "format": "`--limit N` writes `<name>.trialN.csv`. A trial run writes beside this file and never over it; nothing reads the trial file and the app's Done check does not count it. A full run keeps rows marked `manual` or edited away from their `derived_as`, and backs the old file up to `<name>.<YYYYMMDD-HHMMSS>.backup` before changing it."
+   "format": "`--limit N` writes `<name>.trialN.csv`. A trial run writes beside this file and never over it; nothing reads the trial file and the app's Done check does not count it. A full run keeps rows marked `manual` or edited away from their `derived_as`, and backs the old file up to `<name>.<YYYYMMDD-HHMMSS>.backup` before changing it. A kept row with no `source` (written before 04i marked its rows) is written back still unmarked; `--rederive-legacy` replaces such rows by today's derivation. An exclusion carried from the partner is applied on top of a hand row."
+  },
+  {
+   "path": "reformatted/rotation_overrides[_<marker>]_flip_mismatch.csv",
+   "names": [
+    "rotation_overrides_flip_mismatch.csv",
+    "perk_overrides_flip_mismatch.csv",
+    "rotation_overrides_{marker}_flip_mismatch.csv"
+   ],
+   "writer": "04i_propagate_to_perk.py",
+   "what": "Kept hand rows of the overrides file whose flip differs from their partner's manual_flip: those sections are in the mirror frame of their partner. Header-only when there are none; written by every full run.",
+   "columns_from": "04i_propagate_to_perk.py:MISMATCH_KEYS",
+   "columns": [
+    {
+     "name": "target_scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "The second scan's section (the overrides file's `perk_scene_uid`)."
+    },
+    {
+     "name": "source_scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "Its partner in the curated pass."
+    },
+    {
+     "name": "row_flip",
+     "type": "0/1",
+     "units": "",
+     "meaning": "The `flip` the kept row says."
+    },
+    {
+     "name": "source_manual_flip",
+     "type": "0/1",
+     "units": "",
+     "meaning": "The partner's `manual_flip` in its reformat index."
+    },
+    {
+     "name": "row_source",
+     "type": "text",
+     "units": "",
+     "meaning": "`manual` (a row marked or edited by hand) or `legacy` (unmarked, from before 04i marked its rows)."
+    }
+   ]
   },
   {
    "path": "reformatted/section_review.csv",
@@ -3114,7 +3163,7 @@
     "section_review.csv"
    ],
    "writer": "04l_roi_curator.py (the Review mode's export)",
-   "what": "Review decisions made in the ROI curator; 04a merges them over the exclusion list.",
+   "what": "Review decisions made in the ROI curator; 04a merges them over the exclusion list. The page exports it stamped (`section_review_<DD.MM.YYYY_HH.MM>.csv`, into the export folder); 04a takes the newest such file, or this one when it is newer.",
    "columns": [
     {
      "name": "scene_uid",
@@ -3888,7 +3937,7 @@
      "name": "subset",
      "type": "text",
      "units": "",
-     "meaning": "Which queue the section was loaded from."
+     "meaning": "Which queue the section was loaded from (`all`, the analysis-set file's name, `roi_worklist[:<tier>]`, `reinstated`), or `outside_build` for a section exported from the saved curation although this build of the page did not carry it."
     },
     {
      "name": "section_order",
@@ -3978,7 +4027,19 @@
      "name": "excluded",
      "type": "0/1",
      "units": "",
-     "meaning": "1 when excluded in the curator."
+     "meaning": "1 when excluded in the curator: the operator's own judgement, which the importers store as one."
+    },
+    {
+     "name": "difficult",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when marked difficult in the curator."
+    },
+    {
+     "name": "not_carried",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 for a section exported from the saved curation (subset `outside_build`) that no reformat_index carried when the page was built: 04a has excluded it or never reformatted it. 05a leaves it out (\"not carried by the pipeline\"); it is NOT an operator exclusion, and the importers do not read it."
     }
    ]
   },

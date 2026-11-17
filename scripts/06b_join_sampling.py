@@ -12,12 +12,14 @@ has the LS headers gets the choice this stage made before there was one:
 Fish ID matched by number (LS22 is fish 22), `treatment`, and the tank rule
 below. Anything else stops and says to choose the columns.
 
-**A blank treatment is left blank unless a fill rule says otherwise.** In the
+**A blank treatment is filled only by a fill rule, never guessed.** In the
 LS sheet the tanks partition cleanly - 303/304/307/308 exercise,
 305/306/309/310 control - and whoever filled the sheet typed only the control
 side at timepoint 1, so the LS choice carries those as rules. Every row
 carries `treatment_source` (sheet / rule / unresolved) so the inference stays
-visible and can be undone.
+visible and can be undone. A blank no rule fills stops the stage, naming the
+animals, unless config.groups.by_animal gives them a group or the study has no
+groups at all. So does a sheet row two animals match (LS1 and LS01 by number).
 
 Every other sheet column not marked Ignore is carried into both outputs under
 its header, lower-cased with `_` for spaces. The reader and the matching live
@@ -104,6 +106,13 @@ def main():
     if joined["duplicate"]:
         print(f"FAIL: {joined['duplicate']} are on more than one row of the sheet")
         return 1
+    # The same mistake the other way round: by number LS1 and LS01 are both row
+    # "1". One row's group written for two animals is a wrong group for one.
+    if joined["shared"]:
+        print("FAIL: one sheet row for two or more animals - "
+              + "; ".join(f"row {sid}: {', '.join(names)}" for sid, names in joined["shared"])
+              + " - fix the sheet or the animal names")
+        return 1
     if joined["missing"]:
         print(f"FAIL: no sheet row for {joined['missing']} (IDs matched "
               f"{'by name' if joined['rule'] == 'exact' else 'by number'} in column "
@@ -111,6 +120,20 @@ def main():
         return 1
 
     meta, unresolved = joined["meta"], joined["unresolved"]
+    # A blank treatment no rule fills is not a group. Written as "" with exit
+    # 0, the animal dropped out of every comparison and Run all went on. It
+    # stops here, named, unless the study has no groups at all - no animal got
+    # one from the sheet and groups.by_animal is empty, the same "no key, stay
+    # blind" case 05c keeps - or groups.by_animal gives it one, which 06c
+    # (resolve_groups) reads alongside this table.
+    by_animal = (CONFIG.get("groups") or {}).get("by_animal") or {}
+    any_group = by_animal or any(m["treatment"] for m in meta.values())
+    blank = [(a, why) for a, why in unresolved if a not in by_animal]
+    if blank and any_group:
+        print("FAIL: blank treatment, and no fill rule gives one: "
+              + "; ".join(f"{a} ({why})" for a, why in blank)
+              + " - fill the sheet, or add a rule in Set up > Slides > Match the sheet")
+        return 1
     cols = list(next(iter(meta.values())).keys())
     IO.atomic_write_csv(META_CSV, [meta[a] for a in animals], cols)
 

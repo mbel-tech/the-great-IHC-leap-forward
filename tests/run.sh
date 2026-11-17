@@ -33,6 +33,9 @@ PY="${PY:-$REPO/work/appenv/Scripts/python.exe}"
 # want a config write one - see tests/_fixture.py.
 export LS_CONFIG_STRICT=1
 [ -x "$PY" ] || PY="python"
+# Exported for the page suites that run a stage function on what the page
+# exported (curator_exports.test.js runs 05a's analysis set).
+export PY
 
 mkdir -p "$BUILD"
 

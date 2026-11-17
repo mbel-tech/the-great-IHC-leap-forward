@@ -71,6 +71,26 @@ chk("an older failure under a newer success is history, not a hold",
                             run(False, "2026-10-21T09:00:00+00:00"),
                             run(True, "2026-10-22T09:30:00+00:00")])), None)
 
+
+# A --limit trial writes beside the real outputs, so it says nothing about
+# them. A passing trial after a failed full run used to clear "its last run
+# failed", and the partial table the full run wrote then read as done.
+def trial(ok, when):
+    return dict(run(ok, when), options={"--limit": 2})
+
+
+failed_then_trial = [run(False, "2026-10-22T09:12:47+00:00"),
+                     trial(True, "2026-10-22T09:20:00+00:00")]
+chk("a passing --limit trial does not clear a failed full run",
+    W.incomplete(ST, study(failed_then_trial)), "its last run failed")
+chk("...the stage stays todo", W.state(ST, study(failed_then_trial)), "todo")
+chk("a failed trial after a good full run is not a hold on the stage",
+    W.incomplete(ST, study([run(True, "2026-10-22T09:00:00+00:00"),
+                            trial(False, "2026-10-22T09:30:00+00:00")])), None)
+chk("last_run without full_only still reports the trial",
+    W.last_run({"runs": failed_then_trial}, "saturation_raw").get("options"),
+    {"--limit": 2})
+
 print()
 print("ALL PASS" if not failures else f"{len(failures)} FAILED")
 sys.exit(1 if failures else 0)

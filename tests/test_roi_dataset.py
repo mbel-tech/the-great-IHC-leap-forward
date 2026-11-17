@@ -6,8 +6,9 @@ grouping and a dropped artifact all still produce a plausible density. The
 properties pinned here are the ones whose violation looks like a result:
 
   * the cut is a SPREAD, median + 3 * 1.4826 * MAD, not a percentile. A
-    percentile would fix the false-positive rate by construction and destroy the
-    only independent check the background discs exist to provide.
+    percentile would fix the false-positive rate by construction. (The share of
+    background above a spread cut is still IN-SAMPLE; the independent check is
+    the leave-one-disc-out rate, pinned further down.)
   * a section with fewer than 5 background nuclei gets NO cut, and its
     positivity columns go BLANK - not 0, which reads as "looked and found none".
   * h is measured per (marker, region), which is what config declares. Per
@@ -271,10 +272,14 @@ def two_marker_check(tmp):
     close("two-marker: AF568 h", float(h["AF568"]), 10.0, 0.005)
     close("two-marker: AF488 h", float(h["AF488"]), 6.0, 0.005)
 
+    # ONLY a missing openpyxl is a skip: any other error loading 06c (a syntax
+    # error, a broken import) is a failure of 06c, not a reason to skip.
     try:
         G6C = load("g6c2", "06c_excel_dataset.py")
         from openpyxl import load_workbook
-    except Exception as exc:                                   # noqa: BLE001
+    except ModuleNotFoundError as exc:
+        if exc.name != "openpyxl":
+            raise
         print(f"skip  two-marker 06c ({exc})")
         return
     G6C.NUCLEI_CSV, G6C.MEAS_CSV = npath, mpath
@@ -311,11 +316,9 @@ def behind_check(tmp, paths):
     file does not have means the two are not from the same run at all.
     """
     npath, bpath, mpath = paths
-    try:
-        G6C = load("g6c3", "06c_excel_dataset.py")
-    except Exception as exc:                                   # noqa: BLE001
-        print(f"skip  behind-check ({exc})")
-        return
+    # No guard: 06c imports openpyxl only when it writes, so a failure to load
+    # it is a broken 06c, and that must fail the suite rather than skip.
+    G6C = load("g6c3", "06c_excel_dataset.py")
     G6C.G5.all_boxes = lambda: G6C.G5.load_csv(bpath)
     G6C.animal_environment = lambda: {}
     out = os.path.join(tmp, "behind.xlsx")
@@ -1009,10 +1012,14 @@ def multiplex_unmeasured_check(tmp):
     # from the done log) and no row in roi_nuclei.csv - there was nothing to
     # write - and 06c's consistency check called that "not from the same run"
     # and returned 1 for any study with one such section.
+    # ONLY a missing openpyxl is a skip: any other error loading 06c (a syntax
+    # error, a broken import) is a failure of 06c, not a reason to skip.
     try:
         G6C = load("g6c_mxun", "06c_excel_dataset.py")
         from openpyxl import load_workbook
-    except Exception as exc:                                   # noqa: BLE001
+    except ModuleNotFoundError as exc:
+        if exc.name != "openpyxl":
+            raise
         print(f"skip  06c measured-empty ({exc})")
         return
     G6C.NUCLEI_CSV = npath
@@ -1052,10 +1059,14 @@ def multiplex_coverage_check(tmp):
     finished that was never started, on the one sheet that exists to say what
     is still missing. X1 and X2 both have M1 nuclei; M2 was never run.
     """
+    # ONLY a missing openpyxl is a skip: any other error loading 06c (a syntax
+    # error, a broken import) is a failure of 06c, not a reason to skip.
     try:
         G6C = load("g6c_mxcov", "06c_excel_dataset.py")
         from openpyxl import load_workbook
-    except Exception as exc:                                   # noqa: BLE001
+    except ModuleNotFoundError as exc:
+        if exc.name != "openpyxl":
+            raise
         print(f"skip  06c multiplex coverage ({exc})")
         return
     nuc, boxes, nid = [], [], 0
@@ -1161,10 +1172,15 @@ def multiplex_cut_check(tmp):
     # ...and 06c's by_section sheet, which took a section's cut by scene_uid
     # alone: the last row's marker won, and the section showed ONE cut, under
     # one marker's name, with both markers' nuclei summed beside it.
+    # ONLY a missing openpyxl is a skip. Any other load error (a syntax error,
+    # a renamed constant) is a failure of 06c, and turning it into a printed
+    # skip hid exactly the kind of regression this check exists to catch.
     try:
         G6C = load("g6c_mx", "06c_excel_dataset.py")
         from openpyxl import load_workbook
-    except Exception as exc:                                   # noqa: BLE001
+    except ModuleNotFoundError as exc:
+        if exc.name != "openpyxl":
+            raise
         print(f"skip  06c multiplex by_section ({exc})")
         return
     G6C.NUCLEI_CSV = npath
@@ -1209,6 +1225,16 @@ def multiplex_cut_check(tmp):
 LOO_A = [10.0, 20.0, 30.0, 40.0, 50.0]
 LOO_B = [100.0, 110.0, 120.0, 130.0, 140.0, 500.0]
 LOO_COLS = NUC_COLS + ["off_tissue", "segmented_on", "nucleus_shaped"]
+# A THIN third disc (3 usable values, under CUT_MIN_NUCLEI) beside A and B:
+# it is never left out itself, but it feeds both cuts.
+# Leave A out, cut from B + thin: 60 70 80 100 110 120 130 140 500,
+#   median 110; |x - 110| sorted 0 10 10 20 30 30 40 50 390, median 30
+#   cut = 110 + 3 * 1.4826 * 30 = 243.43 -> A: 0 of 5
+# Leave B out, cut from A + thin: 10 20 30 40 50 60 70 80, median 45;
+#   |x - 45| sorted 5 5 15 15 25 25 35 35, median 20
+#   cut = 45 + 3 * 1.4826 * 20 = 133.96 -> B: 140 and 500 -> 2 of 6
+# Summed: 2 over 11 = 0.1818. Without the thin disc in the cuts it is 6 of 11.
+LOO_THIN = [60.0, 70.0, 80.0]
 
 
 def loo_check(tmp):
@@ -1222,6 +1248,8 @@ def loo_check(tmp):
       L2  one background disc                          -> blank
       L3  two background discs, one with 4 usable      -> blank
       L4  as L1, but segmented on the marker itself    -> blank (withheld)
+      L5  as L1 plus a THIN third disc (3 usable)      -> the thin disc
+          feeds the cuts the other two are counted against (LOO_THIN below)
     """
     nuc, boxes, nid = [], [], 0
 
@@ -1257,6 +1285,15 @@ def loo_check(tmp):
     # still holds only 4 values a cut could be taken from.
     for _ in range(2):
         add("L3", "background", "__background__", 3, 9.0, cen=1)
+    boxes += [box("L5", "roi", "Dm")] + [
+        box("L5", "background", "__background__") for _ in range(3)]
+    add("L5", "roi", "Dm", 1, 400.0)
+    for v in LOO_A:
+        add("L5", "background", "__background__", 2, v)
+    for v in LOO_B:
+        add("L5", "background", "__background__", 3, v)
+    for v in LOO_THIN:
+        add("L5", "background", "__background__", 4, v)
 
     npath = os.path.join(tmp, "loo_nuclei.csv")
     bpath = os.path.join(tmp, "loo_boxes.csv")
@@ -1270,7 +1307,7 @@ def loo_check(tmp):
     spec = G5.load_csv(os.path.join(tmp, "loo_specificity.csv"))
     sp = {s["scene_uid"]: s for s in spec}
     chk("leave-one-out: a specificity row per section", sorted(sp),
-        ["L1", "L2", "L3", "L4"])
+        ["L1", "L2", "L3", "L4", "L5"])
     cols = list(spec[0]) if spec else []
     want = ["false_positive_rate", "loo_false_positives", "loo_nuclei",
             "loo_false_positive_rate"]
@@ -1295,6 +1332,13 @@ def loo_check(tmp):
              s.get("loo_false_positive_rate")), blank)
     chk("L4's in-sample rate is withheld too, for the same reason",
         sp.get("L4", {}).get("false_positive_rate"), "")
+    # The thin disc is never left out itself (11 nuclei, not 14), but its
+    # values are in both cuts: 2 false positives, where dropping it from the
+    # cuts would give L1's 6 + 0 = 6 over the same 11.
+    l5 = sp.get("L5", {})
+    chk("L5 leave-one-disc-out: the thin disc feeds the others' cuts",
+        (l5.get("loo_false_positives"), l5.get("loo_nuclei"),
+         l5.get("loo_false_positive_rate")), ("2", "11", "0.1818"))
 
 
 def main():
@@ -1439,11 +1483,8 @@ def cross_check(tmp, paths, meas):
     would have noticed.
     """
     npath, bpath, mpath = paths
-    try:
-        G6C = load("g6c", "06c_excel_dataset.py")
-    except Exception as exc:                                   # noqa: BLE001
-        print(f"skip  06c cross-check ({exc})")
-        return
+    # No guard: see behind_check - a 06c that does not load is a failure.
+    G6C = load("g6c", "06c_excel_dataset.py")
     if not hasattr(G6C, "MEAS_CSV"):
         print("skip  06c cross-check (06c has no MEAS_CSV - not refactored?)")
         return
@@ -1456,7 +1497,9 @@ def cross_check(tmp, paths, meas):
     out = os.path.join(tmp, "roi_dataset.xlsx")
     try:
         rc = G6C.main(["--out", out])
-    except ModuleNotFoundError as exc:                         # openpyxl
+    except ModuleNotFoundError as exc:
+        if exc.name != "openpyxl":
+            raise
         print(f"skip  06c cross-check ({exc})")
         return
     chk("06c exits 0", rc, 0)

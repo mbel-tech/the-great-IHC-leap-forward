@@ -316,10 +316,15 @@ def main():
                                                or r["saturated_fraction"] or 0))
     want = {r["scene_uid"] for r in worst[: args.figures]}
 
+    # Sections with no overview pair to measure. They used to be dropped
+    # uncounted, and a run where every one was missing wrote a header-only
+    # census and succeeded.
+    no_overview = []
     for i, row in enumerate(rows):
         um_px = float(row["um_px"] or 5.2)
         out = analyse(row, um_px, fallbacks)
         if out is None:
+            no_overview.append(row["scene_uid"])
             continue
         res, imgs = out
         results.append(res)
@@ -327,6 +332,16 @@ def main():
             samples.append((res, imgs))
         if (i + 1) % 200 == 0:
             print(f"  {i + 1}/{len(rows)}")
+
+    if not results:
+        # Not written: this CSV is the stage's declared output, and an empty
+        # one made the app show the census as done.
+        if not rows:
+            print(f"no {args.marker} section measured: {QC_CSV} has none")
+        else:
+            print(f"no {args.marker} section measured: {len(no_overview)} of {len(rows)} "
+                  f"have no _MARK/_DAPI overview pair in {OVERVIEW_DIR} - run 01_overviews")
+        return 1
 
     path = os.path.join(REPORT_DIR, f"saturation_{args.marker}{suffix}.csv")
     keys = sorted({k for r in results for k in r})
@@ -340,6 +355,12 @@ def main():
         print(f"wrote {fig_path}")
 
     report(results, args.marker, fallbacks)
+    if no_overview:
+        print(f"{len(no_overview)} of {len(rows)} {args.marker} section(s) not measured: "
+              f"no _MARK/_DAPI overview pair (first: {', '.join(no_overview[:5])}) "
+              f"- run 01_overviews")
+        return 1
+    return 0
 
 
 def report(results, marker, fallbacks=()):
@@ -443,4 +464,4 @@ def defaultdict_count(rows, key):
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

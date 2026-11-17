@@ -41,6 +41,21 @@ KEYS = [
     "ls_atlas_curator_v1",         # 04b's page, retired but a browser may hold it
 ]
 
+# Keys whose refusal by the page's own storage is not news to the operator. The rolling
+# snapshot is a second copy of the curation, the largest write and the first refused near
+# the quota, and the page already treats losing it as harmless. The radius, the ROI choice
+# and the added ROIs are saved only when their own control is used - so a warning raised by
+# one would stay up through any amount of curation, long after the file (which every load
+# now seeds from, see SaveGuard.behind) had it. On disk they are all still kept.
+QUIET_KEYS = {"ls_roi_curator_v1_backup", "ls_roi_curator_v1_size",
+              "ls_roi_curator_v1_rois", "ls_roi_curator_v1_custom"}
+
+# ...but only the snapshot stays quiet on a STALE page (a load that started from an older
+# copy than the file, whose saves are set aside, not written). There the file does NOT have
+# what the page saved: a radius, an ROI choice or an added ROI set on that page is lost on
+# reload like any decision, so it is reported like one.
+STALE_QUIET_KEYS = {"ls_roi_curator_v1_backup"}
+
 
 class CurationStore:
     """The curators' state: in the project file when there is one, else one JSON file per key.
@@ -110,15 +125,24 @@ class CurationStore:
     def all_present(self):
         return {k: self.read(k) for k in KEYS if self.read(k) is not None}
 
-    def set_aside(self, folder, key, text):
+    def set_aside(self, folder, key, text, fresh=False, path=None):
         """Keep `text` as curation/<folder>/<key>.json, out of the way. Returns the path.
 
         For curation that is being replaced rather than lost: what an import overwrote,
         and what a page still showing the old state tried to save after it. A subfolder,
         so neither the stages nor the project's reconcile (top-level files only) take it
         for the live copy.
+
+        `fresh` picks a name no earlier set-aside holds (`<key>.json`, then `<key>.2.json`,
+        ...), so two pages' saves of one key never overwrite each other; `path` rewrites a
+        set-aside made earlier (the same page saving again).
         """
-        path = os.path.join(self.dir, folder, key + ".json")
+        if path is None:
+            path = os.path.join(self.dir, folder, key + ".json")
+            n = 1
+            while fresh and os.path.exists(path):
+                n += 1
+                path = os.path.join(self.dir, folder, "%s.%d.json" % (key, n))
         os.makedirs(os.path.dirname(path), exist_ok=True)
         tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
@@ -176,6 +200,15 @@ class SaveGuard:
     the one open before it. What such a page still sends - its unload save, a decision on
     its way to disk - is that project's work, so it is written to that project's store,
     never to the one open now and never dropped.
+
+    `behind` is the keys whose file on disk is NEWER than the page's localStorage: the page's
+    own setItem refused a save (a full store) that the mirror wrote to disk anyway. The page
+    that made it holds the newest state in memory and goes on saving it, which is fine; a
+    page LOADED from that localStorage holds an older copy, and its first save would send it
+    over the newer file. So while a key is behind every load is seeded with it from disk over
+    whatever localStorage holds, and a load where even that is refused marks the key stale
+    and its saves of it are kept aside, never written (see `seed_script`). A save of the key
+    that the page's storage accepts means the two agree again and ends it.
     """
 
     def __init__(self):
@@ -186,6 +219,12 @@ class SaveGuard:
         self.holding = set()
         self.held = {}
         self.retired = {}
+        self.behind = set()
+        self.stale_aside = None
+        # (gen, load, key) -> the set-aside file of that stale load's saves of `key`. One
+        # file per load: its later saves hold its earlier ones, but another stale load's
+        # must not overwrite them.
+        self.stale_paths = {}
 
     def replaced(self, keys, aside=None):
         """The store now holds an import of `keys`: retire every page loaded before it."""
@@ -199,23 +238,91 @@ class Bridge(QObject):
     """What the page calls to persist. One write path, deliberately: `saveFrom` only decides
     whether the page saving is still allowed to, then goes through `save`."""
 
-    def __init__(self, store, on_save=None, on_error=None, guard=None, on_aside=None):
+    def __init__(self, store, on_save=None, on_error=None, guard=None, on_aside=None,
+                 on_page_error=None, on_behind=None, on_stale=None):
         super().__init__()
         self.store = store
         self.on_save = on_save
+        # `on_page_error(key, message)`: the save reached disk but the page's OWN storage
+        # refused it (a full localStorage). Shown like a failed save: the page now holds
+        # less than the file, and a reload would show the page's older copy.
+        self.on_page_error = on_page_error
         # `on_error(key, message)`: a save that did not reach disk. The page cannot be told -
         # its localStorage already holds the decision - so the app has to show it.
         self.on_error = on_error
         self.guard = guard or SaveGuard()
         # `on_aside(key, path)`: a save from a page older than an import, kept at `path`.
         self.on_aside = on_aside
+        # `on_behind()`: `guard.behind` changed, or the file it is seeded from did: the
+        # injected script has to be rebuilt so the NEXT load starts from the file.
+        self.on_behind = on_behind
+        # `on_stale(load, key, message)`: a page load that started from an OLDER copy of `key`
+        # than the file, so what it saves is set aside, not written. Its own warning: the
+        # operator has to know before working on that page, not after.
+        self.on_stale = on_stale
 
     @Slot(str, str, str)
     def saveFrom(self, gen, key, text):
         """A save from the page loaded as `gen`: written, kept aside, or held back."""
+        self._route(gen, key, text, None)
+
+    @Slot(str, str, str, str)
+    def saveFromRefused(self, gen, key, text, why):
+        """The same save, which the page's own localStorage refused with `why`.
+
+        The disk copy is written all the same - it is the one that matters, and the only one
+        left - and the refusal is reported rather than taken for success: the curator saves
+        on every click, so a full browser store would otherwise go unnoticed until a reload
+        showed the older copy the page still holds.
+        """
+        self._route(gen, key, text, why)
+
+    @Slot(str, str, str)
+    def loadStale(self, gen, load, keys):
+        """The load `load` could not take the file in for `keys` (comma separated): say so now."""
+        for key in keys.split(","):
+            if key and key not in STALE_QUIET_KEYS:
+                self._stale(load, key, stale_load_text(key))
+
+    @Slot(str, str, str, str)
+    def saveFromStale(self, gen, load, key, text):
+        """A save from a load whose localStorage is older than the file (`SaveGuard.behind`).
+
+        Kept aside, never written: it is the older copy plus whatever was done since, and
+        writing it would put the older copy back over the newer file. Kept, because the part
+        done since is someone's work. Routed like any save first - a page of a project closed
+        since keeps it with that project, a page from before an import with the import's
+        other set-asides.
+        """
+        g = self.guard
+        if gen != g.gen and gen not in g.retired and key in g.superseded:
+            self._route(gen, key, text, None)          # set aside as from_open_page
+            return
+        store = g.retired.get(gen, self.store)
+        g.stale_aside = g.stale_aside or os.path.join(backup_folder(), "from_stale_page")
+        slot = (gen, load, key)
+        try:
+            path = store.set_aside(g.stale_aside, key, text, fresh=slot not in g.stale_paths,
+                                   path=g.stale_paths.get(slot))
+        except Exception as e:                              # noqa: BLE001
+            msg = save_error_text(store, key, e)
+        else:
+            g.stale_paths[slot] = path
+            msg = stale_save_text(key, path)
+        print(msg, file=sys.stderr)
+        if key not in STALE_QUIET_KEYS:
+            self._stale(load, key, msg)
+
+    def _stale(self, load, key, msg):
+        if self.on_stale:
+            self.on_stale(load, key, msg)
+        elif self.on_error:
+            self.on_error(key, msg)
+
+    def _route(self, gen, key, text, page_error):
         g = self.guard
         if gen in g.retired:
-            self._write(g.retired[gen], key, text)
+            self._write(g.retired[gen], key, text, page_error)
             return
         if gen != g.gen and key in g.superseded:
             # Not written - it is the curation the import replaced, plus anything done on
@@ -234,13 +341,13 @@ class Bridge(QObject):
         if key in g.holding:
             g.held[key] = text
             return
-        self.save(key, text)
+        self._write(self.store, key, text, page_error)
 
     @Slot(str, str)
     def save(self, key, text):
         self._write(self.store, key, text)
 
-    def _write(self, store, key, text):
+    def _write(self, store, key, text, page_error=None):
         try:
             store.write(key, text)
         except Exception as e:                              # noqa: BLE001
@@ -253,6 +360,26 @@ class Bridge(QObject):
             if self.on_error:
                 self.on_error(key, msg)
             return
+        g = self.guard
+        if page_error:
+            # The file is now ahead of the page's storage: the next load must start from it.
+            g.behind.add(key)
+            if self.on_behind:
+                self.on_behind()
+            msg = page_store_error_text(store, key, page_error)
+            print(msg, file=sys.stderr)
+            if key in QUIET_KEYS:
+                # On disk, which is what a snapshot is for; not a decision the page lacks.
+                return
+            report = self.on_page_error or self.on_error
+            if report:
+                report(key, msg)
+            return
+        if key in g.behind:
+            # The page's storage took this one: it and the file agree again.
+            g.behind.discard(key)
+            if self.on_behind:
+                self.on_behind()
         if self.on_save:
             self.on_save(key, len(text))
 
@@ -268,6 +395,31 @@ def save_error_text(store, key, exc):
         text += (" - the file may be open in another program (an editor, a sync client, "
                  "antivirus), or the folder is read-only")
     return text
+
+
+def page_store_error_text(store, key, why):
+    """One line for a save that reached disk while the page's own storage refused it."""
+    return (f"{key} was saved to {store.where()}, but the curator page's own storage refused "
+            f"it ({why}). A reload starts from the file; if the browser storage is still "
+            "full then, that page's saves are kept aside rather than written. Free the "
+            "browser storage, or restart the app (its browser storage is not kept)")
+
+
+def stale_load_text(key):
+    """What a page that could not start from the file is told, before anything is done on it."""
+    return (f"This page started from an OLDER copy of {key} than the file on disk: the "
+            "browser's storage is full, so the page could not take the file in. Decisions "
+            "made on this page will NOT be written to the file - they are set aside under "
+            "curation/_backup_*/from_stale_page and will not come back after a reload. Free "
+            "the browser storage, or restart the app, then reload before curating")
+
+
+def stale_save_text(key, path):
+    """One line for a save from such a page: where it went instead, and what to do."""
+    return (f"{key} from this page was set aside in {path}, NOT written to the file: the "
+            "page started from an older copy than the file. These decisions will not come "
+            "back after a reload - redo them (or take them from that file) once the page has "
+            "reloaded from the file. Free the browser storage, or restart the app, then reload")
 
 
 def seed_script(store, guard=None):
@@ -288,9 +440,12 @@ def seed_script(store, guard=None):
     """
     guard = guard or SaveGuard()
     seed = {k: v for k, v in ((k, store.read(k)) for k in KEYS) if v is not None}
+    behind = sorted(k for k in guard.behind if k in seed)
     return """
 (function () {
-  var SEED = %s, GEN = %s, FORCE = %s;
+  var SEED = %s, GEN = %s, FORCE = %s, BEHIND = %s, STALE = {};
+  // This load, among every load of this script: a stale warning is given once per load.
+  var LOAD = Math.random().toString(36).slice(2) + Date.now().toString(36);
   try {
     // Still the browser's own setItem here, so none of this is mirrored back.
     var fresh = localStorage.getItem("ls_app_seed_gen") !== GEN;
@@ -301,17 +456,35 @@ def seed_script(store, guard=None):
     if (fresh) FORCE.forEach(function (k) { if (!(k in SEED)) localStorage.removeItem(k); });
     if (fresh) localStorage.setItem("ls_app_seed_gen", GEN);
   } catch (e) {}
+  // A key whose file is newer than this localStorage (SaveGuard.behind): taken from the
+  // file over what is here, on every load until they agree. Refused again (still full),
+  // this load holds the older copy, and its saves of the key go aside, not to disk.
+  BEHIND.forEach(function (k) {
+    try { localStorage.setItem(k, SEED[k]); } catch (e) { STALE[k] = 1; }
+  });
 
   var queue = [], bridge = null;
   window.__lsQueueSize = function () { return queue.length; };
 
+  // Mirrored even when the browser's own setItem throws (a full localStorage): the
+  // disk copy is the one that matters, and a mirror reached only after a successful
+  // setItem lost exactly the saves that most needed it. The throw still reaches the
+  // page afterwards, which has its own NOT SAVED notice; the app shows its own.
   var orig = Storage.prototype.setItem;
+  function send(k, v, why) {
+    if (STALE[k]) bridge.saveFromStale(GEN, LOAD, k, v);
+    else if (why) bridge.saveFromRefused(GEN, k, v, why);
+    else bridge.saveFrom(GEN, k, v);
+  }
   Storage.prototype.setItem = function (k, v) {
-    orig.call(this, k, v);
+    var err = null;
+    try { orig.call(this, k, v); } catch (e) { err = e; }
     if (this === window.localStorage) {
-      if (bridge) { bridge.saveFrom(GEN, String(k), String(v)); }
-      else { queue.push([String(k), String(v)]); }
+      var why = err ? String((err.name ? err.name + ": " : "") + (err.message || err)) : "";
+      if (bridge) { send(String(k), String(v), why); }
+      else { queue.push([String(k), String(v), why]); }
     }
+    if (err) throw err;
   };
 
   function connect() {
@@ -319,12 +492,15 @@ def seed_script(store, guard=None):
     new QWebChannel(qt.webChannelTransport, function (ch) {
       bridge = ch.objects.lsbridge;
       window.__lsbridge = bridge;
-      while (queue.length) { var e = queue.shift(); bridge.saveFrom(GEN, e[0], e[1]); }
+      // Before anything is done on this page, not after: what it saves will go aside.
+      var stale = Object.keys(STALE);
+      if (stale.length) bridge.loadStale(GEN, LOAD, stale.join(","));
+      while (queue.length) { var e = queue.shift(); send(e[0], e[1], e[2]); }
     });
   }
   connect();
 })();
-""" % (json.dumps(seed), json.dumps(guard.gen), json.dumps(guard.force))
+""" % (json.dumps(seed), json.dumps(guard.gen), json.dumps(guard.force), json.dumps(behind))
 
 
 EXPORT_PAGE = """<!doctype html>

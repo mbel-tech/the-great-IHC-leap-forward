@@ -190,6 +190,11 @@ of scenes and where each sits on the glass — without decoding a single pixel. 
 it touches only the file's index, and it produces the two tables the whole pipeline is built on:
 one row per file, one row per scanned section.
 
+This step can read the headers of CZI files still inside their transfer zips. **No step after it
+can:** every step that reads pixels, from the overviews (01) on, reads extracted CZI files in the
+source folder. A study whose slides arrived as zips must have them extracted before stage 01, and
+00b checks that extraction.
+
 In a multiplex study the table of channels can rename a marker (the scan's AF568 called pERK). The
 manifest records each scene's marker under the study's name, not the scan's, because every later
 step selects scenes by comparing that name; under the scan's name, 01 would write no clipping masks
@@ -1513,8 +1518,11 @@ deviation scaled by the constant that makes it comparable to a standard deviatio
 to section.
 
 **A spread and not a percentile, deliberately.** Taking the top few per cent of background objects as
-the cut would fix the false-positive rate by construction — and destroy the only independent check
-available. With a spread-based cut, how many background nuclei land above it is a *measurement*. On
+the cut would fix the false-positive rate by construction. With a spread-based cut, how many
+background nuclei land above it is a *measurement* — but an **in-sample** one: the cut was fitted
+to those same nuclei, so it is not an independent check. The independent check is the
+leave-one-disc-out rate (`loo_false_positive_rate` in `detector_specificity.csv`), where each
+background disc is counted against the cut the section's other discs give. On
 this dataset it is a low single-digit percentage, and — the number that decides whether positivity
 is usable at all — **it is not correlated with treatment group.** Positivity inside the anatomical
 regions is several-fold higher than that background rate.
@@ -1604,9 +1612,15 @@ The join validates itself rather than trusting the spreadsheet: the cohort it pr
 against an independent column in the workbook recording which animals were sliced for this
 experiment, and a disagreement is reported loudly. A run that mis-assigns animals to groups should
 fail obviously rather than produce a plausible and wrong result. An animal with no row in the
-workbook stops the join. A blank treatment is left blank unless a fill rule says otherwise: in the
-LS sheet the tanks partition cleanly (303/304/307/308 exercise, 305/306/309/310 control) and only the
-control side was typed at timepoint 1, so the LS choice carries those tanks as rules.
+workbook stops the join, and so does one row that two animals match (by number, LS1 and LS01 are
+both row 1); both animals are named. Only a cell holding a single number is read as one, so "Tank 3
+fish 1" is not fish 31. A blank treatment is filled only by a fill rule: in the LS sheet the tanks
+partition cleanly (303/304/307/308 exercise, 305/306/309/310 control) and only the control side was
+typed at timepoint 1, so the LS choice carries those tanks as rules. A blank no rule fills stops the
+join and names the animals, unless `groups.by_animal` gives them a group or the study has no groups at
+all (no animal has one in the sheet and `groups.by_animal` is empty). Re-running this step, or
+changing the workbook, puts the results built from it out of date, and they stay out of date
+until this step has run on the new workbook. `groups.by_animal` is a setting of this step.
 
 **Which columns.** The study says which sheet column names the animal and which column (or
 columns) hold the treatment; two or more make one group, such as "exercise · 1". The person chooses

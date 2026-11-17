@@ -28,11 +28,17 @@ class ProjectSession(QObject):
     dirtyChanged = Signal(bool)
     saved = Signal()
     opened = Signal(str)           # a different project is now the open one
+    reloaded = Signal(str)         # the same file read again, replacing what was in memory
 
     def __init__(self, project, parent=None):
         super().__init__(parent)
         self.project = project
         self._was_dirty = project.dirty
+        # The window's run guard: idle_for(action) is True when no stage is running, and otherwise
+        # tells the person why `action` has to wait. Save As points the runner at another file and
+        # a saved change of out_root re-roots the curator, both under a stage still writing; the
+        # session asks here so every way of saving (menu, Ctrl+S, the save-before prompts) is held.
+        self.idle_for = lambda action: True
         if project.path:
             LC.remember_project(project.path)
 
@@ -66,18 +72,25 @@ class ProjectSession(QObject):
 
     # ---- saving ---------------------------------------------------------------
 
+    def _moves_out_root(self):
+        """True if saving would change the out_root the stages and the curator are rooted at."""
+        p = self.project
+        return bool(p.path) and p.get("out_root") != p.saved_get("out_root")
+
     def save(self, parent=None):
         """Write the project. True if it is saved afterwards."""
         if not self.project.path:
             return self.save_as(parent)
+        if self._moves_out_root() and not self.idle_for("save a new output folder (out_root)"):
+            return False
         try:
             self.project.save()
         except LP.ProjectConflict as exc:
-            ans = BTN.question(parent, "The file changed on disk",
-                               "%s\n\nSave over it anyway? (Choose No to keep the file as it is "
-                               "and use File > Revert to read it again.)" % exc,
-                               BTN.Yes | BTN.No, BTN.No)
-            if ans != BTN.Yes:
+            ans = self._ask_conflict(parent, str(exc))
+            if ans == "reload":
+                self.reload(parent)
+                return False
+            if ans != "save":
                 return False
             try:
                 self.project.save(force=True)
@@ -91,7 +104,32 @@ class ProjectSession(QObject):
         self._after_write()
         return True
 
+    #: The conflict box's own button labels. Qt's standard Discard button is "Don't Save" on
+    #: macOS and "Close without Saving" on GNOME, which reads like a harmless cancel; these say
+    #: what happens, and the text names them.
+    SAVE_OVER = "Save over it"
+    RELOAD = "Discard my changes and reload"
+
+    def _ask_conflict(self, parent, why):
+        """"save", "reload" or "cancel" for a save that found the file changed on disk."""
+        box = QMessageBox(QMessageBox.Warning, "The file changed on disk",
+                          "%s\n\n%s: write your version over the file. The other change to the "
+                          "settings is lost; curation decisions in the file are kept.\n"
+                          "%s: throw away your unsaved changes here and read the file again.\n"
+                          "Cancel: leave both as they are for now." % (why, self.SAVE_OVER, self.RELOAD),
+                          QMessageBox.NoButton, parent)
+        save = box.addButton(self.SAVE_OVER, QMessageBox.AcceptRole)
+        reload = box.addButton(self.RELOAD, QMessageBox.DestructiveRole)
+        cancel = box.addButton(QMessageBox.Cancel)
+        box.setDefaultButton(cancel)
+        box.setEscapeButton(cancel)
+        box.exec()
+        clicked = box.clickedButton()
+        return "save" if clicked is save else "reload" if clicked is reload else "cancel"
+
     def save_as(self, parent=None):
+        if not self.idle_for("save the project under another name"):
+            return False
         start = self.project.path or os.path.join(LC.studies_dir(), LC.slugify(self.project.name) + ".json")
         path, _ = QFileDialog.getSaveFileName(parent, "Save project as", start, "Project (*.json)")
         if not path:
@@ -112,6 +150,25 @@ class ProjectSession(QObject):
         LC.remember_project(path)
         self._after_write()
         self.opened.emit(path)               # the window now points the stages at this file
+        return True
+
+    def reload(self, parent=None):
+        """Read the file again, dropping unsaved changes and any "changed on disk" state.
+
+        The way out of a conflict that keeps the other change: `Project.revert` only goes back
+        to this copy's last save, which is exactly what conflicts with the file. True if read.
+        """
+        if not self.idle_for("read the project file again"):
+            return False
+        try:
+            self.project.reload()
+        except LP.ProjectError as exc:
+            BTN.warning(parent, "Could not read the file", str(exc))
+            return False
+        self._was_dirty = self.project.dirty
+        self.reloaded.emit(self.project.path)
+        self.dirtyChanged.emit(self._was_dirty)
+        self.changed.emit()
         return True
 
     def _after_write(self):

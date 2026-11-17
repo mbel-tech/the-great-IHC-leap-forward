@@ -37,6 +37,7 @@ Run:  python 04a_reformat.py
 import sys
 import argparse
 import csv
+import glob
 import importlib.util
 import json
 import os
@@ -57,6 +58,7 @@ if _HERE not in sys.path:
 # the whole process. Imported, not re-implemented: this block used to be four
 # lines copy-pasted into every stage.
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
+import ls_config as LC  # noqa: E402
 import ls_channels as CH  # noqa: E402
 import ls_paths as LP  # noqa: E402
 import ls_atlas as AT  # noqa: E402
@@ -104,17 +106,40 @@ def overview_um_px(row):
     ratio, and nothing said so. One helper, here because all three already
     load this module, so the fallback cannot drift between them.
     """
-    try:
-        v = float((row or {}).get("um_px") or "")
-        if v > 0:
-            return v
-    except (TypeError, ValueError):
-        pass
+    v = own_um_px(row)
+    if v is not None:
+        return v
     v = CONFIG.get("overview_target_um_per_px")
     if not v:
         raise SystemExit("no overview scale: focus.csv has no um_px for this "
                          "section and the config sets no overview_target_um_per_px")
     return float(v)
+
+
+def own_um_px(row):
+    """The focus.csv row's own `um_px` as a float, or None when it has none."""
+    try:
+        v = float((row or {}).get("um_px") or "")
+    except (TypeError, ValueError):
+        return None
+    return v if v > 0 else None
+
+
+def report_scale_fallbacks(uids, own):
+    """Say how many of `uids` took the config's overview scale.
+
+    `own` is the set of uids whose focus.csv row carries its own `um_px`. The
+    fallback is the scale 01 exports at, so it is normally right - but it is
+    silent, and wrong if the config's scale changed after the export. A count
+    makes that visible. Returns the count.
+    """
+    n = sum(1 for u in uids if u not in own)
+    if n:
+        print(f"  {n} section(s) have no um_px in focus.csv; their areas use the "
+              f"config's overview_target_um_per_px "
+              f"({overview_um_px(None)} um/px). Re-run 01_overviews.py if that is "
+              f"not the scale they were exported at.")
+    return n
 
 # The naming rule, borrowed rather than restated. ls_paths owns it; this
 # module is one of its callers. See marker_paths below for what still is not
@@ -599,6 +624,64 @@ def marker_paths(marker):
 
 
 REVIEW_CSV = os.path.join(REFORMAT_DIR, "section_review.csv")
+# Where the ROI curator files its exports - the same place 05a looks for
+# roi_regions*. The Review mode's export lands here as
+# `<stamp>/section_review_<stamp>.csv`, never as REVIEW_CSV.
+EXPORT_DIR = LC.export_dir(CONFIG)
+
+
+def _about_this_study(path):
+    """True when `path` names sections and all of them are in qc/focus.csv.
+
+    05a's test for a file found in the shared download folder, restated for
+    this stage's own focus.csv path: another study's review export there must
+    not exclude or reinstate anything here.
+    """
+    try:
+        with open(path, newline="", encoding="utf-8") as fh:
+            uids = {r.get("scene_uid", "") for r in csv.DictReader(fh)} - {""}
+        with open(QC_CSV, newline="", encoding="utf-8") as fh:
+            known = {r["scene_uid"] for r in csv.DictReader(fh)}
+    except (OSError, KeyError, csv.Error, UnicodeDecodeError):
+        return False
+    return bool(uids) and uids <= known
+
+
+def find_review_csv():
+    """The Review mode's decisions to apply: the newest review export.
+
+    Resolved the way 05a_roi_geometry.find_regions_csv resolves the newest
+    `roi_regions*`, because the page writes both the same way: it cannot be
+    handed a path, so its export turns up in the export folder (in a dated
+    `DD.MM.YYYY_HH.MM` folder, the file stamped with the same name - the app
+    files it there, and a picked folder gets the same layout), in reformatted/,
+    or in the download folder. Every candidate is collected and the newest
+    mtime wins. Each export carries EVERY review decision the page holds, so
+    the newest is the whole of them, not a delta.
+
+    `REVIEW_CSV` (reformatted/section_review.csv) is still a candidate: it is
+    what this stage read before the page stamped its exports, and a file put
+    there by hand is a decision too.
+
+    This used to read REVIEW_CSV only. The page never wrote that name, so every
+    reinstatement and drop made in Review mode stopped at the export folder
+    while the page's own confirmation said 04a would act on it.
+    """
+    downloads = os.path.join(os.path.expanduser("~"), "Downloads")
+    cand = [REVIEW_CSV] if os.path.exists(REVIEW_CSV) else []
+    for root in (REFORMAT_DIR, EXPORT_DIR, downloads):
+        if not root:
+            continue
+        found = (glob.glob(os.path.join(root, "section_review*.csv"))
+                 + glob.glob(os.path.join(root, "*", "section_review*.csv")))
+        # The download folder holds every study's downloads. A file there is
+        # taken only when every section it names is one of THIS study's.
+        if root == downloads:
+            found = [p for p in found if _about_this_study(p)]
+        cand += found
+    if cand:
+        return max(cand, key=os.path.getmtime)
+    return None
 
 
 def apply_review(excluded, marker):
@@ -618,11 +701,13 @@ def apply_review(excluded, marker):
     Returns (excluded, mask_rejected). `excluded` is a new dict; the caller's is
     not mutated.
     """
-    if not os.path.exists(REVIEW_CSV):
+    path = find_review_csv()
+    if not path:
         return excluded, set()
+    print(f"review decisions from {path}")
     out, rejected = dict(excluded), set()
     restored = dropped = 0
-    with open(REVIEW_CSV, newline="", encoding="utf-8") as fh:
+    with open(path, newline="", encoding="utf-8") as fh:
         for r in csv.DictReader(fh):
             uid = r.get("scene_uid", "")
             # Paired: rows for the other marker belong to the other run's
@@ -647,9 +732,11 @@ def apply_review(excluded, marker):
             elif r.get("excluded") == "1":
                 out[uid] = ("manual", r.get("reason") or "excluded on review")
                 dropped += 1
-    if restored or dropped or rejected:
-        print(f"section_review.csv: {restored} reinstated, {dropped} dropped, "
-              f"{len(rejected)} mask(s) rejected")
+    # Always, zeros included, once a file is used: when the newest export
+    # changes (another browser's, holding fewer decisions), a run that now
+    # applies nothing has to say so rather than look like the last one.
+    print(f"{os.path.basename(path)}: {restored} reinstated, {dropped} dropped, "
+          f"{len(rejected)} mask(s) rejected")
     return out, rejected
 
 
@@ -1084,6 +1171,14 @@ def main():
             print(f"    ... and {len(lost) - 15} more")
         print(f"  full list: {path}")
         print("!" * 74)
+    elif os.path.exists(paths["lost"]):
+        # Nothing lost this run, so an earlier run's list is stale - and one
+        # written before excluded sections were kept out of it may name
+        # sections that were never meant to survive. A full run is the whole
+        # answer; --only returned above and never gets here.
+        os.remove(paths["lost"])
+        print(f"removed {os.path.basename(paths['lost'])} from an earlier run: "
+              f"no kept section was lost this time")
     report_excluded_failures(excl_failed)
     if n_excluded:
         print(f"excluded {n_excluded} section(s) marked as too damaged in the curator;")

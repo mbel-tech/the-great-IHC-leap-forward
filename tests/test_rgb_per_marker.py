@@ -75,8 +75,13 @@ def run_04o(O, marker):
 
     `reformat` is replaced by a pass-through: the geometry is 04a's business and
     has its own suites. What is under test is where the picture LANDS, so the
-    fake hands back the overview PNGs as they are - the marker plane is the
-    marker's own _MARK.png, which is what makes the two runs' pictures differ.
+    fake hands back the overview PNGs as they are. Under multiplex both runs
+    read the scan's one _MARK.png (per-marker overview naming is an open owner
+    decision); each marker's colour is what makes the two pictures differ.
+
+    "" when main() raised nothing and returned None; otherwise what it raised,
+    or "returned <rc>" - a run that fails by its return code is not a run that
+    worked, and this used to look only for an exception.
     """
     def fake_reformat(dapi, companion=None, **_kw):
         img = np.asarray(Image.open(dapi).convert("L"))
@@ -89,7 +94,9 @@ def run_04o(O, marker):
     O.RF.reformat = fake_reformat
     raised = ""
     try:
-        O.main()
+        rc = O.main()
+        if rc is not None:
+            raised = f"returned {rc}"
     except BaseException as exc:                    # noqa: BLE001
         raised = f"{type(exc).__name__}: {exc}"
     finally:
@@ -106,20 +113,24 @@ with temp_study(acquisition=MULTIPLEX) as study:
     # focus table are the only inputs `--all` reads before rendering.
     write_csv(os.path.join(ref, "reformat_index.csv"), ["id", "kind", "animal"],
               [{"id": UID, "kind": "section", "animal": "AB12"}])
+    # focus.csv as 00_manifest / 01 really write it under multiplex: ONE row
+    # per scan, its marker_channel the file's second channel - the first
+    # marker only - and the overviews in that one folder. A row per marker,
+    # as this used to write, is a study no pipeline produces, and it hid that
+    # 04o found no section at all for the second marker.
     write_csv(os.path.join(out, "qc", "focus.csv"),
               ["scene_uid", "marker_channel", "animal"],
-              [{"scene_uid": UID, "marker_channel": m, "animal": "AB12"}
-               for m in ("Mk1", "Mk2")])
-    for m in ("Mk1", "Mk2"):
-        d = os.path.join(out, "overviews", "AB12", m)
-        os.makedirs(d, exist_ok=True)
-        Image.fromarray(np.full((SIDE, SIDE), 40, np.uint8)).save(
-            os.path.join(d, UID + "_DAPI.png"))
-        Image.fromarray(np.full((SIDE, SIDE), 200, np.uint8)).save(
-            os.path.join(d, UID + "_MARK.png"))
+              [{"scene_uid": UID, "marker_channel": "Mk1", "animal": "AB12"}])
+    d = os.path.join(out, "overviews", "AB12", "Mk1")
+    os.makedirs(d, exist_ok=True)
+    Image.fromarray(np.full((SIDE, SIDE), 40, np.uint8)).save(
+        os.path.join(d, UID + "_DAPI.png"))
+    Image.fromarray(np.full((SIDE, SIDE), 200, np.uint8)).save(
+        os.path.join(d, UID + "_MARK.png"))
 
     chk("04o runs for the first marker", run_04o(O, "Mk1"), "")
-    chk("04o runs for the second marker", run_04o(O, "Mk2"), "")
+    chk("04o runs for the second marker, from the scan's one focus row",
+        run_04o(O, "Mk2"), "")
 
     names = O.RF.NAMES
     rgb = {m: names.path("sections_rgb", m) for m in ("Mk1", "Mk2")}
@@ -246,7 +257,7 @@ print()
 print("--- a composite not built, or a marker with no colour, fails the run ---")
 
 
-def run_04o_rc(O, marker):
+def run_04o_rc(O, marker, extra=("--all", "--thumbs")):
     """run_04o, but keeping main()'s return value and what it printed."""
     import contextlib
     import io
@@ -257,7 +268,7 @@ def run_04o_rc(O, marker):
         return img, None, 0.0, None, None, comp
 
     saved_argv, saved_rf = sys.argv, O.RF.reformat
-    sys.argv = ["04o_section_rgb.py", "--marker", marker, "--all", "--thumbs",
+    sys.argv = ["04o_section_rgb.py", "--marker", marker, *extra,
                 "--source", "overview"]
     O.RF.reformat = fake_reformat
     out = io.StringIO()
@@ -294,6 +305,110 @@ with temp_study(acquisition=MULTIPLEX) as study:
     chk("...the one that could be built is on disk",
         os.path.exists(os.path.join(O.rgb_dir("Mk1"), UID + ".png")), True)
 
+    # --verify is a check: a mismatch, or a section it could not check, used
+    # to end in success. UID's greyscale matches its DAPI overview; S3's does
+    # not; `gone` has no overview, so it cannot be checked.
+    sec = O.RF.marker_paths("Mk1")["sections"]
+    os.makedirs(sec, exist_ok=True)
+    Image.fromarray(np.full((SIDE, SIDE), 40, np.uint8)).save(os.path.join(sec, UID + ".png"))
+    bad = "S3"
+    Image.fromarray(np.full((SIDE, SIDE), 41, np.uint8)).save(os.path.join(sec, bad + ".png"))
+    Image.fromarray(np.full((SIDE, SIDE), 40, np.uint8)).save(os.path.join(d, bad + "_DAPI.png"))
+    Image.fromarray(np.full((SIDE, SIDE), 200, np.uint8)).save(os.path.join(d, bad + "_MARK.png"))
+    write_csv(os.path.join(out, "reformatted", "reformat_index.csv"),
+              ["id", "kind", "animal"],
+              [{"id": u, "kind": "section", "animal": "AB12"} for u in (UID, gone, bad)])
+    write_csv(os.path.join(out, "qc", "focus.csv"),
+              ["scene_uid", "marker_channel", "animal"],
+              [{"scene_uid": u, "marker_channel": "Mk1", "animal": "AB12"}
+               for u in (UID, gone, bad)])
+    rc, said = run_04o_rc(O, "Mk1", ("--all", "--verify"))
+    chk("--verify with a mismatch fails the run", rc, 1)
+    chk("...naming the mismatch", any("MISMATCH " + bad in ln for ln in said), True)
+    chk("...the section it could not check is 'not verified', not 'not built'",
+        any("1 not verified" in ln for ln in said)
+        and not any("NOT BUILT" in ln for ln in said), True)
+    chk("...and the reason is the last line",
+        bool(said) and "1 section(s) MISMATCHED and 1 could not be checked" in said[-1], True)
+
+    # A mismatch ALONE, every section checkable, still fails - and says it
+    # does not reproduce.
+    write_csv(os.path.join(out, "reformatted", "reformat_index.csv"),
+              ["id", "kind", "animal"],
+              [{"id": u, "kind": "section", "animal": "AB12"} for u in (UID, bad)])
+    rc, said = run_04o_rc(O, "Mk1", ("--all", "--verify"))
+    chk("--verify with only a mismatch fails the run", rc, 1)
+    chk("...its last line says it does not reproduce, not that any could not be checked",
+        bool(said) and "1 section(s) MISMATCHED" in said[-1]
+        and "does not reproduce" in said[-1]
+        and "could not be checked" not in said[-1], True)
+
+    # No greyscale to compare with: no image is written (verify renders at
+    # scale 1, and saving it would overwrite the composite path), and the last
+    # line says it could not be checked - not that it does not reproduce.
+    nogrey = "S4"
+    for suf, v in (("_DAPI.png", 40), ("_MARK.png", 200)):
+        Image.fromarray(np.full((SIDE, SIDE), v, np.uint8)).save(
+            os.path.join(d, nogrey + suf))
+    write_csv(os.path.join(out, "reformatted", "reformat_index.csv"),
+              ["id", "kind", "animal"],
+              [{"id": u, "kind": "section", "animal": "AB12"} for u in (UID, nogrey)])
+    write_csv(os.path.join(out, "qc", "focus.csv"),
+              ["scene_uid", "marker_channel", "animal"],
+              [{"scene_uid": u, "marker_channel": "Mk1", "animal": "AB12"}
+               for u in (UID, nogrey)])
+    target = os.path.join(O.rgb_dir("Mk1"), nogrey + ".png")
+    rc, said = run_04o_rc(O, "Mk1", ("--all", "--verify"))
+    chk("--verify with no greyscale to compare with fails the run", rc, 1)
+    chk("...and writes no image for it", os.path.exists(target), False)
+    chk("...its last line says it could not be checked, not that it does not reproduce",
+        bool(said) and "1 section(s) could not be checked" in said[-1]
+        and "does not reproduce" not in said[-1], True)
+
+print()
+print("--- --include-excluded: an EXCLUDED section with no composite does not fail ---")
+# 04a --render-excluded's rule: an excluded section is never going into the
+# analysis, and excluded sections are exactly the torn, empty or debris ones
+# that form no tissue mask. Counted as NOT BUILT, one failed the stage for good.
+# Counted apart and named instead; a KEPT section not built still fails.
+with temp_study(acquisition=MULTIPLEX) as study:
+    O = load_stage("04o_section_rgb.py", name="lsstage_04o_excl")
+    out = study.out_root
+    excl = "S9"
+    # UID is in the index (kept); `excl` is scanned, not indexed (excluded),
+    # and has no overview - the picture cannot be made.
+    write_csv(os.path.join(out, "reformatted", "reformat_index.csv"),
+              ["id", "kind", "animal"], [{"id": UID, "kind": "section", "animal": "AB12"}])
+    write_csv(os.path.join(out, "qc", "focus.csv"),
+              ["scene_uid", "marker_channel", "animal"],
+              [{"scene_uid": u, "marker_channel": "Mk1", "animal": "AB12"}
+               for u in (UID, excl)])
+    d = os.path.join(out, "overviews", "AB12", "Mk1")
+    os.makedirs(d, exist_ok=True)
+    Image.fromarray(np.full((SIDE, SIDE), 40, np.uint8)).save(
+        os.path.join(d, UID + "_DAPI.png"))
+    Image.fromarray(np.full((SIDE, SIDE), 200, np.uint8)).save(
+        os.path.join(d, UID + "_MARK.png"))
+    rc, said = run_04o_rc(O, "Mk2", ("--include-excluded",))
+    chk("an excluded section with no composite does not fail 04o", rc, None)
+    chk("...it is counted apart, as an excluded section",
+        any("1 excluded section(s) got no composite" in ln for ln in said), True)
+    chk("...and named", any(excl in ln for ln in said), True)
+    chk("...not as NOT BUILT", any("NOT BUILT" in ln or " not built:" in ln
+                                   for ln in said), False)
+    chk("...the kept section's composite is built",
+        os.path.exists(os.path.join(O.rgb_dir("Mk2"), UID + ".png")), True)
+
+    # The same failure on a KEPT section still fails the run, reason last.
+    os.remove(os.path.join(O.rgb_dir("Mk2"), UID + ".png"))
+    os.remove(os.path.join(d, UID + "_DAPI.png"))
+    rc, said = run_04o_rc(O, "Mk2", ("--include-excluded",))
+    chk("a KEPT section with no composite still fails 04o", rc, 1)
+    chk("...its count is the last line",
+        bool(said) and "1 Mk2 composite(s) NOT BUILT" in said[-1], True)
+    chk("...and the excluded one is still counted apart",
+        any("1 excluded section(s) got no composite" in ln for ln in said), True)
+
 # The first two markers shown get red and green by default; a third with no
 # `display.colours` entry is what the colour map leaves out.
 THREE = {"layout": "multiplex", "channels": MULTIPLEX["channels"] + [
@@ -306,7 +421,7 @@ with temp_study(acquisition=THREE) as study:
               ["id", "kind", "animal"], [{"id": UID, "kind": "section", "animal": "AB12"}])
     write_csv(os.path.join(out, "qc", "focus.csv"),
               ["scene_uid", "marker_channel", "animal"],
-              [{"scene_uid": UID, "marker_channel": "Mk3", "animal": "AB12"}])
+              [{"scene_uid": UID, "marker_channel": "Mk1", "animal": "AB12"}])
     chk("the third marker has no colour in this study",
         "Mk3" in O.MARKER_COLOURS, False)
     rc, said = run_04o_rc(O, "Mk3")

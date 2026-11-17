@@ -227,6 +227,14 @@ def main():
 
     # ---- the decision flags ------------------------------------------------
     chk("a named plate reads as assigned", state["A_s01a_sc00"]["assigned"], True)
+    # `not_carried` (04l): the pipeline no longer carried the section when it
+    # was exported. A derived state, not the operator's: `excluded` stays 0 on
+    # such a row, and the rebuilt record must not come back excluded, or it
+    # would still be left out once the pipeline carries the section again.
+    nc, _s = Q.build([dict(PLATES[0], not_carried="1")], LANDMARKS, [], k_of)
+    chk("a not_carried row is not stored as the operator's exclusion",
+        nc["A_s01a_sc00"]["excl"], False)
+    chk("...and its work comes back", len(nc["A_s01a_sc00"]["pairs"]), 2)
     # THE ID WINS. The index is kept as a record of what the array looked like
     # and used only when there is no id at all.
     chk("...and the plate comes from the id", state["A_s01a_sc00"]["plate_id"], "plate_010")
@@ -405,7 +413,18 @@ def main():
             rc = Q.main(margv)
         chk("a report-only run names what --write would keep",
             "B_KEPT_ONLY" in buf.getvalue(), True)
+        chk("...says 'would keep', not 'kept' - it kept nothing",
+            ("would keep 1" in buf.getvalue(), "kept 1" in buf.getvalue()),
+            (True, False))
         chk("...and makes no backup", (rc, backups()), (0, []))
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = Q.main(margv + ["--replace"])
+        chk("--replace without --write says it needs --write",
+            (rc, "--replace needs --write" in buf.getvalue(),
+             "would be DROPPED" in buf.getvalue()), (0, True, True))
+        chk("...and changes nothing", (stored(), backups()), (stored0, []))
 
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
@@ -419,7 +438,7 @@ def main():
         chk("...another study's entry is untouched",
             stored()["_studies"]["/elsewhere/other_study"], {"X": rec})
         chk("...the report counts and names what it kept",
-            ("kept 1" in buf.getvalue(), "B_KEPT_ONLY" in buf.getvalue()), (True, True))
+            ("keeping 1" in buf.getvalue(), "B_KEPT_ONLY" in buf.getvalue()), (True, True))
         first = backups()
         chk("...one timestamped backup beside it", len(first), 1)
         chk("...named <name>.<YYYYMMDD-HHMMSS>.backup",
@@ -468,6 +487,18 @@ def main():
             open(seed, encoding="utf-8").read(), before)
         chk("...with no temp file left beside it",
             [n for n in os.listdir(merge_dir) if n.endswith(".tmp")], [])
+
+        # An unreadable stored file is replaced (after a backup), and SAID to
+        # be: its contents cannot be merged, so only the backup keeps them.
+        with open(seed, "w", encoding="utf-8") as fh:
+            fh.write("{not json")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = Q.main(margv + ["--write"])
+        chk("an unparseable stored file is named as unreadable",
+            (rc, "could not read" in buf.getvalue()), (0, True))
+        chk("...and replaced by the export's sections",
+            sorted(stored()["_studies"][Q.STUDY_ID]), sorted([uid_a, uid_c]))
 
         # The names are a list a person reads: capped, with the rest counted.
         many = ["S%02d" % i for i in range(25)]

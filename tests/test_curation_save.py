@@ -160,6 +160,24 @@ with held_open():
 chk("a new failure streak shows a box again", len(boxes()), 1)
 for b in boxes():
     b.close()
+view.bridge.save(KEY, GOOD)
+# A key saved only when its own control is used (the radius here): its failed disk write
+# must not hold the warning up until that control is used again, through curation that
+# reaches disk.
+with held_open():
+    view.bridge.save("ls_roi_curator_v1_size", "3")
+chk("a failed disk write of the radius is shown", view.save_warning.isVisible(), True)
+for b in boxes():
+    b.close()
+view.bridge.save(KEY, NEW)
+chk("...and a later save that reaches disk clears it", view.save_warning.isVisible(), False)
+# On a STALE page (started from an older copy than the file) the radius is reported like
+# any key, in the load-time box and the banner: what it saves is set aside, not on disk.
+view.bridge.loadStale(view.guard.gen, "load-q", "ls_roi_curator_v1_size")
+chk("a stale page's radius is reported at load: banner and box",
+    (view.save_warning.isVisible(), len(boxes())), (True, 1))
+for b in boxes():
+    b.close()
 server.stop()
 
 print("--- an import is not saved over by the page that was open before it ---")
@@ -406,6 +424,127 @@ view.bridge.saveFrom(b_gen, KEY, json.dumps(b_late))
 chk("...and a late save from B's page stays out of it", in_file(pc), C_ROI)
 chk("A's curation is untouched by all of it", in_file(pa).get("LS9_s2"), None)
 w.server.stop()
+
+print("--- a full browser store: the disk still gets the save, and the app says so ---")
+# The page's own localStorage refuses a write once the origin's quota is used up. The
+# mirror used to call the browser's setItem first and reach the bridge only if that
+# returned, so exactly these saves - the ones the browser could not keep - never reached
+# disk either, and the app's banner never showed. Filled with plain property writes,
+# which bypass setItem and so are not mirrored: only the curator's own save goes to disk.
+out = os.path.join(tmp, "full")
+os.makedirs(os.path.join(out, "reformatted"))
+with open(os.path.join(out, "reformatted", "roi.html"), "w", encoding="utf-8") as fh:
+    fh.write(PAGE)
+server = CV.LocalServer(out)
+view = CV.CuratorView(server, out)
+view.show()
+lines = []
+view.logged.connect(lines.append)
+view.show_page("reformatted/roi.html")
+chk("the page starts empty", wait_loaded({}), True)
+# Big pieces until one is refused, then smaller ones into what is left, so that not
+# even the few bytes of a decision fit.
+filled = js("var n = 0, mb = 0; [1 << 20, 1 << 14, 1 << 8, 8, 1].forEach(function (w) {"
+            " for (var i = 0; i < 64; i++) { try { localStorage['fill' + (n++)] = 'x'.repeat(w);"
+            " if (w === 1 << 20) mb++; } catch (e) { break; } } }); mb")
+chk("the browser store fills up before 64 MB", (filled or 0) < 64, True)
+FULL = {"LS1_s1": {"plate": "decided while full"}}
+js("S = {LS1_s1: {plate: 'decided while full'}}; true")
+chk("a save the browser refuses still reaches disk", settle(lambda: stored() == FULL), True)
+chk("...the app shows its banner", view.save_warning.isVisible(), True)
+chk("...saying the page's own storage refused it",
+    "own storage" in view.save_warning.text() and KEY in view.save_warning.text(), True)
+chk("...and logs it", any("NOT SAVED" in s and "refused" in s for s in lines), True)
+for b in boxes():
+    b.close()
+
+# The file is now NEWER than the page's storage. A reload reads localStorage, and the seed
+# used to fill only empty keys - so the page came back without the decision, and its first
+# save sent that older copy over the file. While the store is still full the reload cannot
+# take the file in either: then its saves are kept aside, never written.
+view.view.reload()
+chk("reloaded with the store still full, the page has only its older copy",
+    settle(lambda: page_state() == {}), True)
+# Said as the page loads, before anything is done on it - and not in the words of the
+# page-storage warning, whose "the file on disk has it" is the opposite of true here.
+chk("...and the app says so as it loads, in a box of its own",
+    settle(lambda: any("started from an OLDER copy" in b.text() for b in boxes())), True)
+js("S.LS1_s2 = {plate: 'after reload'}; true")
+spin(1000)
+chk("...and its saves do not put that older copy over the file", stored(), FULL)
+stale = glob.glob(os.path.join(out, "curation", "_backup_*", "from_stale_page", KEY + ".json"))
+chk("...they are kept aside instead",
+    any(json.load(open(p, encoding="utf-8")).get("LS1_s2") == {"plate": "after reload"}
+        for p in stale), True)
+LEAD = "Curation is NOT SAVED - this page's decisions are being set aside, not written to the file."
+chk("...the banner opens with what is true", view.save_warning.text().startswith(LEAD), True)
+chk("...says where they are, and that a reload will not bring them back",
+    ("from_stale_page" in view.save_warning.text(),
+     "will not come back" in view.save_warning.text()), (True, True))
+chk("...and the box came once for this page, not once per save", len(boxes()), 1)
+for b in boxes():
+    b.close()
+
+js("Object.keys(localStorage).filter(function (k) { return k.indexOf('fill') === 0; })"
+   ".forEach(function (k) { localStorage.removeItem(k); }); true")
+view.view.reload()
+chk("with room again, a reload starts from the file", settle(lambda: page_state() == FULL), True)
+js("S.LS1_s3 = {plate: 'caught up'}; true")
+caught = dict(FULL, LS1_s3={"plate": "caught up"})
+chk("...a decision then is saved on top of it", settle(lambda: stored() == caught), True)
+chk("once the store has room again the banner goes",
+    settle(lambda: not view.save_warning.isVisible()), True)
+chk("...and the next load is back to filling only empty keys", view.guard.behind, set())
+server.stop()
+
+print("--- a refused snapshot is not a refused save ---")
+quiet = []
+qbr = ST.Bridge(ST.CurationStore(os.path.join(tmp, "quiet")),
+                on_error=lambda k, m: quiet.append(k), on_page_error=lambda k, m: quiet.append(k))
+qbr.saveFromRefused(qbr.guard.gen, "ls_roi_curator_v1_backup", '{"S": {}}', "QuotaExceededError")
+chk("the backup key reaching disk only raises no warning", quiet, [])
+chk("...it is on disk", qbr.store.read("ls_roi_curator_v1_backup"), '{"S": {}}')
+# Saved only when their own control is used: a warning from one would never clear.
+for k in ("ls_roi_curator_v1_size", "ls_roi_curator_v1_rois", "ls_roi_curator_v1_custom"):
+    qbr.saveFromRefused(qbr.guard.gen, k, "1", "QuotaExceededError")
+chk("...nor does the radius, the ROI choice or the added ROIs", quiet, [])
+
+print("--- a stale page's saves of the radius, ROIs and added ROIs are reported ---")
+seen = []
+rbr = ST.Bridge(ST.CurationStore(os.path.join(tmp, "stale-quiet")),
+                on_stale=lambda load, k, m: seen.append(k))
+rbr.loadStale(rbr.guard.gen, "L1", ",".join(sorted(ST.QUIET_KEYS)))
+chk("at load: the three, not the snapshot",
+    sorted(seen), sorted(ST.QUIET_KEYS - {"ls_roi_curator_v1_backup"}))
+seen.clear()
+for k in sorted(ST.QUIET_KEYS):
+    rbr.saveFromStale(rbr.guard.gen, "L1", k, "1")
+chk("...and each save set aside, not on disk, is reported too",
+    sorted(seen), sorted(ST.QUIET_KEYS - {"ls_roi_curator_v1_backup"}))
+
+print("--- two stale loads in one session do not overwrite each other's set-aside ---")
+rbr.saveFromStale(rbr.guard.gen, "L1", KEY, '{"a": 1}')
+rbr.saveFromStale(rbr.guard.gen, "L2", KEY, '{"b": 2}')
+rbr.saveFromStale(rbr.guard.gen, "L1", KEY, '{"a": 3}')
+# KEY.json and KEY.<n>.json - not KEY_size.json and the like.
+kept = glob.glob(os.path.join(tmp, "stale-quiet", "curation", "_backup_*", "from_stale_page",
+                              KEY + ".*json"))
+chk("one file per load, each holding that load's last save",
+    sorted(json.dumps(json.load(open(p, encoding="utf-8"))) for p in kept),
+    sorted(json.dumps(d) for d in ({"a": 3}, {"b": 2})))
+
+print("--- a stale page of a project closed since keeps its saves with that project ---")
+stale_seen = []
+old_store = ST.CurationStore(os.path.join(tmp, "closed"))
+sbr = ST.Bridge(ST.CurationStore(os.path.join(tmp, "open")),
+                on_stale=lambda load, k, m: stale_seen.append(m))
+sbr.guard.retired["old-gen"] = old_store
+sbr.saveFromStale("old-gen", "load-1", KEY, '{"x": 1}')
+chk("set aside in the closed project's curation folder",
+    len(glob.glob(os.path.join(tmp, "closed", "curation", "_backup_*", "from_stale_page",
+                               KEY + ".json"))), 1)
+chk("...not the open one's", os.path.exists(os.path.join(tmp, "open", "curation")), False)
+chk("...and never written as that project's live curation", old_store.read(KEY), None)
 
 print()
 print("FAILED: %d" % fails if fails else "ALL PASS")

@@ -170,12 +170,15 @@ class MainWindow(QMainWindow):
         # The open project: the study config plus the app's record of working on it.
         # Held in memory; stages read the saved file, so a run saves it first.
         self.session = ProjectSession(LP.Project.open(self.config_path), self)
+        self.session.idle_for = self._idle_for     # Save As / a moved out_root wait for a running stage
         self._pending_log = []
         for key, _old, new in self.session.project.reanchored:
             self._pending_log.append(
                 f"paths updated for this location: {key} -> {new} (File > Save to keep)")
         self.session.changed.connect(self._update_title)
         self.session.opened.connect(self._project_opened)
+        # Read again after a conflict: the screens and the curator follow it as for a replaced file.
+        self.session.reloaded.connect(lambda p: self._project_opened(p, again=True))
         self.session.saved.connect(self._project_saved)
         self.out_root = self._config()["out_root"]
         line = self.session.sync_curation(self)

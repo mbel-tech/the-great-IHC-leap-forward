@@ -127,7 +127,12 @@ def choose_variants(rows):
     overrides = {}
     if os.path.exists(override_path):
         with open(override_path, newline="", encoding="utf-8") as fh:
-            for r in csv.DictReader(fh):
+            rd = csv.DictReader(fh)
+            # A person writes this file: a missing column is a refusal naming
+            # the file and the column, not a bare KeyError (00 reads it too).
+            for col in ("animal", "slide", "marker_channel", "variant"):
+                IO.pick_column(rd.fieldnames, col, what=override_path)
+            for r in rd:
                 overrides[(r["animal"], int(r["slide"]), r["marker_channel"])] = r["variant"]
         print(f"Loaded {len(overrides)} variant override(s)")
 

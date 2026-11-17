@@ -618,9 +618,13 @@ cut = median(background) + 3 × 1.4826 × MAD(background)
 
 — a *spread*-based cut, deliberately not a percentile. Take the top 5% of background
 nuclei as "positive" and the false-positive rate is 5% by construction: you have fixed it
-by definition and destroyed the only independent check the discs exist to provide. With a
-spread-based cut, how many background nuclei land above the line is a **measurement**, and
-`detector_specificity.csv` reports it per section and per animal.
+by definition and destroyed the check the discs exist to provide. With a spread-based cut,
+how many background nuclei land above the line is a **measurement**, and
+`detector_specificity.csv` reports it per section and per animal. That share is **in-sample**:
+the cut was fitted to those same nuclei, so it is the tail of the distribution the cut came
+from, not an independent check. The independent one is the leave-one-disc-out rate
+(`loo_false_positive_rate`): each background disc counted against the cut the section's
+other discs give.
 
 Two things that measurement is *not*:
 

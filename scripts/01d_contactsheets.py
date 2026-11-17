@@ -86,9 +86,12 @@ def chosen_variants():
     """(animal, slide, marker) -> variant, from Stage 2's re-scan resolution.
 
     Five slides were scanned twice (LS45_8b/8c, LS45_9b/9c, LS61_2b/2c,
-    LS61_4b/4c, LS85_7a/7b-). Both copies carry their own 1..N section_order,
-    so including both interleaves two series into one sheet - which is exactly
-    what the alternating sl1/sl8 labels revealed.
+    LS61_4b/4c, LS85_7a/7b-). Each copy used to carry its own 1..N
+    section_order, so including both interleaved two series into one sheet -
+    which is exactly what the alternating sl1/sl8 labels revealed. 00 now
+    numbers both copies inside their slide's places, so they no longer collide
+    with another slide, but both are still the same sections: only the chosen
+    one belongs on the sheet.
     """
     path = os.path.join(OUT_ROOT, "manifest", "variant_choices.csv")
     if not os.path.exists(path):
@@ -177,8 +180,14 @@ def thumb_path(row, kind):
     )
 
 
-def build_sheet(rows, animal, marker, kind, cols, thumb_w, out_dir):
-    """Paged montage of one animal's series in one marker."""
+def build_sheet(rows, animal, marker, kind, cols, thumb_w, out_dir, missing=None):
+    """Paged montage of one animal's series in one marker.
+
+    `missing`, a list, receives the scene_uid of every section focus.csv lists
+    whose overview PNG is not on disk. They used to be left off the sheet
+    without a word, which is the one thing this module promises not to do: a
+    gap in the series must never be silently invented."""
+    missing = missing if missing is not None else []
     rows = sorted(rows, key=lambda r: (r["section_order"], r["slide"]))
     focus_floor = quantile([r["focus_score"] for r in rows], FOCUS_LOW_QUANTILE)
 
@@ -187,6 +196,8 @@ def build_sheet(rows, animal, marker, kind, cols, thumb_w, out_dir):
         path = thumb_path(r, kind)
         if os.path.exists(path):
             entries.append((r, path))
+        else:
+            missing.append(r["scene_uid"])
     if not entries:
         return []
 
@@ -307,10 +318,12 @@ def main():
         by_key[(r["animal"], r["marker_channel"])].append(r)
 
     sheets = []
+    missing = []
     for n_done, ((animal, marker), group) in enumerate(
             sorted(by_key.items(), key=lambda kv: (NM.natural_key(kv[0][0]), kv[0][1]))):
         PG.report(n_done, len(by_key), "animals and markers")
-        written = build_sheet(group, animal, marker, args.kind, args.cols, args.thumb, SHEET_DIR)
+        written = build_sheet(group, animal, marker, args.kind, args.cols, args.thumb,
+                              SHEET_DIR, missing)
         sheets.extend(written)
         print(f"  {animal:<7} {marker:<6} {len(group):>4} sections -> {len(written)} page(s)")
 
@@ -327,7 +340,13 @@ def main():
     print(f"QC-flagged sections : {flagged} of {len(rows)}")
     print(f"gallery             : {gallery}")
     print("=" * 72)
+    if missing:
+        print(f"{len(missing)} of {len(rows)} section(s) left off the sheets: no "
+              f"{args.kind} overview on disk (first: {', '.join(missing[:5])}) "
+              f"- re-run 01_overviews")
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

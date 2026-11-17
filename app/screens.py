@@ -1283,7 +1283,10 @@ class SetupScreen(QWidget):
             "The workbook could not be checked: %s." % rep.get("error")]
         if rep.get("from") and not rep.get("error"):
             lines.append("Fish read from the %s." % rep["from"])
-        bad = bool(rep.get("error") or rep.get("missing") or rep.get("blank"))
+        # Red for everything 06b stops on, the rows it refuses included: an
+        # animal on two rows, and one row two animals match.
+        bad = bool(rep.get("error") or rep.get("missing") or rep.get("blank")
+                   or rep.get("duplicate") or rep.get("shared"))
         self.workbook_line.setText(" ".join(lines))
         self.workbook_line.setStyleSheet(f"color:{COLOUR['failed']}" if bad else QUIET)
         self.logged.emit("workbook checked: " + lines[0])
@@ -1306,7 +1309,9 @@ class SetupScreen(QWidget):
             self._sync_groups("No groups loaded: the workbook gave no animal a group."
                               if not project.read_only else None, bad=True)
             return
-        missing = (rep.get("missing") or []) + [a for a, _ in rep.get("blank") or []]
+        missing = ((rep.get("missing") or []) + list(rep.get("duplicate") or [])
+                   + [a for _sid, who in rep.get("shared") or [] for a in who]
+                   + [a for a, _ in rep.get("blank") or []])
         text = ("This keeps each fish's treatment group in the study, for the Shotgun deck.\n\n"
                 "%s\n\nThe curator's sections, plates and ROIs and every count stay keyed by "
                 "animal; only the deck's layout and the order 05c measures sections in use "

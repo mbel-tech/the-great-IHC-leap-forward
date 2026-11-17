@@ -40,7 +40,9 @@ def _natural_key(text):
                  for part in re.split(r"(\d+)", str(text)) if part != "")
 
 
-SLIDE_EXTS = (".czi", ".zip")          # 00_manifest reads zips of czis too
+# 00_manifest reads the HEADERS of CZIs inside zips; every pixel stage (01 on)
+# reads extracted CZI files only, so a zip must be extracted before stage 01.
+SLIDE_EXTS = (".czi", ".zip")
 
 
 def name_pattern(runner=None):

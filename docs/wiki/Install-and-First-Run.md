@@ -45,7 +45,7 @@ The window has a step list down the left with six screens, in the order you work
 
 | Menu | Item | What it does |
 | --- | --- | --- |
-| File | New, Open, Open Recent, Save, Save As, Revert | Work with the project file |
+| File | New, Open, Open Recent, Save, Save As, Revert | Work with the project file (Save As, and a Save that changes the output folder, wait while a stage runs) |
 | File | Project history | Every stage that ran in this project, and when |
 | File | Export a copy | A copy of the project to share or archive |
 | View | One item per screen, All stages, Refresh status | Jump to a screen; see every stage in one list; re-read progress from disk |

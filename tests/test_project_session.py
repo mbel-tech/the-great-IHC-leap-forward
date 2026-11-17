@@ -69,6 +69,23 @@ def question(parent, title, text, buttons=None, default=None):
 QMessageBox.question = staticmethod(question)
 QMessageBox.warning = staticmethod(lambda p, t, x, *a, **k: (asked.append("warn:" + t), texts.append(x)))
 QMessageBox.information = staticmethod(lambda p, t, x, *a, **k: asked.append("info:" + t))
+
+
+def box_exec(box):
+    """A QMessageBox built with its own buttons: click the one whose label is the scripted answer."""
+    asked.append(box.windowTitle())
+    texts.append(box.text())
+    want = answers.get(box.windowTitle())
+    for b in box.buttons():
+        if b.text().replace("&", "") == want:
+            b.click()
+            return 0
+    if box.escapeButton() is not None:
+        box.escapeButton().click()
+    return 0
+
+
+QMessageBox.exec = box_exec
 picked = {}
 QFileDialog.getSaveFileName = staticmethod(lambda *a, **k: (picked.get("save", ""), ""))
 QFileDialog.getOpenFileName = staticmethod(lambda *a, **k: (picked.get("open", ""), ""))
@@ -148,10 +165,60 @@ s2 = session_on("c")
 with open(s2.project.path, "r+", encoding="utf-8") as fh:
     d = json.load(fh); d["pixel_size_um"] = 4; fh.seek(0); json.dump(d, fh, indent=2); fh.truncate()
 s2.project.set("section_thickness_um", 15.0, by="t")
-answers["The file changed on disk"] = QMessageBox.No
-chk("saving over a hand edit asks; No leaves the file", (s2.save(None), read(s2.project.path)["pixel_size_um"]), (False, 4))
-answers["The file changed on disk"] = QMessageBox.Yes
+answers["The file changed on disk"] = "Cancel"
+chk("saving over a hand edit asks; Cancel leaves the file", (s2.save(None), read(s2.project.path)["pixel_size_um"]), (False, 4))
+answers["The file changed on disk"] = PS.ProjectSession.SAVE_OVER
 chk("Yes saves over it", (s2.save(None), read(s2.project.path)["section_thickness_um"]), (True, 15.0))
+
+# The way out that keeps the other change: Discard reads the file again. Revert alone only went
+# back to this copy's last save - the very thing that conflicts - so the question came back on
+# every later Save.
+s3 = session_on("conflict_reload")
+other = LP.Project.open(s3.project.path)
+other.set("pixel_size_um", 0.71, by="B")
+other.save()
+s3.project.write_curation("ls_reload_probe", "1")            # a partial write arms the conflict
+s3.project.set("section_thickness_um", 16.0, by="t")
+s3.touch()
+reloaded = []
+s3.reloaded.connect(reloaded.append)
+answers["The file changed on disk"] = PS.ProjectSession.RELOAD
+chk("Discard reads the file again instead of saving",
+    (s3.save(None), s3.project.get("pixel_size_um"), s3.project.get("section_thickness_um") == 16.0, s3.dirty),
+    (False, 0.71, False, False))
+chk("...and tells the window", reloaded, [s3.project.path])
+chk("the box's buttons carry their own labels, and its text names them",
+    (PS.ProjectSession.RELOAD in texts[-1], PS.ProjectSession.SAVE_OVER in texts[-1],
+     "Discard my changes and reload" == PS.ProjectSession.RELOAD), (True, True, True))
+s3.project.set("section_thickness_um", 17.0, by="t")
+asked.clear()
+chk("...after which Save goes through without asking, keeping the other change",
+    (s3.save(None), "The file changed on disk" in asked, read(s3.project.path)["pixel_size_um"],
+     read(s3.project.path)["section_thickness_um"]), (True, False, 0.71, 17.0))
+
+print("--- saving while a stage runs ---")
+# Save As rebinds the runner and a saved out_root re-roots the curator, both under a stage
+# that is still writing. The window's run guard (idle_for) is asked first, like Open / New.
+g = session_on("guard")
+guard_asked = []
+g.idle_for = lambda action: (guard_asked.append(action), False)[1]
+g_path = g.project.path
+picked["save"] = os.path.join(TMP, "guard", "elsewhere.json")
+chk("Save As is refused while a stage runs, before any dialog",
+    (g.save_as(None), os.path.exists(picked["save"]), g.project.path), (False, False, g_path))
+g.project.set("out_root", os.path.join(TMP, "guard", "moved_out"), by="t")
+chk("Save that would move out_root is refused while a stage runs",
+    (g.save(None), read(g_path)["out_root"] == g.project.get("out_root"), g.dirty), (False, False, True))
+chk("...each with the guard's own question",
+    guard_asked, ["save the project under another name", "save a new output folder (out_root)"])
+g.project.revert()
+g.project.set("pixel_size_um", 0.42, by="t")
+chk("an ordinary Save still goes through while a stage runs",
+    (g.save(None), read(g_path)["pixel_size_um"]), (True, 0.42))
+g.idle_for = lambda action: True
+g.project.set("out_root", os.path.join(TMP, "guard", "moved_out"), by="t")
+chk("...and once idle, the out_root change saves", (g.save(None), read(g_path)["out_root"]),
+    (True, os.path.join(TMP, "guard", "moved_out")))
 
 print("--- revert ---")
 s.project.set("pixel_size_um", 3.3, by="t")
@@ -469,6 +536,18 @@ if MW:
     w.session.touch()
     w._file_actions["save"].trigger()
     chk("File > Save writes it", (read(path)["pixel_size_um"], "*" in w.windowTitle()), (0.32, False))
+    w._thread = object()                       # a stage is running
+    asked.clear()
+    picked["save"] = os.path.join(TMP, "win", "save_as_while_running.json")
+    w._file_actions["save_as"].trigger()
+    w.session.project.set("out_root", os.path.join(TMP, "win", "other_out"), by="t")
+    w._file_actions["save"].trigger()
+    chk("while a stage runs, File > Save As and a Save moving out_root are refused",
+        (asked.count("info:A step is running"), os.path.exists(picked["save"]),
+         w.config_path == os.path.abspath(path), read(path)["out_root"] == w.out_root), (2, False, True, True))
+    w._thread = None
+    w.session.project.revert()
+    w.session.touch()
     w._fill_recent()
     chk("the project is in Open Recent", [a.text() for a in w._recent_actions][:1], [os.path.basename(path)])
     other_path = study("win2")

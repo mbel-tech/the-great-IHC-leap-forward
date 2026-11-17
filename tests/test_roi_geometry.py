@@ -587,6 +587,79 @@ with temp_study(acquisition={"layout": "paired",
     chk("roi_boxes_Mk1.csv is written with rows in it",
         len(P5.load_csv(_box_path)) if os.path.exists(_box_path) else 0, 1)
 
+    # ---- a self-intersecting polygon ---------------------------------------
+    # A bowtie has shoelace area 0 (its two lobes cancel) while 05c's even-odd
+    # membership counts both lobes, so the density between them is infinite.
+    # The curator refuses one now; an older export can still carry one, and
+    # 05a must refuse the ROI by name rather than compute an area for it.
+    import io as _bio                                         # noqa: E402
+    import contextlib as _bctx                                # noqa: E402
+    _bow = os.path.join(MK.root, "roi_regions_bowtie.csv")
+    _wcsv(_bow,
+          [{"scene_uid": U1, "marker": "Mk1", "roi_kind": "roi",
+            "region": "BOWTIE", "seed_n": "", "sec_x": "128", "sec_y": "128",
+            "sec_r": "", "sec_poly": "100 100;150 150;150 100;100 150"},
+           {"scene_uid": U1, "marker": "Mk1", "roi_kind": "roi",
+            "region": "SQUARE", "seed_n": "", "sec_x": "125", "sec_y": "125",
+            # A double-clicked corner (the same point twice) is not a crossing.
+            "sec_r": "", "sec_poly": "100 100;150 100;150 150;150 150;100 150"},
+           # Pinched to a narrow waist that does NOT touch: the two notch tips
+           # are 2 px apart. A simple outline, however close it comes, is kept.
+           {"scene_uid": U1, "marker": "Mk1", "roi_kind": "roi",
+            "region": "HOURGLASS", "seed_n": "", "sec_x": "125", "sec_y": "125",
+            "sec_r": "", "sec_poly": "100 100;150 100;126 124;150 150;100 150;124 124"}],
+          ["scene_uid", "marker", "roi_kind", "region", "seed_n",
+           "sec_x", "sec_y", "sec_r", "sec_poly"])
+    _buf = _bio.StringIO()
+    _saved = (P5.RF.reformat, P5.scene_rects)
+    try:
+        P5.RF.reformat = _Reformat()
+        P5.scene_rects = lambda path: {0: (100, 200, 1000, 1000)}
+        P5.use_marker("Mk1")
+        with _bctx.redirect_stdout(_buf):
+            _g, _boxes, _sk = P5.build(_bow, require_background=False)
+    finally:
+        P5.RF.reformat, P5.scene_rects = _saved
+    _said = _buf.getvalue()
+    chk("a bowtie polygon is not placed; a pinched one that does not touch is",
+        sorted(b["region"] for b in _boxes), ["HOURGLASS", "SQUARE"])
+    chk("ring_crosses: an outline touching itself at one point is refused",
+        P5.ring_crosses([(0, 0), (5, 5), (10, 10), (10, 0), (5, 5), (0, 10)]), True)
+    chk("ring_crosses: a corner resting on another edge is refused",
+        P5.ring_crosses([(0, 0), (10, 0), (10, 10), (5, 0), (0, 10)]), True)
+    chk("...the refusal names the section and the region",
+        any(U1 in ln and "BOWTIE" in ln for ln in _said.splitlines()), True)
+    chk("...and says why", "crosses or touches itself" in _said, True)
+
+    # ---- not_carried ---------------------------------------------------------
+    # 04l marks a curated section no reformat_index carries any more as
+    # `not_carried=1` (and leaves `excluded`, the operator's own, alone). 05a
+    # must leave it out - build() has no index row to place it from, and would
+    # otherwise fail the run on it every time.
+    _rg = [{"scene_uid": "G1", "roi_kind": "roi"}, {"scene_uid": "G1", "roi_kind": "background"},
+           {"scene_uid": "K1", "roi_kind": "roi"}, {"scene_uid": "K1", "roi_kind": "background"}]
+    _pl = [{"scene_uid": "G1", "excluded": "0", "not_carried": "1"},
+           {"scene_uid": "K1", "excluded": "0", "not_carried": "0"}]
+    _keep, _dropped, _, _ = P5.analysis_set(_rg, _pl)
+    chk("analysis set: a not_carried section is left out", _keep, ["K1"])
+    chk("...under its own reason, not the operator's",
+        dict(_dropped).get("G1"), "not carried by the pipeline (in no reformat_index)")
+    # --all-sections skips the analysis set, so the rule is applied there too.
+    _nc_rg = os.path.join(MK.root, "roi_regions_nc.csv")
+    _nc_pl = os.path.join(MK.root, "roi_plates_nc.csv")
+    _wcsv(_nc_rg, [{"scene_uid": "GONE_s01a_sc00", "marker": "Mk1", "roi_kind": "roi",
+                    "region": "R1", "seed_n": "", "sec_x": "128", "sec_y": "128",
+                    "sec_r": "10", "sec_poly": ""}],
+          ["scene_uid", "marker", "roi_kind", "region", "seed_n",
+           "sec_x", "sec_y", "sec_r", "sec_poly"])
+    _wcsv(_nc_pl, [{"scene_uid": "GONE_s01a_sc00", "excluded": "0", "not_carried": "1"}],
+          ["scene_uid", "excluded", "not_carried"])
+    _buf = _bio.StringIO()
+    with _bctx.redirect_stdout(_buf):
+        _g, _b, _sk = P5.build(_nc_rg, plates_csv=_nc_pl, require_background=False)
+    chk("--all-sections: a not_carried section is not tried, so not SKIPPED", _sk, [])
+    chk("...and the drop is said", "not carried by the pipeline" in _buf.getvalue(), True)
+
     # ---- verify() ---------------------------------------------------------
     # Mk1 asked for; Mk2 is the only marker in the unsuffixed index. If the
     # file list is still the literal pair, `want` is empty, the note below is
@@ -681,6 +754,41 @@ with temp_study(acquisition={"layout": "paired",
     chk("roi_geometry_Mk2.csv holds Mk2's section only",
         _uids(P5.geom_csv("Mk2")), [U2])
 
+    # The bowtie through main(): the run FAILS with the count as its last line,
+    # and the boxes it did place are still written. A refused region the
+    # operator drew is a gap 05c would never measure, and exiting 0 made the
+    # app show 05a done with the section looking complete.
+    _rc, _said = _main(_bow, "--marker", "Mk1")
+    chk("a crossed polygon makes main() return 1", _rc, 1)
+    _last = [ln for ln in _said.splitlines() if ln.strip()][-1]
+    chk("...the last line names the refusal and its count",
+        _last.startswith("!! 1 Mk1 polygon ROI(s) REFUSED"), True)
+    chk("...and the boxes it placed are written",
+        sorted(r["region"] for r in P5.load_csv(P5.box_csv("Mk1"))),
+        ["HOURGLASS", "SQUARE"])
+
+    # A row with NO shape (neither sec_r nor sec_poly - a damaged or legacy
+    # export) is a curated region that will not be measured, like a crossed
+    # one. It was printed as REFUSED and the run returned 0, so the app showed
+    # 05a done with the region silently missing. Same rule as the bowtie.
+    _shapeless = os.path.join(MK.root, "roi_regions_shapeless.csv")
+    _wcsv(_shapeless,
+          [{"scene_uid": U1, "marker": "Mk1", "roi_kind": "roi",
+            "region": "R1", "seed_n": "1", "sec_x": "128", "sec_y": "128",
+            "sec_r": "10", "sec_poly": ""},
+           {"scene_uid": U1, "marker": "Mk1", "roi_kind": "roi",
+            "region": "NOSHAPE", "seed_n": "2", "sec_x": "140", "sec_y": "140",
+            "sec_r": "", "sec_poly": ""}], _RCOLS)
+    _rc, _said = _main(_shapeless, "--marker", "Mk1")
+    chk("a ROI row with no shape makes main() return 1", _rc, 1)
+    _last = [ln for ln in _said.splitlines() if ln.strip()][-1]
+    chk("...the last line names the refusal and its count",
+        _last.startswith("!! 1 Mk1 ROI row(s) REFUSED (no shape"), True)
+    chk("...the row is named above it",
+        any(U1 in ln and "NOSHAPE" in ln for ln in _said.splitlines()), True)
+    chk("...and the box it could place is written",
+        sorted(r["region"] for r in P5.load_csv(P5.box_csv("Mk1"))), ["R1"])
+
     # --marker stays an assertion: with it, only that marker is touched. The
     # other marker's boxes are curation-derived work and must survive as-is.
     _sentinel = "scene_uid,roi_index\nKEEP-ME,0\n"
@@ -728,14 +836,27 @@ with temp_study(acquisition={"layout": "paired",
             report.update(dict(REP, angle=7.0) if U3 in src else REP)
         return np.zeros((256, 256), np.uint8)
 
+    # The same export with Mk2's clean section in it too: the app runs 05a
+    # with no --marker, so Mk1 fails and Mk2 is placed AFTER it in one run.
+    turned2_csv = os.path.join(MK.root, "roi_regions_turned2.csv")
+    _wcsv(turned2_csv,
+          [{"scene_uid": u, "marker": m, "roi_kind": "roi", "region": "R1",
+            "seed_n": "1", "sec_x": "128", "sec_y": "128", "sec_r": "10",
+            "sec_poly": ""} for u, m in ((U1, "Mk1"), (U3, "Mk1"), (U2, "Mk2"))],
+          _RCOLS)
+
     _saved = (P5.RF.reformat, P5.scene_rects, sys.argv)
     _buf = _io.StringIO()
+    _buf2 = _io.StringIO()
     try:
         P5.RF.reformat = _turned
         P5.scene_rects = lambda path: {0: (100, 200, 1000, 1000)}
         sys.argv = ["05a_roi_geometry.py", turned_csv, "--all-sections"]
         with _ctx.redirect_stdout(_buf):
             _rc = P5.main()
+        sys.argv = ["05a_roi_geometry.py", turned2_csv, "--all-sections"]
+        with _ctx.redirect_stdout(_buf2):
+            _rc2 = P5.main()
     finally:
         P5.RF.reformat, P5.scene_rects, sys.argv = _saved
         for _p, _text in _keep.items():
@@ -749,6 +870,19 @@ with temp_study(acquisition={"layout": "paired",
         _last.startswith("!! 1 Mk1 section(s) with ROIs NOT PLACED"), True)
     chk("...the section that was placed still has its box",
         _uids(P5.box_csv("Mk1")), [U1])
+    _last2 = [ln for ln in _buf2.getvalue().splitlines() if ln.strip()][-1]
+    chk("two markers, Mk1 skips and Mk2 is clean: the run fails", _rc2, 1)
+    chk("...Mk2 was still placed", _uids(P5.box_csv("Mk2")), [U2])
+    chk("...Mk1's own NOT PLACED line is printed",
+        "!! 1 Mk1 section(s) with ROIs NOT PLACED" in _buf2.getvalue(), True)
+    chk("...and the LAST line names Mk1, not Mk2's separator",
+        _last2.startswith("!! ROIs not placed for Mk1 "), True)
+    chk("...and names Mk2 as the one placed", "; Mk2 was placed." in _last2, True)
+    # Every marker failed: the line must not claim any was placed.
+    _all = P5.not_placed_line(["Mk1", "Mk2"], ["Mk1", "Mk2"])
+    chk("every marker failed: the closing line says none was placed",
+        ("were placed" in _all, "Mk2 was placed" in _all,
+         "; no marker was placed." in _all), (False, False, True))
 
 
 print()

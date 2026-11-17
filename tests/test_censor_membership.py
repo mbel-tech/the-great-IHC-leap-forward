@@ -16,7 +16,11 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
-from _fixture import temp_study, load_stage  # noqa: E402
+from _fixture import private_home, temp_study, load_stage  # noqa: E402
+
+# 04a's apply_review also searches ~/Downloads for a review export; this
+# suite must not read the runner's.
+private_home()
 
 fails = 0
 

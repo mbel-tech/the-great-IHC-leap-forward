@@ -23,7 +23,11 @@ sys.path.insert(0, os.path.join(REPO, "scripts"))
 # config is currently named, so without this the suite would read the
 # operator's live study and pass or fail on their data. config.example.json is
 # multiplex, so the paired half has to be asked for explicitly.
-from _fixture import use_temp_study, load_stage             # noqa: E402
+from _fixture import private_home, use_temp_study, load_stage             # noqa: E402
+
+# 04a's apply_review also searches ~/Downloads for a review export; this
+# suite must not read the runner's.
+private_home()
 
 STUDY = use_temp_study(acquisition={"layout": "paired",
                                     "markers": ["AF568", "AF488"]})

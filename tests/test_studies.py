@@ -204,6 +204,49 @@ with home() as tmp:
         os.path.normcase(C.resolve_path()),
         os.path.normcase(os.path.join(REPO, "config.json")))
 
+# --------------------------------------------------------------------------
+print()
+print("--- the app never opens the repo's own config.json unasked ---")
+# resolve_path falls back to <repo>/config.json so a bare stage run works. The
+# app's study question took that fallback as an answer: with the last study gone
+# and none active, a config.json left in the checkout opened as the study.
+sys.path.insert(0, os.path.join(REPO, "app"))
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+import study_picker as SP                                   # noqa: E402
+
+asked = []
+
+
+class _Picker:
+    """Stands in for the dialog: records that it was shown, and is cancelled."""
+
+    def __init__(self, repo_root, parent=None):
+        asked.append(repo_root)
+        self.chosen = None
+
+    def exec(self):
+        return SP.QDialog.Rejected
+
+
+with home() as tmp:
+    fake_repo = os.path.join(tmp, "checkout")
+    os.makedirs(fake_repo)
+    with open(os.path.join(fake_repo, "config.json"), "w", encoding="utf-8") as fh:
+        fh.write("{}")
+    real_repo, real_picker = C.REPO, SP.StudyPicker
+    C.REPO, SP.StudyPicker = fake_repo, _Picker
+    try:
+        C.write_settings({"last_project": os.path.join(tmp, "gone", "config.json")})
+        got = SP.ensure_study(fake_repo)
+        chk("last study gone, none active: the picker asks", (got, len(asked)), (None, 1))
+        os.environ["LS_CONFIG"] = os.path.join(fake_repo, "config.json")
+        chk("...but the repo config named by LS_CONFIG is used",
+            os.path.normcase(SP.ensure_study(fake_repo) or ""),
+            os.path.normcase(os.path.join(fake_repo, "config.json")))
+        del os.environ["LS_CONFIG"]
+    finally:
+        C.REPO, SP.StudyPicker = real_repo, real_picker
+
 print()
 print("ALL PASS" if not failures else f"{len(failures)} FAILED")
 sys.exit(1 if failures else 0)

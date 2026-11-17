@@ -77,8 +77,13 @@ def block_median(tile, n):
     return np.median(trimmed.reshape(n, f, n, f), axis=(1, 3))
 
 
-def collect_tiles(paths, tiles_per_file, rng):
-    """Per-channel stacks of reduced raw tiles."""
+def collect_tiles(paths, tiles_per_file, rng, failed=None):
+    """Per-channel stacks of reduced raw tiles.
+
+    `failed`, a list, receives (file name, reason) for every file that raised.
+    One bad file must not stop the sample, but it is counted: it used to be a
+    printed line in a run that exited 0."""
+    failed = failed if failed is not None else []
     stacks = defaultdict(list)
     for i, (path, marker) in enumerate(paths, 1):
         try:
@@ -103,6 +108,7 @@ def collect_tiles(paths, tiles_per_file, rng):
                         stacks[name].append(block_median(arr, TILE_N))
         except Exception as exc:  # noqa: BLE001
             print(f"  !! {os.path.basename(path)}: {exc}")
+            failed.append((os.path.basename(path), str(exc)))
             continue
         print(f"\r  [{i}/{len(paths)}] {os.path.basename(path):<20} "
               f"{ {k: len(v) for k, v in stacks.items()} }", end="")
@@ -180,10 +186,20 @@ def main():
         rows = [r for r in csv.DictReader(fh) if r["is_redundant_copy"] == "0"]
 
     by_marker = defaultdict(list)
+    absent = []
     for r in rows:
         p = os.path.join(SOURCE_DIR, r["file"])
         if os.path.exists(p):
             by_marker[r["marker_channel"]].append((p, r["marker_channel"]))
+        else:
+            absent.append(r["file"])
+    # czifile reads loose files only - like every pixel stage, this reads
+    # EXTRACTED CZIs (00_manifest reads only the headers from zips). A CZI
+    # still inside its zip, or on a drive that is not mounted, is not sampled
+    # - said, not silently dropped.
+    if absent:
+        print(f"{len(absent)} of {len(rows)} file(s) in the manifest are not in "
+              f"{SOURCE_DIR} and cannot be sampled (first: {absent[:3]})")
 
     chosen = []
     for marker, pool in sorted(by_marker.items()):
@@ -191,9 +207,19 @@ def main():
         chosen.extend(pool[: args.files // max(len(by_marker), 1)])
     print(f"sampling {len(chosen)} files x up to {args.tiles} tiles/channel\n")
 
-    stacks = collect_tiles(chosen, args.tiles, rng)
+    failed = []
+    stacks = collect_tiles(chosen, args.tiles, rng, failed)
     if not stacks:
-        raise SystemExit("no tiles collected")
+        # The absent count is often the whole reason: a study that keeps its
+        # CZIs inside zips has none on disk for czifile to read - 00 read their
+        # headers from the zips, but the slides must be extracted before 01.
+        why = []
+        if absent:
+            why.append(f"{len(absent)} of {len(rows)} manifest file(s) are not in "
+                       f"{SOURCE_DIR} (czifile reads loose CZIs only)")
+        if failed:
+            why.append(f"{len(failed)} file(s) could not be read")
+        raise SystemExit("no tiles collected" + (": " + "; ".join(why) if why else ""))
 
     print("\nderiving the stitched-domain mapping from real tile geometry ...")
     mapping = stitch_map(chosen[0][0])
@@ -205,11 +231,13 @@ def main():
         print(f"  mapping derived; {100 * overlap_frac:.0f}% of a pitch cell comes "
               f"from a tile's trailing region")
 
+    too_few = []
     for name, stack in sorted(stacks.items()):
         arr = np.stack(stack)
         print(f"\n{name}: {arr.shape[0]} raw tiles")
         if arr.shape[0] < 40:
             print("  !! too few tiles for a stable median, skipping")
+            too_few.append(name)
             continue
 
         tile_field = np.median(arr, axis=0)
@@ -272,6 +300,20 @@ def main():
     print("the section rather than by the illumination profile.")
     print("=" * 72)
 
+    # A channel with no field, or a file that could not be read, is work this
+    # run did not do; the fields it did write stay, and the run says so.
+    problems = []
+    if too_few:
+        problems.append(f"no field for {', '.join(too_few)} (fewer than 40 usable "
+                        f"tiles; raise --files or --tiles)")
+    if failed:
+        problems.append(f"{len(failed)} of {len(chosen)} sampled file(s) could not "
+                        f"be read: {', '.join(f for f, _ in failed[:5])}")
+    if problems:
+        print("01h incomplete: " + "; ".join(problems))
+        return 1
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

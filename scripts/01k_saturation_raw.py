@@ -295,6 +295,10 @@ def main():
     if os.path.exists(OUT_CSV):
         with open(OUT_CSV, newline="", encoding="utf-8") as fh:
             by_uid = {r["scene_uid"]: r for r in csv.DictReader(fh)}
+    # Kept rows, --force included, take section_order / slide / variant from
+    # the manifest as it is now, and a row whose section has left it goes:
+    # see 01_overviews.refresh_identity.
+    OV.refresh_identity(by_uid, scenes, "saturation_raw.csv")
     if by_uid and not args.force:
         rows = list(by_uid.values())
         # A row counts as done only if the mask its marker now calls for is
@@ -331,9 +335,15 @@ def main():
     # unplugged - but the row is marked FAILED_CEILING so it never reads as
     # current: the next run retries it, and this run exits 1 naming it.
     stale_kept = []
+    # Every section this run tried and could not measure, with or without an
+    # earlier row. Only the ones WITH a row used to fail the run, so a fresh
+    # run where some files were missing or unreadable exited 0 with those
+    # sections simply absent from saturation_raw.csv.
+    lost_uids = []
 
     def lose(lost):
         for r in lost:
+            lost_uids.append(r["scene_uid"])
             row = by_uid.get(r["scene_uid"])
             if row is not None:
                 row["ceiling"] = FAILED_CEILING
@@ -395,6 +405,8 @@ def main():
     # mounted?"; returning None after that recorded the stage as done with no
     # masks behind it, and 04j then called every section unmeasured.
     if not rows:
+        print("01k measured nothing: no section has a raw clipping record "
+              "(is the source drive mounted?)")
         return 1
     # A forced run that measured nothing still fails, now that it keeps the
     # earlier rows: it was asked to measure again and did not, which is the
@@ -405,10 +417,11 @@ def main():
         return 1
     if not args.no_merge:
         merge_into_focus(rows)
-    if stale_kept:
-        print("%d section(s) could not be measured again and keep their earlier "
-              "row, marked to be retried: %s" % (len(stale_kept),
-                                                 ", ".join(stale_kept[:10])))
+    if lost_uids:
+        # One line, last: the app shows the last printed line as the reason.
+        print("%d section(s) could not be measured (%d keep their earlier row, "
+              "marked to be retried): %s" % (len(lost_uids), len(stale_kept),
+                                             ", ".join(lost_uids[:10])))
         return 1
     if args.native_sample:
         print()

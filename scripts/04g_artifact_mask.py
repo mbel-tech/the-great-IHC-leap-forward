@@ -133,6 +133,10 @@ HALO_PCTL = 90.0
 HALO_ITERS = 10
 # ~0.0004 mm2 (15 px at 5.20 um/px - the same cut there); below this it is noise
 MIN_OBJ_MM2 = 4.0e-4
+# Below this much tissue core (after the rim erosion) there is nothing to
+# judge against. 0.0135 mm2 is 500 px at 5.20 um/px, the same cut there
+# (500 px is 0.01352, 499 px 0.01349); it was the pixel count `500`.
+MIN_CORE_MM2 = 0.0135
 MAX_OBJ_MM2 = 1.2           # above this it is not an artifact, it is anatomy
 ELONGATION_SPLIT = 3.0      # bbox aspect ratio dividing compact from elongated
 FILL_SPLIT = 0.55           # area / bbox area; a curved fibre is low, a disc is high
@@ -156,7 +160,7 @@ def detect(im, tis, mm_px):
     """
     px_mm2 = mm_px ** 2
     core = ndimage.binary_erosion(tis, np.ones((2 * RIM_ERODE_PX + 1,) * 2))
-    if core.sum() < 500:
+    if core.sum() * px_mm2 < MIN_CORE_MM2:
         return np.zeros(im.shape, np.uint8), []
 
     tex = texture(im)
@@ -425,7 +429,8 @@ def main():
             chan[r["scene_uid"]] = r["marker_channel"]
             # The scale this section's overview was exported at; see
             # 04a.overview_um_px.
-            um_px[r["scene_uid"]] = _RF.overview_um_px(r)
+            if _RF.own_um_px(r) is not None:
+                um_px[r["scene_uid"]] = _RF.own_um_px(r)
             try:
                 satur[r["scene_uid"]] = float(r["saturated_fraction"])
             except (KeyError, ValueError):
@@ -446,6 +451,7 @@ def main():
 
     if args.limit:
         index = index[: args.limit]
+    _RF.report_scale_fallbacks([r["id"] for r in index], set(um_px))
 
     rows, previews = [], []
     # Sections this run was asked to mask and could not. Both used to be a
@@ -453,6 +459,15 @@ def main():
     # and the section's `_artifact.png` from an earlier run stayed on disk
     # looking like this run's answer - 04a and 05c read it as current.
     not_masked = []
+    # EXCLUDED sections (only --include-excluded reaches them) that could not
+    # be masked. Kept apart from `not_masked`, 04a --render-excluded's rule
+    # (excl_failed there): excluded sections are exactly the torn, empty or
+    # debris ones whose overview forms no tissue mask, and they are never going
+    # into the analysis. The app always runs 04g with --include-excluded, so
+    # counted as a failure one such section failed the stage for good -
+    # excluding it again changes nothing - and Run all stopped at it every time.
+    # What is missing is a mask to compare with in Review mode: said, not failed.
+    excl_not_masked = []
     for i, r in enumerate(index):
         go, write_masks = run_plan(args.preview, len(previews))
         if not go:
@@ -460,15 +475,17 @@ def main():
         uid = r["id"]
         src = os.path.join(OVERVIEW_DIR, r["animal"], chan.get(uid, args.marker), uid + "_DAPI.png")
         if not os.path.exists(src):
-            not_masked.append((uid, "overview PNG missing"))
-            if write_masks:
+            (excl_not_masked if r["excluded"] else not_masked).append(
+                (uid, "overview PNG missing"))
+            if write_masks and not args.limit:
                 drop_stale_mask(uid)
             continue
         im = np.asarray(Image.open(src).convert("L")).astype(np.float32)
         tis = load_tissue(im)
         if tis is None:
-            not_masked.append((uid, "no tissue mask could be formed"))
-            if write_masks:
+            (excl_not_masked if r["excluded"] else not_masked).append(
+                (uid, "no tissue mask could be formed"))
+            if write_masks and not args.limit:
                 drop_stale_mask(uid)
             continue
         mm_px = _RF.overview_um_px({"um_px": um_px.get(uid)}) / 1000.0
@@ -490,7 +507,7 @@ def main():
     # A preview that found no artifact in its first few sections reports; only
     # a full run with nothing masked is a missing-input error.
     if not rows and not args.preview:
-        report_not_masked(not_masked)
+        report_not_masked(not_masked + excl_not_masked)
         raise SystemExit("nothing masked - run 01_overviews.py first, or "
                          "04a_reformat.py when running without --include-excluded")
 
@@ -528,15 +545,17 @@ def main():
     print("resolution) and channel-specific antibody aggregates (would need the")
     print("marker channel, which would break the blinding).")
     print("=" * 74)
+    report_excluded_not_masked(excl_not_masked)
     # A SKIPPED SECTION FAILS THE RUN - 05c's rule. What was masked is
     # written and stays; the failure is what makes someone look at the list.
     # Printed last, because app/runner.py shows the last line printed as the
     # reason. A --limit trial counts only the sections it was told to do.
     if not_masked:
         report_not_masked(not_masked)
-        print(f"!! {len(not_masked)} section(s) NOT MASKED (see above; any "
-              f"earlier mask of theirs was removed): this stage is not "
-              f"complete. Fix the cause and run it again.")
+        print(f"!! {len(not_masked)} section(s) NOT MASKED (see above; "
+              + ("a --limit trial left any earlier mask of theirs in place"
+                 if args.limit else "any earlier mask of theirs was removed")
+              + "): this stage is not complete. Fix the cause and run it again.")
         return 1
 
 
@@ -547,6 +566,10 @@ def drop_stale_mask(uid):
     it, 05c flags nuclei under it, and the summary - which no longer lists the
     section - is the only thing that disagrees. Gone, 04a reports the section
     as having no mask, which is the truth.
+
+    A FULL run only. A --limit trial writes its summary beside the real one
+    and app/workflow.py ignores trial records, so the stage still reads done
+    on the real summary - which lists this section and expects its mask.
     """
     p = os.path.join(MASK_DIR, uid + "_artifact.png")
     if os.path.exists(p):
@@ -562,6 +585,24 @@ def report_not_masked(not_masked):
         print(f"    {uid:<24} {why}")
     if len(not_masked) > 15:
         print(f"    ... and {len(not_masked) - 15} more")
+
+
+def report_excluded_not_masked(excl):
+    """Name the EXCLUDED sections this run could not mask - not a failure.
+
+    The section stays excluded and out of the analysis either way; what is
+    missing is the mask Review mode would compare against. Worth saying, in
+    words that cannot read as a kept section going unmasked (04a's
+    report_excluded_failures, same rule).
+    """
+    if not excl:
+        return
+    print(f"  {len(excl)} excluded section(s) could not be masked for Review "
+          f"mode (still excluded; nothing is lost from the analysis):")
+    for uid, why in excl[:15]:
+        print(f"    {uid:<24} {why}")
+    if len(excl) > 15:
+        print(f"    ... and {len(excl) - 15} more")
 
 
 def overlay(previews):

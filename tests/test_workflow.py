@@ -162,8 +162,12 @@ chk("skipped scenes are counted", W.shortfall("scene_renders", _out), "3 scenes 
 chk("one skipped scene", W.shortfall("scene_renders", "  1 not drawn:\n"), "1 scene not drawn")
 chk("a full run has no shortfall", W.shortfall("scene_renders", "wrote 40 scenes\n"), None)
 chk("other stages are not read for it", W.shortfall("manifest", _out), None)
-chk("colour pictures not built are counted",
-    W.shortfall("rgb_perk", "wrote 9 composites\n  2 not built:\n"), "2 pictures not built")
+# 04o's "N not built:" list only ever precedes a failure (rc 1), and an
+# excluded section with no composite is not a shortfall of a finished run:
+# no entry for the rgb stages, so neither is summarised as one.
+chk("04o's picture stages are not read for a shortfall",
+    [W.shortfall(sid, "wrote 9 composites\n  2 not built:\n")
+     for sid in ("rgb_perk", "rgb_pcna")], [None, None])
 print("--- 06i detection overlays: a Results button, on request only ---")
 chk("overlays are a stage", "detection_overlays" in S.BY_ID)
 chk("...run by hand, never by Run all remaining", "detection_overlays" in W.BY_HAND)
@@ -305,6 +309,105 @@ chk("a trial run of a few sections records nothing to compare with",
     W.run_inputs("detect", {"--limit": 5}, study(_cfg)), None)
 chk("...a full run does", W.run_inputs("detect", {}, study(_cfg)),
     W.fingerprint("detect", study(_cfg)))
+# ...and a trial is never the record that proves a stage current. It is kept as
+# an ok run with no inputs; picked as the last ok run, it sent the status back to
+# file dates, which a setting change does not move, so a stage made stale by a
+# setting read Done after a 5-section trial.
+_cfg3 = json.loads(json.dumps(_cfg))
+_cfg3.setdefault("detection", {})["nucleus_diameter_um"] = 77
+chk("a setting change puts detection out of date",
+    bool(W.outdated(S.BY_ID["detect"], study(_cfg3))), True)
+_cfg3["project"]["runs"].append({"stage": "detect", "ok": True, "options": {"--limit": 5}})
+chk("...and a trial run since does not make it current",
+    bool(W.outdated(S.BY_ID["detect"], study(_cfg3))), True)
+
+# 06c takes its groups from 06b's animal_metadata.csv (resolve_groups), so the
+# results are made from 06b's output, and 06b and the results from the
+# workbook's content. Re-running 06b with new groups used to leave the results
+# reading Done, groups and all.
+_meta = os.path.join(_res, "animal_metadata.csv")
+chk("the results are current after 06b and the results ran",
+    W.outdated(S.BY_ID["build_results"], study(_cfg)), None)
+_put(_meta, "animal,treatment\nLS1,exercise\n", _T0 + 300)
+chk("re-running 06b with other groups puts the results out of date",
+    "Join the experiment" in (W.outdated(S.BY_ID["build_results"], study(_cfg)) or ""), True)
+_put(_meta, "join_sampling\n", _T0 + 300)
+chk("...and the same groups again does not", W.outdated(S.BY_ID["build_results"], study(_cfg)),
+    None)
+_book = os.path.join(TMP, "sampling.xlsx")
+_put(_book, "fish 1 control\n", _T0)
+_cfgw = json.loads(json.dumps(_cfg))
+_cfgw["project"].setdefault("stage_options", {})["join_sampling"] = {"--xlsx": _book}
+_record(_cfgw, "join_sampling", "build_results")
+chk("06b and the results, run on a workbook, are current",
+    [W.outdated(S.BY_ID[x], study(_cfgw)) for x in ("join_sampling", "build_results")],
+    [None, None])
+_put(_book, "fish 1 exercise\n", _T0)
+chk("a changed workbook puts 06b and the results out of date, saying so",
+    ["workbook" in (W.outdated(S.BY_ID[x], study(_cfgw)) or "")
+     for x in ("join_sampling", "build_results")], [True, True])
+# A results run recorded before it fingerprinted 06b's output is judged by date,
+# as the per-marker keys are: 06b's table older than the results is no change.
+_old = json.loads(json.dumps(_cfg))
+for _r in _old["project"]["runs"]:
+    if _r["stage"] == "build_results":
+        for _k in ("join_sampling", "workbook"):
+            _r["inputs"]["files"].pop(_k, None)
+os.utime(_meta, (_T0 + 60, _T0 + 60))           # when 06b wrote it, before the results
+chk("a results run recorded before 06b was an input is not put out of date",
+    W.outdated(S.BY_ID["build_results"], study(_old)), None)
+# Running the results alone after the workbook changed must not make them
+# current: their groups are still 06b's, from the old workbook. While 06b is out
+# of date for what decides the groups, so are the results.
+_record(_cfgw, "build_results")
+chk("results re-run alone after a workbook change are still out of date",
+    "workbook" in (W.outdated(S.BY_ID["build_results"], study(_cfgw)) or ""), True)
+_record(_cfgw, "join_sampling", "build_results")
+chk("...until 06b and then the results run",
+    W.outdated(S.BY_ID["build_results"], study(_cfgw)), None)
+# An animal measured after 06b ran has no group: Build results run alone must
+# not read Done with it in no comparison.
+_meas = os.path.join(_res, "roi_measurements.csv")
+_meas_was = open(_meas, encoding="utf-8").read()
+_meta_was = open(_meta, encoding="utf-8").read()
+_put(_meta, "animal,treatment\nLS1,control\n", os.path.getmtime(_meta))
+_put(_meas, "animal,roi_kind\nLS1,roi\nLS9,roi\n", os.path.getmtime(_meas))
+_record(_cfgw, "join_sampling", "build_results")
+chk("an animal measured with no row in 06b's table puts the results out of date",
+    "LS9" in (W.outdated(S.BY_ID["build_results"], study(_cfgw)) or ""), True)
+_put(_meta, "animal,treatment\nLS1,control\nLS9,exercise\n", os.path.getmtime(_meta))
+_record(_cfgw, "join_sampling", "build_results")
+chk("...and once 06b has a row for it, they are current",
+    W.outdated(S.BY_ID["build_results"], study(_cfgw)), None)
+_put(_meas, _meas_was, os.path.getmtime(_meas))
+_put(_meta, _meta_was, os.path.getmtime(_meta))
+_record(_cfgw, "join_sampling", "build_results")
+
+# 06b's result depends on groups.by_animal (a blank the key covers passes), so
+# it is a setting 06b reads.
+chk("06b is current before the group key changes",
+    W.outdated(S.BY_ID["join_sampling"], study(_cfg)), None)
+_cfgg = json.loads(json.dumps(_cfg))
+_cfgg.setdefault("groups", {})["by_animal"] = {"LS1": "control"}
+chk("...a changed groups.by_animal puts 06b out of date",
+    bool(W.outdated(S.BY_ID["join_sampling"], study(_cfgg))), True)
+# A 06b run recorded before it read the key holds no hash for it, and is not
+# put out of date for that alone.
+_old = json.loads(json.dumps(_cfg))
+for _r in _old["project"]["runs"]:
+    if _r["stage"] == "join_sampling":
+        _r["inputs"]["settings"].pop("groups.by_animal", None)
+chk("...a 06b run recorded before it read the key stays current",
+    W.outdated(S.BY_ID["join_sampling"], study(_old)), None)
+# ...but only while the key is still unset: one set since was not what that
+# run read, and the run must not stay current over it.
+_oldg = json.loads(json.dumps(_old))
+_oldg.setdefault("groups", {})["by_animal"] = {"LS1": "control"}
+chk("...a key missing from the record but SET now is a change",
+    bool(W.outdated(S.BY_ID["join_sampling"], study(_oldg))), True)
+_oldg["groups"]["by_animal"] = {}
+chk("...and one set to nothing (empty) is not",
+    W.outdated(S.BY_ID["join_sampling"], study(_oldg)), None)
 
 # What the 14 Oct notice said by hand is a stage status now.
 os.utime(_nuc, (W.ROI_FIX_AT - 3600, W.ROI_FIX_AT - 3600))

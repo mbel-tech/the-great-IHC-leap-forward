@@ -561,12 +561,22 @@ def main():
     _write_csv(os.path.join(OUT_DIR, "seeds.csv"), seed_rows)
     _write_csv(os.path.join(OUT_DIR, "text_labels.csv"), text_rows)
     _write_csv(os.path.join(OUT_DIR, "legend_by_page.csv"), legend_rows)
-    _write_csv(os.path.join(OUT_DIR, "gaps.csv"), gap_rows)
+    # Pinned columns: an atlas with every plate seeded has no gaps, and that
+    # run must still replace the last run's gaps.csv rather than leave it to
+    # list plates that are now labelled.
+    _write_csv(os.path.join(OUT_DIR, "gaps.csv"), gap_rows,
+               ["plate_id", "page", "image_file", "reason"])
 
     _report(plate_rows, seed_rows, text_rows, gap_rows, colour_usage, raster_pages)
 
 
-def _write_csv(path, rows):
+def _write_csv(path, rows, keys=None):
+    """`keys` is for a table that may be empty: with it, no rows is written
+    header-only. Without it nothing is written, as before."""
+    if not rows and keys:
+        IO.atomic_write_csv(path, [], keys)
+        print(f"  wrote {os.path.basename(path)}  (0 rows)")
+        return
     if not rows:
         print(f"  (nothing to write for {os.path.basename(path)})")
         return

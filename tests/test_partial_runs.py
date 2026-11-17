@@ -280,8 +280,24 @@ with temp_study() as st:
         return np.zeros(im.shape, np.uint8), []
     G.detect = _detect
 
+    # A --limit TRIAL that reaches the section first: it fails, but it must
+    # not remove the real mask - the stage reads done on the real summary
+    # (workflow ignores trial records), which expects that mask.
     buf = io.StringIO()
     saved = sys.argv
+    sys.argv = ["04g", "--marker", marker, "--limit", "3"]
+    try:
+        with contextlib.redirect_stdout(buf):
+            rc = G.main()
+    finally:
+        sys.argv = saved
+    chk("a --limit trial that cannot mask a section returns 1", rc, 1)
+    chk("...but leaves that section's real mask in place",
+        os.path.exists(stale), True)
+    chk("...and says so", "left any earlier mask" in buf.getvalue(), True)
+    seen.clear()
+
+    buf = io.StringIO()
     sys.argv = ["04g", "--marker", marker]
     try:
         with contextlib.redirect_stdout(buf):
@@ -309,6 +325,22 @@ with temp_study() as st:
     rc = run_main(G, ["04g", "--marker", marker, "--limit", "2"])
     chk("a --limit trial is not failed for sections it was told not to do", rc, None)
 
+    # A focus row with no um_px takes the config's overview scale - said, not
+    # silent, since that is wrong if the scale changed after the export.
+    write(G.QC_CSV, [{"scene_uid": u, "animal": "LS01", "section_order": str(i),
+                      "marker_channel": marker, "saturated_fraction": "0",
+                      "um_px": ("" if i == 0 else "5.20")}
+                     for i, u in enumerate(uids)])
+    buf = io.StringIO()
+    sys.argv = ["04g", "--marker", marker, "--limit", "2"]
+    try:
+        with contextlib.redirect_stdout(buf):
+            G.main()
+    finally:
+        sys.argv = saved
+    chk("a section with no um_px is counted as on the config's scale",
+        "1 section(s) have no um_px in focus.csv" in buf.getvalue(), True)
+
     # The area gates are physical. One bright, smooth disc of 112 px in
     # granular tissue, the same pixels at three scales: its area follows the
     # square of the scale, and the 1 px specks that are noise at 5.20 um/px
@@ -326,6 +358,80 @@ with temp_study() as st:
         [round(r["area_mm2"], 6) for r in at[10.4e-3]], [round(112 * 10.4e-3 ** 2, 6)])
     chk("...and at 20.8 um/px single-pixel specks clear the physical minimum",
         len(at[20.8e-3]) > 1, True)
+
+    # The tissue-core gate is physical too (MIN_CORE_MM2, which was 500 px).
+    # A 1260 px smooth dome in 200x200 px of tissue: at 0.65 um/px the eroded
+    # core is 0.0149 mm2 and the dome is found; at 0.60 um/px the core is
+    # 0.0127 mm2, under the gate, and nothing is - although the dome itself
+    # (0.00045 mm2) would clear MIN_OBJ_MM2. As 500 px, the gate passed both.
+    im2 = rng.normal(100, 25, (200, 200)).astype(np.float32)
+    d2 = (yy - 100) ** 2 + (xx - 100) ** 2
+    im2[d2 < 400] = (300 - 0.1 * d2)[d2 < 400]
+    chk("enough tissue core at 0.65 um/px: the dome is found",
+        len(G2.detect(im2, tis, 6.5e-4)[1]), 1)
+    chk("...too little physical core at 0.60 um/px: nothing is judged",
+        G2.detect(im2, tis, 6.0e-4)[1], [])
+
+print()
+print("--- 04g --include-excluded: an EXCLUDED section with no tissue does not fail it ---")
+# The app always runs 04g with --include-excluded, so every scanned section is
+# masked, excluded ones too - and excluded ones are exactly the torn, empty or
+# debris sections whose overview forms no tissue mask. Counted as NOT MASKED,
+# one of them failed the stage for good (excluding it again changes nothing).
+# 04a --render-excluded's rule instead: counted apart, named, not a failure.
+# A KEPT section that cannot be masked still fails the run.
+
+with temp_study() as st:
+    G = load_stage("04g_artifact_mask.py", name="lsstage_04g_excl")
+    marker = G.MARKERS[0]
+    uids = [f"LS01_s01a_sc{i:02d}" for i in range(3)]
+    write(G.QC_CSV, [{"scene_uid": u, "animal": "LS01", "section_order": str(i),
+                      "marker_channel": marker, "saturated_fraction": "0",
+                      "um_px": "5.20"} for i, u in enumerate(uids)])
+    # uids[2] is excluded by the curation; its overview is blank.
+    write(G._RF.marker_paths(marker)["overrides"], [
+        {"scene_uid": uids[2], "extra_rotation": "0", "flip": "0",
+         "excluded": "1", "decision": "manual", "reason": "torn"}])
+    d = os.path.join(G.OVERVIEW_DIR, "LS01", marker)
+    os.makedirs(d, exist_ok=True)
+    for i, u in enumerate(uids):
+        Image.fromarray(np.full((40, 40), 0 if i == 2 else 100, np.uint8)).save(
+            os.path.join(d, u + "_DAPI.png"))
+    # No tissue in a blank overview, as tissue_mask says for one.
+    G.load_tissue = lambda im: None if im.max() == 0 else np.ones(im.shape, bool)
+    G.detect = lambda im, tis, mm_px: (np.zeros(im.shape, np.uint8), [])
+
+    def run_04g(*extra):
+        buf = io.StringIO()
+        saved = sys.argv
+        sys.argv = ["04g", "--marker", marker, "--include-excluded", *extra]
+        try:
+            with contextlib.redirect_stdout(buf):
+                rc = G.main()
+        finally:
+            sys.argv = saved
+        return rc, buf.getvalue()
+
+    rc, out = run_04g()
+    said = [ln for ln in out.splitlines() if ln.strip()]
+    chk("an excluded section with no tissue does not fail 04g", rc, None)
+    chk("...it is counted apart, as an excluded section",
+        "1 excluded section(s) could not be masked" in out, True)
+    chk("...and named", any(uids[2] in ln for ln in said), True)
+    chk("...not reported as NOT MASKED", "NOT MASKED" in out, False)
+    chk("the summary holds the sections that were masked",
+        sorted(r["scene_uid"] for r in read(G.summary_csv(marker))), uids[:2])
+
+    # The same blank overview on a KEPT section is still a failure.
+    Image.fromarray(np.zeros((40, 40), np.uint8)).save(
+        os.path.join(d, uids[0] + "_DAPI.png"))
+    rc, out = run_04g()
+    said = [ln for ln in out.splitlines() if ln.strip()]
+    chk("a KEPT section with no tissue still fails 04g", rc, 1)
+    chk("...with the kept one's count as the last line",
+        bool(said) and "1 section(s) NOT MASKED" in said[-1], True)
+    chk("...and the excluded one still counted apart",
+        "1 excluded section(s) could not be masked" in out, True)
 
 # ---------------------------------------------------------------- 01 / 01k
 

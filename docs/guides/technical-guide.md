@@ -122,6 +122,8 @@ small picture of every section, and a record of which scan of which section belo
   the slide's grid from the scenes' positions and draws one picture per candidate mounting order for a
   person to confirm once. The order matters because consecutive sections along the brain are 14 µm apart,
   so a section's place in the series is its position along the brain.
+  00 reads headers from loose CZIs and from CZIs inside the transfer zips alike; every stage that reads
+  pixels (01 on) reads extracted CZI files only, so zipped slides must be extracted before stage 01.
 - **00b Verify extraction** checks each copied file against the size, and optionally the checksum,
   recorded in the transfer zip.
 - **00d CZI self-test** checks the four things every reading stage assumes about the files: the scene
@@ -889,7 +891,9 @@ counters are read too.
 Every pixel that reaches a result is read by `czi_read.py` through pylibCZIrw, and the call **always names
 the scene**: 219 of the 222 LS files have overlapping scene rectangles, and a read without `scene=`
 composites a neighbour's tissue into the array. `czi_meta.py` reads the metadata XML straight from the
-file's segments without decoding pixels, from a plain file or a stored zip member. `ls_channels.py` turns
+file's segments without decoding pixels, from a plain file or a stored zip member - but only the header:
+the pixel readers take extracted CZI files, so a zipped slide is extracted (and checked by 00b) before
+stage 01. `ls_channels.py` turns
 the study's declared channels into a plane index per file, by the CZI's own channel name first and the
 declared index only as a fallback. Part 1, chapter 1 ("Why the file is read the way it is"), gives the
 reasons.
@@ -913,8 +917,9 @@ than writing a partial or a guessed result.
 Stage `manifest`. The first stage: reads every CZI header, loose files and members of stored zips
 alike, without decoding a pixel, and builds the tables every later stage keys on.
 
-- **Reads:** the slides folder (`source_dir`, or the list in `source_files`), and
-  `manifest/layout_overrides.csv` where a person has fixed a slide's row count.
+- **Reads:** the slides folder (`source_dir`, or the list in `source_files`, whose names may be loose
+  CZIs, whole zips or CZIs inside a zip), and `manifest/layout_overrides.csv` where a person has fixed
+  a slide's row count.
 - **Writes:** `manifest/manifest_files.csv` (one row per CZI), `manifest/manifest_scenes.csv` (one row
   per scene, which is one brain section), `qc/slidemaps/<file>.png`, `qc/slide_layout_summary.csv` and
   `qc/slide_layout_review.csv`.
@@ -924,7 +929,12 @@ alike, without decoding a pixel, and builds the tables every later stage keys on
   candidate mounting convention, drawn as one panel each in the slide map so a person can confirm one.
   The scene uid (`LS105_s10a_sc03`) is built here and is the key of every table after it.
 - **Settings:** `slide_naming`, `pixel_size_um`, `section_order_convention`, `acquisition`.
-- **Failure and re-run:** cheap (headers only) and rewrites every output on each run.
+- **Failure and re-run:** cheap (headers only) and rewrites every output on each run. Exits 1, writing
+  neither manifest table, when no CZI is found or any file cannot be read: a name that does not fit the
+  grammar, no scenes in the header, a scene count that disagrees with a stated `SizeS` (a header
+  without one, as ZEN writes for a single scene, is not compared), an archive that will not
+  open, or a `source_files` name found nowhere. A QC table with no rows is written header-only. A paired
+  study whose `acquisition.markers` do not name the scans' channels stops after the tables are written.
   `--accept-suggestions` writes the suggested row counts into `layout_overrides.csv`.
 
 ### `00b_verify_extraction.py`
@@ -937,8 +947,10 @@ came from.
 - **How:** the zips are stored, not compressed, so each member's size and CRC-32 are already in the
   central directory. The default compares sizes, which costs nothing. `--crc` reads every extracted file
   end to end and compares the CRC (about 420 GB on the LS study). `--watch` polls until extraction ends.
-- **Failure and re-run:** a mismatch is a row with its status, not an exception; re-running rechecks
-  everything.
+- **Failure and re-run:** a mismatch is a row with its status, not an exception, but any corrupt, missing
+  or still-extracting file, or an unreadable archive, makes the run exit 1 with the counts as its last
+  line. No zips at all is nothing to verify, and exits 0. With `source_files`, only the named zips and
+  the named CZIs inside zips are checked, as in 00. Re-running rechecks everything.
 
 ### `00c_channel_identity.py`
 
@@ -1047,6 +1059,10 @@ section, before and after correction.
   pitch. The reported amplitude is the peak-to-trough of the folded profile as a percentage of the mean:
   how much more signal a detection near a tile centre sees than one near an edge.
 - **Settings:** `pixel_size_um`.
+- **Failure and re-run:** exits 1 when no section is found, and when any named or found section was
+  not measured (missing, too little tissue, or no usable profile), with the count as the last line;
+  when nothing was measured it writes no summary. A FAIL verdict is a result, not a failed run: the
+  measurement before correction is expected to find the artifact.
 
 ### `01d_contactsheets.py`
 
@@ -1057,6 +1073,8 @@ Stage `contactsheets`. One contact sheet per animal and a browsable gallery.
 - **How:** sections in rostro-caudal order across the page, so a gradient along the brain reads as a
   gradient on the page. Sections flagged by QC are marked, not dropped. `--kind`, `--cols` and `--thumb`
   choose the channel and the layout.
+- **Failure and re-run:** a section in `qc/focus.csv` with no overview PNG of the chosen kind is left off
+  the sheets and counted, and the run exits 1 naming the first few; re-run 01 for them.
 
 ### `01e_tile_geometry.py`
 
@@ -1081,6 +1099,9 @@ and checks it.
   anatomy, and takes the per-pixel median across thousands of cells. Tissue falls at random positions
   relative to the grid, so the median keeps only illumination. Normalised to mean 1 and smoothed.
 - **Settings:** `pixel_size_um`.
+- **Failure and re-run:** stops when there are no sections; `build` exits 1 naming any channel with no
+  usable section (the other channels' fields are still written), and `verify` exits 1 counting the
+  sections it had no field for.
 
 ### `01g_saturation_map.py`
 
@@ -1093,7 +1114,9 @@ costs.
 - **How:** four numbers per section: the fraction of clipping inside tissue, its edge affinity, the size
   of the largest clipped blob (at 5.2 µm per pixel any large blob cannot be nuclei), and the fraction of
   tissue clipped. `--proxy` reproduces the old 8-bit proxy for comparison only.
-- **Failure and re-run:** refuses when the raw masks are missing; run 01 (or 01k) first.
+- **Failure and re-run:** a section with no raw mask falls back to the 8-bit proxy, which undercounts
+  by about 2x, and the run names how many did; run 01 (or 01k) first. A section with no overview pair
+  is counted and the run exits 1; when no section was measured it writes no CSV.
 
 ### `01h_tilefield_raw.py`
 
@@ -1106,6 +1129,10 @@ stitched domain.
   the stitched image repeats every 1836 px, it reads each tile's rectangle and M index and applies the
   documented rule (within a scene, the subblock with the highest M index wins) to derive exactly which
   part of each tile survives stitching. `--files` and `--tiles` set the sample.
+- **Failure and re-run:** czifile reads loose CZIs only, so manifest files not on disk are counted and
+  not sampled; with no tile collected it stops saying how many were absent or unreadable. A channel
+  with fewer than 40 usable tiles gets no field, and that or an unreadable file makes the run exit 1;
+  the fields it did build are still written.
 
 ### `01i_multisection_review.py`
 
@@ -1243,6 +1270,9 @@ every atlas plate) into one 256 by 256 frame: debris removed, long axis horizont
 padded square and resized.
 
 - **Reads:** the DAPI overviews; the operator's overrides (`rotation_overrides*.csv`, exclusions); with
+  `--apply-overrides` the curator's Review decisions, from the newest `section_review*.csv` in
+  `reformatted/`, the export folder (one dated folder deep) or the download folder (only a file whose
+  sections are all this study's), found the way 05a finds `roi_regions*` (`find_review_csv`); with
   `--censor` the raw clipping masks, with `--mask-artifacts` the artifact masks.
 - **Writes:** per marker (names from `ls_paths`) `reformatted/reformat_index[_<marker>].csv`,
   `reformatted/sections[_<marker>]/<uid>.png` and `<uid>_mask.npy`, `excluded_sections[_<marker>].csv`
@@ -1256,7 +1286,7 @@ padded square and resized.
 - **Failure and re-run:** `--apply-overrides` re-applies the operator's decisions; `--render-excluded`
   also draws the excluded sections so Review mode can show them (an excluded section whose picture cannot
   be made is reported in its own count, never in `lost_sections`, which lists only kept sections that
-  vanished); `--only` limits the run to named uids.
+  vanished, and is removed by a full run that lost nothing); `--only` limits the run to named uids.
   A kept section that did not survive (it is in `lost_sections`) or a section neither kept nor excluded
   fails the run: the index is still written, and the last line says how many.
   A changed angle moves every ROI placed on that section, so 05a refuses a section whose recorded angle no
@@ -1315,9 +1345,12 @@ Stage `exclusion`. Proposes the sections that cannot be measured, conservatively
   `04a --apply-overrides`, and can be reinstated in the ROI curator's Review mode.
 - **Failure and re-run:** it measures the sections in `reformat_index.csv`. A section already in
   `excluded_sections.csv` and no longer in the index (a final reformat left it out) keeps its previous
-  row unchanged, and the run says how many it carried; dropping it would put it back into the analysis at
+  row unchanged, and the run says how many it carried (and why, when an existing exclusions or candidates
+  file cannot be read); dropping it would put it back into the analysis at
   the next final reformat. A section whose overview cannot be read is named and fails the run (exit 1, the
-  count as the last line); the sections that were measured are written.
+  count as the last line); the sections that were measured are written, and its previous row, if it
+  had one, is kept with `carried` = `unreadable` so a standing proposal is not lost (rows carried for
+  already-excluded sections say `excluded`).
 
 ### `04g_artifact_mask.py`
 
@@ -1329,7 +1362,9 @@ otherwise good tissue and masks them.
   previews in `qc/artifacts/`.
 - **How:** on the DAPI overview (artifacts that affect every channel equally), 5.20 µm per pixel on the
   LS study. Every area (the object size gates, tissue and measurable mm²) is converted with the section's
-  own `um_px` from `qc/focus.csv`, or the config's `overview_target_um_per_px` when the row has none. The tissue rim is
+  own `um_px` from `qc/focus.csv`, or the config's `overview_target_um_per_px` when the row has none
+  (the run says how many sections took that fallback, as 04f and 04i do). The minimum tissue core
+  is an area too (`MIN_CORE_MM2`, 500 px at 5.20 µm/px). The tissue rim is
   eroded by 6 px (31 µm) first, because the pial and ventricular surfaces are genuinely bright. Bright
   objects inside are classed by shape as compact (air bubble, antibody aggregate) or elongated
   (fibre, hair, external debris). The masked area is small (median 0.13 % of
@@ -1339,7 +1374,9 @@ otherwise good tissue and masks them.
   summary, which is left as it was and is what the app's Done check looks for. A section it could not mask
   (overview missing, or no tissue mask) is named, its `_artifact.png` from an earlier run is removed so it
   cannot be read as current, and the run exits 1 with the count as its last line. A trial counts only the
-  sections it was told to do.
+  sections it was told to do. An EXCLUDED section (`--include-excluded`, which the app always passes) that
+  cannot be masked is listed apart and does not fail the run, as with `04a --render-excluded`: it is not
+  going into the analysis, and excluding it again would change nothing.
 
 ### `04i_propagate_to_perk.py`
 
@@ -1348,7 +1385,8 @@ other pass of the same physical sections.
 
 - **Reads:** `pairs.csv`, both passes' reformatted masks, and the curated pass's overrides.
 - **Writes:** `reformatted/rotation_overrides[_<marker>].csv` for the other pass, with the alignment
-  score of each section.
+  score of each section, and beside it `<that name>_flip_mismatch.csv`: the kept hand rows whose flip
+  differs from their partner's `manual_flip` (header-only when there are none).
 - **How:** exclusions are copied straight through `pairs.csv` (it is one section imaged twice). Rotations
   are **re-derived**, not copied: the other pass is reformatted, and the rotation that best aligns its
   tissue mask with the curated pass's mask is searched over the full 360°, on a shared physical grid
@@ -1361,9 +1399,14 @@ other pass of the same physical sections.
 - **Failure and re-run:** `--limit N` writes a `.trialN` file instead of the real one. A full run keeps
   hand corrections: each row says `source` (`derived` or `manual`) and `derived_as` (what 04i wrote), and a
   row marked manual, or whose values no longer match its `derived_as`, is kept in place of the derived one
-  (in a file written before these columns, a row that differs from this run's derivation is kept). The
-  run says how many it kept; deleting a row hands that section back to 04i. Before it changes the file it
-  copies it to `<name>.<YYYYMMDD-HHMMSS>.backup`, the same naming 04q uses.
+  (in a file written before these columns, a row that differs from this run's derivation is kept, and
+  written back still unmarked). The run says how many it kept; deleting a row hands that section back to
+  04i, and `--rederive-legacy` replaces each unmarked row that 04i derives a row for in this run by
+  today's derivation (an unmarked row with no derivation is kept; a row marked `manual`, in any case and
+  spacing, never is). An exclusion carried from the partner is applied on top of a hand row (its rotation and flip
+  stay); a hand row that excludes a section whose partner is kept is left as it is and listed. Kept rows
+  in the mirror frame of their partner are listed by name. Before it changes the file it copies it to
+  `<name>.<YYYYMMDD-HHMMSS>.backup` (`ls_io.backup_path`, which 04q uses too).
 
 ### `04j_censor_clipped.py`
 
@@ -1406,8 +1449,21 @@ repository (about 6,500 lines, most of it the page's JavaScript). Chapter 7 desc
   `curation/ls_roi_curator_v1.json`.
 - **Writes:** `reformatted/roi_curator.html`. Its exports are `roi_plates.csv`, `roi_landmarks.csv` and
   `roi_regions.csv`, each with a timestamp added to its name, and Review mode exports
-  `section_review.csv`.
-- **How:** Python collects the data and fills twenty placeholders (`__DATA__`, `__PLATES__`, `__SEED__` and the rest) in one HTML template with `ls_io.fill`, which escapes the JSON for a `<script>` block.
+  `section_review.csv` (stamped the same way). The three ROI files cover every section the saved state
+  holds work for, not only the sections in this build. The build is a set of (scene_uid, marker): under
+  multiplex a section is written for every declared marker the build does not carry it for (the
+  `--worklist` / `--analysis-set` narrowing applies to the first marker only), under paired once, under
+  its provenance marker. A section outside the build takes its animal and order from the embedded
+  provenance table and is divided by the frame stamped on its record; one with no provenance row, or with
+  positions and no stored frame, is named in the page header and left out. One that no reformat_index
+  carried when the page was built (`CARRIED`, every marker's index before any narrowing - the files 05a
+  looks a section up in) is written with `not_carried=1`, so 05a's analysis set leaves it out instead of
+  failing to place it. It is decided from the index, not from 04p's `status` (the furthest point a
+  section ever reached, so a section once measured reads `measured` for ever), and it is kept out of
+  `excluded`, which is the operator's judgement and which 04q and the app's import store as one. The
+  flag is as of the last curator page build: a section carried again since then stays `not_carried=1`
+  until the page is rebuilt.
+- **How:** Python collects the data and fills twenty-two placeholders (`__DATA__`, `__PLATES__`, `__SEED__` and the rest) in one HTML template with `ls_io.fill`, which escapes the JSON for a `<script>` block.
 - **Settings:** `acquisition`, `atlas_source`, `atlas_scope` (`existing_regions`, `regions_to_add`),
   `atlas_polygon_mirror`, `export_dir`, `display`, and `groups` (only to build the blinded Shotgun deck
   order, never shown).
@@ -1459,10 +1515,14 @@ frame.
   GB to render and more than a browser holds comfortably. Measurement never depends on it.
 - **Settings:** `curation_render.*`, `display`, `acquisition`, `channels`.
 - **Failure and re-run:** resumable; `--force` redraws. `--all` builds the whole index and
-  `--include-excluded` every scanned section, unmasked, for Review mode. A composite it could not build
+  `--include-excluded` every scanned section, unmasked, for Review mode. `--verify` exits 1 when a
+  section's blue plane does not match its greyscale or a section cannot be checked; it writes nothing.
+  A composite it could not build
   (overview missing, no tissue mask, the CZI unreadable) is named and the run exits 1 with the count as its
   last line, as does a marker with no `display.colours` entry; what was built is kept, and a re-run builds
-  only what is missing.
+  only what is missing. An excluded section (`--include-excluded`) with no composite is listed apart and
+  does not fail the run, as with `04a --render-excluded`. Under `multiplex` the sections are taken from
+  `focus.csv` as 04a takes them (one row per scan), so every marker finds them.
 
 ### `04p_section_provenance.py`
 
@@ -1557,8 +1617,15 @@ real slide pixels.
   reads and the app's Done check looks for, is left as it was. A section with ROIs that could not be
   placed (its angle no longer matches, its overview or scene rectangle is missing, or it has no index
   row) is listed under `SKIPPED` and the run exits 1 with the count as its last line, a trial included
-  for the sections it was told to place; the boxes that were placed are written. Sections left out by the
-  analysis-set rule (no background disc) are the curation's decision and do not fail the run.
+  for the sections it was told to place; the boxes that were placed are written. When one run places
+  several markers, a closing line after the last marker names the ones that failed. Sections left out by the
+  analysis-set rule (no background disc) are the curation's decision and do not fail the run. A polygon
+  ROI whose outline crosses or touches itself (`ring_crosses`; the curator refuses one since 2026-11-16,
+  an older export can still carry one) has no single area - the shoelace and 05c's even-odd membership
+  disagree - so it is refused and listed under `REFUSED` by section and region; the rest of the section is
+  placed and written, and the run exits 1 with `!! N <marker> polygon ROI(s) REFUSED ...` as its last
+  line (`not_placed`). A ROI row with no shape at all (neither `sec_r` nor `sec_poly`; only a damaged
+  or legacy export has one) is refused the same way, with `!! N <marker> ROI row(s) REFUSED (no shape ...`.
 
 ### `05b_tune_detection.py`
 
@@ -1637,15 +1704,20 @@ Stage `join_sampling`. The unblinding step: joins the per-ROI numbers to the exp
   treatment columns make one group. Without a block, a sheet with the LS headers gets the LS mapping
   (Fish ID by number, `treatment`, and the tank fill rule). Each row carries `treatment_source`
   (`sheet`, `rule` or `unresolved`). Every other sheet column not marked Ignore is carried through.
-- **Settings:** `sampling`.
+- **Settings:** `sampling`, `groups.by_animal` (an animal blank in the sheet passes only when it names it).
 - **Failure and re-run:** refuses a sheet it cannot map, and says to choose the columns in Set up.
+  Refuses an animal on two rows, one row two animals match (LS1 and LS01 by number), and a blank
+  treatment no fill rule fills unless `groups.by_animal` names the animal or the study has no groups
+  at all. The workbook's content is fingerprinted, for this stage and for `build_results`, which also
+  fingerprints `animal_metadata.csv`: changing either puts them out of date.
 
 ### `06c_excel_dataset.py`
 
 Stage `excel_sample`. The analysis table as a workbook, one row per ROI per animal.
 
-- **Reads:** `results/roi_measurements.csv` from 06a (it re-derives nothing) and the sampling sheet
-  through 06b's reader.
+- **Reads:** `results/roi_measurements.csv` from 06a (it re-derives nothing), and the `environment`
+  column from 06b's `results/animal_metadata.csv` (joined by animal, so it follows the sheet, `--xlsx`,
+  ID column and matching 06b used; without that file or column it says so and leaves the column blank).
 - **Writes:** `results/roi_dataset.xlsx` (`--out` to change), with sheets `by_roi`, `by_disc`,
   `by_section` and `coverage`, written with openpyxl (bold header, frozen first row, sized columns).
 - **How:** groups 06a's rows. Withheld values (no cut, no denominator, Abercrombie not applied) are blank,
@@ -1934,6 +2006,13 @@ out: the `project` block, `curation`, stage-written values (`detection.auto`), n
 out by default: folder and file paths, and `groups`. Import is a merge, checked by the same validator the
 stages run, after copying the study file aside. The windows are in `app/settings_transfer.py`.
 
+### `ls_sources.py`
+
+Shared module, standard library only: which files a study takes from its source folder under
+`source_files` (a loose CZI, a whole zip, or a CZI inside a zip, by basename), and the named files found
+nowhere. One copy for `00_manifest.py` (what it reads) and `00b_verify_extraction.py` (what it checks), so
+the two cannot select different slides; a named CZI whose only zip will not open fails both.
+
 ### `ls_tune.py`
 
 Shared module, no study file and no CZI: measures a crop's signal and decides detection settings, so every
@@ -2049,6 +2128,7 @@ straight from `sys.argv`) without running it. A script with no options says "(no
 | `04g_artifact_mask.py` | `--marker` | `_default` | which marker to process (default <_default>) Choices: MARKERS. |
 | `04g_artifact_mask.py` | `--include-excluded` | off | mask every scanned section of the marker, from focus.csv, excluded ones included, so they can be reviewed with a mask like every other section. Needs no reformat first. Excluded ones are marked excluded=1 in the summary. |
 | `04i_propagate_to_perk.py` | `--limit` | `0` |  |
+| `04i_propagate_to_perk.py` | `--rederive-legacy` | off | replace rows with no `source` mark (written before 04i marked its rows) that this run derives a row for by today's derivation, after a backup; unmarked rows with no derivation are kept. Rows marked manual are never replaced |
 | `04j_censor_clipped.py` | `--tolerance` | `0.01` | section is set aside at or above this clipped fraction |
 | `04j_censor_clipped.py` | `--allow-partial` | off | write the analysis set even if it has unmeasured sections and the file on disk is complete |
 | `04j_censor_clipped.py` | `--marker` | `_default` | which marker to process (default <_default>) Choices: MARKERS. |
@@ -2199,6 +2279,7 @@ straight from `sys.argv`) without running it. A script with no options says "(no
 | `ls_sampling.py` | (none) |  |  |
 | `ls_segment.py` | (none) |  |  |
 | `ls_settings_io.py` | (none) |  |  |
+| `ls_sources.py` | (none) |  |  |
 | `ls_tune.py` | (none) |  |  |
 | `make_demo_pack.py` | `--czi` |  |  |
 | `make_demo_pack.py` | `--scenes` |  | scene indices to keep, e.g. 3,4,6 |
@@ -2261,7 +2342,22 @@ and writes only its own study's entry and carries the others through untouched.
 
 The ROI curator saves on every change, writes a snapshot under `ls_roi_curator_v1_backup` every 60
 seconds, and keeps the last 80 actions for undo. Restoring the snapshot is deliberately not a button
-(`roiRestoreBackup()` in the browser console), because it replaces the live state wholesale.
+(`roiRestoreBackup()` in the browser console), because it replaces the live state wholesale; it goes
+through `initState`, so every restored plate is checked against the atlas again.
+
+A save writes per section, because two tabs of the page share the key. Each tab remembers, per section,
+what the key held and what its own record was when it last synced (`SEEN`, `BASE`); a save writes only
+the sections whose record changed since, on top of what the key holds now, and takes in the sections
+another tab saved (`takeTheirs`, also run on the `storage` event). When both tabs changed one section the
+later save keeps it and tells the other tab on a `BroadcastChannel`, which says so in its header. A save
+the browser refuses (a full `localStorage`) is caught: the header shows NOT SAVED with the reason until a
+save succeeds, and the next change retries every section not yet written. In the app, the injected
+`setItem` mirror writes to disk even when the browser's own write throws
+(`state.Bridge.saveFromRefused`) and shows the curator's warning. The key is then `behind`
+(`state.SaveGuard`): each later load seeds it from the file over `localStorage`, and a load where even
+that is refused sends its saves of the key aside (`saveFromStale`, under `curation/_backup_*/from_stale_page`)
+rather than over the newer file, until a save the page's own storage accepts. The app warns as
+such a load starts (`Bridge.loadStale`) that what is done on it will not reach the file.
 
 The page is regenerated freely: when it opens, the saved curation embedded by the stage (`__SEED__`, read
 from `curation/ls_roi_curator_v1.json`) is merged with what `localStorage` holds, so rebuilding the page
@@ -2283,7 +2379,7 @@ The page's JavaScript (about 4,500 lines inside `04l_roi_curator.py`) falls into
 top-level functions:
 
 - **Storage:** `openStudy`, `saveStudy`, `openMine` and `initState` (state per study, merged with the seed),
-  `autosave`, the undo stack (`undoMark`, `undoLast`).
+  `save` and `takeTheirs` (per section, see 7.2), `autosave`, the undo stack (`undoMark`, `undoLast`).
 - **Plates:** `verifyPlate` and `resolvePlate` check each saved plate against the set's fingerprints
   (`ls_atlas`), so a plate that was re-rendered or removed is reported in `plateNotice` rather than used
   silently.
@@ -2304,10 +2400,18 @@ top-level functions:
 - **Review mode:** `toggleReview`, `revRender` and the `rev*` functions show every section, including
   excluded ones, with its provenance (`__PROV__`, from `section_provenance.csv`), its artifact and
   censor overlays, and lets a person reinstate an excluded section; `exportReview` writes
-  `section_review.csv`.
+  `section_review.csv`, which 04a's `find_review_csv` picks up from the export folder.
 - **Shotgun deck:** `shotgun` builds a PowerPoint file in the browser, with no library: it writes the
   slide XML itself and packs it with a stored zip (`zipStore`, `crc32`). Slides are ordered blind.
-- **Export:** `exportCsv`, `saveExport` and `dl`.
+- **Export:** `exportCsv`, `saveExport` and `dl`. `exportCsv` loops over the saved state, not `DATA`
+  (see `04l_roi_curator.py` above). Without a chosen folder, `expWrite` downloads the files of one action
+  `EXP_GAP_MS` apart and `expListDownloads` lists each as a re-download link with the count to expect.
+  Each export's stamp and counts are captured when its files are queued (`expCur`, passed through
+  `saveExport` to `expWrite`), so a second Export pressed mid-download keeps its own.
+- **Polygons:** `ringCrosses` refuses an outline that crosses itself in `commitPoly` (before the area
+  floor, which has its own message), puts back a corner drag that makes one, and refuses a corner removal
+  that would; `polyRefuse` says why in `#polyWarn`. `select()` names any crossed region already stored on
+  the section shown.
 
 ### 7.4 The level curator
 
@@ -2406,7 +2510,12 @@ An installed copy carries `VERSION.json`. `app/updates.py` compares it with the 
 downloaded into `<install>/updates/new-<v>/`; an **installer** update (libraries, Python or R changed) can
 only come from the new Setup program. `update_apply.py`, copied out of `app/` because it replaces it, swaps
 the new code in after the app closes, checks that it imports, and puts the old version back if anything
-fails; it also does **Help > Undo last update**. `update_ui.py` is the window side.
+fails; it also does **Help > Undo last update**. Before moving anything it writes
+`updates/swap-journal.json`; if the helper dies mid-swap, `update_apply.recover()` reads it and puts the
+old version back under an exclusive `swap-journal.lock`. `app/__main__.py` runs it before the app starts;
+the bundled runtime's `sitecustomize.py` runs it only when `app/` itself is missing. A reversal that fails
+is retried on later starts and given up after three tries, but never while `app/` is missing (then nothing else can help). The replaced version is deleted only once it is filed as
+`updates/previous/`. `update_ui.py` is the window side.
 `packaging/make_update.py` writes the update package at build time.
 
 ### 8.6 The crash log
@@ -2502,7 +2611,7 @@ One row per scene, which is one section: where it sits on the slide and its plac
 | `slide_col` | int |  | Column of the slide grid, from 0. |
 | `serial_<convention>` | int |  | The scene's position on its slide under each mounting convention (S_scan_order, A_rows_LR, B_cols_TB, C_rows_serpentine, D_cols_serpentine). |
 | `slide_serial` | int |  | The position under the study's chosen convention (`section_order_convention`). |
-| `section_order` | int |  | Position of the section along the animal's brain, 1..N within one marker's series. |
+| `section_order` | int |  | Position of the section along the animal's brain, 1..N within one marker's series. Every scan of a re-scanned slide is numbered inside that slide's places, and the scan Stage 2 uses runs on without a gap. |
 
 #### `qc/slide_layout_summary.csv`
 
@@ -2667,7 +2776,7 @@ One row per exported section: the quality numbers every later stage reads. Measu
 One row per section: clipping on the raw plane, and where its mask is. 04j censors from these masks.
 
 - **Written by:** 01_overviews.py (01k_saturation_raw.py backfills)
-- **Read by:** 06f_recensor_nuclei.py
+- **Read by:** 01k_saturation_raw.py, 06f_recensor_nuclei.py
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
@@ -2972,7 +3081,7 @@ Where a slide was scanned more than once: which scan was used.
 Optional: which scan of a re-scanned slide to use.
 
 - **Written by:** a person
-- **Read by:** 02_pair_passes.py
+- **Read by:** 00_manifest.py, 02_pair_passes.py
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
@@ -3259,6 +3368,7 @@ One row per reformatted section: whether 04f proposes it for exclusion, and the 
 | `n_pieces` | int |  | Pieces above the minimum size. |
 | `focus_score` | float |  | From focus.csv (rule: under 0.070 proposes `out_of_focus`). |
 | `frame_mm2` | float | mm² | Area of the whole working frame. |
+| `carried` | text |  | Empty for a row this run measured. `excluded`: the previous row, unchanged, of a section already excluded and no longer in the index. `unreadable`: the previous row of an indexed section whose overview this run could not read (the run fails for it). |
 
 #### `reformatted/reformat_index[_<marker>].csv`
 
@@ -3310,7 +3420,7 @@ Per section: the rotation and exclusion carried onto the second scan. The LS stu
 
 - **Written by:** 04i_propagate_to_perk.py (the second scan of a paired study); older studies carry the removed rotation curator's export
 - **Read by:** ls_bundle.py
-- **Format:** `--limit N` writes `<name>.trialN.csv`. A trial run writes beside this file and never over it; nothing reads the trial file and the app's Done check does not count it. A full run keeps rows marked `manual` or edited away from their `derived_as`, and backs the old file up to `<name>.<YYYYMMDD-HHMMSS>.backup` before changing it.
+- **Format:** `--limit N` writes `<name>.trialN.csv`. A trial run writes beside this file and never over it; nothing reads the trial file and the app's Done check does not count it. A full run keeps rows marked `manual` or edited away from their `derived_as`, and backs the old file up to `<name>.<YYYYMMDD-HHMMSS>.backup` before changing it. A kept row with no `source` (written before 04i marked its rows) is written back still unmarked; `--rederive-legacy` replaces such rows by today's derivation. An exclusion carried from the partner is applied on top of a hand row.
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
@@ -3325,12 +3435,27 @@ Per section: the rotation and exclusion carried onto the second scan. The LS stu
 | `flip_margin` | float |  | How much better the chosen side is than the mirrored one. |
 | `confidence` | text |  | `high`, or `low` when align_iou is under the threshold and the transfer is worth a look. |
 | `reason` | text |  | Why, in words. |
-| `source` | text |  | `derived` (written by 04i) or `manual` (a hand correction a re-run keeps). |
+| `source` | text |  | `derived` (written by 04i), `manual` (a hand correction a re-run keeps), or empty for a row from before 04i marked its rows. |
 | `derived_as` | text |  | The decision 04i derived for this row (pairing, rotation, flip, excluded). A row whose values differ from it was edited by hand. |
+
+#### `reformatted/rotation_overrides[_<marker>]_flip_mismatch.csv`
+
+Kept hand rows of the overrides file whose flip differs from their partner's manual_flip: those sections are in the mirror frame of their partner. Header-only when there are none; written by every full run.
+
+- **Written by:** 04i_propagate_to_perk.py
+- **Read by:** a person
+
+| Column | Type | Units | Meaning |
+|------------|------|------|---------------------------|
+| `target_scene_uid` | text |  | The second scan's section (the overrides file's `perk_scene_uid`). |
+| `source_scene_uid` | text |  | Its partner in the curated pass. |
+| `row_flip` | 0/1 |  | The `flip` the kept row says. |
+| `source_manual_flip` | 0/1 |  | The partner's `manual_flip` in its reformat index. |
+| `row_source` | text |  | `manual` (a row marked or edited by hand) or `legacy` (unmarked, from before 04i marked its rows). |
 
 #### `reformatted/section_review.csv`
 
-Review decisions made in the ROI curator; 04a merges them over the exclusion list.
+Review decisions made in the ROI curator; 04a merges them over the exclusion list. The page exports it stamped (`section_review_<DD.MM.YYYY_HH.MM>.csv`, into the export folder); 04a takes the newest such file, or this one when it is newer.
 
 - **Written by:** 04l_roi_curator.py (the Review mode's export)
 - **Read by:** 04a_reformat.py
@@ -3523,7 +3648,7 @@ One row per section with any curation work: the plate it was matched to and how 
 | `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
-| `subset` | text |  | Which queue the section was loaded from. |
+| `subset` | text |  | Which queue the section was loaded from (`all`, the analysis-set file's name, `roi_worklist[:<tier>]`, `reinstated`), or `outside_build` for a section exported from the saved curation although this build of the page did not carry it. |
 | `section_order` | int |  | Position of the section along the animal's brain, 1..N within one marker's series. |
 | `plate_set` | text |  | The atlas plate set (`plates_final`, `plates_wullimann`, or an own atlas). |
 | `plate_id` | text |  | The plate's id, which sorts rostral to caudal. |
@@ -3538,7 +3663,9 @@ One row per section with any curation work: the plate it was matched to and how 
 | `status` | text |  | `registered`, `plate_only`, `favourite_only`, `no_roi` or `excluded`. |
 | `favorite` | 0/1 |  | 1 when starred. |
 | `view_rotation_deg` | float | degrees | How the section was turned for viewing; geometry is unaffected. |
-| `excluded` | 0/1 |  | 1 when excluded in the curator. |
+| `excluded` | 0/1 |  | 1 when excluded in the curator: the operator's own judgement, which the importers store as one. |
+| `difficult` | 0/1 |  | 1 when marked difficult in the curator. |
+| `not_carried` | 0/1 |  | 1 for a section exported from the saved curation (subset `outside_build`) that no reformat_index carried when the page was built: 04a has excluded it or never reformatted it. 05a leaves it out ("not carried by the pipeline"); it is NOT an operator exclusion, and the importers do not read it. |
 
 #### `roi_landmarks.csv (curator export)`
 

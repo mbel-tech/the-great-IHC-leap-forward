@@ -35,7 +35,8 @@ is read in the greyscale frame.
 --merge keeps sections the export does not mention. A session spent on one animal
 exports only that animal, so a plain import would silently drop every decision
 made about the other eleven; the export wins only where the two overlap, being
-the more recent statement about those sections.
+the more recent statement about those sections. What a write replaces is kept
+first as `<store>.<YYYYMMDD-HHMMSS>.backup` beside it, as 04q does.
 """
 
 import csv
@@ -77,6 +78,8 @@ import ls_atlas as AT                                       # noqa: E402
 # The store is filed per study, the way the curator page keeps its key: this
 # study's records are read and replaced, every other study's carried through.
 import ls_curation as CU                                    # noqa: E402
+# The same timestamped backup 04q takes before rewriting its seed.
+import ls_io as IO                                          # noqa: E402
 
 ROI_KEY = "ls_roi_curator_v1"
 
@@ -220,6 +223,9 @@ def rebuild(plates_csv, landmarks_csv=None, k=None, regions_csv=None, frame_of=N
                 e["assigned"] = True
             e["fav"] = r.get("favorite") == "1"
             e["hard"] = r.get("difficult") == "1"
+            # The operator's exclusion only. `not_carried` (the pipeline did not
+            # carry the section when it was exported) is deliberately NOT read:
+            # stored as `excl` it would outlive its reason. 04q does the same.
             e["excl"] = r.get("excluded") == "1"
             e["noroi"] = (r.get("status") or "") == "no_roi"
             try:
@@ -408,7 +414,20 @@ def main():
         print("\n--dry-run: nothing written")
         return 0
 
-    store.write(ROI_KEY, json.dumps(CU.file_under(stored, study, S, token)))
+    text = json.dumps(CU.file_under(stored, study, S, token))
+    if raw is not None and raw != text:
+        # A merge still OVERWRITES the sections the export holds, and a replace
+        # all of them: what they were is otherwise gone. The same timestamped
+        # `<name>.<YYYYMMDD-HHMMSS>.backup` 04q takes (never an existing name),
+        # beside the store's file - of the text as read, so a project-backed
+        # store is covered too.
+        bak = IO.backup_path(store.path(ROI_KEY))
+        os.makedirs(os.path.dirname(bak), exist_ok=True)
+        with open(bak, "w", encoding="utf-8") as fh:
+            fh.write(raw)
+        print(f"\nbacked up {os.path.basename(store.path(ROI_KEY))} -> "
+              f"{os.path.basename(bak)}")
+    store.write(ROI_KEY, text)
     print(f"\nwrote {store.path(ROI_KEY)}")
     return 0
 

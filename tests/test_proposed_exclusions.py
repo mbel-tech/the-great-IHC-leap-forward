@@ -15,7 +15,11 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
-from _fixture import temp_study, load_stage  # noqa: E402
+from _fixture import private_home, temp_study, load_stage  # noqa: E402
+
+# 04a's apply_review also searches ~/Downloads for a review export; this
+# suite must not read the runner's.
+private_home()
 
 fails = 0
 
@@ -132,10 +136,33 @@ with temp_study(**PAIRED):
         got = {r["uid"]: r for r in csv.DictReader(fh)}
     chk("the indexed section is measured", kept in got)
     chk("an excluded, unindexed section is carried, not dropped", gone in got)
-    chk("...unchanged", got.get(gone), prior_gone)
+    chk("...unchanged, marked carried=excluded", got.get(gone),
+        dict(prior_gone, carried="excluded"))
     chk("a section neither indexed nor excluded is not carried", stale in got, False)
     chk("the run says how many it carried",
         "carried 1 already-excluded section(s)" in out.getvalue())
+
+    # A missing file is the ordinary case and says nothing; one that exists
+    # and cannot be read used to be the same silent [] - and then the excluded
+    # sections this exists to keep were dropped without a word.
+    keep_ex = F.EXCLUDED_CSV
+    try:
+        F.EXCLUDED_CSV = os.path.join(os.path.dirname(keep_ex), "no_such_file.csv")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            got_c = F.carry_excluded(set())
+        chk("a missing exclusions file carries nothing, quietly",
+            (got_c, out.getvalue()), ([], ""))
+        F.EXCLUDED_CSV = os.path.join(os.path.dirname(keep_ex), "a_directory")
+        os.makedirs(F.EXCLUDED_CSV, exist_ok=True)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            got_c = F.carry_excluded(set())
+        chk("an exclusions file that cannot be read carries nothing...", got_c, [])
+        chk("...and says why", "could not read" in out.getvalue()
+            and "a_directory" in out.getvalue())
+    finally:
+        F.EXCLUDED_CSV = keep_ex
 
 print()
 print("--- 04f: areas at each section's own scale; an unmeasured section fails the run ---")
@@ -182,6 +209,40 @@ with temp_study(**PAIRED):
         bool(said) and "1 section(s) NOT MEASURED" in said[-1])
     chk("...and the section is named", absent in out.getvalue())
     chk("the sections that were measured are still written", sorted(got), [at5, at10])
+    chk("...and marked as measured (carried empty)",
+        [got[u]["carried"] for u in (at5, at10)], ["", ""])
+
+    # The unreadable section had a row from an earlier run that PROPOSED it.
+    # A full run that cannot measure it must not drop that proposal: for a
+    # study with no override file, 04a's exclusions come from this file.
+    prior_abs = dict(got[at5], uid=absent, section_order="2", proposed="1",
+                     artifact_class="no_tissue", reason="no tissue piece larger "
+                     "than 0.40 mm2", carried="")
+    write(F.CANDIDATES_CSV, list(got.values()) + [prior_abs])
+    # ...and at5's focus row has lost its um_px: it falls back to the config's
+    # overview scale, which the run must say.
+    write(F.QC_CSV, [{"scene_uid": u, "animal": "LS02",
+                      "marker_channel": RF.DEFAULT_MARKER, "focus_score": "0.2",
+                      "um_px": um}
+                     for u, um in ((at5, ""), (at10, "10.40"), (absent, "5.20"))])
+    out = io.StringIO()
+    try:
+        sys.argv = ["04f", "--montage", "0"]
+        with contextlib.redirect_stdout(out):
+            rc = F.main()
+    finally:
+        sys.argv = saved
+    with open(F.CANDIDATES_CSV, newline="", encoding="utf-8") as fh:
+        got = {r["uid"]: r for r in csv.DictReader(fh)}
+    chk("an unreadable section keeps its previous row", absent in got)
+    chk("...its proposal still standing, marked carried=unreadable",
+        (got.get(absent, {}).get("proposed"), got.get(absent, {}).get("carried")),
+        ("1", "unreadable"))
+    chk("...and the run still fails for it", rc, 1)
+    chk("a section with no um_px in focus.csv is counted as on the config's scale",
+        "1 section(s) have no um_px in focus.csv" in out.getvalue())
+    chk("...and measured at that scale (5.20 here)",
+        abs(float(got[at5]["total_mm2"]) - a5) < 1e-6)
 
 print()
 print("FAILURES" if fails else "ALL PASS")

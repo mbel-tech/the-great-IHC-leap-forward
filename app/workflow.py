@@ -645,7 +645,14 @@ OPTIONS = {
             "0.01 is 1%. Saturated pixels in the sections that stay are flagged, not "
             "removed.", default=0.01, cli_default=0.01, minimum=0.0, maximum=1.0),
     ],
-    "propagate_perk": [_limit()],
+    "propagate_perk": [
+        _limit(),
+        Opt("--rederive-legacy", "bool", "Re-derive old unmarked rows",
+            "Rows written before this step marked its own rows are kept when they "
+            "differ, since nothing says whether a person wrote them. This replaces "
+            "them with a fresh alignment (the old file is backed up first). Rows "
+            "marked as hand corrections are never replaced."),
+    ],
     "worklist": [
         Opt("--min-sections", "int", "Hold out animals with fewer sections",
             "Animals with fewer measurable sections than this go to the end of the "
@@ -1287,7 +1294,12 @@ def incomplete(stage, study):
     the log, and 05c trusts such rows, so nothing is counted against them.
     """
     if stage.sid != "detect":
-        rec = last_run((study.cfg or {}).get("project"), stage.sid)
+        # Full runs only. A `--limit` trial writes beside the real outputs
+        # (.trialN), so whether it passed says nothing about them - and a
+        # passing trial after a failed full run used to clear "its last run
+        # failed", leaving the partial table the full run wrote reading as
+        # done.
+        rec = last_run((study.cfg or {}).get("project"), stage.sid, full_only=True)
         if (rec is not None and not rec.get("ok")
                 and stage.done(study.out_root, study.names)):
             return "its last run failed"
@@ -1517,11 +1529,12 @@ def curators(study):
 #: would read as a full run.
 SHORTFALL = {
     "scene_renders": (re.compile(r"^\s*(\d+) not drawn:", re.M), "scene", "not drawn"),
-    # 04o: a section whose CZI or scene is missing, or with no tissue mask.
     # 06i: a section whose outlines do not agree with 06a's counts is not drawn.
     "detection_overlays": (re.compile(r"^\s*(\d+) not drawn:", re.M), "scene", "not drawn"),
-    "rgb_perk": (re.compile(r"^\s*(\d+) not built:", re.M), "picture", "not built"),
-    "rgb_pcna": (re.compile(r"^\s*(\d+) not built:", re.M), "picture", "not built"),
+    # Not 04o (rgb_perk / rgb_pcna): a kept section it cannot build fails the
+    # run ("!! N ... NOT BUILT"), so its "N not built:" list never ends a
+    # finished run; an excluded section with no composite is not a shortfall
+    # (04a --render-excluded's rule, also not listed here).
 }
 
 
@@ -1736,6 +1749,32 @@ def _input_groups(need, study):
     return groups
 
 
+def _extra_inputs(sid, study):
+    """{fingerprint key: [files]} stage `sid` reads that are not a `made_from` stage's outputs.
+
+    06b reads the sampling workbook, which no stage writes. The results (06e:
+    06a, 06c, 06d) read it too, and take their groups from 06b's
+    animal_metadata.csv (06c resolve_groups), so re-running 06b with other
+    groups must put them out of date. Only that table, under 06b's own key:
+    06b's roi_dataset.csv is its copy of 06a's numbers, which the results
+    rebuild themselves, so hashing it would make every 06b run after new
+    measurements cost one more pointless rebuild. 06b is not in their
+    `made_from` for the same reason: 06b goes out of date whenever 06a's table
+    changes, and that alone says nothing about the groups.
+    """
+    out = {}
+    if sid in ("join_sampling", "build_results") and study.out_root:
+        import ls_sampling as SAMPLING
+        opts = (((study.cfg.get("project") or {}).get("stage_options") or {})
+                .get("join_sampling"))
+        book = SAMPLING.workbook_path(study.cfg, opts)
+        out["workbook"] = [book] if book and os.path.isfile(book) else []
+    if sid == "build_results" and study.out_root:
+        meta = os.path.join(study.out_root, "results", "animal_metadata.csv")
+        out["join_sampling"] = [meta] if os.path.exists(meta) else []
+    return out
+
+
 def _input_paths(need, study):
     """The files a stage reads from stage `need`: a curator's newest export, else its outputs."""
     return [p for paths in _input_groups(need, study).values() for p in paths]
@@ -1770,6 +1809,8 @@ def fingerprint(sid, study):
     files = {key: _hash([_content(p) for p in paths])
              for need in st.made_from if applies(S.BY_ID[need], study)[0]
              for key, paths in _input_groups(need, study).items()}
+    files.update({key: _hash([_content(p) for p in paths])
+                  for key, paths in _extra_inputs(sid, study).items()})
     settings = {k: _hash(_setting(study.cfg, k)) for k in st.settings}
     return {"files": files, "settings": settings}
 
@@ -1787,13 +1828,24 @@ def run_inputs(sid, values, study):
 
 
 def _last_ok(study, sid):
+    """The newest ok FULL run of `sid`: the record that says what its results were made from.
+
+    A `--limit` trial is recorded ok with no inputs (run_inputs); taken as the
+    last ok run it sent the status back to file dates, which a setting change
+    does not move, so a stage put out of date by a setting read Done after a
+    5-section trial. A narrowed run is never that proof (as last_run's
+    full_only).
+    """
     for rec in reversed(((study.cfg or {}).get("project") or {}).get("runs") or []):
-        if rec.get("stage") == sid and rec.get("ok"):
+        if rec.get("stage") == sid and rec.get("ok") and not (
+                (rec.get("options") or {}).get("--limit")):
             return rec
     return None
 
 
 def _changed_from(need, study):
+    if need == "workbook":
+        return "the sampling workbook"
     need, _, marker = need.partition(":")
     if marker:
         return "%s for %s" % (_changed_from(need, study), study.marker_label(
@@ -1843,14 +1895,28 @@ def _fixed_reason(st, study):
 
 
 def _settings_changed(st, study):
-    """The settings `st` reads that differ from its last recorded run's, in order."""
+    """The settings `st` reads that differ from its last recorded run's, in order.
+
+    A setting the record holds no hash for was not read by that run (it was
+    recorded before the stage read it: 06b and groups.by_animal). That is no
+    change only while the setting is still UNSET now - the run read nothing
+    and nothing is there. Counted as a change regardless, adding a setting to
+    a stage put every study's run of it out of date at once; counted as none
+    regardless, a value set since (a group key typed in after 06b ran) never
+    put the stage out of date at all.
+    """
     rec = _last_ok(study, st.sid)
     then = rec.get("inputs") if rec else None
     if not isinstance(then, dict):
         return []
     now = fingerprint(st.sid, study)
     was = then.get("settings") or {}
-    return [k for k in now["settings"] if now["settings"][k] != was.get(k)]
+    return [k for k, h in now["settings"].items()
+            if (h != was[k] if k in was else h not in _UNSET_HASHES)]
+
+
+#: What an unset setting hashes to: absent (None), or an empty value.
+_UNSET_HASHES = {_hash(v) for v in (None, {}, [], "")}
 
 
 def _files_changed(st, study, now, was, made):
@@ -1860,16 +1926,19 @@ def _files_changed(st, study, now, was, made):
     marker had a key of its own, or one made before the export held that
     marker - is judged by date, as a run with no record is: newer than `st`'s
     results is a change. By hash it would put every such study out of date at
-    once, though nothing it reads had changed.
+    once, though nothing it reads had changed. The same for an input added
+    since the run was recorded (_extra_inputs: the workbook, 06b's table).
     """
     out = []
+    extra = _extra_inputs(st.sid, study)
     for k, h in now.items():
-        if k in was or ":" not in k:
+        if k in was or (":" not in k and k not in extra):
             if h != was.get(k):
                 out.append(k)
         elif made is not None and any(
                 os.path.getmtime(p) > made
-                for p in _input_groups(k.partition(":")[0], study).get(k, ())):
+                for p in (extra[k] if k in extra
+                          else _input_groups(k.partition(":")[0], study).get(k, ()))):
             out.append(k)
     return out
 
@@ -1907,7 +1976,76 @@ def _own_reason(st, study):
         if applies(S.BY_ID[need], study)[0] and any(
                 os.path.getmtime(p) > made for p in _input_paths(need, study)):
             return "%s is newer than its results" % _changed_from(need, study)
+    for key, paths in _extra_inputs(st.sid, study).items():
+        if any(os.path.getmtime(p) > made for p in paths):
+            return "%s is newer than its results" % _changed_from(key, study)
     return None
+
+
+def _groups_reason(study):
+    """Why 06b's groups no longer follow from the workbook and the choice, or None.
+
+    Only what decides the groups: the workbook's content and the settings 06b
+    reads, not 06a's table (06b goes out of date whenever 06e re-runs 06a, and
+    that changes no group). The results take their groups from 06b's table, so
+    while this holds they are out of date too, whatever their own record says:
+    run alone after a workbook change, Build results recorded the new workbook
+    beside the old groups and read Done.
+    """
+    st = S.BY_ID["join_sampling"]
+    if not applies(st, study)[0] or not st.done(study.out_root, study.names):
+        return None
+    # An animal measured since 06b ran has no group at all: running only
+    # Build results after a new animal was measured used to read Done, with
+    # that animal in no comparison.
+    new = _unjoined_animals(study.out_root)
+    if new:
+        return "%d measured animal(s) have no row in its table: %s" % (
+            len(new), ", ".join(new[:5]) + (" ..." if len(new) > 5 else ""))
+    made = _made_at(st, study)
+    rec = _last_ok(study, st.sid)
+    then = rec.get("inputs") if rec else None
+    if isinstance(then, dict):
+        now = fingerprint(st.sid, study)
+        if "workbook" in _files_changed(st, study, now["files"], then.get("files") or {}, made):
+            return "the sampling workbook changed since it ran"
+        keys = _settings_changed(st, study)
+        if keys:
+            import ls_config as LC
+            label = {k.path: k.label for k in LC.SPEC}
+            return "a setting it reads changed since it ran: %s" % ", ".join(
+                label.get(k, k) for k in keys)
+        return None
+    if made is not None and any(os.path.getmtime(p) > made
+                                for p in _extra_inputs(st.sid, study).get("workbook", ())):
+        return "the sampling workbook is newer than its results"
+    return None
+
+
+def _unjoined_animals(out_root):
+    """Animals in 06a's roi_measurements.csv with no row in 06b's animal_metadata.csv.
+
+    Empty when either file is missing or has no `animal` column: that is not
+    this check's question (06b's own status answers whether it ran).
+    """
+    import csv as _csv
+    res = os.path.join(out_root, "results")
+
+    def animals(name):
+        try:
+            with open(os.path.join(res, name), newline="", encoding="utf-8") as fh:
+                rd = _csv.DictReader(fh)
+                if "animal" not in (rd.fieldnames or []):
+                    return None
+                return {(r.get("animal") or "").strip() for r in rd} - {""}
+        except (OSError, UnicodeDecodeError, _csv.Error):
+            return None
+
+    measured = animals("roi_measurements.csv")
+    joined = animals("animal_metadata.csv") if measured else None
+    if not measured or joined is None:
+        return []
+    return sorted(measured - joined)
 
 
 def outdated(stage, study, _seen=None):
@@ -1933,6 +2071,11 @@ def outdated(stage, study, _seen=None):
             if applies(n, study)[0] and outdated(n, study, seen):
                 why = "%s is out of date" % display_title(n, study)
                 break
+        if why is None and stage.sid == "build_results":
+            groups = _groups_reason(study)
+            if groups:
+                why = "%s is out of date: %s" % (
+                    display_title(S.BY_ID["join_sampling"], study), groups)
     seen[stage.sid] = why
     return why
 
@@ -2079,11 +2222,18 @@ def next_up(study, setup_ok=True, setup_missing=()):
     return "home", "Everything the app can run is done.", None
 
 
-def last_run(project_block, sid):
-    """The newest run record for a stage, or None."""
+def last_run(project_block, sid, full_only=False):
+    """The newest run record for a stage, or None.
+
+    `full_only` skips trial runs - records whose options carry `--limit` -
+    which narrow the stage on purpose and leave its real outputs alone.
+    """
     for rec in reversed((project_block or {}).get("runs") or []):
-        if rec.get("stage") == sid:
-            return rec
+        if rec.get("stage") != sid:
+            continue
+        if full_only and ((rec.get("options") or {}).get("--limit")):
+            continue
+        return rec
     return None
 
 

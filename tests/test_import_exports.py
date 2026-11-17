@@ -137,6 +137,16 @@ def replace_guard(d, plates):
     # store is this study's, so it is what the merge read and kept.
     chk("...and keeps the unmentioned section",
         "LS22_s01b_sc00" in kept["_studies"][studies[-1]], True)
+    # The merge still OVERWROTE the section the export holds: what it was is
+    # kept first, as 04q keeps its seed.
+    cur = os.path.join(out_root, "curation")
+    baks = sorted(n for n in os.listdir(cur) if n.endswith(".backup"))
+    chk("...after a timestamped backup of what it replaced",
+        [n.startswith(IE.ROI_KEY + ".json.") for n in baks], [True])
+    if baks:
+        with open(os.path.join(cur, baks[0]), encoding="utf-8") as fh:
+            chk("...holding the store as it was",
+                sorted(json.load(fh)), ["LS22_s01a_sc00", "LS22_s01b_sc00"])
 
 
 def other_study_kept(d, plates):
@@ -376,6 +386,20 @@ def main():
         S3, n3, nbg3 = IE.rebuild(pl, lm, k=3.0, regions_csv=os.path.join(d, "nope.csv"))
         chk("the rebuild still works", n3, 3)
         chk("and says it found none", nbg3, 0)
+
+        print("\na section the pipeline no longer carried at export time:\n")
+        # 04l marks such a section `not_carried=1` and leaves `excluded` as the
+        # operator's own (0). Bringing the export in must not turn the derived
+        # state into a stored operator exclusion: once the pipeline carries the
+        # section again it would still be shown red and left out of 05a.
+        nc = PLATES.replace("view_rotation_deg,excluded\n",
+                            "view_rotation_deg,excluded,difficult,not_carried\n")
+        nc = nc.replace(",registered,1,0.0,0\n", ",registered,1,0.0,0,0,1\n")
+        pl_nc = write(d, "roi_plates_nc.csv", nc)
+        S4, n4, _ = IE.rebuild(pl_nc, lm, k=3.0, regions_csv=rg)
+        e4 = S4["LS22_s01a_sc00"]
+        chk("its work comes back", (n4, e4["assigned"]), (3, True))
+        chk("...and it is NOT stored as excluded by the operator", e4["excl"], False)
 
         replace_guard(d, pl)
         other_study_kept(d, pl)

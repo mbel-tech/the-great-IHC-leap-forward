@@ -9,6 +9,320 @@ where things landed, not which plausible-looking route was tried and abandoned, 
 
 ---
 
+## 2026-11-16 - Final review fixes: stages that could never pass (04o / 04g / 05a / app / tests / docs)
+
+**Changed:** 04o takes its sections from `focus.csv` the way 04a does (`frames_for`): under
+`multiplex` every row, not only those whose `marker_channel` is the marker being built, and the
+overview folder from each row's own `marker_channel`. 04g and 04o list an EXCLUDED section
+(reached through `--include-excluded`) that cannot be masked or composited apart, by name, and do
+not fail the run for it - 04a `--render-excluded`'s rule; a kept section still fails it, reason
+last. 05a fails the run (`!! N <marker> ROI row(s) REFUSED (no shape ...`, last line) on a ROI row
+with neither `sec_r` nor `sec_poly`, as it does on a crossed polygon; the boxes it placed are
+written. The app's dead `SHORTFALL` entries for `rgb_perk` / `rgb_pcna` are gone.
+`tests/test_roi_dataset.py` skips 06c only when `openpyxl` is missing; any other load error fails
+the suite. `tests/test_rgb_per_marker.py`'s multiplex study writes `focus.csv` as 00 does (one row
+per scan) and checks the run's return code, not only that nothing was raised. The technical guide
+says twenty-two placeholders and that `not_carried` is as of the last page build; the R figures'
+blank-environment stop says to run 06b, then 06c.
+
+**Why:** the final whole-branch review. Since "a skipped section fails the run", two stages could
+fail for good with nothing the operator could do, and stop Run all remaining each time: 04o for
+every multiplex marker but the first (focus.csv names one marker per scan, so every section was
+"not in focus.csv"), and 04g/04o on an excluded section with no tissue (the app always passes
+`--include-excluded`, and excluding it again changes nothing). The test fixture wrote a focus row
+per marker, which no study has, and hid the first. A shapeless ROI row was curated work silently
+not measured with the run reading done. Five broad `except Exception` guards turned a broken 06c
+into five "skip" lines.
+
+**Cost:** under `multiplex`, every marker's overview-route composite uses the scan's one
+`_MARK.png` (the first marker's plane) until the owner decides per-marker overview naming; the CZI
+route reads each marker's own plane. An excluded section with no mask or composite no longer fails
+anything - its absence from Review mode is said in the run's output, not as a failure. An old
+export carrying a shapeless row now fails 05a until the region is redrawn.
+
+## 2026-11-16 - Loose ends from the reviews (00 / 00b / 01c / 02 / 04g / 04i / 04o / 04q / 05a / 06c / app)
+
+**Changed:** The in-sample false-positive rate is called in-sample, and the leave-one-disc-out rate
+named as the independent check, in the pipeline guide, the methods, the nuclei-detection note and
+the R figure caption (which now quotes the leave-one-disc-out median beside it). 04q: a report-only
+run says "would keep", `--replace` without `--write` says it needs `--write`, and an unreadable
+stored file is named before it is backed up and replaced. `app.import_exports` takes 04q's
+timestamped backup before it writes. 04g `--limit` never removes a real mask. 05a's closing line
+names the placed markers only if there are any. 04o `--verify` ends with "does not reproduce" or
+"could not be checked", whichever it was. 04i reads `source` stripped and case-blind, and its
+`--rederive-legacy` wording says unmarked rows with no derivation are kept. 00 and 02 refuse a
+`chosen_variants.csv` missing a column by name. 00 and 00b share `source_files` matching
+(`scripts/ls_sources.py`), and 00b now fails on a named CZI found nowhere (its zip unreadable).
+01c's partial-run line says what to do. The guides say pixel stages read extracted CZIs. 06c takes
+`environment` from 06b's `animal_metadata.csv` by animal (`ls_sampling.fish_id` removed). In the
+app: the results are out of date while a measured animal has no row in 06b's table; a setting
+missing from an old run record is a change when it is set now; the sheet-match join fault names
+its exception type and logs the traceback; a stale lock is put back without overwriting; a swap
+clears an old journal's `.tries`; on a stale page the radius, ROI choice and added ROIs are
+reported, a failed disk write of them clears once a later save succeeds, and two stale loads keep
+separate set-aside files (`<key>.json`, `<key>.2.json`, ...). The Task 13 entry's re-run list now
+names 04e and 04j.
+
+**Why:** each was parked by a task review (Tasks 6-16): wording that overstated a check, messages
+that described a run as having done what it had not, a trial run that could delete a real mask
+under a stage still reading done, 06c reading a different sheet than 06b's join, two copies of one
+matching rule, and app states that read current or quiet when they were not.
+
+**Cost:** 06c's environment column is blank until 06b has run (and says so); before, it was filled
+from the default workbook whatever 06b read. 00b fails a subset study whose named CZI is in no
+readable archive, where it used to pass. A study whose `groups.by_animal` was set after 06b's last
+recorded run sees 06b out of date once. Stale-page set-asides are one file per page load, not one
+per key.
+
+## 2026-11-16 - Curator exports and review decisions reach the pipeline (04l / 04a / 05a / app)
+
+**Changed:** `exportCsv` in `04l_roi_curator.py` writes every section the saved state holds work
+for, not only the sections in this build (`DATA`). A section outside the build takes animal,
+marker and order from the embedded provenance table and is divided by the frame stamped on its
+record; its `subset` is `outside_build`, and the status line says how many came from outside. One
+with no provenance row, or with positions and no stored frame, is named in a red header line
+(`expWarn`) and left out. 04a's `apply_review` reads the newest `section_review*.csv` from
+`reformatted/`, the export folder (one dated folder deep) or the download folder (this study's
+sections only), found the way 05a finds `roi_regions*` (`find_review_csv`); `reformatted/section_review.csv`
+is still a candidate. The page refuses an outline that crosses itself (`ringCrosses`): it is not
+closed, a corner drag that makes one is put back, a corner removal that would is refused, and a red
+header line (`polyWarn`) says why. 05a refuses such a polygon from an older export by section and
+region (`ring_crosses`, listed under `REFUSED`) instead of measuring it. The download fallback
+spaces the files of one export `EXP_GAP_MS` (800 ms) apart and lists each, with the count to
+expect, as a link that downloads it again. The app's "Open in browser" button is removed.
+Review fixes: the build is a set of (scene_uid, marker), and under multiplex (`ACQ_LAYOUT`, now
+embedded) an outside section is written for every declared marker the build lacks, which also
+covers a `--worklist` build narrowed on the first marker only; a section no reformat_index carries
+(`CARRIED`, embedded from every marker's index; not 04p's ranked `status`, which says `measured`
+for ever once a section was measured) goes out with a new appended `not_carried=1` column, not
+`excluded=1` - `excluded` is the operator's and both importers store it, so a derived state there
+would outlive its reason - and 05a's analysis set (and `--all-sections`) leaves it out under its
+own reason; Shotgun expects its two files; the crossing messages say "crosses or touches"; 05a exits 1 on a refused crossed polygon, after writing the boxes it placed, with the
+count as its last line; each export keeps its own stamp and counts while queued behind another
+(`expCur`); the crossing test runs before the area floor, which now says why; a stored crossed
+region is named when its section is shown; 04a prints its review counts even when zero.
+
+**Why:** After a rebuild with a different subset, the next export silently left out curated
+sections, and 05a takes the newest export. Review decisions never reached 04a: the page writes a
+stamped file into the export folder and 04a read only `reformatted/section_review.csv`, while the
+page's confirmation said 04a would act on it. A bowtie has shoelace area 0 in 05a and an even-odd
+area in 05c, so its density was inflated or infinite. Three back-to-back downloads trip the
+browser's multiple-download prompt, and refusing it lost two files with nothing saying how many
+there should be. "Open in browser" opened the page on the app's per-run port in a browser that
+does not mirror to disk, so work done there never reached the curation files; nothing depended on
+it, so removing it was the smaller change than a notice.
+
+**Cost:** A section curated in an older build is exported only if its record carries a frame;
+records imported by 04q and never shown again in an `--rgb` build do not, and are named until the
+page is rebuilt with them. Out-of-build sections take the marker from 04p's provenance row; under
+multiplex the scene is written under every declared marker instead. A 05a run with a refused
+crossed polygon fails until the region is redrawn and exported again (a shapeless row still only
+warns). An export
+in the fallback takes about 1.6 s longer. Blob URLs for the re-download links are not revoked.
+
+## 2026-11-16 - The ROI curator does not lose work (04l / app)
+
+**Changed:** `save()` in `04l_roi_curator.py` writes per section. Each tab keeps, per section,
+what the key held (`SEEN`) and what its own record was (`BASE`) when it last synced; a save
+writes only the sections whose record moved from `BASE`, on top of what the key holds now, and
+takes in, through `resolvePlate`, the sections another tab saved. A `storage` listener does the
+same between saves and redraws the section on screen if it was one of them. A section both tabs
+changed is kept by the later save, which tells the other tab on a `BroadcastChannel`; that tab
+says so in the header (`syncNote`), once. The listener redraws the section on screen without
+saving it (`showPlate`), since `select()` writing the slider's plate made two tabs answer each
+other's saves for ever, and drops this tab's undo snapshots of the sections it took. An idle tab's autosave now writes nothing. `save()` catches
+a refused write, shows a red NOT SAVED line with the browser's reason (`saveWarn`) until a save
+succeeds, and retries on the next change (a section stays changed until it is written);
+"saved HH:MM:SS" is only claimed for a save that happened. `hasPlateWork` (assigned, a
+landmark, or a drawn region) is the one rule for "the plate is a decision", used by `select()`,
+`exportCsv` and Shotgun, and `hasRoiWork` is built on it, and the strip's plate-only colour and count use it too; Review's Clear keeps any record
+`hasDecision` keeps and takes an undo mark, as do Reinstate, Drop and Reject mask, and `u`
+in Review undoes the last change to the section shown and says what it undid. `roiRestoreBackup` goes through `initState`, and `adoptSeed` through
+`resolvePlate`. Polygons record the plate
+they were drawn on (`pl`) and `usedRois` counts them on that plate only (an older polygon counts
+when the plate's ROI of that number names its region). ADD ROI names, scene uids and animal ids
+go through `esc`, now declared beside `el`. In the app, the injected `setItem` mirror catches the
+browser's refusal, writes to disk anyway (`Bridge.saveFromRefused`) and shows the curator's
+banner, saying the file has it and the page does not. The key is then `behind`
+(`SaveGuard`): every load seeds it from the file over localStorage, and a load where even that
+is refused sends its saves of it aside (`saveFromStale`, `from_stale_page`), never over the
+newer file; a save the page's storage accepts ends it. Such a stale load is told so as it
+loads (`loadStale`), in its own box, and its banner says the decisions are set aside in
+`from_stale_page`, not written, and will not come back after a reload; a stale page of a project
+closed since sets aside under that project's folder. A refused snapshot (`_backup`), radius,
+ROI choice or added-ROI list is written but raises no warning (those are saved only when their
+own control is used, so the warning could never clear), and the warning stays until every
+failing key has saved. Checks in `tests/lost_work.test.js` (a new
+page suite, so 23 of 23) and `tests/test_curation_save.py`.
+
+**Why:** found on review. A second tab's 60 s autosave or unload save wrote the store it loaded
+over everything the other tab had saved since. A section curated only with polygons moved onto
+the slider's plate when revisited and exported as a favourite with no plate. Review's Clear
+deleted a reinstated section's polygons with no undo. A full browser store threw out of the
+click with nothing on screen, and the app's mirror, reached only after the browser's write
+returned, never saw those saves. A restored snapshot kept a stale `verified: "ok"`. After a
+plate change the guided walk skipped a region whose ROI number an old polygon had used. A
+region name typed into ADD ROI went into the page as markup.
+
+**Cost:** each save compares every record in the tab with its last synced copy (one
+`JSON.stringify` pass over the store), and reads the key once more when another tab has written
+it. Polygons carry one more field. The app's mirror still rethrows the browser's refusal after
+the disk write, so the page sees it as it would without the app, and says NOT SAVED too. While a
+key is behind, every refused save rebuilds the injected seed script (a read of every key).
+Not addressed: a polygon-only section whose plate the old `select()` already moved keeps that
+plate and now exports it as `plate_only`; re-check polygon-only sections curated before this.
+
+## 2026-11-16 - The study file and the installed app survive concurrency and crashes (project / app / updates)
+
+**Changed:** the partial writers of the study file (`write_curation`, `_mark_synced`,
+`record_run`) compare the stamp they hold with the one on disk before they read it. If it moved,
+they compare what is there with the last save minus what they own (`_settings_view`: curation,
+`project.runs`, `project.synced`, `project.id`/`created`, `detection.auto`). Only those moved:
+memory takes them in and nothing is asked. Anything else moved: the write still goes ahead (only
+its own keys) and `_foreign` makes the next full save raise `ProjectConflict` until a reload or a
+forced save. A full save that finds only those moved (05b's `detection.auto` during a run) takes
+them in and saves without asking; a forced save takes them in first too, so "save over it" never
+erases the other copy's curation decisions, marks or run rows. The conflict box offers "Discard my changes and reload"
+(its own label, not Qt's platform one), which reads the file again (`ProjectSession.reload`); Revert only went back to this copy's save. File > Save As, and a Save that would change `out_root`, ask the window's run guard
+(`ProjectSession.idle_for`, wired to `MainWindow._idle_for`) and are refused with the same
+message as Open/New while a stage runs. `update_apply` writes `updates/swap-journal.json` before
+moving anything and removes it when the swap is settled; `recover()` puts every part back from
+a leftover journal (skipped while the helper that wrote it is alive), under an exclusive
+`swap-journal.lock`, at most once per process, retried on later starts and given up after three
+failures (never while `app/` is missing: nothing else could recover it then); the count is kept
+in the journal or a side file; a stale lock is renamed aside, never deleted from under its
+new owner; a malformed journal is set aside. `app/__main__.py` runs it before the app starts; the
+bundled runtime's `sitecustomize.py` (Windows and macOS) runs it only when `app/` is missing,
+because every stage and worker interpreter passes through there. The replaced version
+is filed as `previous` by moving the old `previous` aside first; when that fails `parked` is
+kept, the old undo copy is put back whole, and the start-up message names the folder. Checks in
+`tests/test_project.py`, `tests/test_project_session.py`, `tests/test_updates.py`.
+
+**Why:** found on review. Each partial writer took the stamp on disk as its own, so B saving a
+setting, then A recording one curation decision, then A saving, lost B's change without a word.
+Save As rebound the runner and re-rooted the curator under a running stage. A helper that died
+between moving `app` out and the new one in left an install with no `app` folder, which nothing
+looked for; and a hand-over to `previous` that failed on a locked file was logged and then the
+only copy of the replaced version (`parked`) was deleted.
+
+**Cost:** a second copy of the app saving the study file now makes this copy's next Save ask
+"The file changed on disk"; so does anything else writing the file while the app has it open
+(`00c_channel_identity.py --accept` from a terminal writes `marker_identity`, which the next Save
+used to drop silently once a run or a curation decision had refreshed the stamp). Recovery when `app/` itself is gone needs
+the new `sitecustomize.py`, which only a fresh install brings (the runtime is not updated in
+place), and the journal only exists from the second update after this one, because the helper
+that runs an update is the copy from the version being replaced. An update cut short is reversed,
+not finished: the person runs it again.
+
+## 2026-11-16 - One sheet row is one animal; 06b's groups and workbook date the results (06b / app)
+
+**Changed:** `ls_sampling.join` reports each sheet row two or more animals match (`shared`, from
+`shared_rows`), joins none of them, and 06b stops naming both, as it stops on an animal on two
+rows; Check workbook and Match the sheet say so too, and Match the sheet will not save. By number
+only a cell with a single run of digits is a number (`_number`), so "Tank 3 fish 1" matches
+nobody. A fill rule's `is` given as one string is that one value. 06b stops, naming the animals,
+on a blank treatment no rule fills, unless `groups.by_animal` gives the animal a group or the study
+has no groups at all (no group in the sheet and `groups.by_animal` empty, the "no key" case 05c
+keeps). `workflow.fingerprint` takes the sampling workbook's content for `join_sampling` and
+`build_results`, and `animal_metadata.csv` for `build_results` under 06b's key
+(`_extra_inputs`); a key a run record lacks is judged by date, as the per-marker keys are.
+While 06b is out of date for its workbook or a setting it reads, the results are too
+(`_groups_reason`), so re-running Build results alone after a workbook change no longer reads
+Done. `groups.by_animal` is a setting of `join_sampling`; a setting a run record holds no hash
+for is not a change (`_settings_changed`), so adding it did not put every 06b run out of date.
+`fish_id` follows `_number`'s one-run-of-digits rule. Check workbook shows a shared row or an
+animal on two rows in red, and Load the groups lists them as left out.
+`_last_ok` skips `--limit` trial runs. The study picker no longer opens `<repo>/config.json`
+unasked when the last study is gone and none is active (`ensure_study`); LS_CONFIG naming it
+still does. `workbook_path` moved to `ls_sampling` so the app's check and its out-of-date test
+name the same file. Checks in `tests/test_sampling_text.py`, `tests/test_join_metadata.py`,
+`tests/test_workflow.py` and `tests/test_studies.py`.
+
+**Why:** found on review. Under the number rule LS1 and LS01 both joined row 1 and LS22 and LS22b
+both joined row 22, and 06b wrote one row's group for both animals and exited 0; "Tank 3 fish 1"
+read as 31; a rule written `"is": "303"` matched tanks 3 and 0. Blank treatments were written as
+"" with exit 0, so the animals fell out of every comparison silently. Re-running 06b with other
+groups left the results reading Done, though 06c takes its groups from 06b's table, and a changed
+workbook changed nothing on screen. A 5-section trial was taken as the last ok run, so a stage put
+out of date by a setting read Done. And the picker's fallback opened whatever `config.json` lay in
+the checkout as the study (REVIEW.md rule 6).
+
+**Cost:** a sheet whose IDs only matched because digits were glued together, or that numbered two
+animals alike, now stops 06b until it is fixed. A study whose sheet leaves some treatments blank
+must fill them, add a rule, or list them in `groups.by_animal`. Results built before 06b last ran
+(06b's table newer than them) show out of date once. IDs with two runs of digits
+(`Fish 22 (rep 2)`, `2025-03-01`, `22.5`, `T1F22`) now match nobody by number: those animals
+read as missing and 06b stops, loudly, where before they could join the wrong row. 06c still reads the environment column from
+the default workbook path, not `--xlsx`; unchanged here.
+
+## 2026-11-16 - Section order survives a re-scan; resumed QC rows are current (00 / 01 / 01k)
+
+**Changed:** `00_manifest` numbers `section_order` per (animal, marker), not per (animal, marker,
+replicate letter) (`assign_section_order`). Each slide owns a block of places, as long as the scan
+Stage 2 will use for it (the `chosen_variants.csv` override, else most scenes, then the earlier
+letter - `02_pair_passes.choose_variants`' rule, so 00 now reads that file too), and every scan of
+the slide is numbered inside it by its position on the slide. The chosen scans run 1..N with no gap
+whatever letter each one has; a scan not chosen shares its slide's numbers. On resume, 01 and 01k
+copy `section_order`, `slide` and `variant` of every kept `focus.csv` / `saturation_raw.csv` row
+from the current manifest and drop rows whose uid is no longer in it, printing how many of each
+(`01_overviews.refresh_identity`, `--force` runs included). Checks in
+`tests/test_rescan_order.py`.
+
+**Why:** found on review. A slide scanned again under another letter (`8c` beside `1b..9b`) was a
+series of its own and numbered 1..k, colliding with slide 1; 01d sorts by `section_order` then
+slide and 04b by `section_order` alone, so the two slides interleaved on the contact sheets and in
+the atlas match. And 01 resumed past rows exactly as written, so after 00 was re-run (mounting
+convention confirmed, overrides changed) `focus.csv` and `saturation_raw.csv` kept the old order
+and identity, and a section gone from the manifest kept its row for good.
+
+**Cost:** `section_order` changes for every study with a re-scanned slide (a slide with two
+replicate letters for one marker, or a slide whose only scan has a letter the rest of the animal
+does not): every section from that slide on is renumbered. Such a study must re-run 00, then 01
+(which now refreshes `focus.csv` and `saturation_raw.csv` without re-exporting) and everything
+after it that copies the column - 01d, 01g, 01l, 04a (`reformat_index`), 04b/04c, 04e (the
+registration report), 04f, 04g, 04j (its analysis rows take `section_order` from `focus.csv`), 04m,
+04n and 04p. Curator exports already saved (`atlas_levels.csv`,
+`roi_plates.csv`, `roi_landmarks.csv`) keep the old numbers in their `section_order` column; they
+join by `scene_uid`, but anything reading their order should be checked. Studies with no re-scan
+get the same numbers as before. A person who overrides `chosen_variants.csv` after 00 has run gets
+a gap or overlap at that slide until 00 is run again; a scan not chosen that has more scenes than
+the chosen one runs past its slide's block into the next slide's numbers (02 uses only the chosen scan, and 01d drops the other once 02 has
+run; 04b still matches both, as before).
+
+## 2026-11-16 - Ingest tells the truth (00 / 00b / 01c / 01d / 01f / 01g / 01h / 01k)
+
+**Changed:** `00_manifest` exits 1 and writes neither `manifest_files.csv` nor
+`manifest_scenes.csv` when it finds no CZI, or when any file cannot be read: a name outside the
+grammar, no Scenes block, a Scenes block that disagrees with `SizeS` (was only printed), an archive
+that will not open (was skipped uncounted), or a `source_files` name found nowhere. `source_files`
+may now name a CZI inside a zip; it was matched against the zip's own name, so the whole archive
+was skipped. The paired marker check, which sat after `return 0`, now runs after the tables are
+written. A QC table with no rows (`slide_layout_review.csv`, and 04a's `gaps.csv`) is written
+header-only instead of leaving last run's file. 00b exits 1 on a corrupt, missing or still
+extracting file or an unreadable archive. 01f exits 1 on a channel with no usable section (build) or
+a section with no field (verify); 01h on a channel with too few tiles or a file it could not read,
+and counts manifest files not on disk; 01c on no sections or nothing measurable, and then writes no
+summary; 01k on any section it could not measure, not only those with an earlier row, with a
+sentence rather than a row of `=` as its last line; 01g on sections with no overview pair, writing
+no census when nothing was measured; 01d on focus.csv sections with no overview PNG, counted. Each
+prints its reason last. Checks in `tests/test_manifest_checks.py`, `test_empty_guards.py` and
+`test_atomic_outputs.py`.
+After review: 00 compares the scene count with `SizeS` only when the header states one (ZEN
+leaves it out of a single-scene file); its last line names the first files that failed and the
+remedy for each cause; and a refused run draws no slide maps. 00b honours `source_files` with 00's
+matching, so a subset study is not failed on slides outside it. 01c counts a named section that is
+not there and exits 1 when any section was not measured; 01h says how many manifest files were
+absent when it collected no tile. The technical guide gives 01c, 01d, 01f, 01g and 01h their
+failure behaviour (01g's old line said it refused without raw masks; it falls back to the proxy).
+
+**Why:** found on review (REVIEW.md rules 2 and 3). Each of these printed its problem and exited
+0, so the app showed the step done; a partial 00 left the two manifest tables describing different
+runs, and a stale review list read as this run's.
+
+**Cost:** a slides folder holding one CZI the grammar does not fit now stops 00 until it is
+renamed or left out with `source_files`. 01c's FAIL verdict is still a successful run: the
+before-correction measurement is expected to find the artifact.
+
 ## 2026-11-15 - Study-agnostic stages that fail honestly (04a / 04e / 04f / 04g / 04i / 04o / 05a)
 
 **Changed:** no stage converts an overview area with a literal pixel size any more.
@@ -25,6 +339,15 @@ could not place, angle mismatch included). A `--limit` trial counts only the sec
 to do. Checks in `tests/test_section_review.py`, `test_partial_runs.py`,
 `test_proposed_exclusions.py`, `test_propagate_frames.py`, `test_rgb_per_marker.py`,
 `test_roi_geometry.py` and `test_wullimann_registration.py`.
+After review: a 05a run over several markers ends with one line naming the markers that
+failed, so a clean marker placed after a failed one no longer leaves its separator as the reason;
+04g's tissue-core gate is an area (`MIN_CORE_MM2`); 04f, 04g and 04i say how many sections took
+the config's overview scale for want of a `um_px`; 04f keeps the previous row of a section it
+could not read, marked in a new `carried` column (`unreadable`, and `excluded` for the
+already-excluded rows); `04o --verify` exits 1 on a mismatch or a section it cannot check, and no
+longer writes a 256 px render over the composite when there is no greyscale to compare; and the
+app's "its last run failed" is judged from full runs only, so a passing `--limit` trial cannot
+clear a failed full run (`tests/test_failed_run.py`).
 
 **Why:** found on review (REVIEW.md rules 2 and 6). Under `paired`, 04e looked in `sections/`
 only, so the second marker's landmark export ended "nothing refined". `UM_PX = 5.20e-3` in 04f and
@@ -55,6 +378,14 @@ previous row, unchanged, for a section in `excluded_sections.csv` that is no lon
 section that cannot be rendered in its own count, not in `lost_sections`. Checks in
 `tests/test_propagate_frames.py`, `tests/test_proposed_exclusions.py` and
 `tests/test_section_review.py`.
+After review: a kept unmarked (legacy) row stays unmarked, and the new `04i --rederive-legacy`
+(also an option on the stage) replaces such rows by today's derivation after the backup, never a
+row marked manual. Kept hand rows whose flip differs from their partner's `manual_flip` are listed
+by name and written to `<overrides stem>_flip_mismatch.csv` (header-only when none); the flip count
+is of rows written, not derivations. An exclusion carried from the partner is applied on top of a
+hand row (rotation and flip kept); a hand row excluding a section whose partner is kept is listed.
+`backup_path` moved to `ls_io` (04q keeps the name). 04f says why when an existing exclusions or
+candidates file cannot be read. 04a removes a stale `lost_sections` file when nothing was lost.
 
 **Why:** found on review (REVIEW.md rule 4). A full 04i run rewrote `perk_overrides.csv` from
 derived rows only, so a correction typed into it was lost; a section the operator flipped got a
@@ -64,8 +395,10 @@ excluded sections from `exclusion_candidates.csv`, and for a study with no overr
 final reformat put them back into the analysis. 04a called an excluded section's failed picture a
 kept section that "did not survive".
 
-**Cost:** two more columns in the overrides file. A legacy file's rows that are stale (not hand
-edits) are kept as manual on the first run until someone deletes them; the run prints the count.
+**Cost:** two more columns in the overrides file, and one more report file beside it. A legacy
+file's rows that differ from today's derivation are kept (stale or hand-made, the code cannot tell)
+until someone deletes them or runs `--rederive-legacy`; the run prints the count, and any in the
+mirror frame of their partner by name.
 A carried 04f row is not re-measured, so a changed threshold does not reach it.
 
 ## 2026-11-15 - Boxes carry the marker they were placed for; multiplex bookkeeping per marker

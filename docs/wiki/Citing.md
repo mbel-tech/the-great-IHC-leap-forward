@@ -1,5 +1,13 @@
 # Citing
 
+## The software
+
+Cite the archived release you used. Each GitHub release is deposited on Zenodo, which gives every version its own DOI and one concept DOI for all versions:
+
+> Bellio, M. (2026). *The Great IHC Leap Forward* (Version 2.3) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.XXXXXXX
+
+*(DOI placeholder until the Zenodo deposit exists.)* The repository's `CITATION.cff` holds the same metadata; GitHub's **Cite this repository** button turns it into APA or BibTeX.
+
 ## The atlases
 
 Both built-in atlases are included with their authors' permission. **If you use either one in research, cite it.**

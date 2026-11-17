@@ -1,0 +1,74 @@
+cff-version: 1.2.0
+message: >-
+  If you use this software, please cite it using the metadata below
+  (the archived Zenodo release of the version you used). If you use the
+  salmon atlas, also cite Marco A. Vindas as its author; if you use the
+  zebrafish atlas, also cite Wullimann, Rupp & Reichert (1996).
+type: software
+title: The Great IHC Leap Forward
+abstract: >-
+  A desktop app and pipeline for blinded, atlas-guided quantification of
+  immunofluorescence in whole-brain sections of fish, from Zeiss CZI
+  whole-slide scans to per-region cell densities. It builds contact sheets
+  and QC for every section, lets an operator assign atlas plates and draw
+  anatomical regions in a browser-based curator, maps those regions back to
+  the native-resolution scan, segments nuclei with StarDist and measures each
+  marker inside them. Salmon (Vindas) and zebrafish (Wullimann 1996) atlases
+  ship ready to use, and custom atlases can be imported from Fiji ROIs.
+authors:
+  - family-names: Bellio
+    given-names: Martina
+    # orcid: "https://orcid.org/0000-0000-0000-0000"
+license: MIT
+repository-code: "https://github.com/mbel-tech/the-great-IHC-leap-forward"
+url: "https://github.com/mbel-tech/the-great-IHC-leap-forward"
+# Placeholder: replace with the Zenodo concept DOI once the first deposit exists.
+doi: 10.5281/zenodo.XXXXXXX
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.XXXXXXX
+    description: Zenodo concept DOI (all versions). Placeholder until the deposit exists.
+version: "2.3"
+date-released: "2026-11-17"
+keywords:
+  - immunohistochemistry
+  - immunofluorescence
+  - whole-slide imaging
+  - CZI
+  - brain atlas
+  - atlas registration
+  - nuclei segmentation
+  - StarDist
+  - fish neuroanatomy
+  - Atlantic salmon
+  - zebrafish
+  - blinded analysis
+references:
+  - type: book
+    title: "Neuroanatomy of the Zebrafish Brain: A Topological Atlas"
+    authors:
+      - family-names: Wullimann
+        given-names: Mario F.
+      - family-names: Rupp
+        given-names: Barbara
+      - family-names: Reichert
+        given-names: Heinrich
+    year: 1996
+    publisher:
+      name: Birkhäuser Verlag
+    isbn: "3-7643-5120-9"
+    doi: 10.1007/978-3-0348-8979-7
+  - type: conference-paper
+    title: Cell detection with star-convex polygons
+    authors:
+      - family-names: Schmidt
+        given-names: Uwe
+      - family-names: Weigert
+        given-names: Martin
+      - family-names: Broaddus
+        given-names: Coleman
+      - family-names: Myers
+        given-names: Gene
+    year: 2018
+    collection-title: "MICCAI 2018"
+    doi: 10.1007/978-3-030-00934-2_30

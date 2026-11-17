@@ -2,7 +2,29 @@
 
 # The Great IHC Leap Forward
 
-Whole-brain IHC pipeline for LS (formerly `ls-ihc-pipeline`).
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.XXXXXXX.svg)](https://doi.org/10.5281/zenodo.XXXXXXX)
+[![Tests](https://github.com/mbel-tech/the-great-IHC-leap-forward/actions/workflows/tests.yml/badge.svg)](https://github.com/mbel-tech/the-great-IHC-leap-forward/actions/workflows/tests.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/mbel-tech/the-great-IHC-leap-forward)](https://github.com/mbel-tech/the-great-IHC-leap-forward/releases/latest)
+
+A desktop app and pipeline for blinded, atlas-guided quantification of immunofluorescence in
+whole-brain sections of fish, from Zeiss CZI whole-slide scans to per-region cell densities.
+
+It reads every section of a study, builds browsable contact sheets and QC, lets an operator
+assign atlas plates and draw anatomical regions (ROIs) in a browser-based curator, puts those
+regions back on the native-resolution scan, segments nuclei with StarDist and measures each
+marker in them. Two atlases ship ready to use (Atlantic salmon, Vindas; zebrafish, Wullimann
+1996) and your own can be imported from Fiji ROIs. Windows and Mac installers bring everything
+with them; the same stages run from the command line.
+
+**Current state (v2.3, November 2026).** Every stage runs from the app or the command line, is
+resumable and fails honestly: a run that skipped work says so and exits non-zero rather than
+showing as done, and partial or trial runs never replace a complete output. Hand decisions made
+in the curators are kept across re-runs. Detection is on the CPU. The R figure steps are switched
+off in the app for now (see [Quantification](#quantification)). See
+[What's new](https://github.com/mbel-tech/the-great-IHC-leap-forward/releases) and `LOGS.md`.
+
+**Citing:** see [How to cite](#how-to-cite) and [`CITATION.cff`](CITATION.cff).
 
 ## Download
 
@@ -69,17 +91,7 @@ The step-by-step guide for a newcomer is [docs/guides/user-guide.md](docs/guides
 **Start the tutorial** on the Project screen (or **Help > Tutorial…**) walks through a whole study
 on a small demo study, with practice in the ROI curator checked against an expert's outlines.
 
-## The LS dataset
-
-Automated screening of pERK and PCNA immunofluorescence across whole-brain transverse sections
-of a salmonid, from Zeiss CZI whole-slide scans.
-
-**392.7 GB · 222 CZI files · 2,572 sections · 12 animals · 2 markers**
-
-The goal is qualitative: survey every section, find *where* the signal is, and nominate regions
-worth quantifying properly. Opening 2,572 sections by hand is not viable, so the pipeline turns
-the dataset into browsable contact sheets, then adds hotspot detection, then propagates named
-anatomical regions from an atlas.
+## Blinding
 
 Analysis is **blinded by construction** — every output is keyed by animal ID, and the group key
 reaches the numbers only at 06b.
@@ -91,17 +103,49 @@ way), and `04l`'s Shotgun deck uses it to lay slides out by treatment, which is 
 group comparison figure can be built without. Both are documented at `config.groups`, and
 leaving `by_animal` empty disables both.
 
-## Atlases, and how to cite them
+## How to cite
+
+If you use this software in research, cite the archived release you used. Each GitHub release is
+deposited on Zenodo, which gives every version its own DOI plus one concept DOI that always
+resolves to the latest version:
+
+> Bellio, M. (2026). *The Great IHC Leap Forward* (Version 2.3) [Computer software]. Zenodo.
+> https://doi.org/10.5281/zenodo.XXXXXXX
+
+*(DOI placeholder: it is filled in once the Zenodo deposit exists.)* The same metadata is in
+[`CITATION.cff`](CITATION.cff), so GitHub's **Cite this repository** button (top right of the
+repository page) gives it in APA and BibTeX.
+
+```bibtex
+@software{bellio_great_ihc_leap_forward,
+  author    = {Bellio, Martina},
+  title     = {The Great IHC Leap Forward},
+  year      = {2026},
+  version   = {2.3},
+  publisher = {Zenodo},
+  doi       = {10.5281/zenodo.XXXXXXX},
+  url       = {https://github.com/mbel-tech/the-great-IHC-leap-forward}
+}
+```
+
+### The atlases
 
 The atlas plates ship in [`atlas/`](atlas/README.md), so a new study loads them with no extraction
 step: the first time a study needs a plate set it does not have, the app copies it into
-`<out_root>/atlas/`. If you use either atlas in research, cite it:
+`<out_root>/atlas/`. If you use either atlas in research, cite it as well:
 
 - **Salmon atlas** — written by **Marco A. Vindas**, otherwise unpublished. Marco A. Vindas must be
-  cited in any research that uses it.
+  cited in any research that uses it: *Vindas, M. A. Atlantic salmon brain atlas. Unpublished.*
 - **Wullimann zebrafish atlas** — Wullimann, M. F., Rupp, B., & Reichert, H. (1996). *Neuroanatomy of
   the Zebrafish Brain: A Topological Atlas*. Basel: Birkhäuser Verlag. ISBN 3-7643-5120-9.
   https://doi.org/10.1007/978-3-0348-8979-7
+
+### Methods the pipeline relies on
+
+Nuclei are found with **StarDist**; cite it if you report counts: Schmidt, U., Weigert, M.,
+Broaddus, C., & Myers, G. (2018). Cell detection with star-convex polygons. *MICCAI 2018*.
+https://doi.org/10.1007/978-3-030-00934-2_30. [`REFERENCES.md`](REFERENCES.md) lists every method
+the pipeline uses, and `docs/software_versions.md` the library versions for a methods section.
 
 ---
 
@@ -124,8 +168,8 @@ format specification its own documentation describes as confidential. pylibCZIrw
 vendor-maintained. For data that ends up in a paper, provenance outranks 0.2 s per section.
 
 czifile is retained because pylibCZIrw deliberately abstracts subblocks away, and per-tile
-illumination correction needs raw tiles. The only other route to them is the Bio-Formats path
-that silently corrupted 238 sections (see `LOGS.md`).
+illumination correction needs raw tiles. The only other route to them is the Bio-Formats path,
+which silently corrupted sections during development (see `LOGS.md`).
 
 Every script records its reader in a `reader` column, so provenance is auditable rather than
 remembered. Bio-Formats is retired from the data path; it survives only for bUnwarpJ/BigWarp
@@ -215,7 +259,7 @@ Things that differ from salmon, so they are not a surprise later:
 - Needs tesseract for the name proposals: `requirements-wullimann.txt`.
 - The plates ship in `atlas/plates_wullimann/` (with the 04x outlines, not yet reviewed) and the cut-out cross sections in
   `atlas/wullimann1996/`; `04v` cuts them out of the book's PDF again if needed. Cite the book - see
-  [Atlases, and how to cite them](#atlases-and-how-to-cite-them).
+  [How to cite](#how-to-cite).
 
 ### Using an atlas of your own
 
@@ -280,16 +324,16 @@ software step can undo is the scan's own JPEG-XR tile compression, fixed at acqu
 ### Reviewing the decisions made before the ROI curator
 
 Four stages decide a section's fate before it reaches the ROI curator, which loads only the
-survivors — so **1,066 exclusions and 2,099 artifact masks were invisible from the tool the
-operator works in.**
+survivors — so without a review step **every exclusion and artifact mask would be invisible
+from the tool the operator works in.**
 
 ```bash
-python scripts/04p_section_provenance.py     # one row per SCANNED section: 2,572
+python scripts/04p_section_provenance.py     # one row per SCANNED section
 python scripts/04l_roi_curator.py --marker AF568 --analysis-set --rgb --worklist
 ```
 
-The curator's **Review** button opens a grid of every scanned section — 1,506 in the analysis,
-1,066 excluded, all 2,572 renderable — grouped by animal and slide, with the cell vocabulary 04d already uses: a
+The curator's **Review** button opens a grid of every scanned section — in the analysis or
+excluded, all renderable — grouped by animal and slide, with the cell vocabulary 04d already uses: a
 dashed amber border is a proposal the program made, a solid red one a decision a person made.
 Clicking one shows the whole chain, from the CZI scene onward: what 04f proposed, what the
 operator decided and why, what 04g masked, whether 04a reformatted it, what 04j censored, and
@@ -310,10 +354,10 @@ file rather than a rewritten override.
 says so before it writes.
 
 `04a_reformat.py --render-excluded` renders excluded sections so they can be *looked* at. The
-app's final pERK reformat passes it, so they are rendered in the same pass. It
+app's final reformat passes it, so they are rendered in the same pass. It
 never writes an index row — the index, not the presence of a file in `reformatted/`, is what puts
-a section into the analysis. It matters for pERK, whose 473 exclusions were applied before
-reformatting and so had no image, while all 593 PCNA ones did.
+a section into the analysis. It matters for a marker whose exclusions were applied before
+reformatting, which otherwise have no image.
 
 ---
 
@@ -359,13 +403,13 @@ work/appenv/Scripts/python.exe scripts/05c_detect_rois.py     # hours; resumable
 python scripts/06a_roi_dataset.py
 python scripts/06c_excel_dataset.py
 python scripts/06d_excel_by_slide.py     # plot_by_slide.R reads THIS one
-Rscript analysis/plot_roi_figures.R                           # LS_MARKER=AF488 for PCNA
+Rscript analysis/plot_roi_figures.R                           # LS_MARKER=<channel> for another marker
 ```
 
 **`results/roi_nuclei.csv` is the artefact that matters** — one row per nucleus, with the
 marker's mean, median and 90th percentile over that nucleus's own pixels. Everything after it is
 arithmetic on a table, so changing your mind about where positivity falls costs a re-run of 06a,
-not a re-read of 130 CZI scenes.
+not a re-read of the CZI scenes.
 
 **Density is per area of usable tissue.** 06a drops nuclei flagged artifact or off-tissue, so it
 divides by the share of the ROI outline that is on the tissue and off the artifact mask, which 05c
@@ -388,10 +432,9 @@ fitted to those same nuclei — so it describes the tail of their own distributi
 independent check. The out-of-sample one is `loo_false_positive_rate` beside it: each background
 disc counted against the cut the section's *other* background discs give, by the same rule. It is
 blank on a section without two background discs of at least 5 usable nuclei each, and 06a prints
-its median per marker and on how many sections it could be formed. The in-sample rate was
-measured here at **2.1% median**, and — the number that decides whether positivity is usable at
-all — **not group-correlated** (control 2.2%, exercise 2.0%). Pooled ROI positivity is 13.3%
-against that, a 5.9x separation.
+its median per marker and on how many sections it could be formed. Before positivity is used
+at all, check that the false-positive rate is low against pooled ROI positivity and, above all,
+**not correlated with group**.
 
 **One marker per figure.** The sheets carry both, keyed by `(sample, marker, ROI)`, but a
 figure draws one — `LS_MARKER` selects it and defaults to `AF568`. Two markers in one panel
@@ -470,8 +513,8 @@ before.
 an allowlist to `source_files` in config, which `00_manifest.discover_sources()`
 honours — so "process these, not the whole folder" costs no copying. Files
 genuinely scattered across folders are hardlinked where the filesystem allows it;
-the slide drive here is exFAT, which supports neither hardlinks nor symlinks, so
-that case offers a copy and states the size first. The screen flags any filename
+where it does not (exFAT supports neither hardlinks nor symlinks), that case offers
+a copy and states the size first. The screen flags any filename
 that does not match the manifest's grammar, because such a file is invisible to
 every stage and is otherwise dropped in silence.
 
@@ -562,9 +605,8 @@ file-relative guess pointed at nothing.
 ### What the app does not run
 
 The Fiji export — step 4 of `run_all.sh`. It is a one-time instrument
-characterisation, already complete for this dataset
-(`qc/flatfield/tilefield_c*.npy`), and `01_overviews` applies the field it finds
-and works without one. It stays in `run_all.sh`, and the app lists it greyed out
+characterisation (it writes `qc/flatfield/tilefield_c*.npy`), and `01_overviews`
+applies the field it finds and works without one. It stays in `run_all.sh`, and the app lists it greyed out
 with the reason (Tools > Instrument characterisation) rather than hiding it; the Python halves of that chain (01e, 01f,
 01c, 01h) run from the app like any other stage.
 
@@ -666,38 +708,45 @@ gradient cancels.
 enumeration and by parsing the CZI directory directly. The power-spectrum estimate was 1–3% off,
 which accumulates to a fifth of a tile across a section.
 
-**Long-running stages checkpoint per item, atomically.** This runs against an external drive that
-has dropped writes; a crash must cost one file, not five hours.
+**Long-running stages checkpoint per item, atomically.** Studies often live on external drives that
+can drop writes; a crash must cost one file, not five hours.
 
 ---
 
 ## Limitations
 
-**No no-primary controls exist for this dataset.** Non-specific secondary binding cannot be
-separated from genuine low-level specific signal, so **absolute positivity rates are not
-defensible** — "X% of cells in region R are marker-positive" is not a claim these data support.
-Relative comparisons between groups at matched anatomical levels are, because the non-specific
-component is shared. Three internal references stand in: optical zero from off-tissue glass, a
+**Without no-primary controls, absolute positivity rates are not defensible.** Non-specific
+secondary binding cannot be separated from genuine low-level specific signal, so "X% of cells in
+region R are marker-positive" is not a claim the pipeline can support on its own. Relative
+comparisons between groups at matched anatomical levels are, because the non-specific component
+is shared. Three internal references stand in: optical zero from off-tissue glass, a
 tissue-negative floor from nuclei-poor fibre tracts within the same section, and object-level
 annulus background.
 
-**Tiles are JPEG-XR compressed** — typically lossy, and fixed at acquisition.
+**JPEG-XR tile compression**, where the scan used it, is typically lossy and fixed at acquisition.
 
-**No shading correction was applied at acquisition**, and tiles were never blended, so the
-illumination profile repeats at the tile pitch across every section. Uncorrected, a fixed
+**Scans without shading correction at acquisition**, and with unblended tiles, repeat the
+illumination profile at the tile pitch across every section; the instrument characterisation
+stages measure and correct it. Uncorrected, a fixed
 threshold detects materially more objects near tile centres.
 
-**The atlas covers the forebrain and the tuberal hypothalamus.** 33 of 64 plates carry no region
+**The salmon atlas covers the forebrain and the tuberal hypothalamus.** 33 of 64 plates carry no region
 identification, so the caudal two-thirds of the brain needs labelling before regional
 quantification extends there.
 
 ---
 
+## Licence
+
+The code is released under the [MIT License](LICENSE), copyright (c) 2026 Martina Bellio. **The atlas
+plates in `atlas/` are not covered by it**: they are included with their authors' permission and stay
+under their authors' terms (see [How to cite](#how-to-cite) and [`atlas/README.md`](atlas/README.md)).
+
 ## Repository contents
 
 Code, plus the atlas plates in `atlas/` (salmon and Wullimann; cite both, see
-[Atlases, and how to cite them](#atlases-and-how-to-cite-them)). Nothing derived from the imaging
-data is committed.
+[How to cite](#how-to-cite)) and the citation metadata in `CITATION.cff`. No imaging data, and
+nothing derived from it, is committed.
 
 Four documents, answering four different questions:
 

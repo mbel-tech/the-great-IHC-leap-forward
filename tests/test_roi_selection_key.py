@@ -29,7 +29,11 @@ def chk(label, got, want):
         failures.append(label)
 
 
-page = open(os.path.join(REPO, "scripts", "04l_roi_curator.py"), encoding="utf-8").read()
+# The page template and the generator that fills it: the checks below ask about
+# both (a placeholder in the page, the line in 04l that fills it), so they read
+# the two files as one text.
+page = "".join(open(os.path.join(REPO, "scripts", f), encoding="utf-8").read()
+               for f in ("roi_curator_page.html", "04l_roi_curator.py"))
 state = open(os.path.join(REPO, "app", "state.py"), encoding="utf-8").read()
 
 keys = None

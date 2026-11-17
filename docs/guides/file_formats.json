@@ -3163,6 +3163,10 @@
     "section_review.csv"
    ],
    "writer": "04l_roi_curator.py (the Review mode's export)",
+   "column_sources": [
+    "04l_roi_curator.py",
+    "roi_curator_page.html"
+   ],
    "what": "Review decisions made in the ROI curator; 04a merges them over the exclusion list. The page exports it stamped (`section_review_<DD.MM.YYYY_HH.MM>.csv`, into the export folder); 04a takes the newest such file, or this one when it is newer.",
    "columns": [
     {
@@ -3912,7 +3916,8 @@
     "04e_register_elastix.py"
    ],
    "column_sources": [
-    "04l_roi_curator.py"
+    "04l_roi_curator.py",
+    "roi_curator_page.html"
    ],
    "columns": [
     {
@@ -4056,7 +4061,8 @@
     "04e_register_elastix.py"
    ],
    "column_sources": [
-    "04l_roi_curator.py"
+    "04l_roi_curator.py",
+    "roi_curator_page.html"
    ],
    "columns": [
     {
@@ -4164,7 +4170,8 @@
     "04e_register_elastix.py"
    ],
    "column_sources": [
-    "04l_roi_curator.py"
+    "04l_roi_curator.py",
+    "roi_curator_page.html"
    ],
    "columns": [
     {

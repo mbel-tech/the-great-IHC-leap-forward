@@ -18,15 +18,18 @@ abstract: >-
 authors:
   - family-names: Bellio
     given-names: Martina
-    # orcid: "https://orcid.org/0000-0000-0000-0000"
+    orcid: "https://orcid.org/0009-0005-5734-0262"
 license: MIT
 repository-code: "https://github.com/mbel-tech/the-great-IHC-leap-forward"
 url: "https://github.com/mbel-tech/the-great-IHC-leap-forward"
-doi: 10.5281/zenodo.24305482
+doi: 10.5281/zenodo.24305481
 identifiers:
   - type: doi
-    value: 10.5281/zenodo.24305482
+    value: 10.5281/zenodo.24305481
     description: Zenodo concept DOI (all versions).
+  - type: doi
+    value: 10.5281/zenodo.24305482
+    description: Zenodo DOI of version 2.3.
 version: "2.3"
 date-released: "2026-11-17"
 keywords:

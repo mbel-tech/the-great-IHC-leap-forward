@@ -4,6 +4,7 @@
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.XXXXXXX.svg)](https://doi.org/10.5281/zenodo.XXXXXXX)
 [![Tests](https://github.com/mbel-tech/the-great-IHC-leap-forward/actions/workflows/tests.yml/badge.svg)](https://github.com/mbel-tech/the-great-IHC-leap-forward/actions/workflows/tests.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/mbel-tech/the-great-IHC-leap-forward)](https://github.com/mbel-tech/the-great-IHC-leap-forward/releases/latest)
 
 A desktop app and pipeline for blinded, atlas-guided quantification of immunofluorescence in
@@ -734,6 +735,12 @@ identification, so the caudal two-thirds of the brain needs labelling before reg
 quantification extends there.
 
 ---
+
+## Licence
+
+The code is released under the [MIT License](LICENSE), copyright (c) 2026 Martina Bellio. **The atlas
+plates in `atlas/` are not covered by it**: they are included with their authors' permission and stay
+under their authors' terms (see [How to cite](#how-to-cite) and [`atlas/README.md`](atlas/README.md)).
 
 ## Repository contents
 

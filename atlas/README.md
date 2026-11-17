@@ -16,8 +16,9 @@ A study that already has its own copy of a set keeps it; nothing here overwrites
 
 ## Citing the atlases
 
-Both atlases are included with their authors' permission. If you use either one in
-research, cite it.
+Both atlases are included with their authors' permission. They are **not** covered by the
+repository's MIT License (see `LICENSE`); they stay under their authors' terms. If you use
+either one in research, cite it.
 
 ### Salmon atlas
 

@@ -19,6 +19,7 @@ authors:
   - family-names: Bellio
     given-names: Martina
     # orcid: "https://orcid.org/0000-0000-0000-0000"
+license: MIT
 repository-code: "https://github.com/mbel-tech/the-great-IHC-leap-forward"
 url: "https://github.com/mbel-tech/the-great-IHC-leap-forward"
 # Placeholder: replace with the Zenodo concept DOI once the first deposit exists.

@@ -2,7 +2,7 @@
 
 # The Great IHC Leap Forward
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.XXXXXXX.svg)](https://doi.org/10.5281/zenodo.XXXXXXX)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24305482.svg)](https://doi.org/10.5281/zenodo.24305482)
 [![Tests](https://github.com/mbel-tech/the-great-IHC-leap-forward/actions/workflows/tests.yml/badge.svg)](https://github.com/mbel-tech/the-great-IHC-leap-forward/actions/workflows/tests.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/mbel-tech/the-great-IHC-leap-forward)](https://github.com/mbel-tech/the-great-IHC-leap-forward/releases/latest)
@@ -110,9 +110,10 @@ deposited on Zenodo, which gives every version its own DOI plus one concept DOI 
 resolves to the latest version:
 
 > Bellio, M. (2026). *The Great IHC Leap Forward* (Version 2.3) [Computer software]. Zenodo.
-> https://doi.org/10.5281/zenodo.XXXXXXX
+> https://doi.org/10.5281/zenodo.24305482
 
-*(DOI placeholder: it is filled in once the Zenodo deposit exists.)* The same metadata is in
+This concept DOI always resolves to the latest version; the Zenodo record lists the DOI of each
+version, for citing the exact one you used. The same metadata is in
 [`CITATION.cff`](CITATION.cff), so GitHub's **Cite this repository** button (top right of the
 repository page) gives it in APA and BibTeX.
 
@@ -123,7 +124,7 @@ repository page) gives it in APA and BibTeX.
   year      = {2026},
   version   = {2.3},
   publisher = {Zenodo},
-  doi       = {10.5281/zenodo.XXXXXXX},
+  doi       = {10.5281/zenodo.24305482},
   url       = {https://github.com/mbel-tech/the-great-IHC-leap-forward}
 }
 ```

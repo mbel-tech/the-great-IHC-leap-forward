@@ -22,12 +22,11 @@ authors:
 license: MIT
 repository-code: "https://github.com/mbel-tech/the-great-IHC-leap-forward"
 url: "https://github.com/mbel-tech/the-great-IHC-leap-forward"
-# Placeholder: replace with the Zenodo concept DOI once the first deposit exists.
-doi: 10.5281/zenodo.XXXXXXX
+doi: 10.5281/zenodo.24305482
 identifiers:
   - type: doi
-    value: 10.5281/zenodo.XXXXXXX
-    description: Zenodo concept DOI (all versions). Placeholder until the deposit exists.
+    value: 10.5281/zenodo.24305482
+    description: Zenodo concept DOI (all versions).
 version: "2.3"
 date-released: "2026-11-17"
 keywords:

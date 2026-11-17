@@ -70,7 +70,8 @@ for s in TS.STEPS:
         chk(f"{s.sid}: {s.target} exists", w.findChild(QWidget, s.target) is not None)
 
 print("--- the curator page has every curator target ---")
-src = open(os.path.join(REPO, "scripts", "04l_roi_curator.py"), encoding="utf-8").read()
+# The page template, which 04l reads from its own file rather than a string literal.
+src = open(os.path.join(REPO, "scripts", "roi_curator_page.html"), encoding="utf-8").read()
 for s in TS.STEPS:
     if s.target.startswith("curator:"):
         m = re.fullmatch(r"curator:#([A-Za-z0-9_-]+)", s.target)

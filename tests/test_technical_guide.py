@@ -58,7 +58,10 @@ def test_every_script_has_entry():
 def test_every_written_csv_registered():
     reg, ignore = _registered(), set(T.load_registry().get("not_files", {}))
     missing = set()
-    for name in T.script_names():
+    # The page templates too: a CSV a curator page exports is named in its
+    # template (roi_curator_page.html), not in the script that fills it.
+    pages = sorted(f for f in os.listdir(T.SCRIPTS) if f.endswith(".html"))
+    for name in T.script_names() + pages:
         with open(os.path.join(T.SCRIPTS, name), encoding="utf-8") as fh:
             for m in CSV_NAME.finditer(fh.read()):
                 base = os.path.basename(m.group(1))

@@ -4,9 +4,9 @@
 
 Cite the archived release you used. Each GitHub release is deposited on Zenodo, which gives every version its own DOI and one concept DOI for all versions:
 
-> Bellio, M. (2026). *The Great IHC Leap Forward* (Version 2.3) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.24305482
+> Bellio, M. (2026). *The Great IHC Leap Forward* (Version 2.3) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.24305481
 
-This concept DOI always resolves to the latest version; the Zenodo record lists each version's own DOI. The repository's `CITATION.cff` holds the same metadata; GitHub's **Cite this repository** button turns it into APA or BibTeX.
+This concept DOI always resolves to the latest version; each version also has its own DOI on the Zenodo record (v2.3: https://doi.org/10.5281/zenodo.24305482). The repository's `CITATION.cff` holds the same metadata; GitHub's **Cite this repository** button turns it into APA or BibTeX.
 
 ## The atlases
 

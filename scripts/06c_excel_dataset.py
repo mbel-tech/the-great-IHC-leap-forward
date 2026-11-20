@@ -228,6 +228,21 @@ def main(argv=None):
     if not os.path.exists(NUCLEI_CSV):
         print(f"no {NUCLEI_CSV} yet - 05c_detect_rois.py has not written anything")
         return 1
+    rc_path = os.path.join(os.path.dirname(MEAS_CSV), RR.REPORT_CSV)
+    rc_rows = G5.load_csv(rc_path) if os.path.exists(rc_path) else []
+    if not os.path.exists(MEAS_CSV) and rc_rows:
+        # CONTROLS FIRST. 05c measures reagent controls before any stained
+        # section, so early in a run 06a has only them: no experimental row,
+        # hence no roi_measurements.csv, and a report. That is a partial run
+        # reporting what it has, not a missing input - and failing here would
+        # end 06e's loop on the first cycle.
+        write_workbook(args.out, [("Reagent controls",
+                                   [{k: _cell(v) for k, v in r.items()} for r in rc_rows],
+                                   RR.sheet_header(rc_rows))])
+        print(f"no stained section measured yet - only the reagent controls "
+              f"({len(rc_rows)} rows) -> {args.out}")
+        print(f"  {RR.limitation_text(rc_rows)}")
+        return 0
     if not os.path.exists(MEAS_CSV):
         print(f"no {MEAS_CSV} - run 06a_roi_dataset.py first.\n"
               f"  This stage no longer re-derives the per-ROI numbers; 06a owns "
@@ -242,8 +257,6 @@ def main(argv=None):
     # for one marker is still planned for the others.
     rc_lookup = RR.study_lookup(CONFIG)
     boxes = RR.drop_controls(G5.all_boxes(), rc_lookup)   # both markers
-    rc_path = os.path.join(os.path.dirname(MEAS_CSV), RR.REPORT_CSV)
-    rc_rows = G5.load_csv(rc_path) if os.path.exists(rc_path) else []
     groups = resolve_groups((CONFIG.get("groups") or {}).get("by_animal") or {})
     envs = animal_environment()
 

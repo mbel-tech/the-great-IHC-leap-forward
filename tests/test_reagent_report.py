@@ -187,9 +187,11 @@ ctl = ([nuc("C", "background", 100, marker="PCNA", own=True)] * 10
 stained = [nuc("S1", "roi", v, marker="PCNA", own=True) for v in (100, 300)]
 cuts = {("C", "PCNA"): 100.0, ("S1", "PCNA"): 150.0}
 r = one(RR.report_rows(ctl, stained, cuts, {("C", "PCNA"): ("same_file", ["S1"])},
-                       areas={("C", "PCNA", "Dm"): 0.5}), "C", marker="PCNA")
+                       areas={("C", "PCNA", "Dm"): 0.5},
+                       factors={("PCNA", "Dm"): 0.5}), "C", marker="PCNA")
 chk("own: pct_positive withheld", r["pct_positive"], "")
-chk("own: positive_per_mm2 = 2 / 0.5 mm2", r["positive_per_mm2"], 4.0)
+chk("own: positive_per_mm2 = 2 x 0.5 (Abercrombie) / 0.5 mm2, as 06a",
+    r["positive_per_mm2"], 2.0)
 chk("own: the fractions beside it are withheld too",
     [r[c] for c in ("stained_pct_median", "specificity_margin", "pct_above_paired_cut")],
     ["", "", ""])
@@ -348,8 +350,11 @@ chk("file and kind come from the manifest and config", (p9["file"], p9["kind"]),
     ("LS45_9.czi", "no_primary"))
 chk("each paired cut: 144.5 -> 25%, 100 -> 50%",
     (p9["pct_above_paired_cut_min"], p9["pct_above_paired_cut_max"]), ("25.0", "50.0"))
-chk("positive_per_mm2 over the ROI disc's area (pi mm2)", p9["positive_per_mm2"],
-    str(round(2 / 3.141593, 1)))
+AB = (G6A.T_UM / (G6A.T_UM + 10.0)) if G6A.AB_ON else 1.0
+chk("positive_per_mm2: 2 x the stained pERK/Dm Abercrombie factor / pi mm2",
+    p9["positive_per_mm2"], str(round(2 * AB / 3.141592653589793, 1)))
+ms = [r for r in meas if (r["marker"], r["region"]) == ("pERK", "Dm")][0]
+chk("...the same factor 06a's own rows carry", ms["abercrombie_factor"], str(round(AB, 4)))
 rc1 = [r for r in rep if r["scene_uid"] == "RC1_s01_sc01" and r["marker"] == "pERK"][0]
 chk("a made-up subject with no stained scenes: study_wide", rc1["pairing"], "study_wide")
 chk("...B empty, note says batch", (rc1["level_ratio"], "batch" in rc1["note"]), ("", True))
@@ -474,6 +479,49 @@ cov = list(openpyxl.load_workbook(xlsx_d)["coverage"].iter_rows(values_only=True
 chk("06d coverage: no control slide or control marker",
     sorted((r[0], r[1]) for r in cov[1:]),
     [("LS45_s01", "PCNA"), ("LS45_s01", "pERK"), ("LS45_s02", "pERK"), ("LS45_s09", "PCNA")])
+
+# Controls first: 05c measures them before any stained section, so early in a
+# run 06a has only them. 06a, 06c and 06d must all carry on.
+print("--- controls_only (05c's first sections) ---")
+only = os.path.join(tmp, "only")
+os.makedirs(only)
+with open(npath, newline="", encoding="utf-8") as fh:
+    allnuc = list(csv.DictReader(fh))
+onpath = os.path.join(only, "roi_nuclei.csv")
+with open(onpath, "w", newline="", encoding="utf-8") as fh:
+    w = csv.DictWriter(fh, fieldnames=NUC_COLS)
+    w.writeheader()
+    w.writerows(r for r in allnuc if r["scene_uid"] == "RC1_s01_sc01")
+omeas = os.path.join(only, "roi_measurements.csv")
+G6A.NUCLEI_CSV, G6A.MEAS_CSV, G6A.SPEC_CSV = onpath, omeas, os.path.join(only, "spec.csv")
+G5.all_boxes = lambda: G5.load_csv(bpath)
+try:
+    with contextlib.redirect_stdout(io.StringIO()):
+        code = G6A.main()
+finally:
+    G6A.NUCLEI_CSV, G6A.MEAS_CSV, G6A.SPEC_CSV, G5.all_boxes = keep
+chk("06a on controls only runs", code, 0)
+chk("...writes no roi_measurements.csv, and the report",
+    (os.path.exists(omeas), os.path.exists(os.path.join(only, "reagent_controls.csv"))),
+    (False, True))
+G6C.NUCLEI_CSV, G6C.MEAS_CSV = onpath, omeas
+G6C.G5.all_boxes = lambda: G6C.G5.load_csv(bpath)
+oxl = os.path.join(only, "roi_dataset.xlsx")
+try:
+    with contextlib.redirect_stdout(io.StringIO()):
+        code = G6C.main(["--out", oxl])
+finally:
+    G6C.NUCLEI_CSV, G6C.MEAS_CSV, G6C.G5.all_boxes = saved
+chk("06c on controls only exits 0 (06e's loop would end on 1)", code, 0)
+chk("...with the Reagent controls sheet alone", openpyxl.load_workbook(oxl).sheetnames,
+    ["Reagent controls"])
+G6D.G6C.MEAS_CSV = omeas
+try:
+    with contextlib.redirect_stdout(io.StringIO()):
+        code = G6D.main(["--out", os.path.join(only, "by_slide.xlsx")])
+finally:
+    G6D.G6C.MEAS_CSV = saved_d[0]
+chk("06d on controls only exits 0", code, 0)
 
 # No control: no sheet.
 os.remove(os.path.join(tmp, "reagent_controls.csv"))

@@ -508,7 +508,8 @@ def leave_one_disc_out(discs):
     return fp, n
 
 
-def reagent_report(lookup, rc_nuc, rc_bg, areas, by_idx, cuts, measured):
+def reagent_report(lookup, rc_nuc, rc_bg, areas, by_idx, cuts, measured,
+                   factors=None):
     """results/reagent_controls.csv's rows (ls_reagent_report.report_rows).
 
     Each measured control's own cut is taken from its own background discs by
@@ -546,7 +547,8 @@ def reagent_report(lookup, rc_nuc, rc_bg, areas, by_idx, cuts, measured):
 
     return RR.report_rows(rc_nuc, stained(), {**cuts, **own_cuts}, pairing,
                           meta=meta, areas={k: v for k, v in areas.items()
-                                            if (k[0], k[1]) in pairing})
+                                            if (k[0], k[1]) in pairing},
+                          factors=factors or {})
 
 
 def main(argv=None):
@@ -1001,8 +1003,18 @@ def main(argv=None):
                              for u, m in exact], CUTS_COLUMNS)
     elif os.path.exists(cuts_csv):
         os.remove(cuts_csv)
+    # The Abercrombie factor 06a's own rows would carry for each control
+    # region, from STAINED nuclei only (hs, h_by_marker, shape_by), so the
+    # report's positive density reads like positive_density_per_mm2.
+    rc_factors = {}
+    for _u, mk, rg in rc_areas:
+        h = hs.get((mk, rg), h_by_marker.get(mk))
+        if not h or mk not in shape_by:
+            continue
+        rc_factors[(mk, rg)] = abercrombie_factor(
+            h, apply=not abercrombie_reason(*shape_by[mk], enabled=AB_ON))
     rc_rows = reagent_report(rc_lookup, rc_nuc, rc_bg, rc_areas, by_idx, cuts,
-                             measured)
+                             measured, rc_factors)
     rc_csv = os.path.join(os.path.dirname(MEAS_CSV), RR.REPORT_CSV)
     if rc_rows:
         IO.atomic_write_csv(rc_csv, rc_rows, RR.COLUMNS)

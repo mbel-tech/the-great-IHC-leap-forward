@@ -148,6 +148,13 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     if not os.path.exists(G6C.MEAS_CSV):
+        rc = os.path.join(os.path.dirname(G6C.MEAS_CSV), RR.REPORT_CSV)
+        if os.path.exists(rc):
+            # 05c measures reagent controls first: early in a run 06a has only
+            # them, and this workbook has nothing to hold yet. Not a failure.
+            print(f"no stained section measured yet (only reagent controls, in "
+                  f"{rc}) - nothing per slide to write")
+            return 0
         print(f"no {G6C.MEAS_CSV} - run 06a_roi_dataset.py first")
         return 1
 

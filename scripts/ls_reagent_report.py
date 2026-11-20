@@ -171,7 +171,8 @@ def _spread(xs):
     return round(st.median(xs), 1), round(min(xs), 1), round(max(xs), 1)
 
 
-def report_rows(control_nuclei, stained_nuclei, cuts, pairing, meta=None, areas=None):
+def report_rows(control_nuclei, stained_nuclei, cuts, pairing, meta=None, areas=None,
+                factors=None):
     """One row per reagent control x marker x region, with COLUMNS.
 
     `control_nuclei`, `stained_nuclei`: iterables of dicts with scene_uid,
@@ -181,9 +182,13 @@ def report_rows(control_nuclei, stained_nuclei, cuts, pairing, meta=None, areas=
     `pairing`: (scene_uid, marker) -> (kind, stained uids) for every control.
     `meta`: (scene_uid, marker) -> {"file", "kind"}. `areas`: (scene_uid,
     marker, region) -> usable ROI area in mm2; it gives positive_per_mm2 and a
-    row to a region whose discs held no nucleus.
+    row to a region whose discs held no nucleus. `factors`: (marker, region) ->
+    the Abercrombie factor 06a applies to that marker and region's positive
+    density (1.0 where it withholds the correction), so positive_per_mm2 reads
+    like 06a's positive_density_per_mm2. A missing key is 1.0, with a note.
     """
     meta, areas = meta or {}, areas or {}
+    factors = factors if factors is not None else {}
     ctl, own_by = {}, {}
     for n in control_nuclei:
         key = (n["scene_uid"], n["marker"])
@@ -226,6 +231,13 @@ def report_rows(control_nuclei, stained_nuclei, cuts, pairing, meta=None, areas=
                              "counterstain there is no denominator, so every fraction "
                              "is withheld and positive_per_mm2 is reported")
             area = areas.get((uid, mk, rg))
+            ab = factors.get((mk, rg))
+            if ab is None:
+                ab = 1.0
+                if cut is not None and area:
+                    notes.append("positive_per_mm2 is not Abercrombie-corrected: no "
+                                 "stained nuclei of this marker and region to measure "
+                                 "h from yet")
             pct = _pct(npos, n) if (cut is not None and n and not own) else ""
 
             # A beside: each paired section's own pct in this region.
@@ -251,7 +263,7 @@ def report_rows(control_nuclei, stained_nuclei, cuts, pairing, meta=None, areas=
                 "kind": info.get("kind", ""), "marker": mk, "region": rg,
                 "pairing": kind, "n_nuclei": n, "n_positive": npos,
                 "pct_positive": pct,
-                "positive_per_mm2": (round(npos / area, 1)
+                "positive_per_mm2": (round(npos * ab / area, 1)
                                      if (cut is not None and area) else ""),
                 "stained_pct_median": s_med, "stained_pct_min": s_min,
                 "stained_pct_max": s_max,
@@ -306,8 +318,9 @@ def sheet_header(rows):
         "specific signal. stained_pct_* are the paired stained sections' pct_positive in "
         "the same region (median, min, max); specificity_margin = stained_pct_median - "
         "pct_positive. For a marker segmented on its own channel the fractions are "
-        "withheld and positive_per_mm2 (profiles over the usable ROI area, not "
-        "Abercrombie-corrected) is reported.",
+        "withheld and positive_per_mm2 (over the usable ROI area, with the Abercrombie "
+        "factor 06a gives that marker and region, as positive_density_per_mm2) is "
+        "reported.",
         "B: control_nuclear_median / stained_nuclear_median = level_ratio. "
         "pct_above_paired_cut scores the control's nuclei against EACH paired stained "
         "section's own cut and gives the median and min-max across those sections, "

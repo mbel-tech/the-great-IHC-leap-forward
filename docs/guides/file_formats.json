@@ -5871,7 +5871,7 @@
      "name": "positive_per_mm2",
      "type": "number",
      "units": "per mm2",
-     "meaning": "A: n_positive over the usable ROI area (outline x usable fraction), profiles, not Abercrombie-corrected. The number to read for a marker segmented on its own channel."
+     "meaning": "A: n_positive x the Abercrombie factor 06a gives that marker and region (from stained nuclei; 1.0 where 06a withholds it) over the usable ROI area (outline x usable fraction), as positive_density_per_mm2. Uncorrected, with a note, before any stained h exists. The number to read for a marker segmented on its own channel."
     },
     {
      "name": "stained_pct_median",

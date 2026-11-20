@@ -1800,7 +1800,9 @@ Stage `excel_sample`. The analysis table as a workbook, one row per ROI per anim
   with the reason carried from 06a. Reagent-control boxes are left out of `planned` and `coverage`. The
   limitation text (`ls_reagent_report.limitation_text`, printed and on the sheet) points to the
   `Reagent controls` sheet only when a `no_primary` row exists; otherwise it is the existing statement.
-- **Failure and re-run:** refuses when `roi_nuclei.csv` or `roi_measurements.csv` is missing. It does not
+- **Failure and re-run:** refuses when `roi_nuclei.csv` or `roi_measurements.csv` is missing, except
+  early in a run when only reagent controls are measured (05c measures them first): then it writes a
+  workbook with the `Reagent controls` sheet alone and exits 0, and 06d writes nothing and exits 0. It does not
   compare their dates, so run 06a first (06e always does). Buildable at any point during detection.
 
 ### `06d_excel_by_slide.py`
@@ -2095,8 +2097,9 @@ control under its own cut (`ls_overlay.section_cut`, `is_positive`; blank, never
 beside each paired section's own pct (median, min, max) and `specificity_margin`. B: control / stained nuclear
 median (censored nuclei out of both), and the control scored against EACH paired section's own cut, median and
 min-max (never a pooled cut); empty under `study_wide`, with `batch` in `note`. For a marker segmented on its
-own channel every fraction is withheld and `positive_per_mm2` (profiles over the usable ROI area, not
-Abercrombie-corrected) is given. A region with discs and no nucleus still gets a row. `limitation_text(rows)`
+own channel every fraction is withheld and `positive_per_mm2` (over the usable ROI area, times the
+Abercrombie factor 06a's stained rows of that marker and region carry, so it reads like
+`positive_density_per_mm2`; uncorrected, with a note, when no stained h exists yet) is given. A region with discs and no nucleus still gets a row. `limitation_text(rows)`
 is 06c's existing statement unless a `no_primary` row exists; `sheet_header(rows)` is the sheet's header,
 which says a background disc is not a reagent control. It reads no group key.
 
@@ -4278,7 +4281,7 @@ The reagent controls, measured: one row per reagent-control section x marker x r
 | `n_nuclei` | integer | count | Kept nuclei in the control's ROI discs in this region (artifact and off-tissue dropped, as in 06a). |
 | `n_positive` | integer | count | A: nuclei the positivity rule calls positive under the control's OWN per-section cut (censored counts as positive). Blank when the control has fewer than 5 usable background-disc nuclei. |
 | `pct_positive` | number | % | A: 100 x n_positive / n_nuclei. Blank with no own cut, and for a marker segmented on its own channel (no denominator). |
-| `positive_per_mm2` | number | per mm2 | A: n_positive over the usable ROI area (outline x usable fraction), profiles, not Abercrombie-corrected. The number to read for a marker segmented on its own channel. |
+| `positive_per_mm2` | number | per mm2 | A: n_positive x the Abercrombie factor 06a gives that marker and region (from stained nuclei; 1.0 where 06a withholds it) over the usable ROI area (outline x usable fraction), as positive_density_per_mm2. Uncorrected, with a note, before any stained h exists. The number to read for a marker segmented on its own channel. |
 | `stained_pct_median` | number | % | A, beside: the median over the paired stained sections of each one's pct_positive in this region, under its own cut. Blank for an own-channel marker. |
 | `stained_pct_min` | number | % | A, beside: the lowest paired stained section's pct_positive. |
 | `stained_pct_max` | number | % | A, beside: the highest paired stained section's pct_positive. |

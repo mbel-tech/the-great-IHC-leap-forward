@@ -511,8 +511,16 @@ def leave_one_disc_out(discs):
     return fp, n
 
 
+#: Why a confirmed reagent control has no measurement for a marker yet.
+WHY_NO_BOXES = ("05a has placed no ROIs on it for this marker - curate it in the ROI "
+                "curator (04l) and run 05a; a section excluded in stage 04, or held out "
+                "of the analysis set by 04j, gets none")
+WHY_NOT_DETECTED = ("it has ROIs but 05c has not measured it - run 05c, which measures "
+                    "reagent controls first")
+
+
 def reagent_report(lookup, rc_nuc, rc_bg, areas, by_idx, cuts, measured,
-                   factors=None, stained_areas=None):
+                   factors=None, stained_areas=None, boxed=None):
     """results/reagent_controls.csv's rows (ls_reagent_report.report_rows).
 
     Each measured control's own cut is taken from its own background discs by
@@ -520,19 +528,34 @@ def reagent_report(lookup, rc_nuc, rc_bg, areas, by_idx, cuts, measured,
     sections' cuts are the ones this stage counted by. The stained nuclei are
     streamed off by_idx, only for the sections a control is paired with.
 
+    A confirmed control with nothing measured for a marker - no 05a boxes, or
+    not detected yet - still gets a row, every measure blank, its note saying
+    why (ls_reagent_report.not_measured_rows): it never just disappears.
+
+    `boxed`: {(scene_uid, marker)} 05a placed boxes on; the default pairing
+    tiers consider only those (ls_reagent_report.pairing_for).
+
     Returns (rows, {(uid, marker): own cut}) - the cuts for
     reagent_control_cuts.csv, never positivity_cuts.csv.
     """
     todo = sorted(k for k in lookup if k in measured)
-    if not todo:
+    missing = sorted((k for k in lookup if k not in measured),
+                     key=lambda k: RR.row_order({"scene_uid": k[0], "marker": k[1], "region": ""}))
+    if not todo and not missing:
         return [], {}
     scene_rows = RR.study_rows(CONFIG)
-    pairing = {k: RR.pairing_for(k[0], k[1], lookup, scene_rows, CONFIG)
+    pairing = {k: RR.pairing_for(k[0], k[1], lookup, scene_rows, CONFIG, boxed)
                for k in todo}
     files = {}
     for r in scene_rows:
         files.setdefault(r["scene_uid"], os.path.basename(
             str(r.get("file", "")).replace("\\", "/")))
+    late = RR.not_measured_rows(
+        missing, lookup, files,
+        {k: (WHY_NOT_DETECTED if boxed and k in boxed else WHY_NO_BOXES)
+         for k in missing})
+    if not todo:
+        return late, {}
     meta = {k: {"file": files.get(k[0], ""), "kind": lookup[k].get("kind", "")}
             for k in todo}
     own_cuts = {}
@@ -557,6 +580,7 @@ def reagent_report(lookup, rc_nuc, rc_bg, areas, by_idx, cuts, measured,
                           factors=factors or {},
                           stained_areas={k: v for k, v in (stained_areas or {}).items()
                                          if (k[0], k[1]) in needed})
+    rows = sorted(rows + late, key=RR.row_order)
     return rows, {k: c for k, c in own_cuts.items() if k in pairing}
 
 
@@ -1028,8 +1052,11 @@ def main(argv=None):
         rc_factors[(mk, rg)] = abercrombie_factor(
             h, apply=not abercrombie_reason(
                 *shape_by.get(mk, ("the nuclear channel", True)), enabled=AB_ON))
+    # Which (section, marker) 05a placed boxes on: the pairing considers only
+    # those, and a control without any is reported as not measured, saying so.
+    boxed = {(u, mk) for u, bs in box_by.items() for mk in split_by_marker(bs)}
     rc_rows, rc_cuts = reagent_report(rc_lookup, rc_nuc, rc_bg, rc_areas, by_idx,
-                                      cuts, measured, rc_factors, st_areas)
+                                      cuts, measured, rc_factors, st_areas, boxed)
     rc_csv = os.path.join(os.path.dirname(MEAS_CSV), RR.REPORT_CSV)
     # A control's own cut, at full precision, for 06i to draw it by - in a file
     # of its own, never positivity_cuts.csv (which lists stained sections only).
@@ -1073,9 +1100,17 @@ def main(argv=None):
               f"Measure > Repairs for older results), then this stage again.")
     print(f"{len(spec)} sections -> {SPEC_CSV}")
     if rc_rows:
+        late = [r for r in rc_rows if r["note"].startswith(RR.NOT_MEASURED)]
         print(f"{len({(r['scene_uid'], r['marker']) for r in rc_rows})} reagent "
               f"control section(s) x marker, {len(rc_rows)} rows -> {rc_csv} "
               f"(kept out of every file above)")
+        if late:
+            print(f"  !! {len(late)} confirmed reagent control section(s) x marker not "
+                  f"measured yet, listed there with blank measures: "
+                  + "; ".join(f"{r['scene_uid']} [{r['marker']}]: "
+                              f"{r['note'][len(RR.NOT_MEASURED) + 2:] or 'reason unknown'}"
+                              for r in late[:5])
+                  + (" ..." if len(late) > 5 else ""))
     # ONE BLOCK PER MARKER. This stage runs once for both, and all three of
     # these numbers are per marker. An h RANGE spanning two markers is not a
     # range of anything - pERK 9.4 and PCNA 6.0 would print as "6.0-9.4" and

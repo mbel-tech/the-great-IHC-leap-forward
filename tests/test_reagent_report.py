@@ -162,6 +162,40 @@ chk("an operator override wins, files and uids both resolved",
     RR.pairing_for("N_s01_sc01", "pERK", RC.expand(cfg3, SCN), SCN, cfg3),
     ("operator", ["C_s02_sc01", "D_s01_sc01"]))
 
+print("--- pairing_boxed: only stained sections with 05a boxes ---")
+# On a real study most sections never get ROIs. A tier that holds stained
+# scenes none of which has boxes paired with sections that will never have a
+# cut, so A's stained columns and all of B stayed blank for good.
+boxed = {("C_s02_sc01", "pERK"), ("D_s01_sc01", "pERK"), ("D_s02_sc01", "PCNA")}
+chk("pairing_boxed: a same-file scene with no boxes is passed over",
+    RR.pairing_for("C_s01_sc01", "pERK", lk, SCN, cfg, boxed), ("same_animal", ["C_s02_sc01"]))
+chk("...down to study-wide, boxed sections only",
+    RR.pairing_for("C_s01_sc01", "pERK", lk, SCN, cfg, {("D_s01_sc01", "pERK")}),
+    ("study_wide", ["D_s01_sc01"]))
+chk("...with boxes on the same file, same_file as before",
+    RR.pairing_for("C_s01_sc01", "pERK", lk, SCN, cfg, boxed | {("C_s01_sc02", "pERK")}),
+    ("same_file", ["C_s01_sc02"]))
+chk("...no 05a geometry for the marker at all: the manifest, as before",
+    RR.pairing_for("C_s01_sc01", "pERK", lk, SCN, cfg, {("D_s02_sc01", "PCNA")}),
+    ("same_file", ["C_s01_sc02"]))
+chk("...None: the manifest", RR.pairing_for("C_s01_sc01", "pERK", lk, SCN, cfg, None),
+    ("same_file", ["C_s01_sc02"]))
+chk("...the operator's choice is kept as chosen",
+    RR.pairing_for("N_s01_sc01", "pERK", RC.expand(cfg3, SCN), SCN, cfg3, boxed),
+    ("operator", ["C_s02_sc01", "D_s01_sc01"]))
+bx = tempfile.mkdtemp()
+os.makedirs(os.path.join(bx, "reformatted"))
+with open(os.path.join(bx, "reformatted", "roi_boxes_pERK.csv"), "w", newline="",
+          encoding="utf-8") as fh:
+    w = csv.DictWriter(fh, ["scene_uid", "marker", "roi_kind"])
+    w.writeheader()
+    w.writerow({"scene_uid": "C_s02_sc01", "marker": "pERK", "roi_kind": "roi"})
+bcfg = {"out_root": bx, "acquisition": {"layout": "paired", "markers": ["pERK", "PCNA"]}}
+chk("boxed_sections: read off 05a's per-marker box files",
+    RR.boxed_sections(bcfg), {("C_s02_sc01", "pERK")})
+chk("...None when 05a has written nothing",
+    RR.boxed_sections(dict(bcfg, out_root=tempfile.mkdtemp())), None)
+
 print("--- study_wide_blanks_B ---")
 kind, uids = RR.pairing_for("N_s01_sc01", "pERK", lk, SCN, cfg)
 chk("pairing is study_wide", kind, "study_wide")
@@ -580,6 +614,28 @@ finally:
 chk("06c on controls only exits 0 (06e's loop would end on 1)", code, 0)
 chk("...with the Reagent controls sheet alone", openpyxl.load_workbook(oxl).sheetnames,
     ["Reagent controls"])
+orep = read(os.path.join(only, "reagent_controls.csv"))
+late = [r for r in orep if (r["scene_uid"], r["marker"]) == ("LS45_s09_sc01", "pERK")]
+chk("not_measured_row: a confirmed control 05c has not reached still has a row",
+    len(late), 1)
+chk("...its measures blank", [late[0][c] for c in ("n_nuclei", "pct_positive", "level_ratio")]
+    if late else None, ["", "", ""])
+chk("...its note says so, and why",
+    late[0]["note"] if late else "",
+    RR.NOT_MEASURED + ": " + G6A.WHY_NOT_DETECTED)
+chk("...kind and file still filled", (late[0]["kind"], late[0]["file"]) if late else None,
+    ("no_primary", "LS45_9.czi"))
+sheet_rows = list(openpyxl.load_workbook(oxl)["Reagent controls"].iter_rows(values_only=True))
+chk("...and the 06c sheet shows it",
+    any(r and r[0] == "LS45_s09_sc01" and "not measured yet" in str(r[-1] or "")
+        for r in sheet_rows), True)
+chk("...a not-measured no_primary row does not switch the limitation text",
+    RR.limitation_text(late), RR.NO_CONTROL_TEXT)
+with contextlib.redirect_stdout(io.StringIO()):
+    nb, _ = G6A.reagent_report({("ZZ1_s01_sc01", "pERK"): {"kind": "isotype"}}, [], {}, {}, {},
+                               {}, set(), boxed=set())
+chk("...one with no 05a boxes says to curate it and run 05a",
+    (len(nb), nb[0]["note"] if nb else ""), (1, RR.NOT_MEASURED + ": " + G6A.WHY_NO_BOXES))
 G6D.G6C.MEAS_CSV = omeas
 try:
     with contextlib.redirect_stdout(io.StringIO()):

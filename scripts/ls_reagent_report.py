@@ -24,9 +24,12 @@ import os
 import statistics as st
 from array import array
 
+import csv
+
 import ls_channels as CH
 import ls_naming as NM
 import ls_overlay as LO
+import ls_paths as LP
 import ls_reagent_controls as RC
 
 #: The report, beside roi_measurements.csv.
@@ -102,7 +105,25 @@ def _base(p):
     return os.path.basename(str(p or "").replace("\\", "/"))
 
 
-def pairing_for(uid, marker, lookup, scene_rows, config):
+def boxed_sections(config):
+    """{(scene_uid, marker)} that 05a placed boxes on, from each marker's
+    roi_boxes file under out_root; None when 05a has written none yet."""
+    names = LP.for_config(config)
+    out, seen = set(), False
+    for m in CH.marker_names(config or {}):
+        path = names.read("roi_boxes", m, announce=lambda *_a, **_k: None)
+        if not path or not os.path.exists(path):
+            continue
+        seen = True
+        try:
+            with open(path, newline="", encoding="utf-8") as fh:
+                out |= {(r["scene_uid"], m) for r in csv.DictReader(fh) if r.get("scene_uid")}
+        except (OSError, KeyError, csv.Error, UnicodeDecodeError):
+            continue
+    return out if seen else None
+
+
+def pairing_for(uid, marker, lookup, scene_rows, config, boxed=None):
     """(kind, stained uids) a reagent control is compared with, for one marker.
 
     In order: the operator's `reagent_controls.paired_with` (keyed by the
@@ -110,13 +131,24 @@ def pairing_for(uid, marker, lookup, scene_rows, config):
     scenes on the same file, the same animal's stained scenes of that marker,
     then every stained section of that marker (`study_wide`). A target that
     is itself a reagent control for the marker is never a pairing.
+
+    `boxed`: {(scene_uid, marker)} 05a placed boxes on (boxed_sections, or
+    06a's own). The default tiers consider only those: on a real study most
+    sections never get ROIs, and a tier holding only sections that will never
+    have a cut left A's stained columns and all of B blank for good. With no
+    05a geometry for this marker at all (None, or none of its sections) the
+    manifest's sections are used, as before. The operator's choice is kept as
+    chosen.
     """
     mine = [r for r in scene_rows if r["scene_uid"] == uid]
     file = _base(mine[0].get("file")) if mine else ""
     animal = mine[0].get("animal", "") if mine else ""
-    stained = [r for r in scene_rows
-               if r.get("marker_channel") == marker and r["scene_uid"] != uid
-               and not RC.is_control(lookup, r["scene_uid"], marker)]
+    every = [r for r in scene_rows
+             if r.get("marker_channel") == marker and r["scene_uid"] != uid
+             and not RC.is_control(lookup, r["scene_uid"], marker)]
+    stained = every
+    if boxed and any(m == marker for _u, m in boxed):
+        stained = [r for r in every if (r["scene_uid"], marker) in boxed]
 
     def uids(rows):
         return sorted({r["scene_uid"] for r in rows}, key=NM.natural_key)
@@ -125,7 +157,7 @@ def pairing_for(uid, marker, lookup, scene_rows, config):
     targets = pw.get(uid) or (pw.get(file) if file else None) or []
     if targets:
         want = set(targets)
-        got = uids(r for r in stained
+        got = uids(r for r in every
                    if r["scene_uid"] in want or _base(r.get("file")) in want)
         if got:
             return "operator", got
@@ -140,9 +172,10 @@ def pairing_for(uid, marker, lookup, scene_rows, config):
     return "study_wide", uids(stained)
 
 
-def pairings(lookup, scene_rows, config):
+def pairings(lookup, scene_rows, config, boxed=None):
     """pairing_for every flagged (scene_uid, marker)."""
-    return {(u, m): pairing_for(u, m, lookup, scene_rows, config) for u, m in lookup}
+    return {(u, m): pairing_for(u, m, lookup, scene_rows, config, boxed)
+            for u, m in lookup}
 
 
 # ---------------------------------------------------------------- the rows
@@ -326,6 +359,27 @@ def report_rows(control_nuclei, stained_nuclei, cuts, pairing, meta=None, areas=
             row["note"] = "; ".join(notes)
             out.append(row)
     return out
+
+
+def not_measured_rows(keys, lookup, files=None, reasons=None):
+    """One row per confirmed reagent control (scene_uid, marker) with nothing
+    measured: every measure blank, the note saying so and why, when known.
+    A confirmed control never just disappears from the report."""
+    files, reasons = files or {}, reasons or {}
+    out = []
+    for uid, mk in keys:
+        row = dict.fromkeys(COLUMNS, "")
+        why = reasons.get((uid, mk))
+        row.update({"scene_uid": uid, "file": files.get(uid, ""),
+                    "kind": (lookup.get((uid, mk)) or {}).get("kind", ""), "marker": mk,
+                    "note": NOT_MEASURED + (": " + why if why else "")})
+        out.append(row)
+    return out
+
+
+def row_order(row):
+    """The report's row order: section (natural), marker, region."""
+    return (NM.natural_key(row["scene_uid"]), row["marker"], row["region"])
 
 
 # ---------------------------------------------------------------- the text

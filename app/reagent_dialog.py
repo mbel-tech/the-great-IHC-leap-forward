@@ -352,6 +352,7 @@ class ReagentControlsDialog(QDialog):
             self._pattern = None
         self.paired_with = copy.deepcopy(self.e["paired_with"])
         self._scene_rows = self._manifest_rows(cfg)
+        self._boxed = self._boxed_sections(cfg)
         self.rows, self._by_key = [], {}
         self._made_up = 0
 
@@ -410,6 +411,16 @@ class ReagentControlsDialog(QDialog):
                 "has not run yet: it runs in Prepare, after the section overviews (01m "
                 "Screen for reagent controls). Come back here after it to see what it "
                 "proposes, or add a file by hand now if one is a reagent control.")
+
+    @staticmethod
+    def _boxed_sections(cfg):
+        """Which sections 05a placed boxes on (the pairing considers only those), or
+        None before 05a: the same answer 06a pairs by."""
+        try:
+            import ls_reagent_report as LR
+            return LR.boxed_sections(cfg)
+        except (OSError, ValueError, KeyError, csv.Error, ImportError):
+            return None
 
     @staticmethod
     def _manifest_rows(cfg):
@@ -589,7 +600,8 @@ class ReagentControlsDialog(QDialog):
                 r.pairing_btn.setEnabled(False)
                 continue
             marker = self._control_marker(r, uids[0])
-            kind, got = LR.pairing_for(uids[0], marker, lookup, self._scene_rows, cfg)
+            kind, got = LR.pairing_for(uids[0], marker, lookup, self._scene_rows, cfg,
+                                       self._boxed)
             r.pairing_kind = kind
             r.pairing_label.setText("Compared with %s (%d section%s)."
                                     % (PAIRING_WORDS.get(kind, kind), len(got),

@@ -1248,20 +1248,18 @@ class SetupScreen(QWidget):
         path = WC.workbook_path(project.cfg, {"--xlsx": typed} if typed else
                                 project.stage_options("join_sampling"))
         self.manifest_btn.setEnabled(False)
-        self.workbook_line.setText("Building the slide manifest…")
-        self.workbook_line.setStyleSheet(QUIET)
+        self.manifest_btn.setText("Building…")
         self.manifest_job.start(project.cfg, path)
 
     def _slide_manifest_ready(self, manifest):
         import slide_manifest_dialog as SMD
         self.manifest_btn.setEnabled(True)
+        self.manifest_btn.setText("Slide manifest…")
         if manifest.get("error"):
             self.workbook_line.setText("The slide manifest could not be built: %s."
                                        % manifest["error"])
             self.workbook_line.setStyleSheet(f"color:{COLOUR['failed']}")
             return None
-        self.workbook_line.setText(manifest.get("summary", ""))
-        self.workbook_line.setStyleSheet(QUIET)
         project = self.session.project
         dlg = SMD.SlideManifestDialog(manifest, project.get("out_root"),
                                       project.read_only, self)

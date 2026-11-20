@@ -108,6 +108,18 @@ with tempfile.TemporaryDirectory() as tmp:
     m = SM.make(cfg, book2)
     chk("an animal on two rows is said so", by_animal(m)["LS1"]["status"], SM.TWO_ROWS)
 
+    # One row two animals match (by number, 1 is LS1 and LS01).
+    os.makedirs(os.path.join(tmp, "s01"))
+    touch(os.path.join(tmp, "s01"), ["LS1_1a.czi", "LS01_1a.czi", "LS2_1a.czi"])
+    book3 = sheet(tmp, [["1", "Control"], ["2", "High"]])
+    m = SM.make(dict(cfg, source_dir=os.path.join(tmp, "s01")), book3)
+    rows3 = by_animal(m)
+    chk("a shared row is said so, naming the other animal",
+        (rows3["LS1"]["status"], rows3["LS01"]["status"]),
+        ("Shares workbook row 1 with LS01", "Shares workbook row 1 with LS1"))
+    chk("...and the shared row is not 'no slides'", "1" in rows3, False)
+    chk("...the others still match", rows3["LS2"]["status"], SM.OK)
+
     # The folder gone: Prepare's manifest is read, its redundant copies skipped.
     os.makedirs(os.path.join(out, "manifest"), exist_ok=True)
     with open(os.path.join(out, "manifest", "manifest_files.csv"), "w", newline="",

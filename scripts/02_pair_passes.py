@@ -37,6 +37,7 @@ import ls_naming as NM  # noqa: E402
 import ls_channels as CH  # noqa: E402
 import ls_io as IO  # noqa: E402
 import ls_paths as LP  # noqa: E402
+import ls_reagent_controls as RC  # noqa: E402
 
 OUT_ROOT = CONFIG["out_root"]
 MANIFEST_DIR = os.path.join(OUT_ROOT, "manifest")
@@ -122,6 +123,14 @@ def choose_variants(rows):
     Where a slide was re-scanned (LS45_8b/8c, LS61_2b/2c, LS85_7a/7b-) prefer
     the variant with more scenes, then the earlier letter. Stage 1's focus
     scores can override this later via manifest/chosen_variants.csv.
+
+    A reagent control is never the chosen scan of a slide that has a stained
+    one: flagged scenes (from config, through ls_reagent_controls.expand, not
+    the manifest column) do not count, so a control scan with more scenes
+    than the stained scan cannot win, and an override naming a scan with no
+    stained scene is not followed. A slide whose every scan is a control
+    still keeps its own entry, chosen as before. The chosen scan keeps all its
+    rows: a single control section on a stained slide is still paired.
     """
     override_path = os.path.join(MANIFEST_DIR, "chosen_variants.csv")
     overrides = {}
@@ -136,16 +145,22 @@ def choose_variants(rows):
                 overrides[(r["animal"], int(r["slide"]), r["marker_channel"])] = r["variant"]
         print(f"Loaded {len(overrides)} variant override(s)")
 
+    lookup = RC.expand(CONFIG, rows)
     by_key = defaultdict(lambda: defaultdict(list))
     for r in rows:
         by_key[(r["animal"], r["slide"], r["marker_channel"])][r["variant"]].append(r)
 
     chosen, notes = {}, []
     for key, variants in by_key.items():
-        if key in overrides and overrides[key] in variants:
+        stained = {v: [r for r in rs
+                       if not RC.is_control(lookup, r["scene_uid"], r["marker_channel"])]
+                   for v, rs in variants.items()}
+        stained = {v: rs for v, rs in stained.items() if rs}
+        pool = stained or variants
+        if key in overrides and overrides[key] in pool:
             pick = overrides[key]
         else:
-            pick = sorted(variants, key=lambda v: (-len(variants[v]), v))[0]
+            pick = sorted(pool, key=lambda v: (-len(pool[v]), v))[0]
         chosen[key] = variants[pick]
         if len(variants) > 1:
             notes.append(
@@ -153,7 +168,7 @@ def choose_variants(rows):
                     "animal": key[0], "slide": key[1], "marker_channel": key[2],
                     "chosen_variant": pick,
                     "candidates": "|".join(f"{v}({len(variants[v])})" for v in sorted(variants)),
-                    "source": "override" if key in overrides else "most_scenes",
+                    "source": "override" if overrides.get(key) == pick else "most_scenes",
                 }
             )
     return chosen, notes

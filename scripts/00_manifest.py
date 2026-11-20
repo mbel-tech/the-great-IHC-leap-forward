@@ -51,6 +51,7 @@ import ls_io as IO  # noqa: E402
 import ls_sources as SRC  # noqa: E402
 import ls_naming as NM  # noqa: E402
 import ls_progress as PG  # noqa: E402
+import ls_reagent_controls as RC  # noqa: E402
 
 SOURCE_DIR = CONFIG["source_dir"]
 OUT_ROOT = CONFIG["out_root"]
@@ -193,10 +194,77 @@ def parse_name(member):
     """
     parsed = NM.parse_name(member, name_pattern())
     if parsed is None:
+        parsed = _control_parts(member)
+    if parsed is None:
         return None
     return {**parsed,
             "animal": parsed["subject"],
             "variant": parsed["replicate"]}
+
+
+def _control_parts(member):
+    """The parts a reagent control file's uid needs, from its `files` entry.
+
+    Control slides are often named with no subject (`NC_3.czi`), so the
+    study's grammar does not read them, and a name that does not parse is a
+    failure of the whole run. The operator's confirmed entry gives the subject
+    (the donor animal, or a made-up ID), the slide and the replicate, and the
+    uid is built from them in the standard shape - the flag never goes into
+    the uid. Held to the same rules as a parsed name: a subject with no `_`,
+    and a whole-number slide, so two controls of one animal cannot collide.
+    None (still a failure) when the entry does not supply them.
+    """
+    sub = RC.control_subject(CONFIG, re.split(r"[\\/]", member)[-1])
+    if sub is None:
+        return None
+    subject = str(sub["subject"]).strip()
+    slide = sub["slide"]
+    if isinstance(slide, str) and slide.strip().isdigit():
+        slide = int(slide.strip())
+    if not subject or "_" in subject or isinstance(slide, bool) or not isinstance(slide, int):
+        return None
+    return {"subject": subject, "slide": slide,
+            "replicate": str(sub["replicate"] or ""),
+            "name_suffix": "", "extras": {}}
+
+
+def flag_reagent_controls(file_rows, scene_rows):
+    """Write `reagent_control` (the kind, or "") on every scene and file row.
+
+    For display only: what is excluded downstream is decided from config by
+    ls_reagent_controls.expand, never from this column. A file row carries the
+    kind when any of its scenes is a reagent control.
+    """
+    lookup = RC.expand(CONFIG, scene_rows)
+    by_file = {}
+    for row in scene_rows:
+        entry = lookup.get((row["scene_uid"], row["marker_channel"]))
+        row["reagent_control"] = (entry.get("kind") or "other") if entry else ""
+        if row["reagent_control"]:
+            by_file.setdefault(row["file"], row["reagent_control"])
+    for row in file_rows:
+        row["reagent_control"] = by_file.get(row["file"], "")
+    return len({(r["scene_uid"], r["marker_channel"]) for r in scene_rows
+                if r["reagent_control"]})
+
+
+def reagent_control_warnings(entries):
+    """Lines for every name that looks like a reagent control and was neither
+    confirmed nor rejected. A warning, never a failure: with `declared: no`
+    the operator still hears about `LS45_noPrimary.czi`. Reads only the group
+    labels (so a weak token that is a group name is not proposed), never which
+    animal is in which group."""
+    paths = [member if source == "LOOSE" else f"{source}/{member}"
+             for source, member, _container, _opener in entries]
+    labels = (CONFIG.get("groups") or {}).get("order") or []
+    matches = RC.scan(paths, CH.marker_names(CONFIG), labels,
+                      RC.entries(CONFIG)["extra_patterns"])
+    lines = []
+    for m in RC.unanswered(CONFIG, matches):
+        lines.append(f"  ?? {m.path} looks like a reagent control ({m.kind}, "
+                     f"'{m.token}') but is neither confirmed nor rejected - "
+                     f"answer it in Set up > Slides > Reagent controls.")
+    return lines
 
 
 # ---------------------------------------------------------------- slide grid
@@ -386,13 +454,34 @@ def chosen_variant_overrides():
                 for r in rd}
 
 
+#: Appended to the animal for a reagent control's series. Internal only: it is
+#: never written to a table and never part of the uid.
+RC_SERIES = "#rc"
+
+
+def _series_key(row):
+    """(animal, marker), or (animal + "#rc", marker) for a reagent control.
+
+    A control gets a series of its own so it cannot take places in its donor
+    animal's rostro-caudal order, nor become the scan that sizes a slide's
+    block. Read off the row's `reagent_control`, which flag_reagent_controls
+    writes from config just before this runs; a row without it is stained.
+    """
+    animal = row["animal"]
+    if row.get("reagent_control"):
+        animal += RC_SERIES
+    return (animal, row["marker_channel"])
+
+
 def assign_section_order(scene_rows, order_key):
     """Write `section_order` (and `slide_serial`) on every scene row.
 
     Rostro-caudal position across the whole animal: slide number first, then
     position within the slide under the confirmed convention (`order_key`).
 
-    One series per (animal, marker), NOT per replicate letter. The letter is
+    One series per (animal, marker), NOT per replicate letter (a reagent
+    control has a series of its own, (animal + "#rc", marker): see
+    _series_key). The letter is
     which scan of a slide this is, and a slide scanned again (`8c` beside
     `1b..9b`) is the same physical sections as its first scan. Numbering each
     letter as its own series gave `8c` 1..k, colliding with slide 1, and 01d
@@ -414,10 +503,11 @@ def assign_section_order(scene_rows, order_key):
     overrides = chosen_variant_overrides()
     series = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
     for row in scene_rows:
-        series[(row["animal"], row["marker_channel"])][row["slide"]][row["variant"]].append(row)
+        series[_series_key(row)][row["slide"]][row["variant"]].append(row)
 
     rescans = 0
-    for (animal, marker), slides in series.items():
+    for (key, marker), slides in series.items():
+        animal = key[:-len(RC_SERIES)] if key.endswith(RC_SERIES) else key
         offset = 0
         for slide in sorted(slides, key=lambda s: (s is None, s if s is not None else 0)):
             scans = slides[slide]
@@ -801,6 +891,16 @@ def main():
                 serials,
             ))
 
+    # Printed on a refused run as well: a control-looking name that fails the
+    # grammar is exactly when the operator most needs to hear it.
+    rc_warnings = reagent_control_warnings(entries)
+    if rc_warnings:
+        print()
+        print(f"{len(rc_warnings)} file(s) may be reagent controls (warning only):")
+        for line in rc_warnings:
+            print(line)
+    n_rc = flag_reagent_controls(file_rows, scene_rows)
+
     # Before anything is written for downstream to read: a stale manifest from
     # an earlier good run is safer than a fresh one that is wrong.
     #
@@ -852,7 +952,9 @@ def main():
     n_series, n_rescans = assign_section_order(scene_rows, order_key)
     print(f"  section_order written from {order_key} across {n_series} series"
           + (f"; {n_rescans} re-scanned slide(s) numbered inside their slide's "
-             f"places" if n_rescans else ""))
+             f"places" if n_rescans else "")
+          + (f"; {n_rc} reagent control scene x marker(s) numbered in their own series"
+             if n_rc else ""))
 
     _write_csv(os.path.join(MANIFEST_DIR, "manifest_files.csv"), file_rows)
     _write_csv(os.path.join(MANIFEST_DIR, "manifest_scenes.csv"), scene_rows)

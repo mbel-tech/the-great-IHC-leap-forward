@@ -33,11 +33,14 @@ and modification time, the scene, the planes, the clip ceiling, the zoom and the
 feature constants). A re-run reads only sections whose key changed or that are
 missing, so a stopped run picks up where it was, and a changed answer in Set up
 (confirmed, rejected) re-scores in seconds without reading a pixel: scoring and
-the strip are always redone from the checkpoint. --force reads everything again;
---limit N reads at most N sections, and leaves the screen CSV as it was until
-every section has features.
+the strip are always redone from the checkpoint. --force runs even when the
+gate says skip, and still resumes. --reread starts the reading over: every
+section is read again, and that is resumable too (rows carry the reread's id,
+kept in qc/reagent_screen_reread.json until the reread finishes; any run while
+one is pending continues it). --limit N reads at most N sections, and leaves the
+screen CSV as it was until every section has features.
 
-Run:  python 01m_reagent_screen.py [--force] [--limit N]
+Run:  python 01m_reagent_screen.py [--force] [--reread] [--limit N]
 """
 
 import argparse
@@ -47,6 +50,7 @@ import importlib.util
 import json
 import os
 import sys
+import time
 
 import numpy as np
 from PIL import Image, ImageDraw
@@ -58,6 +62,7 @@ from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
 import czi_read as CR  # noqa: E402
 import ls_channels as CH  # noqa: E402
 import ls_io as IO  # noqa: E402
+import ls_jsonio as JS  # noqa: E402
 import ls_reagent_controls as RC  # noqa: E402
 import ls_reagent_screen as RS  # noqa: E402
 
@@ -81,12 +86,14 @@ MANIFEST_FILES = os.path.join(OUT_ROOT, "manifest", "manifest_files.csv")
 #: of what they depend on. Scoring is redone from it on every run.
 FEATURES_CSV = os.path.join(QC_DIR, "reagent_screen_features.csv")
 FEATURE_KEYS = ["scene_uid", "file", "marker", "f1", "f2", "f3", "tiles", "tile_x", "tile_y",
-                "fingerprint"]
+                "fingerprint", "reread"]
+#: A --reread in progress: {"id": ...}. Removed when it finishes.
+REREAD_JSON = os.path.join(QC_DIR, "reagent_screen_reread.json")
 #: One small picture of each section's first tile per marker, so the strip is
 #: redrawn after a re-score without reading a CZI.
 THUMB_DIR = os.path.join(QC_DIR, "reagent_screen_thumbs")
 #: Bump when a feature's definition changes: every checkpoint row is then re-read.
-FEATURE_VERSION = 2
+FEATURE_VERSION = 3
 
 SCREEN_KEYS = ["scene_uid", "file", "marker", "f1", "f2", "f3", "z1", "z2", "z3",
                "n_features", "guard_dapi_ok", "guard_exposure_ok", "candidate", "rank",
@@ -100,8 +107,9 @@ DRAWS_PER_TILE = 8
 STRIP_CANDIDATES = 8
 STRIP_MEDIANS = 3
 THUMB_PX = 256
-#: Thumbnails are stored at TILE_PX / THUMB_STORE (128 px), drawn at THUMB_PX.
-THUMB_STORE = 4
+#: Thumbnails are stored at TILE_PX / THUMB_STORE (256 px, 2 x 2 block means), drawn
+#: 1:1 at THUMB_PX: fine enough to see 1-3 um puncta by eye.
+THUMB_STORE = 2
 
 MARKERS = list(CH.marker_names(CONFIG))
 
@@ -304,9 +312,31 @@ def load_thumb(uid, marker):
         return np.asarray(im).astype(np.float64)
 
 
-def is_current(ck, uid, markers, fp):
+def is_current(ck, uid, markers, fp, reread=None):
+    """Every marker row present with this fingerprint, and - while a reread is
+    in progress - read under that reread."""
+    rows = [ck.get((uid, m)) or {} for m in markers]
     return fp is not None and all(
-        (ck.get((uid, m)) or {}).get("fingerprint") == fp for m in markers)
+        r.get("fingerprint") == fp and (reread is None or r.get("reread") == reread)
+        for r in rows)
+
+
+def reread_state(start):
+    """The id of the reread in progress, starting one when `start`; else None."""
+    if os.path.exists(REREAD_JSON):
+        try:
+            with open(REREAD_JSON, encoding="utf-8") as fh:
+                rid = json.load(fh).get("id")
+            if rid:
+                return rid
+        except (OSError, ValueError, AttributeError):
+            pass
+    if not start:
+        return None
+    rid = time.strftime("%Y%m%dT%H%M%S") + f"-{os.getpid()}"
+    os.makedirs(QC_DIR, exist_ok=True)
+    JS.write_json_atomic(REREAD_JSON, {"id": rid})
+    return rid
 
 
 # ---------------------------------------------------------------- outputs
@@ -438,8 +468,10 @@ class _Out:
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--force", action="store_true",
-                    help="screen even when the study does not ask for it, and read every "
-                         "section again rather than resume")
+                    help="screen even when the study does not ask for it (still resumes)")
+    ap.add_argument("--reread", action="store_true",
+                    help="read every section again rather than reuse the checkpoint; "
+                         "resumable, and a run while one is pending continues it")
     ap.add_argument("--limit", type=int, default=0,
                     help="read at most N sections this run (0: all); a later run resumes")
     args = ap.parse_args()
@@ -481,7 +513,11 @@ def main():
 
     ceilings = {k: int(v["clip_ceiling"]) for k, v in files.items()
                 if str(v.get("clip_ceiling") or "").isdigit()}
-    ck = {} if args.force else load_checkpoint()
+    ck = load_checkpoint()
+    pending = os.path.exists(REREAD_JSON)
+    reread = reread_state(args.reread)
+    if reread and pending:
+        say(f"continuing the reread started earlier ({reread}): sections it has read are kept")
     fps, problems, todo = {}, {}, {}
     for r in scenes:
         uid, fname = r["scene_uid"], r["file"]
@@ -491,7 +527,7 @@ def main():
             continue
         fps[uid] = fingerprint(path, r, section_markers(r, multiplex, plan), nuc_c, plan,
                                zoom, OV.ceiling_for(ceilings, fname))
-        if not is_current(ck, uid, section_markers(r, multiplex, plan), fps[uid]):
+        if not is_current(ck, uid, section_markers(r, multiplex, plan), fps[uid], reread):
             todo.setdefault(fname, []).append(r)
     for fname in dict.fromkeys(r["file"] for r in scenes if r["scene_uid"] in problems):
         say(f"  !! {fname}: not in {SOURCE_DIR}; its sections are listed unscreened")
@@ -499,7 +535,7 @@ def main():
     say(f"{len(uids)} section(s); {len(uids) - n_todo - len(problems)} already screened "
         f"(qc/reagent_screen_features.csv), {n_todo} to read, {RS.TILES} tiles of "
         f"{RS.TILE_PX} px each" + (f", at most {args.limit} this run" if args.limit else "")
-        + (" (--force: every section read again)" if args.force else ""))
+        + (" (reread: every section read again)" if reread else ""))
 
     read = 0
     stopped = False
@@ -538,15 +574,19 @@ def main():
                             "f3": _fmt(f.get("f3"), 6), "tiles": used,
                             "tile_x": "" if first is None else first[0],
                             "tile_y": "" if first is None else first[1],
-                            "fingerprint": fps[uid]}
+                            "fingerprint": fps[uid], "reread": reread or ""}
                         if m in thumbs:
-                            save_thumb(uid, m, thumbs[m])
+                            try:
+                                save_thumb(uid, m, thumbs[m])
+                            except Exception as exc:  # noqa: BLE001 - the strip re-reads it
+                                say(f"  !! {uid}: thumbnail not saved ({type(exc).__name__}: "
+                                    f"{exc}); the strip will read the tile again")
                     say.progress(f"  read {read}/{n_todo}")
         except Exception as exc:  # noqa: BLE001 - one bad file must not stop the screen
             say(f"  !! {fname}: {type(exc).__name__}: {exc}")
             for r in frows:
                 if not is_current(ck, r["scene_uid"], section_markers(r, multiplex, plan),
-                                  fps.get(r["scene_uid"])):
+                                  fps.get(r["scene_uid"]), reread):
                     problems.setdefault(r["scene_uid"],
                                         f"not screened: {type(exc).__name__}: {exc}")
         # Checkpoint per file, so a stopped run resumes from here.
@@ -557,11 +597,15 @@ def main():
 
     left = [r["scene_uid"] for rs in todo.values() for r in rs
             if not is_current(ck, r["scene_uid"], section_markers(r, multiplex, plan),
-                              fps.get(r["scene_uid"])) and r["scene_uid"] not in problems]
+                              fps.get(r["scene_uid"]), reread) and r["scene_uid"] not in problems]
     if left:
         say(f"--limit {args.limit}: {len(left)} section(s) still to read. Run again to "
-            f"resume; {os.path.basename(SCREEN_CSV)} is scored once every section is read.")
+            f"resume{' the reread' if reread else ''}; "
+            f"{os.path.basename(SCREEN_CSV)} is scored once every section is read.")
         return 0
+    if reread:
+        os.remove(REREAD_JSON)
+        say(f"reread {reread} finished")
 
     rows, where, by_uid = [], {}, {}
     for r in scenes:

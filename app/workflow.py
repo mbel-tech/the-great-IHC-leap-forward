@@ -291,7 +291,7 @@ PLAIN = {
     "reagent_screen": "Looks for sections that may be reagent controls (stained without the "
                       "primary antibody, or not stained), by the pattern of the stain rather "
                       "than its brightness, and lists them for you to confirm or reject in "
-                      "Set up. It never decides for you. It can be stopped and resumes; answering in Set up only re-scores, without reading the slides again. It runs only when the study says it "
+                      "Set up. It never decides for you. It can be stopped and picks up where it was; answering in Set up only re-scores, without reading the slides again. It runs only when the study says it "
                       "is not sure, or says yes but none is confirmed yet. It cannot see isotype "
                       "or pre-adsorbed controls, and cannot tell a missing primary from a failed "
                       "stain or an animal that does not express the marker.",
@@ -559,11 +559,14 @@ OPTIONS = {
     ],
     "overviews": [_force("sections"), _limit()],
     "reagent_screen": [
-        Opt("--force", "bool", "Screen anyway, from scratch",
+        Opt("--force", "bool", "Screen anyway",
             "Normally the screen runs only when the study says it is not sure whether it "
-            "has reagent controls, or says yes with none confirmed, and it resumes: a "
-            "section already read is not read again. Turn this on to screen every section, "
-            "reading each one again."),
+            "has reagent controls, or says yes with none confirmed. Turn this on to screen "
+            "regardless. It still resumes: a section already read is not read again."),
+        Opt("--reread", "bool", "Read every section again",
+            "Throw away what earlier runs measured and read every section from the slides "
+            "again. This can be stopped too: the next run continues the rereading where it "
+            "stopped rather than starting it over."),
         Opt("--limit", "int", "Read at most N sections",
             "Stop after reading this many sections; the next run resumes where it stopped. "
             "The list of candidates is written once every section has been read. 0 means "

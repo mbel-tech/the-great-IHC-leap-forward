@@ -373,8 +373,9 @@ It cannot see isotype or pre-adsorbed controls, and it cannot tell a section sta
 primary from a failed stain or from an animal that does not express the marker. Its thresholds stay
 provisional until it has been run on a study with known controls. It runs only when it is needed
 (the study says it is unsure, or yes with none confirmed); otherwise it says why and stops. It can be
-stopped and picks up where it was: what it has measured is kept, section by section, and is read
-again only when the scan file changes. Confirming or rejecting a proposal therefore only re-ranks the
+stopped and picks up where it was: what it has measured is saved after each scan file, so a stop
+loses at most the file it was reading, and a section is read again only when its scan file changes
+or the operator asks for everything to be read again. Confirming or rejecting a proposal therefore only re-ranks the
 list, in seconds, without opening a slide.
 
 ## 01d  Contact sheets and gallery {#stage-contactsheets}

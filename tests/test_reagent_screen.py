@@ -159,12 +159,24 @@ for label, fill, cut in (("glass", 300.0, 150), ("zeros", 0.0, 52)):
         print(f"     {label}/{kind}: before {base}  after {moved}")
         chk(f"{label}, {kind}: F1/F2/F3 unchanged when only the tissue shifts",
             all(p is not None and q is not None and abs(p - q) < 1e-6 for p, q in zip(base, moved)))
-        # One tile with a third of it glass holds ~28 puncta, so a control's F1 is
-        # noisy here (the stage takes the median of 12 tiles); the level check is loose.
+
+    # Level, as the stage sees it: one tile with a third of it glass holds ~28 puncta, so
+    # a single control tile is noisy; the stage takes a median over tiles, and so does this.
+    for kind, make in (("stained", stained_tile), ("control", control_tile)):
+        vals = []
+        for seed in range(100, 110):
+            d, a, _b = make(seed)
+            tm = np.ones((N, N), bool)
+            tm[:, :cut] = False
+            d[~tm] = fill
+            a[~tm] = fill
+            vals.append(RS.f1_nuclear_enrichment(a, d, tm))
+        med = float(np.median(vals))
+        print(f"     {label}/{kind}: median F1 over 10 tiles {med:.3f}")
         if kind == "stained":
-            chk(f"{label}, stained: F1 still reads stained (> 2)", base[0] > 2.0)
+            chk(f"{label}, stained: median F1 over 10 tiles > 2", med > 2.0)
         else:
-            chk(f"{label}, control: F1 still reads unenriched (< 2)", base[0] < 2.0)
+            chk(f"{label}, control: median F1 over 10 tiles < 1.5", med < 1.5)
 
 print("--- robust_z ---")
 z = RS.robust_z({"a": 1.0, "b": 2.0, "c": 3.0, "d": 4.0, "e": 100.0})
@@ -411,9 +423,18 @@ def uid_of(name, scene):
     return f"{name[:-4].replace('_1a', '_s01a')}_sc{scene:02d}"
 
 
-def checkpointed():
+def checkpointed(reread=None):
+    """Sections in the checkpoint; with `reread`, only those read under that reread."""
     with open(M.FEATURES_CSV, newline="", encoding="utf-8") as fh:
-        return {r["scene_uid"] for r in csv.DictReader(fh)}
+        return {r["scene_uid"] for r in csv.DictReader(fh)
+                if reread is None or r["reread"] == reread}
+
+
+def reread_id():
+    if not os.path.exists(M.REREAD_JSON):
+        return None
+    with open(M.REREAD_JSON, encoding="utf-8") as fh:
+        return json.load(fh)["id"]
 
 
 ALL_SECTIONS = {(r["file"], int(r["scene_index"])) for r in scenes}
@@ -480,7 +501,7 @@ chk("the confirmed section has no z and no status",
 chk("...and says why", "confirmed" in got["LS09_s01a_sc01"]["note"])
 M.CONFIG["reagent_controls"] = {"declared": "unsure"}
 
-print("--- a run stopped part-way resumes from the last finished file ---")
+print("--- a --reread stopped part-way resumes from the last finished file ---")
 STOP = {"after": 7}
 
 
@@ -502,19 +523,79 @@ def _stopping_read(self, roi, plane, scene, zoom):
 _Doc.read = _stopping_read
 del READS[:]
 try:
-    run("--force")
+    run("--reread")
     chk("the stand-in stop happened", False)
 except _Stop:
     pass
 _Doc.read = _orig_read
-done_before = checkpointed()
-chk("whole files done before the stop are checkpointed", len(done_before), 6)
+rid = reread_id()
+chk("the reread is recorded as in progress", bool(rid))
+done_before = checkpointed(rid)
+chk("whole files read before the stop are checkpointed under it", len(done_before), 6)
 del READS[:]
-run()
-chk("the resumed run reads only what was not checkpointed",
+run("--reread")
+chk("--reread again continues: reads only what the reread had not read",
     {uid_of(n, s_) for n, s_ in sections_read()}, {r["scene_uid"] for r in scenes} - done_before)
+chk("...then the reread is finished", os.path.exists(M.REREAD_JSON), False)
 chk("...and gives the same screen as before", [(r["scene_uid"], r["f1"], r["f3"], r["status"])
                                                for r in read_screen()], first)
+
+print("--- --reread --limit, twice, then a plain run: one reread, never restarted ---")
+seen = []
+for argv in (("--reread", "--limit", "5"), ("--reread", "--limit", "5"), ()):
+    del READS[:]
+    run(*argv)
+    seen.append({uid_of(n, s_) for n, s_ in sections_read()})
+chk("5, then 5 others, then the remaining 10",
+    [len(x) for x in seen], [5, 5, 10])
+chk("...no section read twice", len(set().union(*seen)), 20)
+chk("...and the reread is finished", os.path.exists(M.REREAD_JSON), False)
+del READS[:]
+run()
+chk("after it, a plain run reads nothing", READS, [])
+
+print("--- --force with the gate closed keeps the checkpoint and resumes ---")
+M.CONFIG["reagent_controls"] = {"declared": "no"}
+for f in ("LS03_1a.czi", "LS04_1a.czi", "LS05_1a.czi"):
+    pf = os.path.join(STUDY.source_dir, f)
+    st = os.stat(pf)
+    os.utime(pf, ns=(st.st_atime_ns, st.st_mtime_ns + 10 ** 9))
+del READS[:]
+run()
+chk("declared no, no --force: skipped, nothing read", READS, [])
+del READS[:]
+run("--force", "--limit", "2")
+f1st = {uid_of(n, s_) for n, s_ in sections_read()}
+chk("--force --limit 2 reads 2 of the 6 changed sections", len(f1st), 2)
+chk("...and the rest of the checkpoint is kept", len(checkpointed()), 20)
+del READS[:]
+run("--force")
+f2nd = {uid_of(n, s_) for n, s_ in sections_read()}
+chk("--force again resumes: the other 4 only", (len(f2nd), f1st & f2nd), (4, set()))
+del READS[:]
+run("--force")
+chk("...and a third --force reads nothing", READS, [])
+M.CONFIG["reagent_controls"] = {"declared": "unsure"}
+
+print("--- a thumbnail that cannot be saved does not stop the file ---")
+_orig_save = M.save_thumb
+
+
+def _bad_save(uid, marker, a):
+    raise OSError("disk full (stand-in)")
+
+
+M.save_thumb = _bad_save
+del READS[:]
+run("--reread")
+M.save_thumb = _orig_save
+chk("every section is still read and scored",
+    (len(sections_read()), len(read_screen()), os.path.exists(M.REREAD_JSON)), (20, 20, False))
+chk("...and the run says the thumbnails were not saved", "thumbnail not saved" in LAST[0])
+run("--reread")                     # put the thumbnails back for what follows
+_t = M.load_thumb("LS03_s01a_sc00", MARKER)
+chk("thumbnails are 256 px (2 x 2 block means of the 512 px tile), 16-bit raw values",
+    (_t.shape, _t.max() > 255), ((256, 256), True))
 
 print("--- a changed CZI is read again, and only that one ---")
 NC_UIDS = set()                     # the stand-in now serves LS09 stained...

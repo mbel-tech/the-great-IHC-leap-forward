@@ -6480,8 +6480,8 @@
    "path": "qc/reagent_screen.png",
    "names": [],
    "writer": "01m_reagent_screen.py",
-   "what": "The contact strip the operator decides by eye: per marker, one native tile of each of the top 8 candidates beside 3 median sections of the same marker.",
-   "format": "RGB PNG: per marker one row of 256 px pictures (the stored 128 px thumbnail of each section's first tile, drawn at twice its size), every picture of a marker at that marker's `qc/display_ranges.json` range. Rewritten every screen, so no old candidate lingers.",
+   "what": "The contact strip the operator decides by eye: per marker, the stored thumbnail of the first screened tile of each of the top 8 candidates, beside 3 median sections of the same marker.",
+   "format": "RGB PNG: per marker one row of 256 px pictures, each the stored thumbnail (the 512 px native tile as 2 x 2 block means) drawn 1:1, every picture of a marker at that marker's `qc/display_ranges.json` range. Rewritten every screen, so no old candidate lingers.",
    "columns": []
   },
   {
@@ -6490,7 +6490,7 @@
     "reagent_screen_features.csv"
    ],
    "writer": "01m_reagent_screen.py",
-   "what": "01m's resume checkpoint: the features of each section x marker, written atomically after every file. A row is reused while its `fingerprint` still matches; scoring (z, candidate, status) is always redone from these rows, so an answer in Set up re-scores without reading a pixel. `--force` starts it afresh.",
+   "what": "01m's resume checkpoint: the features of each section x marker, written atomically after every file (a stop loses at most the file being read). A row is reused while its `fingerprint` still matches (and, during a `--reread`, while it was read under that reread); scoring (z, candidate, status) is always redone from these rows, so an answer in Set up re-scores without reading a pixel. `--force` only overrides the run gate and keeps these rows; `--reread` reads every section again, resumably.",
    "readers": [
     "01m_reagent_screen.py"
    ],
@@ -6554,7 +6554,13 @@
      "name": "fingerprint",
      "type": "text",
      "units": "",
-     "meaning": "A hash of what the features depend on: the CZI's size and modification time, the scene index, the planes read and whether F1 is skipped, the clip ceiling, the overview zoom, the feature constants and FEATURE_VERSION. A mismatch means the section is read again."
+     "meaning": "A hash of what the features depend on: the CZI's size and modification time, the scene index, the planes read and whether F1 is skipped, the clip ceiling, the overview zoom, the feature constants and FEATURE_VERSION (3: thumbnails at 256 px). A mismatch means the section is read again."
+    },
+    {
+     "name": "reread",
+     "type": "text",
+     "units": "",
+     "meaning": "The id of the `--reread` this row was read under, or empty. While a reread is in progress (`qc/reagent_screen_reread.json`), a row with another id is read again."
     }
    ]
   },
@@ -6563,7 +6569,18 @@
    "names": [],
    "writer": "01m_reagent_screen.py",
    "what": "A small picture of each section's first screened tile, per marker, so the contact strip is redrawn after a re-score without reading a CZI.",
-   "format": "16-bit greyscale PNG, 128 x 128: the 512 px native tile as 4 x 4 block means, raw values (no display range).",
+   "format": "16-bit greyscale PNG, 256 x 256: the 512 px native tile as 2 x 2 block means, raw values (no display range). About 100-140 KB each, so roughly 250-350 MB for the ~2,500 LS sections.",
+   "readers": [
+    "01m_reagent_screen.py"
+   ],
+   "columns": []
+  },
+  {
+   "path": "qc/reagent_screen_reread.json",
+   "names": [],
+   "writer": "01m_reagent_screen.py",
+   "what": "A `--reread` in progress. Every 01m run while it exists continues that reread (sections already read under it are kept); removed when the reread has read every section.",
+   "format": "JSON: `{\"id\": \"<start time>-<pid>\"}`, the id stamped in the checkpoint's `reread` column.",
    "readers": [
     "01m_reagent_screen.py"
    ],

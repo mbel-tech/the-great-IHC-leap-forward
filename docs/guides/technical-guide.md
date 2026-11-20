@@ -1209,7 +1209,9 @@ the operator to confirm or reject in Set up. It never assigns one.
   field, so the mask can differ slightly), then `TILES` = 12 tiles of
   512 native pixels drawn uniformly inside it, seeded by a hash of the scene uid.
 - **Writes:** `qc/reagent_screen.csv` (one row per section x marker), `qc/reagent_screen.png`, the
-  resume checkpoint `qc/reagent_screen_features.csv` and `qc/reagent_screen_thumbs/<scene_uid>_<marker>.png`.
+  resume checkpoint `qc/reagent_screen_features.csv`, `qc/reagent_screen_thumbs/<scene_uid>_<marker>.png`
+  (256 px, 2 x 2 block means; roughly 250-350 MB on LS) and, during a `--reread`,
+  `qc/reagent_screen_reread.json`.
 - **How:** a tile touching a pixel at the clip ceiling in any plane, or under half tissue, is skipped;
   a tile position is never drawn twice. Every feature is taken over the tile's tissue pixels only (the
   overview mask under it, and scanned): a batch shifts tissue but not glass.
@@ -1220,8 +1222,8 @@ the operator to confirm or reject in Set up. It never assigns one.
   controls (`ls_reagent_controls.manifest_lookup`) are listed but not scored; `rejected` sections stay in
   the population and are never proposed again. Guards: DAPI tissue fraction within the study's range,
   and the file's marker exposure equal to that marker's modal one (recorded for the scan's plane-1
-  marker only; any other marker says so in `note`). The strip shows, per marker, one tile of each of
-  the top 8 candidates beside 3 median sections, all at that marker's display range.
+  marker only; any other marker says so in `note`). The strip shows, per marker, the stored thumbnail of
+  each of the top 8 candidates beside 3 median sections, all at that marker's display range.
 - **Settings:** `reagent_controls.declared`, `.files`, `.scenes`, `.rejected`, `acquisition`, `channels`.
 - **Limits:** cannot see isotype or pre-adsorbed controls; cannot tell a no-primary section from a
   failed stain or a non-expressing animal; thresholds stay provisional until a validation run on a
@@ -1233,8 +1235,11 @@ the operator to confirm or reject in Set up. It never assigns one.
   modification time, scene, planes, clip ceiling, zoom, feature constants), and a run reads only
   sections whose key is missing or changed. Scoring and the strip are always redone from the checkpoint
   and the stored thumbnails, so confirming or rejecting in Set up re-scores without reading a pixel.
-  `--force` reads every section again; `--limit N` reads at most N and leaves `reagent_screen.csv` as it
-  was until every section has features. A file that will not open, or a scene missing from it, is
+  `--force` only overrides the run gate and still resumes. `--reread` reads every section again, and is
+  resumable too: rows carry the reread's id, kept in `qc/reagent_screen_reread.json` until it finishes,
+  and any run while it is pending continues it. `--limit N` reads at most N and leaves
+  `reagent_screen.csv` as it was until every section has features. A thumbnail that cannot be saved is
+  reported, and the strip reads that tile again. A file that will not open, or a scene missing from it, is
   listed with empty features and a note, and is tried again next run.
   Reads no group key.
 
@@ -2194,7 +2199,8 @@ straight from `sys.argv`) without running it. A script with no options says "(no
 | `01l_scene_renders.py` | `--force` | off | redraw pictures that already exist (default skips them) |
 | `01l_scene_renders.py` | `--workers` | `DEFAULT_WORKERS` | CZIs drawn at once, while free RAM allows (default half the cores, at most 4: <DEFAULT_WORKERS> here) |
 | `01l_scene_renders.py` | `--limit` | `0` | stop after trying N scenes, drawn or not (0 = all) |
-| `01m_reagent_screen.py` | `--force` | off | screen even when the study does not ask for it, and read every section again rather than resume |
+| `01m_reagent_screen.py` | `--force` | off | screen even when the study does not ask for it (still resumes) |
+| `01m_reagent_screen.py` | `--reread` | off | read every section again rather than reuse the checkpoint; resumable, and a run while one is pending continues it |
 | `01m_reagent_screen.py` | `--limit` | `0` | read at most N sections this run (0: all); a later run resumes |
 | `02_pair_passes.py` | (none) |  |  |
 | `04a2_atlas_remerge.py` | `--dpi` | `300` |  |
@@ -4448,15 +4454,15 @@ The reagent-control signal screen: one row per section x marker. It proposes and
 
 #### `qc/reagent_screen.png`
 
-The contact strip the operator decides by eye: per marker, one native tile of each of the top 8 candidates beside 3 median sections of the same marker.
+The contact strip the operator decides by eye: per marker, the stored thumbnail of the first screened tile of each of the top 8 candidates, beside 3 median sections of the same marker.
 
 - **Written by:** 01m_reagent_screen.py
 - **Read by:** a person
-- **Format:** RGB PNG: per marker one row of 256 px pictures (the stored 128 px thumbnail of each section's first tile, drawn at twice its size), every picture of a marker at that marker's `qc/display_ranges.json` range. Rewritten every screen, so no old candidate lingers.
+- **Format:** RGB PNG: per marker one row of 256 px pictures, each the stored thumbnail (the 512 px native tile as 2 x 2 block means) drawn 1:1, every picture of a marker at that marker's `qc/display_ranges.json` range. Rewritten every screen, so no old candidate lingers.
 
 #### `qc/reagent_screen_features.csv`
 
-01m's resume checkpoint: the features of each section x marker, written atomically after every file. A row is reused while its `fingerprint` still matches; scoring (z, candidate, status) is always redone from these rows, so an answer in Set up re-scores without reading a pixel. `--force` starts it afresh.
+01m's resume checkpoint: the features of each section x marker, written atomically after every file (a stop loses at most the file being read). A row is reused while its `fingerprint` still matches (and, during a `--reread`, while it was read under that reread); scoring (z, candidate, status) is always redone from these rows, so an answer in Set up re-scores without reading a pixel. `--force` only overrides the run gate and keeps these rows; `--reread` reads every section again, resumably.
 
 - **Written by:** 01m_reagent_screen.py
 - **Read by:** 01m_reagent_screen.py
@@ -4472,7 +4478,8 @@ The contact strip the operator decides by eye: per marker, one native tile of ea
 | `tiles` | int |  | How many tiles were read (at most 12). |
 | `tile_x` | int | px | The first tile's left edge, native pixels from the scene's own origin; empty when no tile was read. |
 | `tile_y` | int | px | The first tile's top edge, likewise. |
-| `fingerprint` | text |  | A hash of what the features depend on: the CZI's size and modification time, the scene index, the planes read and whether F1 is skipped, the clip ceiling, the overview zoom, the feature constants and FEATURE_VERSION. A mismatch means the section is read again. |
+| `fingerprint` | text |  | A hash of what the features depend on: the CZI's size and modification time, the scene index, the planes read and whether F1 is skipped, the clip ceiling, the overview zoom, the feature constants and FEATURE_VERSION (3: thumbnails at 256 px). A mismatch means the section is read again. |
+| `reread` | text |  | The id of the `--reread` this row was read under, or empty. While a reread is in progress (`qc/reagent_screen_reread.json`), a row with another id is read again. |
 
 #### `qc/reagent_screen_thumbs/<scene_uid>_<marker>.png`
 
@@ -4480,7 +4487,15 @@ A small picture of each section's first screened tile, per marker, so the contac
 
 - **Written by:** 01m_reagent_screen.py
 - **Read by:** 01m_reagent_screen.py
-- **Format:** 16-bit greyscale PNG, 128 x 128: the 512 px native tile as 4 x 4 block means, raw values (no display range).
+- **Format:** 16-bit greyscale PNG, 256 x 256: the 512 px native tile as 2 x 2 block means, raw values (no display range). About 100-140 KB each, so roughly 250-350 MB for the ~2,500 LS sections.
+
+#### `qc/reagent_screen_reread.json`
+
+A `--reread` in progress. Every 01m run while it exists continues that reread (sections already read under it are kept); removed when the reread has read every section.
+
+- **Written by:** 01m_reagent_screen.py
+- **Read by:** 01m_reagent_screen.py
+- **Format:** JSON: `{"id": "<start time>-<pid>"}`, the id stamped in the checkpoint's `reread` column.
 <!-- /tables:files -->
 
 ## 10. Tests

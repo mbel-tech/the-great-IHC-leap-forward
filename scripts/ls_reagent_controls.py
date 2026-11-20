@@ -215,14 +215,21 @@ def manifest_lookup(config, markers=()):
     e = entries(config)
     if not e["files"] and not e["scenes"]:
         return {}
+    return expand(config, manifest_rows(config, markers))
+
+
+def manifest_rows(config, markers=()):
+    """00's manifest_scenes.csv under `config["out_root"]`, one row per scene x
+    marker: under `multiplex` (pass the study's markers) each scene row is
+    repeated for every marker it carries. [] when there is no manifest yet."""
     path = os.path.join((config or {}).get("out_root") or "", "manifest", "manifest_scenes.csv")
     if not os.path.exists(path):
-        return {}
+        return []
     with open(path, newline="", encoding="utf-8") as fh:
         rows = list(csv.DictReader(fh))
     rows += [dict(r, marker_channel=m) for r in list(rows) for m in markers or ()
              if m and m != r["marker_channel"]]
-    return expand(config, rows)
+    return rows
 
 
 def reagent_order(uids, lookup, marker=None):

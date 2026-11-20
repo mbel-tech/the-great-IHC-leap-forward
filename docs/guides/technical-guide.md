@@ -1747,7 +1747,8 @@ Stage `roi_dataset`. Turns the per-nucleus rows into per-ROI numbers. Still blin
 
 - **Reads:** `results/roi_nuclei.csv`, the done log, the ROI boxes and geometry.
 - **Writes:** `results/roi_measurements.csv`, `results/positivity_cuts.csv`,
-  `results/detector_specificity.csv` and `results/roi_geometry_changed.csv`.
+  `results/detector_specificity.csv` and `results/roi_geometry_changed.csv`; and
+  `results/reagent_controls.csv` when a measured section is a confirmed reagent control.
 - **How:** **positivity cut** per section and marker from that section's background discs:
   median + 3 × 1.4826 × MAD, needing at least 5 background nuclei (else no cut, and positives are blank,
   not zero). **Specificity:** the fraction of background nuclei above the cut, a measured false-positive
@@ -1756,7 +1757,13 @@ Stage `roi_dataset`. Turns the per-nucleus rows into per-ROI numbers. Still blin
   nucleus-shaped. Censored nuclei count as positive; artifact and off-tissue nuclei are not counted. Disc
   areas come from 05a's measured semi-axes. A marker segmented on its own channel has no denominator:
   fraction positive and total density are withheld and positive density is reported.
-- **Settings:** `section_thickness_um`, `pixel_size_um`, `detection`.
+  **Reagent controls** (per section x marker, from config through `ls_reagent_report.study_lookup`) are
+  routed out in the streaming pass: none of their nuclei reach the files above, the cuts file, h or the
+  Abercrombie fallbacks, and no zero row is written for them. They still pass the join and geometry
+  checks. Their own cut is taken by the same rule, and `ls_reagent_report.report_rows` writes
+  `results/reagent_controls.csv` beside the paired stained sections; with no control, a previous file
+  is removed.
+- **Settings:** `section_thickness_um`, `pixel_size_um`, `detection`, `reagent_controls`.
 
 ### `06b_join_sampling.py`
 
@@ -1784,9 +1791,15 @@ Stage `excel_sample`. The analysis table as a workbook, one row per ROI per anim
   column from 06b's `results/animal_metadata.csv` (joined by animal, so it follows the sheet, `--xlsx`,
   ID column and matching 06b used; without that file or column it says so and leaves the column blank).
 - **Writes:** `results/roi_dataset.xlsx` (`--out` to change), with sheets `by_roi`, `by_disc`,
-  `by_section` and `coverage`, written with openpyxl (bold header, frozen first row, sized columns).
+  `by_section` and `coverage`, written with openpyxl (bold header, frozen first row, sized columns),
+  and a `Reagent controls` sheet when 06a's `results/reagent_controls.csv` has rows: the same table
+  under a plain-language header (what A and B mean, isotype rows test the antibody and no-primary rows
+  the secondary, a background disc is not a reagent control). `write_workbook` takes an optional third
+  item per sheet, the lines above the table.
 - **How:** groups 06a's rows. Withheld values (no cut, no denominator, Abercrombie not applied) are blank,
-  with the reason carried from 06a.
+  with the reason carried from 06a. Reagent-control boxes are left out of `planned` and `coverage`. The
+  limitation text (`ls_reagent_report.limitation_text`, printed and on the sheet) points to the
+  `Reagent controls` sheet only when a `no_primary` row exists; otherwise it is the existing statement.
 - **Failure and re-run:** refuses when `roi_nuclei.csv` or `roi_measurements.csv` is missing. It does not
   compare their dates, so run 06a first (06e always does). Buildable at any point during detection.
 
@@ -1795,7 +1808,7 @@ Stage `excel_sample`. The analysis table as a workbook, one row per ROI per anim
 Stage `excel_slide`. The same dataset one level finer: `results/roi_dataset_by_slide.xlsx` with sheets
 `by_slide` and `by_section`, so the spread within an animal is visible. A slide is one CZI file
 (`LS22_s01a`). Only ROIs placed on a slide appear; there are no zero rows for regions nobody marked.
-Formatted by 06c's `write_workbook`.
+Formatted by 06c's `write_workbook`. Reagent-control boxes are left out of `coverage`, as in 06c.
 
 ### `06e_refresh_loop.py`
 
@@ -2063,9 +2076,29 @@ gives a control file the subject, slide and replicate its name does not carry. `
 `reagent_order` splits uids into controls and the rest, each in natural order; `series_animal` gives the
 internal series key (`<animal>#rc` for a control) that readers grouping by animal use, and `series_label`
 prints it; `warn_unanswered` reads `qc/reagent_screen.csv` and returns the warning 05b and 05c print. It
-reads no group key. Settings: `reagent_controls.declared`, `.files`, `.scenes`, `.paired_with`, `.rejected`
+reads no group key. `manifest_rows` is that manifest, one row per scene x marker (multiplex-aware). Settings:
+`reagent_controls.declared`, `.files`, `.scenes`, `.paired_with`, `.rejected`
 and `.extra_patterns`, checked by `ls_config`. Used by `ls_config`, the manifest, 01, 01b, 01d, 01m, 04b, 04c,
-05b, 05c and the app.
+05b, 05c, 06a, `ls_reagent_report` and the app.
+
+### `ls_reagent_report.py`
+
+Shared module: reagent controls, measured. Used by 06a (which writes `results/reagent_controls.csv`), 06c
+(the `Reagent controls` sheet) and 06d. `study_lookup(config)` and `study_rows(config)` are
+`ls_reagent_controls.manifest_lookup` / `manifest_rows` with the study's markers under `multiplex`;
+`drop_controls(rows, lookup)` removes control (scene, marker) rows. `pairing_for(uid, marker, lookup,
+scene_rows, config)` returns `(kind, stained uids)`: the operator's `reagent_controls.paired_with` (a uid or a
+file, either side), else stained scenes on the same file, else the same animal's of that marker, else every
+stained section of that marker (`study_wide`); a control is never paired with. `report_rows(control_nuclei,
+stained_nuclei, cuts, pairing, meta, areas)` gives one row per control x marker x region (`COLUMNS`). A: the
+control under its own cut (`ls_overlay.section_cut`, `is_positive`; blank, never 0, under 5 background nuclei),
+beside each paired section's own pct (median, min, max) and `specificity_margin`. B: control / stained nuclear
+median (censored nuclei out of both), and the control scored against EACH paired section's own cut, median and
+min-max (never a pooled cut); empty under `study_wide`, with `batch` in `note`. For a marker segmented on its
+own channel every fraction is withheld and `positive_per_mm2` (profiles over the usable ROI area, not
+Abercrombie-corrected) is given. A region with discs and no nucleus still gets a row. `limitation_text(rows)`
+is 06c's existing statement unless a `no_primary` row exists; `sheet_header(rows)` is the sheet's header,
+which says a background disc is not a reagent control. It reads no group key.
 
 ### `ls_reagent_screen.py`
 
@@ -2382,6 +2415,7 @@ straight from `sys.argv`) without running it. A script with no options says "(no
 | `ls_progress.py` | (none) |  |  |
 | `ls_project.py` | (none) |  |  |
 | `ls_reagent_controls.py` | (none) |  |  |
+| `ls_reagent_report.py` | (none) |  |  |
 | `ls_reagent_screen.py` | (none) |  |  |
 | `ls_sampling.py` | (none) |  |  |
 | `ls_segment.py` | (none) |  |  |
@@ -4225,6 +4259,37 @@ The exact cut per section and marker, at full precision, so 06i draws the same c
 | `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
 | `cut` | float | grey value | The cut, as Python's repr of the float. |
+
+#### `results/reagent_controls.csv`
+
+The reagent controls, measured: one row per reagent-control section x marker x region. 06a keeps these sections out of roi_measurements.csv, detector_specificity.csv, positivity_cuts.csv and h, and reports them here (ls_reagent_report.report_rows). A: what the positivity rule calls on the control under its own cut, beside the paired stained sections. B: the level comparison and the control scored against each paired section's own cut, empty under study-wide pairing. Written only when a measured section is a confirmed reagent control; otherwise a previous file is removed. 06c turns it into the "Reagent controls" sheet.
+
+- **Written by:** 06a_roi_dataset.py
+- **Read by:** 06c_excel_dataset.py
+
+| Column | Type | Units | Meaning |
+|------------|------|------|---------------------------|
+| `scene_uid` | text |  | The reagent-control section: `<subject>_s<NN><replicate>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `file` | text |  | The CZI file the section is on, from the manifest. |
+| `kind` | text |  | The reagent-control kind confirmed in Set up: `no_primary`, `unstained`, `isotype`, `preadsorbed` or `other`. |
+| `marker` | text |  | The marker this row is a reagent control for. A multiplex scene that is a control for one marker is stained, and in roi_measurements.csv, for the others. |
+| `region` | text |  | The atlas region of the control's ROI discs. |
+| `pairing` | text |  | Which stained sections it is compared with: `operator` (reagent_controls.paired_with), `same_file`, `same_animal`, or `study_wide` (every stained section of the marker). |
+| `n_nuclei` | integer | count | Kept nuclei in the control's ROI discs in this region (artifact and off-tissue dropped, as in 06a). |
+| `n_positive` | integer | count | A: nuclei the positivity rule calls positive under the control's OWN per-section cut (censored counts as positive). Blank when the control has fewer than 5 usable background-disc nuclei. |
+| `pct_positive` | number | % | A: 100 x n_positive / n_nuclei. Blank with no own cut, and for a marker segmented on its own channel (no denominator). |
+| `positive_per_mm2` | number | per mm2 | A: n_positive over the usable ROI area (outline x usable fraction), profiles, not Abercrombie-corrected. The number to read for a marker segmented on its own channel. |
+| `stained_pct_median` | number | % | A, beside: the median over the paired stained sections of each one's pct_positive in this region, under its own cut. Blank for an own-channel marker. |
+| `stained_pct_min` | number | % | A, beside: the lowest paired stained section's pct_positive. |
+| `stained_pct_max` | number | % | A, beside: the highest paired stained section's pct_positive. |
+| `specificity_margin` | number | % points | A: stained_pct_median - pct_positive. |
+| `control_nuclear_median` | number | intensity | B: median marker_median of the control's uncensored ROI nuclei in this region. Empty under study_wide pairing. |
+| `stained_nuclear_median` | number | intensity | B: the same over the paired stained sections' ROI nuclei, pooled. Empty under study_wide pairing. |
+| `level_ratio` | number | ratio | B: control_nuclear_median / stained_nuclear_median. Empty under study_wide pairing: across batches it measures the batch. |
+| `pct_above_paired_cut` | number | % | B: the control's ROI nuclei scored against EACH paired stained section's own cut; the median across those sections. Never a pooled cut. Empty under study_wide pairing and for an own-channel marker. |
+| `pct_above_paired_cut_min` | number | % | B: the lowest of those per-section scores. |
+| `pct_above_paired_cut_max` | number | % | B: the highest of those per-section scores. |
+| `note` | text |  | Why a column is blank or empty: no own cut, no denominator, paired sections not measured yet, or study-wide pairing (batch). |
 
 #### `results/roi_geometry_changed.csv`
 

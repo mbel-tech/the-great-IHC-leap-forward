@@ -45,6 +45,16 @@ could be formed - blank rather than 0, which would read as "looked and found
 none". With no no-primary control and no tERK normaliser an absolute positivity
 rate is not defensible; the comparison between arms at matched levels is, and
 `detector_specificity.csv` carries the false-positive rate to quote with it.
+A study with a confirmed no-primary reagent control gets a pointer to the
+"Reagent controls" sheet in place of that statement, printed and on the sheet
+(ls_reagent_report.limitation_text); without one it is unchanged.
+
+**Reagent controls** (no primary, isotype, unstained ...) are not in any sheet
+above: 06a routes their rows to `results/reagent_controls.csv`, and when that
+file has rows they are the "Reagent controls" sheet, under a plain-language
+header. Their boxes are left out of `planned` and `coverage` too, by the same
+config lookup 06a uses (ls_reagent_controls), so an animal whose only sections
+are controls is not reported as unmeasured.
 
 **What "total tissue area" means here.** It is the area of the ROI discs
 themselves, mapped onto the slide and summed - not the whole section, and not a
@@ -72,6 +82,7 @@ import collections
 import csv
 import importlib.util
 import os
+import re
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _spec = importlib.util.spec_from_file_location("_g5", os.path.join(_HERE, "05a_roi_geometry.py"))
@@ -96,6 +107,7 @@ if _HERE not in sys.path:
 # lines copy-pasted into every stage.
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
 import ls_naming as NM  # noqa: E402
+import ls_reagent_report as RR  # noqa: E402
 OUT_ROOT = G5.OUT_ROOT
 RESULTS = os.path.join(OUT_ROOT, "results")
 NUCLEI_CSV = os.path.join(RESULTS, "roi_nuclei.csv")
@@ -145,24 +157,35 @@ def write_workbook(path, sheets):
     Shared with 06d so the two datasets are formatted by the same code - bold
     header, frozen first row, columns sized to their contents. A second copy of
     this would be a second thing to keep in step for no benefit.
+
+    A sheet may be (name, rows, lines): the lines are written one per row above
+    the table, with a blank row between, and the panes freeze under the table's
+    header instead of the first row.
     """
     from openpyxl import Workbook
     from openpyxl.styles import Font
     from openpyxl.utils import get_column_letter
 
     wb = Workbook()
-    for i, (name, data) in enumerate(sheets):
+    for i, sheet in enumerate(sheets):
+        name, data = sheet[0], sheet[1]
+        lines = list(sheet[2]) if len(sheet) > 2 else []
         ws = wb.active if i == 0 else wb.create_sheet()
         ws.title = name
+        for line in lines:
+            ws.append([line])
+        if lines:
+            ws.append([])
         if not data:
             continue
+        top = len(lines) + (1 if lines else 0) + 1
         cols = list(data[0].keys())
         ws.append(cols)
         for c in range(1, len(cols) + 1):
-            ws.cell(row=1, column=c).font = Font(bold=True)
+            ws.cell(row=top, column=c).font = Font(bold=True)
         for row in data:
             ws.append([row[c] for c in cols])
-        ws.freeze_panes = "A2"
+        ws.freeze_panes = f"A{top + 1}"
         for c, col in enumerate(cols, 1):
             width = max(len(str(col)), *(len(str(r[col])) for r in data)) + 2
             ws.column_dimensions[get_column_letter(c)].width = min(width, 30)
@@ -188,6 +211,13 @@ def resolve_groups(config_groups, meta_csv=None):
             + "\n  06b_join_sampling.py is the unblinding - fix config.json or rerun 06b.")
     return {**meta, **config_groups}
 
+def _cell(v):
+    """A CSV string as the number it is, so the sheet sorts and sums; text stays."""
+    if not isinstance(v, str) or not re.fullmatch(r"-?\d+(\.\d+)?", v):
+        return v
+    return float(v) if "." in v else int(v)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=XLSX)
@@ -206,7 +236,14 @@ def main(argv=None):
         return 1
 
     meas = G5.load_csv(MEAS_CSV)
-    boxes = G5.all_boxes()          # both markers; see 05a.all_boxes
+    # Reagent controls are not planned sections of the experiment: 06a writes
+    # none of their rows here, so their boxes leave `planned` and coverage too.
+    # Per (section, marker), from config - a multiplex scene that is a control
+    # for one marker is still planned for the others.
+    rc_lookup = RR.study_lookup(CONFIG)
+    boxes = RR.drop_controls(G5.all_boxes(), rc_lookup)   # both markers
+    rc_path = os.path.join(os.path.dirname(MEAS_CSV), RR.REPORT_CSV)
+    rc_rows = G5.load_csv(rc_path) if os.path.exists(rc_path) else []
     groups = resolve_groups((CONFIG.get("groups") or {}).get("by_animal") or {})
     envs = animal_environment()
 
@@ -259,7 +296,8 @@ def main(argv=None):
               f"(e.g. {sorted(orphaned)[0]}). The two files are not from the "
               f"same run. Re-run 06a_roi_dataset.py.")
         return 1
-    behind = nuc_secs - measured
+    # A reagent control is in roi_nuclei.csv and never in roi_measurements.csv.
+    behind = nuc_secs - measured - {u for u, _m in rc_lookup}
     if behind:
         print(f"  06a is {len(behind)} section(s) behind roi_nuclei.csv - "
               f"reporting the {len(measured)} it covers. Normal while "
@@ -363,7 +401,9 @@ def main(argv=None):
             # no-primary control and no tERK normaliser, an absolute positivity
             # rate is not a claim these data support; the comparison between
             # arms at matched levels is. detector_specificity.csv carries the
-            # false-positive rate that has to be quoted with it.
+            # false-positive rate that has to be quoted with it. A study with a
+            # no-primary reagent control reads it against the "Reagent
+            # controls" sheet instead (ls_reagent_report.limitation_text).
             "n_positive": npos,
             "frac_positive": (round(npos / n, 4)
                               if (full and n and not no_den) else ""),
@@ -487,13 +527,20 @@ def main(argv=None):
             "percent": round(100 * done / len(pl), 1) if pl else "",
         })
 
-    write_workbook(args.out, (("by_roi", by_roi), ("by_disc", by_disc),
-                              ("by_section", by_section), ("coverage", coverage)))
+    sheets = [("by_roi", by_roi), ("by_disc", by_disc),
+              ("by_section", by_section), ("coverage", coverage)]
+    if rc_rows:
+        sheets.append(("Reagent controls", [{k: _cell(v) for k, v in r.items()}
+                                            for r in rc_rows],
+                       RR.sheet_header(rc_rows)))
+    write_workbook(args.out, sheets)
 
     print("=" * 72)
     print(f"{len(by_roi)} rows (one per ROI per sample) -> {args.out}")
     print(f"  sheets: by_roi, by_disc ({len(by_disc)}), "
-          f"by_section ({len(by_section)}), coverage")
+          f"by_section ({len(by_section)}), coverage"
+          + (f", Reagent controls ({len(rc_rows)})" if rc_rows else ""))
+    print(f"  {RR.limitation_text(rc_rows)}")
     # Sections, not by_section rows: under `multiplex` a section has a row per
     # marker, and counting rows would count it once per marker.
     tr = collections.Counter(

@@ -5802,6 +5802,146 @@
    ]
   },
   {
+   "path": "results/reagent_controls.csv",
+   "names": [
+    "reagent_controls.csv"
+   ],
+   "writer": "06a_roi_dataset.py",
+   "what": "The reagent controls, measured: one row per reagent-control section x marker x region. 06a keeps these sections out of roi_measurements.csv, detector_specificity.csv, positivity_cuts.csv and h, and reports them here (ls_reagent_report.report_rows). A: what the positivity rule calls on the control under its own cut, beside the paired stained sections. B: the level comparison and the control scored against each paired section's own cut, empty under study-wide pairing. Written only when a measured section is a confirmed reagent control; otherwise a previous file is removed. 06c turns it into the \"Reagent controls\" sheet.",
+   "readers": [
+    "06c_excel_dataset.py"
+   ],
+   "columns_from": "ls_reagent_report.py:COLUMNS",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "The reagent-control section: `<subject>_s<NN><replicate>_sc<NN>`, from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "file",
+     "type": "text",
+     "units": "",
+     "meaning": "The CZI file the section is on, from the manifest."
+    },
+    {
+     "name": "kind",
+     "type": "text",
+     "units": "",
+     "meaning": "The reagent-control kind confirmed in Set up: `no_primary`, `unstained`, `isotype`, `preadsorbed` or `other`."
+    },
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker this row is a reagent control for. A multiplex scene that is a control for one marker is stained, and in roi_measurements.csv, for the others."
+    },
+    {
+     "name": "region",
+     "type": "text",
+     "units": "",
+     "meaning": "The atlas region of the control's ROI discs."
+    },
+    {
+     "name": "pairing",
+     "type": "text",
+     "units": "",
+     "meaning": "Which stained sections it is compared with: `operator` (reagent_controls.paired_with), `same_file`, `same_animal`, or `study_wide` (every stained section of the marker)."
+    },
+    {
+     "name": "n_nuclei",
+     "type": "integer",
+     "units": "count",
+     "meaning": "Kept nuclei in the control's ROI discs in this region (artifact and off-tissue dropped, as in 06a)."
+    },
+    {
+     "name": "n_positive",
+     "type": "integer",
+     "units": "count",
+     "meaning": "A: nuclei the positivity rule calls positive under the control's OWN per-section cut (censored counts as positive). Blank when the control has fewer than 5 usable background-disc nuclei."
+    },
+    {
+     "name": "pct_positive",
+     "type": "number",
+     "units": "%",
+     "meaning": "A: 100 x n_positive / n_nuclei. Blank with no own cut, and for a marker segmented on its own channel (no denominator)."
+    },
+    {
+     "name": "positive_per_mm2",
+     "type": "number",
+     "units": "per mm2",
+     "meaning": "A: n_positive over the usable ROI area (outline x usable fraction), profiles, not Abercrombie-corrected. The number to read for a marker segmented on its own channel."
+    },
+    {
+     "name": "stained_pct_median",
+     "type": "number",
+     "units": "%",
+     "meaning": "A, beside: the median over the paired stained sections of each one's pct_positive in this region, under its own cut. Blank for an own-channel marker."
+    },
+    {
+     "name": "stained_pct_min",
+     "type": "number",
+     "units": "%",
+     "meaning": "A, beside: the lowest paired stained section's pct_positive."
+    },
+    {
+     "name": "stained_pct_max",
+     "type": "number",
+     "units": "%",
+     "meaning": "A, beside: the highest paired stained section's pct_positive."
+    },
+    {
+     "name": "specificity_margin",
+     "type": "number",
+     "units": "% points",
+     "meaning": "A: stained_pct_median - pct_positive."
+    },
+    {
+     "name": "control_nuclear_median",
+     "type": "number",
+     "units": "intensity",
+     "meaning": "B: median marker_median of the control's uncensored ROI nuclei in this region. Empty under study_wide pairing."
+    },
+    {
+     "name": "stained_nuclear_median",
+     "type": "number",
+     "units": "intensity",
+     "meaning": "B: the same over the paired stained sections' ROI nuclei, pooled. Empty under study_wide pairing."
+    },
+    {
+     "name": "level_ratio",
+     "type": "number",
+     "units": "ratio",
+     "meaning": "B: control_nuclear_median / stained_nuclear_median. Empty under study_wide pairing: across batches it measures the batch."
+    },
+    {
+     "name": "pct_above_paired_cut",
+     "type": "number",
+     "units": "%",
+     "meaning": "B: the control's ROI nuclei scored against EACH paired stained section's own cut; the median across those sections. Never a pooled cut. Empty under study_wide pairing and for an own-channel marker."
+    },
+    {
+     "name": "pct_above_paired_cut_min",
+     "type": "number",
+     "units": "%",
+     "meaning": "B: the lowest of those per-section scores."
+    },
+    {
+     "name": "pct_above_paired_cut_max",
+     "type": "number",
+     "units": "%",
+     "meaning": "B: the highest of those per-section scores."
+    },
+    {
+     "name": "note",
+     "type": "text",
+     "units": "",
+     "meaning": "Why a column is blank or empty: no own cut, no denominator, paired sections not measured yet, or study-wide pairing (batch)."
+    }
+   ]
+  },
+  {
    "path": "results/roi_geometry_changed.csv",
    "names": [
     "roi_geometry_changed.csv"

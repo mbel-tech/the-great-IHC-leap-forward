@@ -815,6 +815,9 @@ STAGES = [
           script="06c_excel_dataset.py",
           outputs=["results/roi_dataset.xlsx"],
           needs=["roi_dataset"],
+          # Which sections are reagent controls leaves their boxes out of
+          # `planned` and coverage; their report is 06a's output.
+          settings=["reagent_controls.files", "reagent_controls.scenes"],
           blurb="One row per ROI per sample, plus per-disc, per-section and "
                 "coverage sheets. A row here is one animal, which is why the "
                 "per-ROI figures read this one. Buildable mid-run."),
@@ -823,6 +826,7 @@ STAGES = [
           script="06d_excel_by_slide.py",
           outputs=["results/roi_dataset_by_slide.xlsx"],
           needs=["roi_dataset"],
+          settings=["reagent_controls.files", "reagent_controls.scenes"],
           blurb="The same table one level finer, so within-animal spread is "
                 "visible. plot_by_slide.R draws that spread; the per-ROI "
                 "figures and their statistics read 06c's per-animal sheet."),

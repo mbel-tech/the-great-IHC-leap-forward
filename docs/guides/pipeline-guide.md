@@ -1900,6 +1900,12 @@ internal references stand in — off-tissue glass, nuclei-poor fibre tracts with
 and background around each object — but none of them is a no-primary control, and the background
 reference discs are not negative controls either: the primary antibody is on that tissue too.
 
+A study that does have reagent controls (marked in Set up, or found by stage 01m and confirmed) is
+different. Its controls are measured and reported on their own, in `results/reagent_controls.csv` and
+the "Reagent controls" sheet of the 06c workbook, so an absolute rate can be read against what the
+positivity rule calls on a section with no specific signal. The paragraph above is for a study without
+them, and a background disc is still not a negative control.
+
 **Tiles are JPEG-XR compressed, and typically lossily.** This was fixed at acquisition and cannot be
 undone.
 

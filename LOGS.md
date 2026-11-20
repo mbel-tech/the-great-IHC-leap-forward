@@ -9,6 +9,37 @@ where things landed, not which plausible-looking route was tried and abandoned, 
 
 ---
 
+## 2026-11-20 - Reagent controls: declared, kept out, measured, reported (docs)
+
+**Changed:** the pipeline now has a notion of a **reagent control**: a section stained without the
+primary antibody (or secondary only), with an isotype IgG, with a pre-adsorbed antibody, or unstained.
+New study asks No / Yes / Not sure; file and folder names are scanned (`ls_reagent_controls`) and the
+operator confirms each match, its kind and its markers (config `reagent_controls`). Confirmed controls
+leave the display ranges, the 05b tuning sample and the experimental rows of 06a-06d, get a series of
+their own in stage 04, and are measured first by 05c. 06a writes `results/reagent_controls.csv` and
+`results/reagent_control_cuts.csv`; 06c has a "Reagent controls" sheet. Part A is the rule's positive
+rate on the control under its own cut, beside the paired stained sections'. Part B scores the control
+against each paired section's own cut (median and min-max, never one pooled cut) and is left empty,
+with a note, under study-wide pairing. Stage 01m screens for unlabelled candidates with three offset-
+and gain-invariant features (nuclear spot enrichment, between-marker Spearman, tail spread; candidate
+when every available robust z is at least 3 and at least two features exist) and only proposes. README,
+wiki, user guide, pipeline guide and methods guide (§12.1) say so; REFERENCES.md has Burry 2011,
+Hewitt 2014, Torlakovic 2014 and Wizenty 2018.
+
+**Why:** the pipeline said absolute positivity was not defensible without no-primary controls and could
+not use one when a study had it; a control also entered the group data as an animal with very low
+signal. Absolute level and tissue/background contrast were ruled out as screen features, because
+LOGS 2026-08-12 found a ~2x AF568 background split between animal batches, which such a feature would
+flag instead of controls.
+
+**Cost / limits:** the "no no-primary controls" statements are unchanged for a study without controls;
+a background disc is still not a negative control. The screen cannot see isotype or pre-adsorbed
+controls and cannot tell a no-primary section from a failed stain or a non-expressing animal. Its
+z >= 3 threshold is provisional until it is run on a study with known controls (plan Task 8, waiting
+for the operator's data); on LS, which has none, it must give zero candidates.
+
+---
+
 ## 2026-11-20 - Slide manifest: slides per animal, checked against the workbook (app / tests / docs)
 
 **Changed:** Set up > Slides has a **Slide manifest…** button. It lists each animal in the slides

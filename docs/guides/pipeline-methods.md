@@ -650,6 +650,68 @@ re-derive it. They used to, and the two implementations had drifted — the Aber
 computed per marker and region in one and per animal and region in the other, with nothing
 comparing them. A regression test now does.
 
+## 12.1 Reagent controls
+
+A reagent control is a section stained without the primary antibody (with or without the secondary),
+with a non-immune IgG of the primary's isotype, with an antibody pre-adsorbed against its peptide, or
+not stained at all. The kinds, and what each tests, follow Burry (2011), Hewitt et al. (2014) and
+Torlakovic et al. (2014): omitting the primary tests the secondary and the detection, while an isotype
+or pre-adsorbed control tests the specificity of the antibody itself. Knockout or non-expressing
+tissue is not a reagent control here; it is experimental tissue stained normally. The background
+reference discs are not reagent controls either.
+
+*Naming.* The operator says whether the slide folder holds reagent controls (no, yes, or not sure).
+On every answer the path of each file, folders included, is scanned against a fixed set of tokens
+(no primary, secondary only, a marker named after "no", isotype or IgG, pre-adsorbed, unstained,
+negative control); each match is confirmed by the operator, with its kind and the markers it controls.
+Looser tokens such as `NC` or `ctrl` are only listed, never pre-ticked, and a token that is also a
+group label is not proposed. The flag is stored per scene and marker, so a section with the primary
+omitted on a slide of stained sections, and a multiplex slide that omits one primary, are both
+representable. It describes how the section was stained, not the animal or the treatment, and is not
+blinding information. A control file whose name has no animal ID is given one by the operator, and a
+control forms a series of its own in stage 04, so it cannot disturb the level order of the animal it
+came from.
+
+*The signal screen.* When the study is not sure, or says yes but names none, stage 01m reads twelve
+512 px tiles per section from inside the tissue at native resolution, skips tiles with clipped pixels,
+and ranks sections that look like a control. Three features are used, each unchanged by an additive
+offset or a multiplicative gain of the channel, because the background differs by about a factor of two
+between animal batches and any measure of absolute level or of tissue-to-background contrast would
+find the batch rather than a control. F1 is the fraction of bright local maxima that fall inside DAPI
+nuclei, over the nuclear area fraction: a nuclear stain is enriched, autofluorescent specks are not. F2
+is the Spearman correlation between two marker channels over tissue pixels, median over tiles, which
+is high when autofluorescence, broad-band across 425 to 738 nm (Wizenty et al., 2018), dominates
+both; it is undefined for a single-marker scan. F3 is log(p99.5 − p50) − log(p50 − p5), the weight of
+the bright tail, heavy for a specific stain. Each feature becomes a robust z across the study's
+sections of that marker (median and 1.4826 × MAD), signed so that control-like is positive. A section
+is a candidate when every available z is at least 3 and at least two features are available, and its
+tissue area and exposure time are ordinary for the study; it is ranked by its weakest z. The screen
+proposes and the operator confirms. It cannot see isotype or pre-adsorbed controls, it cannot tell a
+section stained without the primary from a failed stain or from an animal that does not express the
+marker, and its thresholds are provisional until it has been run on a study with known controls.
+
+*Keeping them out.* Confirmed controls are left out of the display ranges, the detection-tuning
+sample and every experimental output; they are still curated and detected, and 05c measures them
+first so that a partial run reports them. The flag says how a section was stained, not which animal it is, so it is not blinding information and the stages before the unblinding step read it.
+
+*What is reported.* Stage 06a writes `results/reagent_controls.csv`, one row per control section,
+marker and region, from the same nuclei and the same cut machinery as the stained sections, and the
+control's own cuts to `results/reagent_control_cuts.csv`. Part A is the share of the control's nuclei
+that its own per-section cut (median + 3 × 1.4826 × MAD of its own background-disc nuclei) calls
+positive: the false-positive rate of the positivity rule where there is no specific signal, including
+autofluorescence and non-specific secondary binding that is not uniform. It is shown beside the
+paired stained sections' rate in the same region and their difference, as a margin (a density per mm²
+for a marker segmented on its own channel). Part B compares levels: the control's median nuclear
+marker intensity over the stained sections', their ratio, and the share of the control's nuclei above
+the cut of each paired stained section, reported as the median and the minimum to maximum across those
+sections, never as one pooled cut. Pairing is, in order, stained scenes on the same file, then of the
+same animal and marker, then all stained sections of the marker; the operator can override it. Under
+that last, study-wide pairing, Part B is left empty with a note, because across batches a level ratio
+measures the batch and not the reagent. The 06c workbook carries the table as a "Reagent controls"
+sheet; with a no-primary control reported, its limitation text points there instead of saying that
+absolute rates are not defensible.
+
+# 13. Blinding
 # 13. Blinding
 
 No stage described in this document reads the treatment group. Every intermediate file is keyed
@@ -688,6 +750,9 @@ non-specific component is shared. Three internal references stand in for the mis
 optical zero from off-tissue glass, a tissue-negative floor from nuclei-poor fibre tracts within
 the same section, and object-level annulus background — but none of them is a no-primary
 control.
+
+A study with confirmed reagent controls has a number in their place; see §12.1. The paragraph above is
+for a study without them, and a background disc is still not a negative control.
 
 **Tiles are JPEG-XR compressed**, typically lossy, and this was fixed at acquisition.
 
@@ -774,6 +839,9 @@ immunofluorescence images using artificial intelligence. *Cell Reports Physical 
 Bookstein FL (1989). Principal warps: thin-plate splines and the decomposition of deformations.
 *IEEE Transactions on Pattern Analysis and Machine Intelligence* 11(6):567–585.
 
+Burry RW (2011). Controls for immunocytochemistry: an update. *Journal of Histochemistry and
+Cytochemistry* 59(1):6–12. https://doi.org/10.1369/jhc.2010.956920
+
 Carey H, Pegios M, Martin L, Saleeba C, Turner AJ, Everett NA, Bjerke IE, Puchades MA, Bjaalie
 JG, McMullan S (2023). DeepSlice: rapid fully automatic registration of mouse brain imaging to a
 volumetric atlas. *Nature Communications* 14:5884. https://doi.org/10.1038/s41467-023-41645-4
@@ -786,6 +854,11 @@ Platform. ImageJ/Fiji plugin.
 
 Klein S, Staring M, Murphy K, Viergever MA, Pluim JPW (2010). elastix: a toolbox for
 intensity-based medical image registration. *IEEE Transactions on Medical Imaging* 29(1):196–205.
+
+Hewitt SM, Baskin DG, Frevert CW, Stahl WL, Rosa-Molinar E (2014). Controls for
+immunohistochemistry: the Histochemical Society's standards of practice for validation of
+immunohistochemical assays. *Journal of Histochemistry and Cytochemistry* 62(10):693–697.
+https://doi.org/10.1369/0022155414545224
 
 Kuhn HW (1955). The Hungarian method for the assignment problem. *Naval Research Logistics
 Quarterly* 2(1–2):83–97.
@@ -814,10 +887,18 @@ American Statistical Association* 88(424):1273–1283.
 Schmidt U, Weigert M, Broaddus C, Myers G (2018). Cell detection with star-convex polygons.
 *Medical Image Computing and Computer Assisted Intervention (MICCAI) 2018*, LNCS 11071:265–273.
 
+Torlakovic EE, et al. (2014). Standardization of negative controls in diagnostic
+immunohistochemistry: recommendations from the international ad hoc expert panel. *Applied
+Immunohistochemistry and Molecular Morphology* 22(4):241–252.
+https://doi.org/10.1097/PAI.0000000000000069
+
 Weigert M, Schmidt U, Boothe T, Müller A, Dibrov A, Jain A, Wilhelm B, Schmidt D, Broaddus C,
 Culley S, Rocha-Martins M, Segovia-Miranda F, Norden C, Henriques R, Zerial M, Solimena M, Rink
 J, Tomancak P, Royer L, Jug F, Myers EW (2018). Content-aware image restoration: pushing the
 limits of fluorescence microscopy. *Nature Methods* 15:1090–1097.
+
+Wizenty J, et al. (2018). Autofluorescence: a potential pitfall in immunofluorescence-based
+inflammation grading. *Journal of Immunological Methods*.
 
 Wullimann MF, Rupp B, Reichert H (1996). *Neuroanatomy of the Zebrafish Brain: A Topological
 Atlas*. Birkhäuser Verlag, Basel.

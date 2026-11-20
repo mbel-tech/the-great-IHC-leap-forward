@@ -796,7 +796,8 @@ def with_options(stage, values=None):
 SETTING_SECTIONS = [
     ("folders", "Study and folders",
      "The study's name, where the slide files are, and where every output is written.",
-     ["study.name", "source_dir", "out_root", "export_dir"]),
+     ["study.name", "source_dir", "out_root", "export_dir",
+      "reagent_controls.declared"]),
     ("naming", "Slide file names",
      "How a file name says which animal and slide it is. A file whose name does not "
      "fit is invisible to every stage, so the pattern is checked against the real "

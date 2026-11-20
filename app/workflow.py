@@ -2161,6 +2161,23 @@ def detect_needs_redo(study):
     return None
 
 
+def limitation_text(out_root):
+    """The positivity limitation the Results page quotes: 06c's own words
+    (ls_reagent_report.limitation_text) over results/reagent_controls.csv when
+    06a has written it, else the text for a study with no no-primary control."""
+    import csv
+    import ls_reagent_report as LR          # numpy, through ls_overlay: only when asked
+    rows = []
+    path = os.path.join(out_root or "", "results", LR.REPORT_CSV)
+    if out_root and os.path.isfile(path):
+        try:
+            with open(path, newline="", encoding="utf-8") as fh:
+                rows = list(csv.DictReader(fh))
+        except (OSError, ValueError, csv.Error):
+            rows = []
+    return LR.limitation_text(rows)
+
+
 def notices(screen_sid, study):
     """Warnings a screen shows above its stages.
 

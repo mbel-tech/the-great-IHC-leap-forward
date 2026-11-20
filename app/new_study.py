@@ -16,6 +16,12 @@ left as a dye name or a placeholder like Marker1 ends up so in every folder and
 workbook. And the sampling workbook, optional: 06b first opened it at Unblind,
 the very end of a study, so a sheet it could not use was found months late.
 Set up > Slides can check it at any time (Check workbook).
+
+And whether the folder holds reagent controls (slides stained without the
+primary antibody, with an isotype IgG, or unstained): No, Yes or Not sure. The
+answer is `reagent_controls.declared`; with Yes or Not sure, or with No when a
+slide name plainly says it is one (LS45_noPrimary.czi), Create opens the
+confirm list (reagent_dialog) once the study is saved.
 """
 
 import os
@@ -29,6 +35,7 @@ import atlas_registry as AR
 import autodetect as AD
 import ls_channels as CH
 import ls_project as LP
+import reagent_dialog as RDLG
 import slide_read as SRD
 import theme as T
 from widgets import SHEET_FILTER, FileField
@@ -37,6 +44,13 @@ ATLASES = (
     (AR.SALMON, "Salmon (Vindas), ready-made plates ship with the app"),
     (AR.WULLIMANN, "Zebrafish, Wullimann 1996, ready-made plates ship with the app"),
     (AD.OWN_ATLAS, "My own atlas: add it in Set up > Atlas afterwards"),
+)
+
+#: The reagent-controls answer, as `reagent_controls.declared` stores it.
+REAGENT_ANSWERS = (
+    ("no", "No"),
+    ("yes", "Yes"),
+    ("unsure", "Not sure, check for me"),
 )
 
 
@@ -136,6 +150,29 @@ class NewStudyDialog(QDialog):
             self.atlas_group.addButton(rb)
             al.addWidget(rb)
 
+        # Reagent controls, built like Atlas. No is the default; the name scan
+        # runs on every answer, so a plainly named control is still asked about.
+        self.reagent_group = QButtonGroup(self)
+        self.reagent_buttons = {}
+        reagent_box = QWidget()
+        rl = QHBoxLayout(reagent_box)
+        rl.setContentsMargins(0, 0, 0, 0)
+        for i, (value, words) in enumerate(REAGENT_ANSWERS):
+            rb = QRadioButton(words)
+            rb.setProperty("reagent", value)
+            rb.setChecked(i == 0)
+            self.reagent_group.addButton(rb)
+            self.reagent_buttons[value] = rb
+            rl.addWidget(rb)
+        rl.addStretch(1)
+        reagent_note = QLabel("Reagent controls are slides or sections stained without the "
+                              "primary antibody (or with the secondary only), with an "
+                              "isotype/IgG instead, or unstained. They are kept out of the "
+                              "results and reported on their own. Yes or Not sure opens a "
+                              "list to confirm them; Set up > Slides has it too.")
+        reagent_note.setWordWrap(True)
+        reagent_note.setStyleSheet(T.HINT)
+
         self.name = QLineEdit()
         self.name.setPlaceholderText("the output folder's name")
 
@@ -151,6 +188,8 @@ class NewStudyDialog(QDialog):
         form.addRow("Section thickness", self.thickness)
         form.addRow("", thick_note)
         form.addRow("Atlas", atlas_box)
+        form.addRow("Reagent controls in this folder?", reagent_box)
+        form.addRow("", reagent_note)
         form.addRow("Sampling workbook", self.workbook)
         form.addRow("", book_note)
         form.addRow("Name (optional)", self.name)
@@ -177,6 +216,10 @@ class NewStudyDialog(QDialog):
     def _atlas(self):
         btn = self.atlas_group.checkedButton()
         return btn.property("atlas") if btn else AR.SALMON
+
+    def reagent_answer(self):
+        btn = self.reagent_group.checkedButton()
+        return btn.property("reagent") if btn else "no"
 
     def _read_slides(self):
         src = self.slides.value()
@@ -332,6 +375,7 @@ class NewStudyDialog(QDialog):
             QMessageBox.warning(self, "Marker names", "The marker names need a look first:\n\n"
                                 + "\n\n".join(named[:5]))
             return
+        project.set("reagent_controls.declared", self.reagent_answer(), by="New study")
         if self.workbook.value():
             # 06b's own --xlsx option, where the Unblind question and Set up keep it.
             project.set_stage_options("join_sampling", {"--xlsx": self.workbook.value()})
@@ -348,4 +392,17 @@ class NewStudyDialog(QDialog):
         AD.write_report(out, found)
         self.project, self.detection = project, found
         self.path = project.path
+        self._confirm_reagent_controls(project)
         self.accept()
+
+    def _confirm_reagent_controls(self, project):
+        """The confirm list, when the answer or the names call for it; saved after."""
+        src = self.slides.value()
+        if not RDLG.needs_confirming(project.cfg, src):
+            return
+        self.reagent_dialog = RDLG.ReagentControlsDialog(project, src, self)
+        if self.reagent_dialog.exec() and self.reagent_dialog.changed:
+            try:
+                project.save()
+            except LP.ProjectError as exc:
+                QMessageBox.warning(self, "Not saved", str(exc))

@@ -8,6 +8,7 @@ nothing here starts a thread or writes a file.
 
 import csv
 import os
+import re
 
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
@@ -271,6 +272,16 @@ class StageListScreen(QWidget):
         self.notice_box.setVisible(False)
         self._dismissed = None
         lay.addWidget(self.notice_box)
+        # Results quotes what an absolute positivity rate can claim: 06c's
+        # limitation, which names the "Reagent controls" sheet once the study
+        # has a no-primary reagent control measured (results/reagent_controls.csv).
+        self.limitation = None
+        if screen.sid == "results":
+            self.limitation = QLabel("")
+            self.limitation.setWordWrap(True)
+            self.limitation.setTextFormat(Qt.RichText)
+            self.limitation.setStyleSheet(QUIET)
+            lay.addWidget(self.limitation)
         self._plan = []
         # All stages spans the whole pipeline, unblinding included; running all of
         # it from one button is not something to offer.
@@ -319,6 +330,15 @@ class StageListScreen(QWidget):
             return
         self.open_requested.emit(sid)
 
+    def show_limitation(self, out_root):
+        """The limitation line on Results, from workflow.limitation_text."""
+        if self.limitation is None:
+            return
+        import html
+        text = html.escape(W.limitation_text(out_root))
+        text = re.sub(r"`([^`]+)`", r"<code>\1</code>", text)
+        self.limitation.setText("<b>What a positivity rate can claim.</b> " + text)
+
     def _run_all(self):
         if self._plan:
             self.run_requested.emit(list(self._plan))
@@ -330,6 +350,7 @@ class StageListScreen(QWidget):
     def refresh(self, study, running, project, busy=False):
         block = project.block if project is not None else {}
         self._study = study
+        self.show_limitation(getattr(study, "out_root", None))
         self._plan, held = W.run_plan(self.screen.sid, study)
         for sid, row in self.rows.items():
             st = S.BY_ID[sid]
@@ -870,6 +891,14 @@ class SetupScreen(QWidget):
         self.report_btn.setToolTip("Everything the slide headers say, and what the app did with it")
         self.report_btn.clicked.connect(self.show_slide_report)
         read.addWidget(self.report_btn)
+        # The confirm list New study opens: which slides or sections are
+        # reagent controls (stained without the primary, isotype, unstained).
+        self.reagent_btn = QPushButton("Reagent controls…")
+        self.reagent_btn.setToolTip(
+            "Confirm which slides or sections are reagent controls: stained without the "
+            "primary antibody, with an isotype/IgG instead, or unstained")
+        self.reagent_btn.clicked.connect(lambda _checked=False: self.show_reagent_controls())
+        read.addWidget(self.reagent_btn)
         self.detect_line = QLabel("")
         self.detect_line.setWordWrap(True)
         self.detect_line.setStyleSheet(QUIET)
@@ -1239,6 +1268,18 @@ class SetupScreen(QWidget):
         say("Pasted %d fish rows and %d columns into %s. Next: Match the sheet."
             % (len(rows) - 1, width, path))
         return path
+
+    def show_reagent_controls(self):
+        """The reagent-controls confirm list; Save writes its four keys."""
+        import reagent_dialog as RDLG
+        project = self.session.project
+        dlg = RDLG.ReagentControlsDialog(project, project.get("source_dir") or "", self)
+        if dlg.exec() and dlg.changed:
+            self.session.touch()
+            self.logged.emit("reagent controls confirmed: %d file(s), %d section(s)"
+                             % (len(project.get("reagent_controls.files") or {}),
+                                len(project.get("reagent_controls.scenes") or {})))
+        return dlg
 
     def show_slide_manifest(self):
         """Build the slide manifest off the window's thread; it opens in _slide_manifest_ready."""

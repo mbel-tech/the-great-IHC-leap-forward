@@ -67,6 +67,8 @@ import ls_atlas as AT  # noqa: E402
 # Whose curation a stored value holds, and the mark that follows a study when its
 # folder moves - the rule 04l and the importers share.
 import ls_curation as CU  # noqa: E402
+import ls_channels as CH  # noqa: E402
+import ls_reagent_controls as RC  # noqa: E402
 
 OUT_ROOT = CONFIG["out_root"]
 REFORMAT_DIR = os.path.join(OUT_ROOT, "reformatted")
@@ -136,6 +138,7 @@ footer{position:sticky;bottom:0;background:var(--bg);border-top:1px solid var(--
        padding:9px 16px;font-size:12px;color:var(--dim)}
 kbd{display:inline-block;padding:1px 6px;border:1px solid var(--line);border-radius:4px;
     background:#1c2027;font:600 11px ui-monospace,monospace}
+.rcbadge{background:#a05a00;color:#fff;border-radius:3px;padding:0 5px;font-size:11px;font-weight:600}
 </style>
 <header>
   <h1>Atlas level curator</h1>
@@ -314,6 +317,11 @@ let active = null;
 const el = id => document.getElementById(id);
 const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g,
   c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+// A reagent control (stained without the primary, with an isotype IgG, or
+// unstained) is curated exactly like any other section; the badge only says so.
+// The record's reagent_control is the kind, set by the generator from config.
+const rcBadge = d => d && d.reagent_control
+  ? ` <span class="rcbadge" title="${esc(d.reagent_control)}">reagent control</span>` : "";
 el("strip").addEventListener("click", e => {
   const c = e.target.closest && e.target.closest(".cell"); if(c) select(c.dataset.uid);
 });
@@ -415,7 +423,7 @@ function select(uid, keep){
   const list = rows(), i = list.findIndex(d=>d.uid===uid);
   const d = list[i], asg = assign(list)[i];
   el("bigSec").src = d.img;
-  el("secInfo").innerHTML = `<b>${d.uid}</b><br>section ${d.order} &middot; ${i+1} of ${list.length}`
+  el("secInfo").innerHTML = `<b>${d.uid}</b>${rcBadge(d)}<br>section ${d.order} &middot; ${i+1} of ${list.length}`
     + `<br>${asg.kind==="anchor"?"<span style='color:#a48bff'>anchor</span>"
         : asg.kind==="interp"?"interpolated"
         : asg.kind==="extrap"?"<span style='color:#d29922'>extrapolated</span>":"no anchors yet"}`;
@@ -503,6 +511,17 @@ render();
 """
 
 
+def reagent_kinds(config):
+    """{scene_uid: kind} for every section that is a reagent control for any marker."""
+    acq = config.get("acquisition") or {}
+    markers = (CH.marker_names(config)
+               if acq.get("layout", CH.LAYOUT_MULTIPLEX) == CH.LAYOUT_MULTIPLEX else ())
+    out = {}
+    for (uid, _m), entry in RC.manifest_lookup(config, markers).items():
+        out.setdefault(uid, entry.get("kind") or "other")
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--animal", default=None)
@@ -525,8 +544,12 @@ def main():
     with open(PLATES_CSV, newline="", encoding="utf-8") as fh:
         plates = list(csv.DictReader(fh))
 
+    # The kind of reagent control a section is (any marker), or "": a badge on
+    # the page, nothing more. From config, never the manifest's display column.
+    rc_kind = reagent_kinds(CONFIG)
     data = [{"uid": r["id"], "animal": r["animal"], "order": int(r["section_order"] or 0),
-             "img": f"sections/{r['id']}.png"} for r in rows]
+             "img": f"sections/{r['id']}.png",
+             "reagent_control": rc_kind.get(r["id"], "")} for r in rows]
     # Original plate from the configured set, as 04l does - relative to the
     # page, which lives in reformatted/. Ordered through ls_atlas.plate_order,
     # the same numeric-aware rule 04l's plate_rows() uses, so the two curators

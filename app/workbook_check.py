@@ -10,6 +10,12 @@ The fish come from where 06b would take them once it can: the measurements
 when there are some, else Prepare's manifest, else the slide file names read
 with the study's naming rule.
 
+An animal whose every section is a reagent control (a slide stained without
+the primary, kept under a made-up ID such as RC1) has no workbook row and
+needs none: 06b exempts it, so it is not listed as missing here either. Which
+sections are controls comes from the study's `reagent_controls`, never from
+the manifest's display-only column.
+
 The workbook may be on a network drive or OneDrive, so the check runs on a
 plain daemon thread, as slide_read does (a QThread still running when its
 owner goes away aborts the app).
@@ -38,8 +44,35 @@ def _csv_rows(path):
         return None
 
 
+def _control_only_from_manifest(cfg):
+    """Animals every one of whose manifest scene x marker rows is a reagent control."""
+    import ls_reagent_controls as RC
+    if not RC.entries(cfg)["files"] and not RC.entries(cfg)["scenes"]:
+        return set()
+    import ls_channels as CH
+    acq = cfg.get("acquisition") or {}
+    markers = (CH.marker_names(cfg)
+               if acq.get("layout", CH.LAYOUT_MULTIPLEX) == CH.LAYOUT_MULTIPLEX else ())
+    try:
+        rows = RC.manifest_rows(cfg, markers)
+    except (OSError, ValueError, KeyError, csv.Error):
+        return set()
+    lookup = RC.expand(cfg, rows)
+    seen, stained = set(), set()
+    for r in rows:
+        a = r.get("animal")
+        if not a:
+            continue
+        seen.add(a)
+        if not RC.is_control(lookup, r["scene_uid"], r["marker_channel"]):
+            stained.add(a)
+    return seen - stained
+
+
 def study_animals(cfg):
-    """({animal: slide files}, where they were read from) for the open study."""
+    """({animal: slide files}, where they were read from) for the open study.
+
+    An animal that is only reagent controls is left out (see the top)."""
     cfg = cfg or {}
     out_root = cfg.get("out_root") or ""
     manifest = _csv_rows(os.path.join(out_root, "manifest", "manifest_files.csv")) \
@@ -54,6 +87,8 @@ def study_animals(cfg):
         return ({a: slides.get(a, 0) for a in {r["animal"] for r in meas if r.get("animal")}},
                 "measurements")
     if slides:
+        for a in _control_only_from_manifest(cfg):
+            slides.pop(a, None)
         return slides, "manifest"
     import autodetect as AD
     import ls_naming as NM
@@ -62,10 +97,21 @@ def study_animals(cfg):
         pattern = NM.compile_pattern(naming)
     except (NM.NamingError, TypeError, ValueError, KeyError):
         return {}, "slide file names"
+    import ls_reagent_controls as RC
+    import ls_channels as CH
+    confirmed = RC.entries(cfg)["files"]
+    every = set(CH.marker_names(cfg))
+    stained = set()
     for name in AD.slide_files(cfg.get("source_dir") or ""):
         parsed = NM.parse_name(name, pattern)
         if parsed and parsed.get("subject"):
             slides[parsed["subject"]] = slides.get(parsed["subject"], 0) + 1
+            # A file confirmed for only some markers still carries stained rows.
+            ent = confirmed.get(name)
+            if ent is None or (ent.get("markers") and not every <= set(ent["markers"])):
+                stained.add(parsed["subject"])
+    if confirmed:
+        slides = {a: n for a, n in slides.items() if a in stained}
     return slides, "slide file names"
 
 

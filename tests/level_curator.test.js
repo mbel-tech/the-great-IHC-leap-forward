@@ -125,4 +125,22 @@ chk("...and picks up the id at that position", M.anchors[uc].id, X.PLATES[1].id)
 chk("the header notice reports the drop count", els["ndropped"].textContent, "1");
 chk("...and the notice row is shown", els["dropRow"].style.display, "");
 
+// ---- the reagent-control badge --------------------------------------------
+// 04k carries each section's reagent_control (its kind, from config) into the
+// record; the section header shows a badge for it and nothing else changes.
+note("");
+chk("every record carries reagent_control", X.DATA.every(d => "reagent_control" in d), true);
+els["animal"].value = X.DATA[0].animal;
+const rcList = X.rows();
+const rcWas = rcList[0].reagent_control;
+rcList[0].reagent_control = "isotype";
+rcList[1].reagent_control = "";
+X.select(rcList[0].uid);
+chk("a reagent control's header shows the badge",
+    /rcbadge[^>]*>reagent control</.test(els["secInfo"].innerHTML), true);
+chk("...its kind in the tooltip", /title="isotype"/.test(els["secInfo"].innerHTML), true);
+X.select(rcList[1].uid);
+chk("...a stained section's does not", /reagent control/.test(els["secInfo"].innerHTML), false);
+rcList[0].reagent_control = rcWas;
+
 done();

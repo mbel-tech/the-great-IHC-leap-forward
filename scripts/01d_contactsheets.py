@@ -175,6 +175,27 @@ def flag(row, focus_floor):
     return "/".join(tags)
 
 
+def is_reagent_control(row, lookup):
+    """Whether this row's (scene, marker) is a confirmed reagent control (config)."""
+    return RC.is_control(lookup or {}, row["scene_uid"], row["marker_channel"])
+
+
+def caption(row, lookup=None):
+    """The line under a thumbnail on the sheet. A reagent control says so, in
+    place of its scene index, so it fits the thumbnail's width."""
+    if is_reagent_control(row, lookup):
+        return f"{row['section_order']:>3}  sl{row['slide']}  reagent control"
+    return f"{row['section_order']:>3}  sl{row['slide']}  s{row['scene_index']}"
+
+
+def gallery_caption(row, lookup, tag):
+    """The same in the gallery cell, HTML-escaped."""
+    words = f"{row['section_order']} sl{row['slide']}"
+    if is_reagent_control(row, lookup):
+        words += " reagent control"
+    return html.escape(words + (" " + tag if tag else ""))
+
+
 def thumb_path(row, kind):
     return os.path.join(
         OVERVIEW_DIR, row["animal"], row["marker_channel"], f"{row['scene_uid']}_{kind}.png"
@@ -253,11 +274,13 @@ def build_sheet(rows, animal, marker, kind, cols, thumb_w, out_dir, missing=None
                 draw.rectangle([cx, cy, cx + thumb_w, cy + thumb_h], outline="#c00000")
 
             tag = flag(row, focus_floor)
-            label = f"{row['section_order']:>3}  sl{row['slide']}  s{row['scene_index']}"
-            draw.text((cx + 2, cy + thumb_h + 3), label, fill="#303030", font=FONT_LABEL)
+            control = is_reagent_control(row, lookup)
+            draw.text((cx + 2, cy + thumb_h + 3), caption(row, lookup),
+                      fill="#a05a00" if control else "#303030", font=FONT_LABEL)
             if tag:
+                # A reagent control's caption is full, so its tag goes on the picture.
                 draw.text(
-                    (cx + thumb_w - 4 - 7 * len(tag), cy + thumb_h + 3),
+                    (cx + thumb_w - 4 - 7 * len(tag), cy + 3 if control else cy + thumb_h + 3),
                     tag, fill="#c00000", font=FONT_FLAG,
                 )
                 draw.rectangle(
@@ -308,7 +331,7 @@ def build_gallery(by_key, sheets, kind, lookup=None):
             parts.append(
                 f"<div class='cell{' flag' if tag else ''}'>"
                 f"<a href='{html.escape(rel)}'><img loading='lazy' src='{html.escape(rel)}'></a>"
-                f"{r['section_order']} sl{r['slide']} {html.escape(tag)}</div>"
+                f"{gallery_caption(r, lookup, tag)}</div>"
             )
         parts.append("</div>")
 

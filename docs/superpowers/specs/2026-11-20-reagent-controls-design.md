@@ -1,6 +1,6 @@
 # Reagent controls: declare, identify, keep out, measure and report
 
-Status: design, awaiting approval. Date: 2026-11-20.
+Status: approved by the operator, 2026-11-20.
 
 ## Why
 
@@ -271,8 +271,8 @@ thresholds are wrong, not the study.
 **Limits, said in the UI and the guide:**
 - The screen cannot see isotype or pre-adsorbed controls.
 - It cannot tell a no-primary section from a failed stain or from a genuinely non-expressing animal.
-- Thresholds stay provisional until it has run on a study with known controls. That validation is
-  a recorded follow-up.
+- Thresholds stay provisional until the validation run on the operator's study with known controls
+  (see "Decided by the operator").
 
 ### 5. Keeping controls out, and pairing
 
@@ -348,8 +348,7 @@ The same 05c nuclei and the same 06a cut machinery are used, so nothing is re-re
   - `pct_above_paired_cut` (median) and `pct_above_paired_cut_min`/`_max`. The control's nuclei
     are scored against **each** paired stained section's own cut, and the median and range across
     those sections are reported. This is the borrowed cut. It answers how much of the positive
-    call level the secondary alone reaches. *(Proposed; awaiting the operator's choice, see the
-    open question below.)*
+    call level the secondary alone reaches. *(Operator's choice.)*
   - **Left empty when `pairing = study-wide`**, with the reason in a `note` column. Across batches
     the ratio measures the batch, not the reagent (LOGS 2026-08-12).
 
@@ -397,12 +396,17 @@ studies without controls is unchanged.
 - Wording of the user guide, wiki and technical-guide entries (`docs/guides/file_formats.json` gets
   the two new files).
 
-## Open question for the operator
+## Decided by the operator
 
-How should part B's borrowed cut combine several paired stained sections?
-- **(a)** Score against each section's cut, then report the median and range. This is the
-  proposed default.
-- **(b)** Pool all their background discs into one cut.
+- Part B's borrowed cut: the control is scored against **each** paired section's cut, and the
+  median and min–max are reported. No pooled cut.
+- **Validation:** the operator will share a study with known reagent controls.
+  - The plan includes a validation step: run `01m` on it and record per-section features, z and
+    candidate calls against the truth.
+  - Set the F1–F3 thresholds from that run, and keep the LS zero-candidate test.
+  - Test the name raster against that study's real filenames.
+  - Until then, the thresholds in §4 are provisional.
+- The calls listed below were reviewed and accepted unchanged.
 
 ## Calls made without the operator (open to correction)
 

@@ -193,6 +193,32 @@ chk("...not in the results either",
     os.path.exists(os.path.join(project.get("out_root"), "results", "animal_metadata.csv")),
     False)
 
+print("--- Set up > Slides: Slide manifest ---")
+import slide_manifest_dialog as SMD                             # noqa: E402
+_shown = []
+_mexec = SMD.SlideManifestDialog.exec
+SMD.SlideManifestDialog.exec = lambda self: (_shown.append(self), 0)[1]
+try:
+    line_before = s.workbook_line.text()
+    s.manifest_btn.click()
+    chk("the manifest is built off the window's thread", s.manifest_job.busy, True)
+    end = time.monotonic() + 20
+    while s.manifest_job.busy and time.monotonic() < end:
+        app.processEvents()
+        time.sleep(0.005)
+    app.processEvents()
+    chk("...and opens a window", len(_shown), 1)
+    _m = _shown[0].manifest if _shown else {"rows": []}
+    chk("...one row per animal, its treatment from the workbook",
+        [(r["animal"], r["treatment"], r["files"], r["status"]) for r in _m["rows"]],
+        [("LS22", "control", 4, "OK")])
+    chk("...the button is back", (s.manifest_btn.isEnabled(), s.manifest_btn.text()),
+        (True, "Slide manifest…"))
+    chk("...the Check workbook line is left as it was", s.workbook_line.text(), line_before)
+    chk("...writing nothing until Save", sorted(os.listdir(STUDY.root)), before)
+finally:
+    SMD.SlideManifestDialog.exec = _mexec
+
 print("--- Set up > Slides: load the groups for Shotgun ---")
 chk("blind until asked: no groups in the study", project.get("groups.by_animal") or {}, {})
 chk("...and Remove is off", s.clear_groups_btn.isEnabled(), False)

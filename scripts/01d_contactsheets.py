@@ -35,6 +35,7 @@ if _HERE not in sys.path:
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
 import ls_naming as NM  # noqa: E402
 import ls_progress as PG  # noqa: E402
+import ls_reagent_controls as RC  # noqa: E402
 
 OUT_ROOT = CONFIG["out_root"]
 OVERVIEW_DIR = os.path.join(OUT_ROOT, "overviews")
@@ -180,7 +181,22 @@ def thumb_path(row, kind):
     )
 
 
-def build_sheet(rows, animal, marker, kind, cols, thumb_w, out_dir, missing=None):
+def sheet_order(lookup):
+    """The sort key of a row on its animal's sheet and in the gallery: stained
+    sections first, then the reagent controls, each by (section_order, slide).
+
+    00 numbers a reagent control in a series of its own, so its section_order
+    repeats the donor's; sorted on section_order alone the two would
+    interleave. The sheet stays one per (animal, marker), under the same file
+    names: the series key (ls_reagent_controls.series_animal) only orders it.
+    """
+    lookup = lookup or {}
+    return lambda r: (RC.series_animal(r, lookup) != r["animal"],
+                      r["section_order"], r["slide"])
+
+
+def build_sheet(rows, animal, marker, kind, cols, thumb_w, out_dir, missing=None,
+                lookup=None):
     """Paged montage of one animal's series in one marker.
 
     `missing`, a list, receives the scene_uid of every section focus.csv lists
@@ -188,7 +204,7 @@ def build_sheet(rows, animal, marker, kind, cols, thumb_w, out_dir, missing=None
     without a word, which is the one thing this module promises not to do: a
     gap in the series must never be silently invented."""
     missing = missing if missing is not None else []
-    rows = sorted(rows, key=lambda r: (r["section_order"], r["slide"]))
+    rows = sorted(rows, key=sheet_order(lookup))
     focus_floor = quantile([r["focus_score"] for r in rows], FOCUS_LOW_QUANTILE)
 
     entries = []
@@ -254,7 +270,7 @@ def build_sheet(rows, animal, marker, kind, cols, thumb_w, out_dir, missing=None
     return written
 
 
-def build_gallery(by_key, sheets, kind):
+def build_gallery(by_key, sheets, kind, lookup=None):
     """Single HTML index linking every sheet and every full-size overview."""
     parts = [
         "<meta charset='utf-8'><title>LS section gallery</title>",
@@ -273,7 +289,7 @@ def build_gallery(by_key, sheets, kind):
     ]
 
     for (animal, marker) in sorted(by_key, key=lambda k: (NM.natural_key(k[0]), k[1])):
-        rows = sorted(by_key[(animal, marker)], key=lambda r: r["section_order"])
+        rows = sorted(by_key[(animal, marker)], key=sheet_order(lookup))
         focus_floor = quantile([r["focus_score"] for r in rows], FOCUS_LOW_QUANTILE)
         parts.append(f"<h2>{html.escape(animal)} &mdash; {html.escape(marker)} "
                      f"({len(rows)} sections)</h2>")
@@ -313,6 +329,7 @@ def main():
     rows = load_qc()
     print(f"{len(rows)} sections in focus.csv")
 
+    lookup = RC.expand(CONFIG, rows)
     by_key = defaultdict(list)
     for r in rows:
         by_key[(r["animal"], r["marker_channel"])].append(r)
@@ -323,11 +340,11 @@ def main():
             sorted(by_key.items(), key=lambda kv: (NM.natural_key(kv[0][0]), kv[0][1]))):
         PG.report(n_done, len(by_key), "animals and markers")
         written = build_sheet(group, animal, marker, args.kind, args.cols, args.thumb,
-                              SHEET_DIR, missing)
+                              SHEET_DIR, missing, lookup)
         sheets.extend(written)
         print(f"  {animal:<7} {marker:<6} {len(group):>4} sections -> {len(written)} page(s)")
 
-    gallery = build_gallery(by_key, sheets, args.kind)
+    gallery = build_gallery(by_key, sheets, args.kind, lookup)
 
     flagged = 0
     for (animal, marker), group in by_key.items():

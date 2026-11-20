@@ -359,6 +359,10 @@ STAGES = [
           script="01d_contactsheets.py",
           outputs=["contactsheets"],
           needs=["overviews"],
+          # Which sections are reagent controls orders each animal's sheet:
+          # its controls after its stained series.
+          settings=["reagent_controls.declared", "reagent_controls.files",
+                    "reagent_controls.scenes"],
           blurb="Per-animal montages in rostro-caudal order, plus an HTML gallery."),
 
     Stage("scene_renders", "01l  Pictures of every scene, for viewing", "Ingest and QC",

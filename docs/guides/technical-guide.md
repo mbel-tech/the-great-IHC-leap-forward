@@ -1078,7 +1078,9 @@ Stage `contactsheets`. One contact sheet per animal and a browsable gallery.
 - **Writes:** `contactsheets/` (one PNG per animal and channel) and an HTML gallery.
 - **How:** sections in rostro-caudal order across the page, so a gradient along the brain reads as a
   gradient on the page. Sections flagged by QC are marked, not dropped. `--kind`, `--cols` and `--thumb`
-  choose the channel and the layout.
+  choose the channel and the layout. A reagent control (`reagent_controls`, through
+  `ls_reagent_controls.expand`) stays on its animal's sheet, under the same file name, but after the
+  stained series rather than interleaved with it (00 numbers it in a series of its own).
 - **Failure and re-run:** a section in `qc/focus.csv` with no overview PNG of the chosen kind is left off
   the sheets and counted, and the run exits 1 naming the first few; re-run 01 for them.
 
@@ -2015,8 +2017,8 @@ gives a control file the subject, slide and replicate its name does not carry. `
 internal series key (`<animal>#rc` for a control) that readers grouping by animal use, and `series_label`
 prints it; `warn_unanswered` reads `qc/reagent_screen.csv` and returns the warning 05b and 05c print. It
 reads no group key. Settings: `reagent_controls.declared`, `.files`, `.scenes`, `.paired_with`, `.rejected`
-and `.extra_patterns`, checked by `ls_config`. Used by `ls_config`, the manifest, 01, 01b, 04b, 04c, 05b,
-05c and the app.
+and `.extra_patterns`, checked by `ls_config`. Used by `ls_config`, the manifest, 01, 01b, 01d, 04b, 04c,
+05b, 05c and the app.
 
 ### `ls_sampling.py`
 

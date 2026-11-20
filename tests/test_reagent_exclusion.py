@@ -11,7 +11,9 @@ through ls_reagent_controls.expand.
 Run:  python tests/test_reagent_exclusion.py
 """
 
+import contextlib
 import csv
+import io
 import os
 import sys
 import tempfile
@@ -94,13 +96,19 @@ chk("a control for another marker does not leave this marker's sample",
 print("--- controls_first ---")
 D5 = load_stage("05c_detect_rois.py", name="lsstage_05c_rcx")
 lk = RC.expand(CFG, [row(u) for u in ("A_sc01", "RC_sc01", "B_sc01")])
-order = D5.measure_order(["A_sc01", "RC_sc01", "B_sc01"], set(), lk, "AF568", "balanced")
+def quiet(fn, *a):
+    """fn(*a) with the stage's own progress lines kept out of the ok/FAIL list."""
+    with contextlib.redirect_stdout(io.StringIO()):
+        return fn(*a)
+
+
+order = quiet(D5.measure_order, ["A_sc01", "RC_sc01", "B_sc01"], set(), lk, "AF568", "balanced")
 chk("05c measures the reagent control first", order[0], "RC_sc01")
 chk("...then the balanced order of the rest",
-    order[1:], D5.balanced_order(["A_sc01", "B_sc01"], set()))
+    order[1:], quiet(D5.balanced_order, ["A_sc01", "B_sc01"], set()))
 chk("...which here is not plain uid order", order[1:], ["B_sc01", "A_sc01"])
 chk("--order uid also puts the control first",
-    D5.measure_order(["A_sc01", "RC_sc01", "B_sc01"], set(), lk, "AF568", "uid"),
+    quiet(D5.measure_order, ["A_sc01", "RC_sc01", "B_sc01"], set(), lk, "AF568", "uid"),
     ["RC_sc01", "A_sc01", "B_sc01"])
 chk("reagent_order keeps natural order inside each part",
     RC.reagent_order(["A_sc10", "RC_sc01", "A_sc02", "A_sc03"],
@@ -184,6 +192,15 @@ chk("04c: an animal with a control gets two series", sorted(got), ["A", "A#rc"])
 chk("...the control alone in its own", [r["id"] for r in got["A#rc"]], ["A_sc03"])
 chk("...the animal column is left as it is",
     {r["animal"] for v in got.values() for r in v}, {"A"})
+
+D1 = load_stage("01d_contactsheets.py", name="lsstage_01d_rcx")
+sheet = [dict(r, section_order=int(r["section_order"]), slide=1) for r in a_rows]
+key = D1.sheet_order(a_lk)
+chk("01d: one sheet, the control after the stained series, not interleaved",
+    [r["scene_uid"] for r in sorted(sheet, key=key)], ["A_sc01", "A_sc02", "A_sc04", "A_sc03"])
+chk("01d: with no control, plain section order",
+    [r["scene_uid"] for r in sorted(sheet, key=D1.sheet_order({}))],
+    ["A_sc01", "A_sc03", "A_sc02", "A_sc04"])
 
 print()
 print("all passed" if not fails else f"{fails} FAILED")

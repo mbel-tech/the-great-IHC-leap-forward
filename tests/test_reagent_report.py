@@ -543,6 +543,23 @@ finally:
     G6C.NUCLEI_CSV, G6C.MEAS_CSV, G6C.G5.all_boxes = saved
 chk("06c runs", code, 0)
 chk("...and does not call the controls a 06a that is behind", "behind" in out6c.getvalue(), False)
+# Per (section, marker): LS45_s09_sc01 is a control for pERK only. A 06a that
+# has not written its stained PCNA rows yet IS behind, though the scene is a
+# control for another marker.
+lagging = os.path.join(tmp, "lagging.csv")
+with open(lagging, "w", newline="", encoding="utf-8") as fh:
+    w = csv.DictWriter(fh, fieldnames=list(meas[0]))
+    w.writeheader()
+    w.writerows(r for r in meas if (r["scene_uid"], r["marker"]) != ("LS45_s09_sc01", "PCNA"))
+G6C.NUCLEI_CSV, G6C.MEAS_CSV = npath, lagging
+G6C.G5.all_boxes = lambda: G6C.G5.load_csv(bpath)
+try:
+    with contextlib.redirect_stdout(io.StringIO()) as out_lag:
+        G6C.main(["--out", os.path.join(tmp, "lagging.xlsx")])
+finally:
+    G6C.NUCLEI_CSV, G6C.MEAS_CSV, G6C.G5.all_boxes = saved
+chk("behind_per_marker: a control for one marker missing its stained rows is behind",
+    "1 section(s) behind" in out_lag.getvalue(), True)
 import openpyxl  # noqa: E402
 wb = openpyxl.load_workbook(xlsx)
 chk("a 'Reagent controls' sheet is added", "Reagent controls" in wb.sheetnames, True)

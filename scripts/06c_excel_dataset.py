@@ -271,13 +271,15 @@ def main(argv=None):
     # marker is NOT measured for the others - see the coverage loop below.
     # Under `paired` a uid has one marker and the two sets say the same thing.
     measured_mk = {(r["scene_uid"], r["marker"]) for r in meas}
-    nuc_secs = set()
+    nuc_secs, nuc_mk = set(), set()
     with open(NUCLEI_CSV, encoding="utf-8") as fh:
         rd = csv.reader(fh)
-        next(rd, None)
+        head = next(rd, None) or []
+        mcol = head.index("marker") if "marker" in head else None
         for row in rd:
             if row:
                 nuc_secs.add(row[0])
+                nuc_mk.add((row[0], row[mcol] if mcol is not None else ""))
     # A SUBSET IS NORMAL MID-RUN, AND MUST NOT FAIL.
     #
     # This stage is meant to be runnable while 05c is still appending. 06a runs
@@ -309,8 +311,15 @@ def main(argv=None):
               f"(e.g. {sorted(orphaned)[0]}). The two files are not from the "
               f"same run. Re-run 06a_roi_dataset.py.")
         return 1
-    # A reagent control is in roi_nuclei.csv and never in roi_measurements.csv.
-    behind = nuc_secs - measured - {u for u, _m in rc_lookup}
+    # A reagent control is in roi_nuclei.csv and never in roi_measurements.csv -
+    # PER (SECTION, MARKER): under `multiplex` a scene that is a control for one
+    # marker is stained for the others, and a 06a missing those must still be
+    # said to be behind. A section is behind when any of its markers is.
+    if mcol is None:                    # no marker column: by section, as before
+        behind = nuc_secs - measured - {u for u, _m in rc_lookup}
+    else:
+        behind = {u for u, m in nuc_mk
+                  if (u, m) not in measured_mk and (u, m) not in rc_lookup}
     if behind:
         print(f"  06a is {len(behind)} section(s) behind roi_nuclei.csv - "
               f"reporting the {len(measured)} it covers. Normal while "

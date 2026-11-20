@@ -13,8 +13,10 @@ where things landed, not which plausible-looking route was tried and abandoned, 
 
 **Changed:** the pipeline now has a notion of a **reagent control**: a section stained without the
 primary antibody (or secondary only), with an isotype IgG, with a pre-adsorbed antibody, or unstained.
-New study asks No / Yes / Not sure; file and folder names are scanned (`ls_reagent_controls`) and the
-operator confirms each match, its kind and its markers (config `reagent_controls`). Confirmed controls
+New study asks No / Yes / Not sure; the slide file names are scanned (`ls_reagent_controls`): each
+top-level `.czi` in the slides folder, and each `.zip` archive's name with the `.czi` member inside it
+(`<zip>/<member>`), but not the names of sub-folders. The operator confirms each match, its kind and
+its markers (config `reagent_controls`). Confirmed controls
 leave the display ranges, the 05b tuning sample and the experimental rows of 06a-06d, get a series of
 their own in stage 04, and are measured first by 05c. 06a writes `results/reagent_controls.csv` and
 `results/reagent_control_cuts.csv`; 06c has a "Reagent controls" sheet. Part A is the rule's positive

@@ -300,6 +300,47 @@ chk("01d: with no control, plain section order",
     [r["scene_uid"] for r in sorted(sheet, key=D1.sheet_order({}))],
     ["A_sc01", "A_sc03", "A_sc02", "A_sc04"])
 
+print("--- blinding: no reagent-control code reads the group key ---")
+# A reagent control is not blinding information, and handling one must never
+# need the animal-to-group key: no code (docstrings and comments aside) in the
+# reagent-control modules names `by_animal`, and none imports the module that
+# reads it (ls_sampling). Stages before 06b that touch reagent controls are
+# covered too. The group LABELS (groups.order) may be read: the name scan uses
+# them to keep a weak token that is a group name from being proposed.
+import ast  # noqa: E402
+
+BLIND = ["scripts/01m_reagent_screen.py", "scripts/ls_reagent_controls.py",
+         "scripts/ls_reagent_screen.py", "scripts/ls_reagent_report.py",
+         "app/reagent_dialog.py", "scripts/00_manifest.py", "scripts/01_overviews.py",
+         "scripts/01d_contactsheets.py", "scripts/04k_level_curator.py",
+         "scripts/05b_tune_detection.py", "scripts/06a_roi_dataset.py"]
+
+
+def reads_group_key(path):
+    tree = ast.parse(open(os.path.join(REPO, path), encoding="utf-8").read())
+    docs = {id(n.body[0].value) for n in ast.walk(tree)
+            if isinstance(n, (ast.Module, ast.FunctionDef, ast.ClassDef, ast.AsyncFunctionDef))
+            and n.body and isinstance(n.body[0], ast.Expr)
+            and isinstance(n.body[0].value, ast.Constant)}
+    hits = []
+    for n in ast.walk(tree):
+        if (isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in docs
+                and "by_animal" in n.value):
+            hits.append(f"string at line {n.lineno}")
+        elif isinstance(n, ast.Name) and n.id == "by_animal":
+            hits.append(f"name at line {n.lineno}")
+        elif isinstance(n, ast.Attribute) and n.attr == "by_animal":
+            hits.append(f"attribute at line {n.lineno}")
+        elif isinstance(n, (ast.Import, ast.ImportFrom)):
+            names = [a.name for a in n.names] + ([n.module] if getattr(n, "module", None) else [])
+            if any(x and x.split(".")[-1] in ("ls_sampling", "06b_join_sampling") for x in names):
+                hits.append(f"import at line {n.lineno}")
+    return hits
+
+
+for path in BLIND:
+    chk(f"blinding: {path} does not read groups.by_animal", reads_group_key(path), [])
+
 print()
 print("all passed" if not fails else f"{fails} FAILED")
 sys.exit(1 if fails else 0)

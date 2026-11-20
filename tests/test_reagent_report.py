@@ -188,14 +188,32 @@ stained = [nuc("S1", "roi", v, marker="PCNA", own=True) for v in (100, 300)]
 cuts = {("C", "PCNA"): 100.0, ("S1", "PCNA"): 150.0}
 r = one(RR.report_rows(ctl, stained, cuts, {("C", "PCNA"): ("same_file", ["S1"])},
                        areas={("C", "PCNA", "Dm"): 0.5},
-                       factors={("PCNA", "Dm"): 0.5}), "C", marker="PCNA")
+                       factors={("PCNA", "Dm"): 0.5},
+                       stained_areas={("S1", "PCNA", "Dm"): 0.5}), "C", marker="PCNA")
 chk("own: pct_positive withheld", r["pct_positive"], "")
 chk("own: positive_per_mm2 = 2 x 0.5 (Abercrombie) / 0.5 mm2, as 06a",
     r["positive_per_mm2"], 2.0)
 chk("own: the fractions beside it are withheld too",
-    [r[c] for c in ("stained_pct_median", "specificity_margin", "pct_above_paired_cut")],
-    ["", "", ""])
+    [r[c] for c in ("stained_pct_median", "stained_pct_min", "stained_pct_max",
+                    "pct_above_paired_cut")], ["", "", "", ""])
 chk("own: the note says so", "denominator" in r["note"] or "counterstain" in r["note"], True)
+chk("own: stained_positive_per_mm2 = 1 x 0.5 / 0.5 mm2 (median, min, max)",
+    (r["stained_positive_per_mm2_median"], r["stained_positive_per_mm2_min"],
+     r["stained_positive_per_mm2_max"]), (1.0, 1.0, 1.0))
+chk("own: specificity_margin = stained density - control density", r["specificity_margin"],
+    -1.0)
+chk("own: the note names its unit, per mm2", "per mm2" in r["note"], True)
+# A nuclear marker keeps the margin in percentage points, and gets densities too.
+r = one(RR.report_rows(
+    [nuc("C", "background", 100)] * 10 + [nuc("C", "roi", v) for v in (90, 95, 105, 200)],
+    [nuc("S1", "roi", v) for v in (100, 300, 400, 50)], {("C", "pERK"): 100.0,
+                                                          ("S1", "pERK"): 150.0},
+    {("C", "pERK"): ("same_file", ["S1"])}, areas={("C", "pERK", "Dm"): 2.0},
+    stained_areas={("S1", "pERK", "Dm"): 2.0}), "C")
+chk("nuclear: margin in percentage points (50 - 50)", r["specificity_margin"], 0.0)
+chk("nuclear: no unit note", "per mm2" in r["note"], False)
+chk("nuclear: densities beside, same unit both sides",
+    (r["positive_per_mm2"], r["stained_positive_per_mm2_median"]), (1.0, 1.0))
 # A region with ROI discs but no nucleus still gets a row: a control never disappears.
 r = one(RR.report_rows([], [], {}, {("C", "pERK"): ("same_file", [])},
                        areas={("C", "pERK", "Dl"): 0.2}), "C", region="Dl")
@@ -355,6 +373,34 @@ chk("positive_per_mm2: 2 x the stained pERK/Dm Abercrombie factor / pi mm2",
     p9["positive_per_mm2"], str(round(2 * AB / 3.141592653589793, 1)))
 ms = [r for r in meas if (r["marker"], r["region"]) == ("pERK", "Dm")][0]
 chk("...the same factor 06a's own rows carry", ms["abercrombie_factor"], str(round(AB, 4)))
+chk("stained_positive_per_mm2 over the paired sections, by the same factor",
+    (p9["stained_positive_per_mm2_min"], p9["stained_positive_per_mm2_max"]),
+    (str(round(2 * AB / 3.141592653589793, 1)),) * 2)
+rcc = read(os.path.join(tmp, "reagent_control_cuts.csv"))
+chk("reagent_control_cuts.csv: each control's own cut, positivity_cuts' columns",
+    (pairs(rcc), list(rcc[0])),
+    ([("LS45_s09_sc01", "pERK"), ("RC1_s01_sc01", "PCNA"), ("RC1_s01_sc01", "pERK")],
+     G6A.CUTS_COLUMNS))
+chk("...at full precision (repr)", float([r for r in rcc if r["scene_uid"] == "LS45_s09_sc01"]
+                                        [0]["cut"]), 100.0)
+
+print("--- 06i reads both cut files ---")
+G6I = load_stage("06i_detection_overlays.py", name="lsstage_06i_rr")
+keep_i = (G6I.CUTS_CSV, G6I.RC_CUTS_CSV)
+G6I.CUTS_CSV = os.path.join(tmp, "positivity_cuts.csv")
+G6I.RC_CUTS_CSV = os.path.join(tmp, "reagent_control_cuts.csv")
+try:
+    ex = G6I._exact_cuts()
+    shown = G6I._cuts(meas)
+finally:
+    G6I.CUTS_CSV, G6I.RC_CUTS_CSV = keep_i
+chk("06i's exact cut lookup finds a control's own cut", ex.get(("RC1_s01_sc01", "pERK")),
+    100.0)
+chk("...and a stained section's, as before", ex.get(("LS45_s02_sc01", "pERK")), 100.0)
+chk("...the control's printed cut, rounded as 06a writes it",
+    shown.get(("LS45_s09_sc01", "pERK")), "100.0")
+chk("06i's default path is 06a's", os.path.basename(keep_i[1]),
+    os.path.basename(G6A.RC_CUTS_CSV))
 rc1 = [r for r in rep if r["scene_uid"] == "RC1_s01_sc01" and r["marker"] == "pERK"][0]
 chk("a made-up subject with no stained scenes: study_wide", rc1["pairing"], "study_wide")
 chk("...B empty, note says batch", (rc1["level_ratio"], "batch" in rc1["note"]), ("", True))
@@ -374,6 +420,9 @@ finally:
     G6A.CONFIG["reagent_controls"] = RC_BLOCK
 chk("no control confirmed: the previous reagent_controls.csv is removed",
     os.path.exists(os.path.join(tmp, "reagent_controls.csv")), False)
+chk("...and reagent_control_cuts.csv", os.path.exists(os.path.join(tmp,
+                                                                  "reagent_control_cuts.csv")),
+    False)
 chk("...and every section is experimental again",
     ("RC1_s01_sc01", "pERK") in pairs(read(os.path.join(tmp, "roi_measurements.csv"))), True)
 # Back to the routed run for 06b and 06c.

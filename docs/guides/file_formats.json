@@ -5892,10 +5892,28 @@
      "meaning": "A, beside: the highest paired stained section's pct_positive."
     },
     {
+     "name": "stained_positive_per_mm2_median",
+     "type": "number",
+     "units": "per mm2",
+     "meaning": "A, beside: the median over the paired stained sections of each one's positive density in this region (n_positive under its own cut x the same Abercrombie factor, over its usable ROI area), the same unit as positive_per_mm2."
+    },
+    {
+     "name": "stained_positive_per_mm2_min",
+     "type": "number",
+     "units": "per mm2",
+     "meaning": "A, beside: the lowest paired stained section's positive density."
+    },
+    {
+     "name": "stained_positive_per_mm2_max",
+     "type": "number",
+     "units": "per mm2",
+     "meaning": "A, beside: the highest paired stained section's positive density."
+    },
+    {
      "name": "specificity_margin",
      "type": "number",
-     "units": "% points",
-     "meaning": "A: stained_pct_median - pct_positive."
+     "units": "% points, or per mm2",
+     "meaning": "A: stained_pct_median - pct_positive, in percentage points. For a marker segmented on its own channel (no fraction): stained_positive_per_mm2_median - positive_per_mm2, in per mm2, and `note` says so. The only column whose unit varies."
     },
     {
      "name": "control_nuclear_median",
@@ -5938,6 +5956,38 @@
      "type": "text",
      "units": "",
      "meaning": "Why a column is blank or empty: no own cut, no denominator, paired sections not measured yet, or study-wide pairing (batch)."
+    }
+   ]
+  },
+  {
+   "path": "results/reagent_control_cuts.csv",
+   "names": [
+    "reagent_control_cuts.csv"
+   ],
+   "writer": "06a_roi_dataset.py",
+   "what": "Each measured reagent control's own cut (per section and marker, at full precision), from its own background discs by the same rule. Kept apart from positivity_cuts.csv, which lists stained sections only; 06i reads both so a control is drawn by its own cut. Removed when no control is measured.",
+   "readers": [
+    "06i_detection_overlays.py"
+   ],
+   "columns_from": "06a_roi_dataset.py:CUTS_COLUMNS",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye name, as declared in the study."
+    },
+    {
+     "name": "cut",
+     "type": "float",
+     "units": "grey value",
+     "meaning": "The cut, as Python's repr of the float."
     }
    ]
   },

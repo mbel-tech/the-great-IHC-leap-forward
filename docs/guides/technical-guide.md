@@ -1748,7 +1748,8 @@ Stage `roi_dataset`. Turns the per-nucleus rows into per-ROI numbers. Still blin
 - **Reads:** `results/roi_nuclei.csv`, the done log, the ROI boxes and geometry.
 - **Writes:** `results/roi_measurements.csv`, `results/positivity_cuts.csv`,
   `results/detector_specificity.csv` and `results/roi_geometry_changed.csv`; and
-  `results/reagent_controls.csv` when a measured section is a confirmed reagent control.
+  `results/reagent_controls.csv` and `results/reagent_control_cuts.csv` (each control's own cut, never in
+  `positivity_cuts.csv`) when a measured section is a confirmed reagent control.
 - **How:** **positivity cut** per section and marker from that section's background discs:
   median + 3 × 1.4826 × MAD, needing at least 5 background nuclei (else no cut, and positives are blank,
   not zero). **Specificity:** the fraction of background nuclei above the cut, a measured false-positive
@@ -1866,8 +1867,10 @@ is left blank on these rows. 06a then divides counts by the usable area. Run 06a
 Stage `detection_overlays`. Pictures of every nucleus found, positives filled in, for checking the
 counts by eye.
 
-- **Reads:** the CZIs, the outlines 05c saved, `roi_nuclei.csv`, `roi_measurements.csv` and
-  `positivity_cuts.csv`.
+- **Reads:** the CZIs, the outlines 05c saved, `roi_nuclei.csv`, `roi_measurements.csv`,
+  `positivity_cuts.csv` and, when there is one, `reagent_control_cuts.csv`: a reagent control has no
+  06a row, so it is drawn by its own cut from that file, and its strip prints the counts drawn (no 06a
+  row to check them against).
 - **Writes:** under `detection_overlays/<marker>/<animal>/`, a whole-scene picture, one crop per ROI and
   one per background disc; `detection_overlays/index.csv` and `failures.csv`.
 - **How:** native pixels, nothing resampled. Each crop is the box 05c segmented, with a strip stacked
@@ -2099,7 +2102,10 @@ median (censored nuclei out of both), and the control scored against EACH paired
 min-max (never a pooled cut); empty under `study_wide`, with `batch` in `note`. For a marker segmented on its
 own channel every fraction is withheld and `positive_per_mm2` (over the usable ROI area, times the
 Abercrombie factor 06a's stained rows of that marker and region carry, so it reads like
-`positive_density_per_mm2`; uncorrected, with a note, when no stained h exists yet) is given. A region with discs and no nucleus still gets a row. `limitation_text(rows)`
+`positive_density_per_mm2`; uncorrected, with a note, when no stained h exists yet) is given, beside
+`stained_positive_per_mm2_*` (each paired section's positive density by the same factor, from
+`stained_areas`); `specificity_margin` is then stained − control in per mm2 and `note` says so (percentage
+points otherwise). A region with discs and no nucleus still gets a row. `limitation_text(rows)`
 is 06c's existing statement unless a `no_primary` row exists; `sheet_header(rows)` is the sheet's header,
 which says a background disc is not a reagent control. It reads no group key.
 
@@ -4285,7 +4291,10 @@ The reagent controls, measured: one row per reagent-control section x marker x r
 | `stained_pct_median` | number | % | A, beside: the median over the paired stained sections of each one's pct_positive in this region, under its own cut. Blank for an own-channel marker. |
 | `stained_pct_min` | number | % | A, beside: the lowest paired stained section's pct_positive. |
 | `stained_pct_max` | number | % | A, beside: the highest paired stained section's pct_positive. |
-| `specificity_margin` | number | % points | A: stained_pct_median - pct_positive. |
+| `stained_positive_per_mm2_median` | number | per mm2 | A, beside: the median over the paired stained sections of each one's positive density in this region (n_positive under its own cut x the same Abercrombie factor, over its usable ROI area), the same unit as positive_per_mm2. |
+| `stained_positive_per_mm2_min` | number | per mm2 | A, beside: the lowest paired stained section's positive density. |
+| `stained_positive_per_mm2_max` | number | per mm2 | A, beside: the highest paired stained section's positive density. |
+| `specificity_margin` | number | % points, or per mm2 | A: stained_pct_median - pct_positive, in percentage points. For a marker segmented on its own channel (no fraction): stained_positive_per_mm2_median - positive_per_mm2, in per mm2, and `note` says so. The only column whose unit varies. |
 | `control_nuclear_median` | number | intensity | B: median marker_median of the control's uncensored ROI nuclei in this region. Empty under study_wide pairing. |
 | `stained_nuclear_median` | number | intensity | B: the same over the paired stained sections' ROI nuclei, pooled. Empty under study_wide pairing. |
 | `level_ratio` | number | ratio | B: control_nuclear_median / stained_nuclear_median. Empty under study_wide pairing: across batches it measures the batch. |
@@ -4293,6 +4302,19 @@ The reagent controls, measured: one row per reagent-control section x marker x r
 | `pct_above_paired_cut_min` | number | % | B: the lowest of those per-section scores. |
 | `pct_above_paired_cut_max` | number | % | B: the highest of those per-section scores. |
 | `note` | text |  | Why a column is blank or empty: no own cut, no denominator, paired sections not measured yet, or study-wide pairing (batch). |
+
+#### `results/reagent_control_cuts.csv`
+
+Each measured reagent control's own cut (per section and marker, at full precision), from its own background discs by the same rule. Kept apart from positivity_cuts.csv, which lists stained sections only; 06i reads both so a control is drawn by its own cut. Removed when no control is measured.
+
+- **Written by:** 06a_roi_dataset.py
+- **Read by:** 06i_detection_overlays.py
+
+| Column | Type | Units | Meaning |
+|------------|------|------|---------------------------|
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
+| `marker` | text |  | The marker's dye name, as declared in the study. |
+| `cut` | float | grey value | The cut, as Python's repr of the float. |
 
 #### `results/roi_geometry_changed.csv`
 

@@ -155,6 +155,11 @@ MEAS_CSV = os.path.join(RESULTS, "roi_measurements.csv")
 #: rounds it to 0.1, and a median on the rounded value can sit either side of
 #: the real one; nuclei are coloured by the cut they were counted by.
 CUTS_CSV = os.path.join(RESULTS, "positivity_cuts.csv")
+#: The same for reagent-control sections, which 06a keeps out of
+#: positivity_cuts.csv and roi_measurements.csv. A control is drawn by its own
+#: cut from here; with no 06a row to check its counts against, its strip
+#: prints the counts drawn. Absent when the study has no measured control.
+RC_CUTS_CSV = os.path.join(RESULTS, "reagent_control_cuts.csv")
 MANIFEST_CSV = D5.MANIFEST_SCENES_CSV
 OUT_DIR = D5.OVERLAY_DIR
 INDEX_CSV = os.path.join(OUT_DIR, "index.csv")
@@ -397,11 +402,22 @@ def scene_context(g, animal, slide, exact_cut, meas_rows):
                              sorted(meas_rows, key=lambda r: int(r["roi_index"]))]}
 
 
-def _exact_cuts():
-    """{(uid, marker): cut} from 06a's positivity_cuts.csv, as floats."""
-    with open(CUTS_CSV, newline="", encoding="utf-8") as fh:
+def _read_cuts(path):
+    with open(path, newline="", encoding="utf-8") as fh:
         return {(r["scene_uid"], r["marker"]): float(r["cut"])
                 for r in csv.DictReader(fh)}
+
+
+def _control_cuts():
+    """{(uid, marker): cut} of the reagent controls (reagent_control_cuts.csv),
+    {} when there is none."""
+    return _read_cuts(RC_CUTS_CSV) if os.path.exists(RC_CUTS_CSV) else {}
+
+
+def _exact_cuts():
+    """{(uid, marker): cut} from 06a's positivity_cuts.csv, as floats, and the
+    reagent controls' own cuts from reagent_control_cuts.csv."""
+    return {**_control_cuts(), **_read_cuts(CUTS_CSV)}
 
 
 def _scan_rows(uids, marker):
@@ -423,9 +439,13 @@ def _read_measurements():
 
 
 def _cuts(meas):
-    """{(uid, marker): section_positivity_cut as written}: one per section."""
-    return {(r["scene_uid"], r["marker"]): r.get("section_positivity_cut", "")
-            for r in meas}
+    """{(uid, marker): section_positivity_cut as written}: one per section.
+    A reagent control has no row in roi_measurements.csv; its cut is its own,
+    rounded to 0.1 as 06a writes the column."""
+    out = {(k, m): str(round(c, 1)) for (k, m), c in _control_cuts().items()}
+    out.update({(r["scene_uid"], r["marker"]): r.get("section_positivity_cut", "")
+                for r in meas})
+    return out
 
 
 _slides = D5.slides
@@ -690,13 +710,15 @@ def _num(v):
 
 
 def prepare_scene(doc, uid, marker, boxes, g, raw, header, cut, meas_by,
-                  get_model):
+                  get_model, control=False):
     """Everything a section's pictures need, computed once.
 
     Returns {outlines, how, kinds_by_roi, counts_by_roi, planes, lo, hi, Minv,
     inside_by_roi}; raises NotDrawn with failures.csv's reason. `cut` is the
     exact cut from positivity_cuts.csv, or None for a section with none. Task 5's
     whole-scene picture is drawn from the same dict as the crops.
+    `control`: a reagent control, which has no roi_measurements.csv row to
+    check its counts against; the counts drawn are printed.
     """
     scene = int(g["scene_index"])
     _, Minv = affine_of(g)
@@ -741,6 +763,11 @@ def prepare_scene(doc, uid, marker, boxes, g, raw, header, cut, meas_by,
             raise NotDrawn(str(exc)) from None
         kinds, counts = k_by[bi], c_by[bi]
         m = meas_by.get(bi)
+        if m is None and control:
+            counts["pct_positive"] = LO.pct_of(LO.frac_positive(
+                counts["n_positive"], counts["n_counted"], cut, False))
+            kinds_by_roi[bi], counts_by_roi[bi] = kinds, counts
+            continue
         if m is None:
             raise Disagrees(f"roi{bi:02d}: no row in roi_measurements.csv - "
                            f"re-run 06a_roi_dataset.py")
@@ -1005,6 +1032,7 @@ def _draw_marker(args, marker):
     meas = _read_measurements()
     cuts = _cuts(meas)
     exact_cuts = _exact_cuts()
+    control_keys = set(_control_cuts())
     meas_by = {}
     for r in meas:
         if r.get("marker") == marker:
@@ -1204,7 +1232,8 @@ def _draw_marker(args, marker):
                                          pyczi=pyczi) as doc:
                             prep = prepare_scene(doc, uid, marker, boxes, g, raw,
                                                  header, cut, meas_by.get(uid, {}),
-                                                 get_model)
+                                                 get_model,
+                                                 control=(uid, marker) in control_keys)
                         if prep["how"] == "re-segmented":
                             fp = fingerprint(uid, marker, raw, ident["cut"], boxes,
                                              context)

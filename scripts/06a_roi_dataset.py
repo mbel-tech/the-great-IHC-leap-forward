@@ -114,6 +114,9 @@ SPEC_CSV = os.path.join(RESULTS, "detector_specificity.csv")
 #: the table they always have.
 CUTS_CSV = os.path.join(RESULTS, "positivity_cuts.csv")
 CUTS_COLUMNS = ["scene_uid", "marker", "cut"]
+#: The same, for reagent-control sections (their own cut), which never enter
+#: positivity_cuts.csv. 06i reads both.
+RC_CUTS_CSV = os.path.join(RESULTS, "reagent_control_cuts.csv")
 #: What 05c recorded about the shape each ROI was measured on (05c's
 #: GEOMETRY_CSV), and where this stage lists the sections whose shape has
 #: changed since. See check_geometry.
@@ -509,17 +512,20 @@ def leave_one_disc_out(discs):
 
 
 def reagent_report(lookup, rc_nuc, rc_bg, areas, by_idx, cuts, measured,
-                   factors=None):
+                   factors=None, stained_areas=None):
     """results/reagent_controls.csv's rows (ls_reagent_report.report_rows).
 
     Each measured control's own cut is taken from its own background discs by
     the same rule as every section's (ls_overlay.section_cut); the stained
     sections' cuts are the ones this stage counted by. The stained nuclei are
     streamed off by_idx, only for the sections a control is paired with.
+
+    Returns (rows, {(uid, marker): own cut}) - the cuts for
+    reagent_control_cuts.csv, never positivity_cuts.csv.
     """
     todo = sorted(k for k in lookup if k in measured)
     if not todo:
-        return []
+        return [], {}
     scene_rows = RR.study_rows(CONFIG)
     pairing = {k: RR.pairing_for(k[0], k[1], lookup, scene_rows, CONFIG)
                for k in todo}
@@ -545,10 +551,13 @@ def reagent_report(lookup, rc_nuc, rc_bg, areas, by_idx, cuts, measured,
                        "roi_kind": "roi", "marker_median": v, "censored": c,
                        "own": o}
 
-    return RR.report_rows(rc_nuc, stained(), {**cuts, **own_cuts}, pairing,
+    rows = RR.report_rows(rc_nuc, stained(), {**cuts, **own_cuts}, pairing,
                           meta=meta, areas={k: v for k, v in areas.items()
                                             if (k[0], k[1]) in pairing},
-                          factors=factors or {})
+                          factors=factors or {},
+                          stained_areas={k: v for k, v in (stained_areas or {}).items()
+                                         if (k[0], k[1]) in needed})
+    return rows, {k: c for k, c in own_cuts.items() if k in pairing}
 
 
 def main(argv=None):
@@ -798,6 +807,7 @@ def main(argv=None):
     not_segmented, no_fraction = [], 0
     rows, spec = [], []
     rc_areas = collections.Counter()   # (uid, marker, region) -> usable mm2
+    st_areas = collections.Counter()   # the same for stained sections
     for uid in sorted(uids):
         # PER MARKER, so `i` restarts at 1 for each one - which is how 05c
         # numbered them. Under `paired` there is exactly one group per section
@@ -842,6 +852,8 @@ def main(argv=None):
                     no_fraction += 1
                 area = (outline * usable_frac if usable_frac is not None
                         else outline)
+                if b["roi_kind"] == "roi":
+                    st_areas[(uid, mk, b["region"])] += area / 1e6
                 n_nuc = len(here.v) if here else 0
                 usable = ([v for v, c in zip(here.v, here.cen) if not c]
                           if here else [])
@@ -1006,22 +1018,33 @@ def main(argv=None):
     # The Abercrombie factor 06a's own rows would carry for each control
     # region, from STAINED nuclei only (hs, h_by_marker, shape_by), so the
     # report's positive density reads like positive_density_per_mm2.
+    # The same h lookup and reason the emit loop uses for a disc, so a
+    # control's density and its paired sections' read like those rows.
     rc_factors = {}
     for _u, mk, rg in rc_areas:
-        h = hs.get((mk, rg), h_by_marker.get(mk))
-        if not h or mk not in shape_by:
+        h = hs.get((mk, rg), h_by_marker.get(mk, h_all))
+        if not h:
             continue
         rc_factors[(mk, rg)] = abercrombie_factor(
-            h, apply=not abercrombie_reason(*shape_by[mk], enabled=AB_ON))
-    rc_rows = reagent_report(rc_lookup, rc_nuc, rc_bg, rc_areas, by_idx, cuts,
-                             measured, rc_factors)
+            h, apply=not abercrombie_reason(
+                *shape_by.get(mk, ("the nuclear channel", True)), enabled=AB_ON))
+    rc_rows, rc_cuts = reagent_report(rc_lookup, rc_nuc, rc_bg, rc_areas, by_idx,
+                                      cuts, measured, rc_factors, st_areas)
     rc_csv = os.path.join(os.path.dirname(MEAS_CSV), RR.REPORT_CSV)
-    if rc_rows:
-        IO.atomic_write_csv(rc_csv, rc_rows, RR.COLUMNS)
-    elif os.path.exists(rc_csv):
-        # No control measured (or none confirmed any more): a stale report
-        # would switch 06c's limitation text on controls this run does not have.
-        os.remove(rc_csv)
+    # A control's own cut, at full precision, for 06i to draw it by - in a file
+    # of its own, never positivity_cuts.csv (which lists stained sections only).
+    rc_cuts_csv = os.path.join(os.path.dirname(MEAS_CSV), os.path.basename(RC_CUTS_CSV))
+    for path, data, cols in ((rc_csv, rc_rows, RR.COLUMNS),
+                             (rc_cuts_csv,
+                              [{"scene_uid": u, "marker": m, "cut": repr(c)}
+                               for (u, m), c in sorted(rc_cuts.items())], CUTS_COLUMNS)):
+        if data:
+            IO.atomic_write_csv(path, data, cols)
+        elif os.path.exists(path):
+            # No control measured (or none confirmed any more): a stale report
+            # would switch 06c's limitation text, and a stale cut colour 06i's
+            # pictures, on controls this run does not have.
+            os.remove(path)
     for path, data in ((MEAS_CSV, rows), (SPEC_CSV, spec)):
         if not data:
             # An EMPTY result must not leave the previous run's file standing.

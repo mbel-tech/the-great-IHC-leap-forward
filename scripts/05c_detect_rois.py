@@ -138,6 +138,7 @@ if _HERE not in sys.path:
 # lines copy-pasted into every stage.
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
 import ls_naming as NM  # noqa: E402
+import ls_reagent_controls as RC  # noqa: E402
 import czi_read as CR  # noqa: E402
 import ls_channels as CH  # noqa: E402
 import ls_segment as SG  # noqa: E402
@@ -1667,6 +1668,31 @@ def load_model():
         return StarDist2D(None, name="2D_versatile_fluo_extracted", basedir=base)
 
 
+def reagent_lookup():
+    """Which (scene_uid, marker) are reagent controls, from config over the
+    manifest. Under `multiplex` every scene carries every marker."""
+    every = CH.marker_names(CONFIG) if LAYOUT == CH.LAYOUT_MULTIPLEX else ()
+    return RC.manifest_lookup(CONFIG, every)
+
+
+def measure_order(todo, done, lookup, marker, order):
+    """The order `todo` is measured in: this marker's reagent controls first,
+    then the rest in `order` ("balanced": balanced_order; "uid": as given).
+
+    Controls are few, and a run stopped part way should still have measured
+    them. Which sections are controls comes from config
+    (ls_reagent_controls.expand); the group key is not read for them.
+    """
+    controls, _rest = RC.reagent_order(todo, lookup, marker)
+    first = set(controls)
+    rest = [u for u in todo if u not in first]
+    if order == "balanced":
+        rest = balanced_order(rest, done)
+    if controls:
+        print(f"  {len(controls)} {marker} reagent control section(s) measured first")
+    return controls + rest
+
+
 def balanced_order(uids, done=()):
     """Alternate treatment and control, one section at a time.
 
@@ -1971,6 +1997,9 @@ def main():
         print(f"no {G5.BOX_CSV} - run 05a_roi_geometry.py --marker {args.marker} first")
         return 1
     print(f"marker: {args.marker}  ({os.path.basename(G5.BOX_CSV)})")
+    unanswered = RC.warn_unanswered(CONFIG)
+    if unanswered:
+        print(unanswered)
     boxes = G5.load_csv(G5.BOX_CSV)
     # A multiplex box file from before 05a stamped the placed marker names the
     # first marker on every row, and the plane read below follows the row's
@@ -2134,9 +2163,8 @@ def main():
                   f"geometry row now, and were left out: {skipped[:5]}")
             return 1
         return 0
-    todo = [u for u in sorted(by_sec) if u not in done]
-    if args.order == "balanced":
-        todo = balanced_order(todo, done)
+    todo = measure_order([u for u in sorted(by_sec) if u not in done], done,
+                         reagent_lookup(), args.marker, args.order)
     if args.limit:
         todo = todo[: args.limit]
     if not todo and not gone:

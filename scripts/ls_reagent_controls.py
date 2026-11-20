@@ -9,9 +9,12 @@ of the animal or the treatment: it is not blinding information, and nothing here
 This module does not import ls_config (ls_config imports it for KINDS).
 """
 
+import csv
 import os
 import re
 from dataclasses import dataclass, field
+
+import ls_naming as NM
 
 KINDS = ("no_primary", "unstained", "isotype", "preadsorbed", "other")
 
@@ -187,3 +190,97 @@ def unanswered(config, matches):
     answered = set(e["files"]) | set(e["scenes"]) | set(e["rejected"])
     return [m for m in matches
             if m.tier == "strong" and m.path not in answered and _base(m.path) not in answered]
+
+
+#: The suffix of a reagent control's series key: 00_manifest numbers a control in
+#: (animal + RC_SERIES, marker), never in its donor animal's series.
+RC_SERIES = "#rc"
+
+#: The signal screen's output (01m), one row per section x marker.
+SCREEN_CSV = ("qc", "reagent_screen.csv")
+
+
+def manifest_lookup(config, markers=()):
+    """expand() over 00's manifest_scenes.csv under `config["out_root"]`.
+
+    `markers`: every marker each scene also carries. Under `multiplex` one scan
+    holds every marker but the manifest has one row per scene, naming one; a
+    stage that works per marker passes the study's markers so a scene entry
+    with `markers: []` covers all of them. Under `paired` pass nothing.
+
+    {} when nothing is confirmed, or when there is no manifest yet: a stage run
+    before 00 has no section a control could be. Never reads the manifest's
+    display-only `reagent_control` column.
+    """
+    e = entries(config)
+    if not e["files"] and not e["scenes"]:
+        return {}
+    path = os.path.join((config or {}).get("out_root") or "", "manifest", "manifest_scenes.csv")
+    if not os.path.exists(path):
+        return {}
+    with open(path, newline="", encoding="utf-8") as fh:
+        rows = list(csv.DictReader(fh))
+    rows += [dict(r, marker_channel=m) for r in list(rows) for m in markers or ()
+             if m and m != r["marker_channel"]]
+    return expand(config, rows)
+
+
+def reagent_order(uids, lookup, marker=None):
+    """(controls, rest), each in natural uid order.
+
+    With `marker`, a uid is a control when it is one for that marker; without,
+    when it is one for any marker (pass a lookup already narrowed to one marker).
+    """
+    if marker is None:
+        flagged = {uid for uid, _m in lookup}
+    else:
+        flagged = {uid for uid, m in lookup if m == marker}
+    ordered = sorted(uids, key=NM.natural_key)
+    return ([u for u in ordered if u in flagged], [u for u in ordered if u not in flagged])
+
+
+def series_animal(row, lookup):
+    """The key a reader groups a row by: its `animal`, or animal + "#rc" when the
+    row's (scene_uid, marker_channel) is a reagent control - the series 00
+    numbered its section_order in. Internal only: never a uid part or a column."""
+    marker = row.get("marker_channel", row.get("marker"))
+    if is_control(lookup, row["scene_uid"], marker):
+        return row["animal"] + RC_SERIES
+    return row["animal"]
+
+
+def series_label(series):
+    """How a series key is printed: the animal, or "<animal> (reagent control)"."""
+    if series.endswith(RC_SERIES):
+        return series[:-len(RC_SERIES)] + " (reagent control)"
+    return series
+
+
+def warn_unanswered(config):
+    """The warning text when `declared` is unsure and the signal screen
+    (qc/reagent_screen.csv) has candidates neither confirmed nor rejected, else None.
+    A warning: 05b and 05c print it and carry on."""
+    e = entries(config)
+    if e["declared"] != "unsure":
+        return None
+    path = os.path.join((config or {}).get("out_root") or "", *SCREEN_CSV)
+    if not os.path.exists(path):
+        return None
+    answered = set(e["files"]) | set(e["scenes"]) | set(e["rejected"])
+    with open(path, newline="", encoding="utf-8") as fh:
+        left = []
+        for r in csv.DictReader(fh):
+            if (r.get("status") or "").strip() != "candidate":
+                continue
+            uid, f = r.get("scene_uid") or "", r.get("file") or ""
+            if uid in answered or f in answered or _base(f) in answered:
+                continue
+            if uid not in left:
+                left.append(uid)
+    if not left:
+        return None
+    shown = ", ".join(left[:5]) + (" ..." if len(left) > 5 else "")
+    return (f"!! reagent controls: this study says 'unsure', and the signal screen "
+            f"({'/'.join(SCREEN_CSV)}) has {len(left)} candidate section(s) not yet "
+            f"confirmed as a reagent control or rejected: {shown}. Carrying on; answer "
+            f"them in Set up, then re-run this stage.")

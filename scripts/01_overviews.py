@@ -50,6 +50,7 @@ import czi_read as CR  # noqa: E402
 import ls_channels as CH  # noqa: E402
 import ls_io as IO  # noqa: E402
 import ls_jsonio as JS  # noqa: E402
+import ls_reagent_controls as RC  # noqa: E402
 
 SOURCE_DIR = CONFIG["source_dir"]
 OUT_ROOT = CONFIG["out_root"]
@@ -375,6 +376,28 @@ def write_sat_raw(by_uid):
 
 # ---------------------------------------------------------------- passes
 
+def display_sample(scenes, lookup):
+    """The sections the frozen display range is sampled from: SAMPLE_SECTIONS
+    drawn with SEED from the stained scenes only.
+
+    A reagent control (no primary, isotype, unstained) is dim by design, so
+    drawing it into the sample would pull every stained section's range down.
+    Which scenes are controls comes from config through `lookup`
+    (ls_reagent_controls.expand), per scene and marker: a multiplex scene that
+    is a control for one marker is still drawn for the other.
+    """
+    pool = [r for r in scenes
+            if not RC.is_control(lookup, r["scene_uid"], r["marker_channel"])]
+    if scenes and not pool:
+        raise SystemExit(
+            f"every one of the {len(scenes)} section(s) in the manifest is a reagent "
+            f"control, so there is no stained section to set the display range from. "
+            f"Check reagent_controls in Set up.")
+    rng = np.random.default_rng(SEED)
+    rng.shuffle(pool)
+    return pool[:SAMPLE_SECTIONS]
+
+
 def sample_display_ranges(scenes, fields, zoom, force):
     if os.path.exists(RANGES_PATH) and not force:
         with open(RANGES_PATH, encoding="utf-8") as fh:
@@ -382,10 +405,7 @@ def sample_display_ranges(scenes, fields, zoom, force):
         print(f"display ranges loaded: {ranges}")
         return ranges
 
-    rng = np.random.default_rng(SEED)
-    pool = list(scenes)
-    rng.shuffle(pool)
-    sample = pool[:SAMPLE_SECTIONS]
+    sample = display_sample(scenes, RC.expand(CONFIG, scenes))
     by_file = {}
     for r in sample:
         by_file.setdefault(r["file"], []).append(r)

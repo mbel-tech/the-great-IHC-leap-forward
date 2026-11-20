@@ -345,6 +345,10 @@ STAGES = [
           script="01_overviews.py", reader="pylibCZIrw",
           outputs=["overviews", "qc/focus.csv"],
           needs=["manifest"],
+          # Which sections are reagent controls decides which ones the
+          # study-wide estimate leaves out (display ranges, tuning sample).
+          settings=["reagent_controls.declared", "reagent_controls.files",
+                    "reagent_controls.scenes"],
           blurb="Every section at exactly 5.2 um/px with a frozen display "
                 "range, plus per-section QC including clipping measured on the "
                 "raw plane. Writes the raw clipping masks 04j censors from in "
@@ -361,6 +365,10 @@ STAGES = [
           script="01l_scene_renders.py", reader="pylibCZIrw",
           outputs=["qc/scene_renders.csv"],
           needs=["manifest"],
+          # Which sections are reagent controls decides which ones the
+          # study-wide estimate leaves out (display ranges, tuning sample).
+          settings=["reagent_controls.declared", "reagent_controls.files",
+                    "reagent_controls.scenes"],
           blurb="Every scene of every slide drawn from the CZI, read in bands "
                 "so memory stays small, several slides at once while free RAM "
                 "allows. Two folders per marker: the stain over "
@@ -720,6 +728,10 @@ STAGES = [
           script="05b_tune_detection.py", reader="pylibCZIrw",
           outputs=["qc/detection_tuning.md"],
           needs=["roi_geometry"],
+          # Which sections are reagent controls decides which ones the
+          # study-wide estimate leaves out (display ranges, tuning sample).
+          settings=["reagent_controls.declared", "reagent_controls.files",
+                    "reagent_controls.scenes"],
           blurb="Samples ROIs from sections spread over every animal, measures "
                 "background, signal, noise, signal-to-noise, contrast and "
                 "saturation on the plane detection uses, and picks StarDist's "

@@ -29,6 +29,7 @@ if _HERE not in sys.path:
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
 import ls_naming as NM  # noqa: E402
 import ls_io as IO  # noqa: E402
+import ls_reagent_controls as RC  # noqa: E402
 
 SOURCE_DIR = CONFIG["source_dir"]
 OUT_ROOT = CONFIG["out_root"]
@@ -62,9 +63,14 @@ def main():
             r["section_order"] = int(r["section_order"])
             usable.append(r)
 
+    # A reagent control is a series of its own (as 00 numbered its
+    # section_order), so it neither shares its donor's section_order values
+    # nor stands in for the donor's stained sections. Internal key only: the
+    # rows written below keep their own `animal`.
+    lookup = RC.expand(CONFIG, rows)
     groups = defaultdict(list)
     for r in usable:
-        groups[(r["animal"], r["marker_channel"])].append(r)
+        groups[(RC.series_animal(r, lookup), r["marker_channel"])].append(r)
     print(f"{len(usable)} sections available across {len(groups)} animal x marker series")
 
     rng = random.Random(SEED)

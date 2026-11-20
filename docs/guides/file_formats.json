@@ -6365,6 +6365,14 @@
      "meaning": "How many sections the scene really holds."
     }
    ]
+  },
+  {
+   "path": "qc/reagent_screen.csv",
+   "names": [
+    "reagent_screen.csv"
+   ],
+   "writer": "01m_reagent_screen.py",
+   "what": "The reagent-control signal screen: one row per section x marker, with `scene_uid`, `file`, `marker` and `status` (`candidate` for a section that looks like a reagent control). 05b and 05c warn, and carry on, while the study says `unsure` and a candidate is neither confirmed nor rejected (ls_reagent_controls.warn_unanswered). The screen stage that writes it is not built yet; its full column list is added with it."
   }
  ],
  "not_files": {

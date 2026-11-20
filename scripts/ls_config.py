@@ -186,7 +186,7 @@ class Key:
 # The spec. Order here is the order keys appear in a generated config.
 # --------------------------------------------------------------------------
 
-_RC_CONSUMERS = ["00", "01", "01m", "02", "05b", "05c", "06a", "06c", "app"]
+_RC_CONSUMERS = ["00", "01", "01b", "01m", "02", "04b", "04c", "05b", "05c", "06a", "06c", "app"]
 
 SPEC = [
     Key("schema_version", "int",

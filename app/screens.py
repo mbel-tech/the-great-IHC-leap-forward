@@ -1279,6 +1279,10 @@ class SetupScreen(QWidget):
             self.logged.emit("reagent controls confirmed: %d file(s), %d section(s)"
                              % (len(project.get("reagent_controls.files") or {}),
                                 len(project.get("reagent_controls.scenes") or {})))
+            # The stages to run again: the app does not mark them out of date
+            # by itself, so the operator is told here as well as on Save.
+            if dlg.result_text:
+                self.logged.emit(dlg.result_text)
         return dlg
 
     def show_slide_manifest(self):

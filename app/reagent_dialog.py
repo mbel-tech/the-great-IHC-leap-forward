@@ -108,6 +108,36 @@ def needs_confirming(cfg, source_dir):
     return bool(RC.unanswered(cfg, scan_folder(cfg, source_dir)))
 
 
+#: What to run again once the confirmed reagent controls change. The app does
+#: not mark these stages out of date by itself (most of them record no inputs),
+#: so Save says it in words. Titles as the app lists them.
+RERUN_STAGES = (
+    "00  Read slide headers - the manifest marks which sections are reagent controls "
+    "and numbers them in a series of their own",
+    "02  Pair the two marker passes (paired studies only)",
+    "01  Export section overviews - it samples the display ranges again when they "
+    "were drawn from a section now confirmed; if it says the ranges are older than "
+    "that record, run it with Force",
+    "04n  Order the ROI queue - reagent controls go first",
+    "05b  Check signal quality and tune detection - only if you have tuned detection "
+    "already",
+    "05c  Detect and measure nuclei, then 06a Per-ROI dataset and the spreadsheets "
+    "(06c, 06d), or 06e Build results",
+)
+
+
+def rerun_text(confirmed_changed, pairing_changed=False):
+    """The plain-words list of stages to run again after Save, or ""."""
+    if confirmed_changed:
+        return ("The reagent controls changed. Run these again, in this order, so every "
+                "result leaves them out and reports them:\n"
+                + "\n".join("  - " + s for s in RERUN_STAGES))
+    if pairing_changed:
+        return ("The pairing changed. Run 06a Per-ROI dataset again (or 06e Build "
+                "results) to compare the reagent controls with the new choice.")
+    return ""
+
+
 def _base(p):
     return os.path.basename(str(p or "").replace("\\", "/"))
 
@@ -128,12 +158,16 @@ class _Row(QFrame):
     """One candidate: what it is, its kind and markers, and the answer."""
 
     def __init__(self, dlg, key, where, path, source, token="", tier="strong", entry=None,
-                 ticked=False, needs_subject=False, markers_on=None, extra_words=""):
+                 ticked=False, needs_subject=False, markers_on=None, extra_words="",
+                 stored=False):
         super().__init__()
         self.setObjectName("card")
         self.key, self.where, self.path, self.source = key, where, path, source
         self.token, self.tier = token or "", tier
         self.old = dict(entry or {})
+        # Already confirmed in the study's config: "Decide later" then leaves
+        # that entry exactly as it is, and only "Un-confirm" removes it.
+        self.stored = bool(stored)
         self.pairing_kind = None
         lay = QVBoxLayout(self)
         lay.setContentsMargins(10, 8, 10, 8)
@@ -165,7 +199,7 @@ class _Row(QFrame):
         lay.addLayout(top)
 
         mrow = QHBoxLayout()
-        mrow.addWidget(QLabel("Controls the markers"))
+        mrow.addWidget(QLabel("Reagent control for markers"))
         self.markers = {}
         stored = self.old.get("markers")
         on = (markers_on if markers_on is not None
@@ -213,7 +247,15 @@ class _Row(QFrame):
         self.accept = QRadioButton("Accept")
         self.reject = QRadioButton("Not a control")
         self.later = QRadioButton("Decide later")
-        for b in (self.accept, self.reject, self.later):
+        buttons = [self.accept, self.reject, self.later]
+        self.unconfirm = None
+        if self.stored:
+            self.later.setToolTip("Leave the confirmed entry as it is")
+            self.unconfirm = QRadioButton("Un-confirm")
+            self.unconfirm.setToolTip("Remove this confirmed reagent control, without "
+                                      "marking it as not a control")
+            buttons.append(self.unconfirm)
+        for b in buttons:
             self.answer.addButton(b)
             ans.addWidget(b)
         (self.accept if ticked else self.later).setChecked(True)
@@ -229,6 +271,19 @@ class _Row(QFrame):
         prow.addWidget(self.pairing_label, 1)
         prow.addWidget(self.pairing_btn)
         lay.addLayout(prow)
+
+    def unconfirmed(self):
+        return self.unconfirm is not None and self.unconfirm.isChecked()
+
+    def target_entry(self):
+        """What Save writes for this row: (True, entry) to store, (False, None) to
+        remove, or None to leave the stored value as it is."""
+        if self.accept.isChecked():
+            return True, self.entry()
+        if self.reject.isChecked() or self.unconfirmed():
+            return False, None
+        # Decide later: a stored entry is kept untouched; a new one stays out.
+        return None if self.stored else (False, None)
 
     def chosen_markers(self):
         """[] when every marker is ticked (the config's "all")."""
@@ -285,6 +340,9 @@ class ReagentControlsDialog(QDialog):
         self.resize(820, 680)
         self.project, self.slides_dir = project, slides_dir
         self.changed = False
+        # After Save: which stages to run again (rerun_text) and everything the
+        # operator should be told (result_text, which includes it). "" when none.
+        self.rerun_text = self.result_text = ""
         cfg = project.cfg
         self.e = RC.entries(cfg)
         self.study_markers = list(CH.marker_names(cfg))
@@ -319,9 +377,7 @@ class ReagentControlsDialog(QDialog):
         scroll.setWidget(self.body)
         lay.addWidget(scroll, 1)
 
-        self.empty = QLabel("Nothing in the slide names looks like a reagent control, and "
-                            "the signal screen has proposed none. Add a file by hand if one "
-                            "is.")
+        self.empty = QLabel(self._empty_words(cfg))
         self.empty.setWordWrap(True)
         self.empty.setStyleSheet(T.HINT)
         lay.addWidget(self.empty)
@@ -344,6 +400,17 @@ class ReagentControlsDialog(QDialog):
         self._populate(cfg)
 
     # ------------------------------------------------------------- building
+    @staticmethod
+    def _empty_words(cfg):
+        """What an empty list says: the screen proposed none, or has not run yet."""
+        if os.path.isfile(os.path.join(cfg.get("out_root") or "", *RC.SCREEN_CSV)):
+            return ("Nothing in the slide names looks like a reagent control, and the "
+                    "signal screen has proposed none. Add a file by hand if one is.")
+        return ("Nothing in the slide names looks like a reagent control. The signal screen "
+                "has not run yet: it runs in Prepare, after the section overviews (01m "
+                "Screen for reagent controls). Come back here after it to see what it "
+                "proposes, or add a file by hand now if one is a reagent control.")
+
     @staticmethod
     def _manifest_rows(cfg):
         try:
@@ -403,22 +470,31 @@ class ReagentControlsDialog(QDialog):
             self._add(key, "files", m.path, (old or {}).get("source") or "name",
                       token=m.token, tier=m.tier, entry=old or {"kind": m.kind},
                       ticked=bool(old) or m.tier == "strong",
-                      markers_on=None if old else (m.markers or None))
+                      markers_on=None if old else (m.markers or None),
+                      stored=key in e["files"])
         for key, old in e["files"].items():
             self._add(key, "files", key, (old or {}).get("source") or "manual",
-                      token=(old or {}).get("pattern") or "", entry=old, ticked=True)
+                      token=(old or {}).get("pattern") or "", entry=old, ticked=True,
+                      stored=True)
         for uid, old in e["scenes"].items():
             self._add(uid, "scenes", uid, (old or {}).get("source") or "manual",
-                      token="", entry=old, ticked=True)
-        for uid, info in self._screen_candidates(cfg).items():
-            self._add(uid, "scenes", uid, "signal", entry={"kind": "no_primary"},
-                      ticked=False, markers_on=info["markers"],
-                      extra_words="%s, rank %s" % (info["file"], info["rank"] or "?"))
+                      token="", entry=old, ticked=True, stored=True)
+        for status in ("candidate", "review"):
+            for uid, info in self._screen_candidates(cfg, status).items():
+                # A candidate passed every measure the screen has for its marker;
+                # a review row only one (a marker with a single usable feature,
+                # LS AF488). Both wait for the operator; review says it is weaker.
+                words = "%s, rank %s" % (info["file"], info["rank"] or "?")
+                if status == "review":
+                    words += (" - on one measure only, the only one this marker has: "
+                              "weaker evidence than a candidate, so look before you accept")
+                self._add(uid, "scenes", uid, "signal", entry={"kind": "no_primary"},
+                          ticked=False, markers_on=info["markers"], extra_words=words)
         self.empty.setVisible(not self.rows)
 
-    def _screen_candidates(self, cfg):
-        """{uid: {file, markers, rank}} from qc/reagent_screen.csv: status candidate,
-        not already confirmed or rejected."""
+    def _screen_candidates(self, cfg, status="candidate"):
+        """{uid: {file, markers, rank}} from qc/reagent_screen.csv: rows of `status`
+        (candidate, or review), not already confirmed or rejected."""
         path = os.path.join(cfg.get("out_root") or "", *RC.SCREEN_CSV)
         if not os.path.isfile(path):
             return {}
@@ -431,7 +507,7 @@ class ReagentControlsDialog(QDialog):
         except (OSError, csv.Error, ValueError):
             return {}
         for r in rows:
-            if (r.get("status") or "").strip() != "candidate":
+            if (r.get("status") or "").strip() != status:
                 continue
             uid, f = r.get("scene_uid") or "", r.get("file") or ""
             if not uid or uid in answered or f in answered or _base(f) in answered:
@@ -448,7 +524,7 @@ class ReagentControlsDialog(QDialog):
         """A row for a slide file added by hand (or the one already listed)."""
         name = _base(name)
         return self._add(name, "files", name, "manual", entry=self.e["files"].get(name),
-                         ticked=False)
+                         ticked=False, stored=name in self.e["files"])
 
     def _add_file(self):
         start = self.slides_dir if self.slides_dir and os.path.isdir(self.slides_dir) else ""
@@ -465,8 +541,11 @@ class ReagentControlsDialog(QDialog):
         files, scenes = dict(self.e["files"]), dict(self.e["scenes"])
         for r in self.rows:
             target = files if r.where == "files" else scenes
-            if r.accept.isChecked():
-                target[r.key] = r.entry()
+            got = r.target_entry()
+            if got is None:
+                continue
+            if got[0]:
+                target[r.key] = got[1]
             else:
                 target.pop(r.key, None)
         rc["files"], rc["scenes"] = files, scenes
@@ -575,18 +654,23 @@ class ReagentControlsDialog(QDialog):
         e = self.e
         files, scenes = dict(e["files"]), dict(e["scenes"])
         rejected = list(e["rejected"])
+        unconfirmed = []
         for r in self.rows:
             target = files if r.where == "files" else scenes
-            if r.accept.isChecked():
-                target[r.key] = r.entry()
+            got = r.target_entry()
+            if got is None:
+                continue                      # Decide later on a stored entry
+            if got[0]:
+                target[r.key] = got[1]
                 rejected = [x for x in rejected if x != r.key]
-            elif r.reject.isChecked():
-                target.pop(r.key, None)
-                if r.key not in rejected:
-                    rejected.append(r.key)
             else:
+                if r.unconfirmed() and r.key in target:
+                    unconfirmed.append(r.key)
                 target.pop(r.key, None)
+                if r.reject.isChecked() and r.key not in rejected:
+                    rejected.append(r.key)
         have = self.project.get("reagent_controls") or {}
+        was = {"files": e["files"], "scenes": e["scenes"], "paired_with": e["paired_with"]}
         for name, value in (("files", files), ("scenes", scenes), ("rejected", rejected),
                             ("paired_with", self.paired_with)):
             if not value and name not in have:
@@ -594,8 +678,22 @@ class ReagentControlsDialog(QDialog):
             if self.project.set("reagent_controls." + name, value, by=BY):
                 self.changed = True
         self.e = RC.entries(self.project.cfg)
+        confirmed_changed = (self.e["files"] != was["files"]
+                             or self.e["scenes"] != was["scenes"])
+        self.rerun_text = rerun_text(confirmed_changed,
+                                     self.e["paired_with"] != was["paired_with"])
+        lines = []
+        if unconfirmed:
+            lines.append("Un-confirmed (no longer reagent controls, and not marked as "
+                         "'not a control' either, so the name scan or the screen may "
+                         "propose them again): " + ", ".join(unconfirmed) + ".")
+        if self.rerun_text:
+            lines.append(self.rerun_text)
+        self.result_text = "\n\n".join(lines)
         return True
 
     def _save_and_close(self):
         if self.save():
+            if self.result_text:
+                QMessageBox.information(self, "Reagent controls", self.result_text)
             self.accept()

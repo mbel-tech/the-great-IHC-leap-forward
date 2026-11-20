@@ -118,6 +118,9 @@ dlg = new_study(PLAIN, "o_unsure", answer="unsure")
 chk("unsure_saved: Not sure writes unsure", dlg.project.get("reagent_controls.declared"),
     "unsure")
 chk("...and opens the confirm list to check", len(opened), 1)
+chk("empty_before_screen: with nothing found, the list says the screen runs in Prepare",
+    opened[0].empty.text().count("Prepare") == 1 and "has proposed none"
+    not in opened[0].empty.text() if opened else None, True)
 
 print("--- New study: a strong match with No ---")
 STRONG = folder("strong", ["LS45_1a.czi", "LS45_noPrimary.czi", "LS45_NC.czi"])
@@ -237,7 +240,12 @@ chk("...not ticked for you: the screen never assigns", cand.accept.isChecked() i
 chk("...the marker it was a candidate for is ticked",
     {m: b.isChecked() for m, b in cand.markers.items()} if cand else None,
     {"pERK": True, "PCNA": False})
-chk("...a review row is not a candidate", scr.row_for("LS45_s01a_sc01"), None)
+rev = scr.row_for("LS45_s01a_sc01")
+chk("review_rows_listed: a review row (one measure only) is listed too", rev is not None, True)
+chk("...unticked", rev is not None and rev.accept.isChecked(), False)
+chk("...and says it is weaker evidence",
+    rev is not None and "weaker evidence" in rev.label.text(), True)
+chk("...a candidate row does not", "weaker evidence" in cand.label.text(), False)
 cand.accept.setChecked(True)
 scr.save()
 chk("...Accept writes a scene entry",
@@ -268,6 +276,42 @@ chk("...and Save writes paired_with",
     project.get("reagent_controls.paired_with"), {"LS45_noPrimary.czi": ["LS46_s01a_sc01"]})
 chk("...the choices offered are stained sections, not the control's own",
     "LS45_s09_sc02" in pd.stained_choices("LS45_noPrimary.czi"), False)
+chk("...a pairing change alone says to run 06a again",
+    ("06a" in pd.rerun_text, "00  Read slide headers" in pd.rerun_text), (True, False))
+
+print("--- a confirmed row: Decide later keeps it, Un-confirm removes it ---")
+stored = dict(project.get("reagent_controls.files")["LS45_noPrimary.czi"])
+keep = RD.ReagentControlsDialog(project, SRC)
+krow = keep.row_for("LS45_noPrimary.czi")
+chk("decide_later_keeps: a confirmed row offers Un-confirm",
+    krow.unconfirm is not None and krow.unconfirm.text(), "Un-confirm")
+chk("...a row never confirmed does not", keep.add_manual("LS46_1a.czi").unconfirm, None)
+krow.subject.setText("LS99")            # an edit, then Decide later: the edit is not kept
+krow.later.setChecked(True)
+chk("...Save works", keep.save(), True)
+chk("...Decide later leaves the stored entry exactly as it was, Animal ID and slide too",
+    project.get("reagent_controls.files")["LS45_noPrimary.czi"], stored)
+chk("...nothing changed, so no stage to re-run", (keep.rerun_text, keep.result_text), ("", ""))
+un = RD.ReagentControlsDialog(project, SRC)
+un.row_for("LS45_noPrimary.czi").unconfirm.setChecked(True)
+un.save()
+chk("unconfirm_removes: Un-confirm removes the entry",
+    "LS45_noPrimary.czi" in (project.get("reagent_controls.files") or {}), False)
+chk("...without marking it not a control",
+    "LS45_noPrimary.czi" in (project.get("reagent_controls.rejected") or []), False)
+chk("...and says so", "Un-confirmed" in un.result_text and "LS45_noPrimary.czi" in un.result_text,
+    True)
+chk("rerun_listed: Save names the stages to run again, in plain words",
+    [w for w in ("00  Read slide headers", "02  Pair", "01  Export section overviews",
+                 "05b", "05c", "06a") if w not in un.rerun_text], [])
+chk("...in the result shown on Save too", un.rerun_text in un.result_text, True)
+back = RD.ReagentControlsDialog(project, SRC)
+chk("...an un-confirmed strong name is proposed again, pre-ticked",
+    back.row_for("LS45_noPrimary.czi") is not None
+    and back.row_for("LS45_noPrimary.czi").accept.isChecked(), True)
+back.row_for("LS45_noPrimary.czi").subject.setText(stored["subject"])
+back.row_for("LS45_noPrimary.czi").slide.setValue(stored["slide"])
+back.save()
 
 print("--- the workbook check ---")
 import workbook_check as WC                                     # noqa: E402
@@ -322,11 +366,21 @@ with open(os.path.join(RES, "results", LR.REPORT_CSV), "w", newline="", encoding
     w = csv.DictWriter(fh, LR.COLUMNS)
     w.writeheader()
     w.writerow({"scene_uid": "LS45_s09_sc01", "kind": "no_primary", "marker": "pERK",
-                "region": "Dm"})
+                "region": "", "note": "confirmed reagent control, not measured yet: 05c"})
+results.show_limitation(RES)
+chk("...a no_primary row not measured yet: still the existing text",
+    "not defensible" in results.limitation.text(), True)
+with open(os.path.join(RES, "results", LR.REPORT_CSV), "w", newline="", encoding="utf-8") as fh:
+    w = csv.DictWriter(fh, LR.COLUMNS)
+    w.writeheader()
+    w.writerow({"scene_uid": "LS45_s09_sc01", "kind": "no_primary", "marker": "pERK",
+                "region": "Dm", "n_nuclei": 40, "n_positive": 1, "pct_positive": 2.5})
 results.show_limitation(RES)
 chk("...a no_primary row: names the Reagent controls sheet",
     "Reagent controls" in results.limitation.text(), True)
-chk("...the text is limitation_text's", W.limitation_text(RES), LR.CONTROL_TEXT)
+chk("...the text is limitation_text's", W.limitation_text(RES),
+    LR.limitation_text([{"kind": "no_primary", "marker": "pERK", "pct_positive": "2.5"}]))
+chk("...and names the marker it covers", "pERK" in results.limitation.text(), True)
 chk("the other screens carry no such line",
     getattr(SC.StageListScreen(W.SCREENS["measure"]), "limitation", None), None)
 
@@ -340,6 +394,15 @@ s.session.project.set("source_dir", SRC, by="test")
 s.reagent_btn.click()
 chk("...which opens the same dialog", len(opened) == 1
     and isinstance(opened[0], RD.ReagentControlsDialog), True)
+told = []
+s.logged.connect(told.append)
+_exec = RD.ReagentControlsDialog.exec
+RD.ReagentControlsDialog.exec = lambda self: (setattr(self, "changed", True),
+                                              setattr(self, "result_text", "run 00 again"), 1)[2]
+s.reagent_btn.click()
+RD.ReagentControlsDialog.exec = _exec
+chk("...and what Save says to re-run reaches the app's message area", "run 00 again" in told,
+    True)
 
 print("--- 01d: a control's caption ---")
 D1 = load_stage("01d_contactsheets.py", name="lsstage_01d_rcdlg")

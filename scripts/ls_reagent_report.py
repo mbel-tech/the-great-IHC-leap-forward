@@ -51,11 +51,19 @@ NO_CONTROL_TEXT = (
     "is not defensible; the comparison between arms at matched levels is, and "
     "`detector_specificity.csv` carries the false-positive rate to quote with it.")
 
+#: The text for a study with a measured no-primary reagent control; {markers} is
+#: the markers it covers (limitation_text).
 CONTROL_TEXT = (
-    "This study has a no-primary reagent control. What the positivity rule calls on it, "
-    "beside the paired stained sections, is on the \"Reagent controls\" sheet: read an "
-    "absolute positivity rate against that rate, not as zero background. "
-    "`detector_specificity.csv` still carries the background discs' false-positive rate.")
+    "This study has a no-primary reagent control for {markers}. What the positivity rule "
+    "calls on it, beside the paired stained sections, is on the \"Reagent controls\" "
+    "sheet: read an absolute positivity rate of {markers} against that rate, not as zero "
+    "background. `detector_specificity.csv` still carries the background discs' "
+    "false-positive rate. For any marker not named here there is no such control, and an "
+    "absolute positivity rate for it is not defensible; the comparison between arms at "
+    "matched levels is.")
+
+#: The note on a confirmed reagent control 06a has nothing measured for yet.
+NOT_MEASURED = "confirmed reagent control, not measured yet"
 
 BATCH_NOTE = ("study-wide pairing: no stained section on the same file or animal, so "
               "the level comparison (B) would cross batches and measure the batch, "
@@ -322,13 +330,36 @@ def report_rows(control_nuclei, stained_nuclei, cuts, pairing, meta=None, areas=
 
 # ---------------------------------------------------------------- the text
 
+def _has_a(r):
+    """Whether a report row carries part A: a positivity call on the control."""
+    return any(str(r.get(c) if r.get(c) is not None else "").strip() != ""
+               for c in ("pct_positive", "positive_per_mm2"))
+
+
+def covered_markers(rows):
+    """The markers with a no_primary row that has a part-A value, in first-seen order.
+    A row for a control not measured yet (no A) covers nothing."""
+    out = []
+    for r in rows or ():
+        if (r.get("kind") or "") == "no_primary" and _has_a(r):
+            m = r.get("marker") or ""
+            if m not in out:
+                out.append(m)
+    return out
+
+
 def has_no_primary(rows):
-    return any((r.get("kind") or "") == "no_primary" for r in rows or ())
+    return bool(covered_markers(rows))
 
 
 def limitation_text(rows):
-    """06c's limitation text: the existing one unless a no_primary row exists."""
-    return CONTROL_TEXT if has_no_primary(rows) else NO_CONTROL_TEXT
+    """06c's limitation text: the existing one unless a no_primary row has a
+    part-A value, and then a pointer to the sheet that names the markers it
+    covers (any other marker keeps the existing statement's substance)."""
+    markers = [m for m in covered_markers(rows) if m] or None
+    if not has_no_primary(rows):
+        return NO_CONTROL_TEXT
+    return CONTROL_TEXT.format(markers=", ".join(markers) if markers else "a marker")
 
 
 def sheet_header(rows):
@@ -358,8 +389,12 @@ def sheet_header(rows):
         "measures the batch, not the reagent.",
         "pairing: operator (Set up), same_file, same_animal, or study_wide when no "
         "stained section shares the file or the animal.",
-        "no_primary and unstained rows test the secondary antibody and autofluorescence; "
-        "isotype and preadsorbed rows test the specificity of the primary antibody.",
+        "no_primary rows test the secondary antibody (with autofluorescence); unstained "
+        "rows test autofluorescence only, since no antibody was applied; isotype and "
+        "preadsorbed rows test the specificity of the primary antibody.",
+        f"A row whose note starts \"{NOT_MEASURED}\" is a confirmed reagent control "
+        "with nothing measured for that marker yet; its measures are blank and the note "
+        "says why.",
         "A background disc is not a reagent control: the primary antibody is on that "
         "tissue, so detector_specificity.csv measures non-specific binding plus "
         "autofluorescence, not zero.",

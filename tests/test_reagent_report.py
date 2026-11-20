@@ -228,11 +228,27 @@ chk("...and it is the no-no-primary text", "no no-primary control" in RR.limitat
     True)
 iso = {"kind": "isotype"}
 chk("an isotype row alone does not switch it", RR.limitation_text([iso]), RR.limitation_text([]))
-np_row = {"kind": "no_primary"}
+np_row = {"kind": "no_primary", "marker": "pERK", "pct_positive": 3.1}
 chk("a no_primary row: it names the Reagent controls sheet",
     "Reagent controls" in RR.limitation_text([np_row]), True)
-chk("...and no longer says there is none",
+chk("...and no longer says the study has none",
     "no no-primary control" in RR.limitation_text([np_row]), False)
+chk("limitation_names_markers: it names the marker covered",
+    "for pERK." in RR.limitation_text([np_row]), True)
+chk("...and says any other marker has none",
+    "any marker not named here" in RR.limitation_text([np_row]), True)
+two = [np_row, dict(np_row, marker="PCNA", pct_positive="", positive_per_mm2=4.0),
+       {"kind": "no_primary", "marker": "tERK", "pct_positive": ""}]
+chk("...a marker covered by density counts; one with no A value does not",
+    RR.covered_markers(two), ["pERK", "PCNA"])
+chk("a no_primary row not measured yet (no A) does not switch it",
+    RR.limitation_text([{"kind": "no_primary", "marker": "pERK", "pct_positive": "",
+                         "note": RR.NOT_MEASURED}]), RR.limitation_text([]))
+chk("sheet_header: unstained is said to test autofluorescence only",
+    any("unstained rows test autofluorescence only" in ln for ln in RR.sheet_header([])), True)
+chk("...no line says unstained rows test the secondary",
+    any("unstained" in ln and "test the secondary" in ln.split("unstained")[1].split(";")[0]
+        for ln in RR.sheet_header([])), False)
 
 print("--- no_disc_language ---")
 texts = [open(os.path.join(SCRIPTS, "ls_reagent_report.py"), encoding="utf-8").read(),

@@ -41,6 +41,7 @@ The spreadsheets can be rebuilt any time, including while detection is still run
 - **Check measurement is finished**, or decide consciously to look at a partial result.
 - **Look at the coverage sheet** in `roi_dataset.xlsx`. Some animals may have few measurable sections because of saturation; note this before comparing groups.
 - **What not to claim.** The LS dataset has no no-primary controls, so absolute statements such as "30% of cells are positive" are not supported. Comparisons between groups at matched brain levels are.
+- **If the study has reagent controls**, the "Reagent controls" sheet in `roi_dataset.xlsx` (and `results/reagent_controls.csv`) says what the positivity rule calls on sections stained without the primary antibody, beside the stained sections of the same marker and region. With a no-primary reagent control measured for a marker, read that marker's absolute rate against that number, not as zero background; the sheet's header names the markers covered, and a control not measured yet is listed with a note but covers nothing. A study without them is as above, and a background disc is not a negative control either way. Reagent controls are never in the group comparisons.
 
 ## Citing
 

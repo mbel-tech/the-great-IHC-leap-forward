@@ -239,6 +239,7 @@ if _HERE not in sys.path:
 import ls_config as LC  # noqa: E402
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
 import ls_channels as CH  # noqa: E402
+import ls_reagent_controls as RC  # noqa: E402
 import ls_paths as LP  # noqa: E402
 import ls_atlas as AT  # noqa: E402
 import atlas_polygons as AP  # noqa: E402
@@ -1049,6 +1050,9 @@ def main():
     # a curated section outside this set would fail 05a's placement. See
     # CARRIED in the page.
     carried = set()
+    rc_lookup = RC.manifest_lookup(
+        CONFIG, MARKERS if (CONFIG.get("acquisition") or {}).get(
+            "layout", CH.LAYOUT_MULTIPLEX) == CH.LAYOUT_MULTIPLEX else ())
 
     def build(marker):
         index_csv, img_dir = marker_paths(marker)
@@ -1099,11 +1103,15 @@ def main():
         # to the greyscale the geometry was computed on.
         out = []
         for r in rows:
+            entry = rc_lookup.get((r["id"], marker))
             has = args.rgb and os.path.exists(
                 os.path.join(REFORMAT_DIR, rgb_dir, r["id"] + ".png"))
             out.append({"uid": r["id"], "animal": r["animal"], "m": marker,
                         "sub": subset, "rgb": bool(has),
                         "order": int(r["section_order"] or 0),
+                        # A badge on the page only: which sections are reagent
+                        # controls comes from config (ls_reagent_controls).
+                        "reagent_control": (entry.get("kind") or "other") if entry else "",
                         "img": (rgb_dir if has else img_dir) + "/" + r["id"] + ".png"})
         return out, subset, before
 

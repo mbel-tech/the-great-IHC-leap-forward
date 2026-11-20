@@ -94,6 +94,7 @@ if _HERE not in sys.path:
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
 import ls_atlas as AT  # noqa: E402
 import ls_naming as NM  # noqa: E402
+import ls_reagent_controls as RC  # noqa: E402
 
 OUT_ROOT = CONFIG["out_root"]
 REFORMAT_DIR = os.path.join(OUT_ROOT, "reformatted")
@@ -122,6 +123,38 @@ ROTATIONS = (-8, -4, 0, 4, 8)          # degrees, residual obliquity after refor
 SCALES = (0.92, 1.0, 1.08)             # section thickness and shrinkage differences
 WARP_SIGMA = 12.0                      # smoothness of the elastic displacement
 WARP_AMPLITUDE = (0.0, 3.0)            # pixels; 0 keeps the undeformed variant
+
+
+def manifest_series_inputs():
+    """(lookup, {scene_uid: marker_channel}) from 00's manifest.
+
+    reformat_index.csv names a section by `id` and carries no marker, so the
+    marker a section's section_order was numbered under is read back from the
+    manifest row of that uid. Both empty when nothing is confirmed as a reagent
+    control or there is no manifest.
+    """
+    lookup = RC.manifest_lookup(CONFIG)
+    if not lookup:
+        return {}, {}
+    with open(os.path.join(OUT_ROOT, "manifest", "manifest_scenes.csv"),
+              newline="", encoding="utf-8") as fh:
+        return lookup, {r["scene_uid"]: r["marker_channel"] for r in csv.DictReader(fh)}
+
+
+def series_of(index, lookup, marker_of):
+    """{series: index rows in section_order}: one series per animal, and a
+    reagent control in a series of its own (ls_reagent_controls.series_animal),
+    as 00 numbered its section_order. The key is internal: rows keep their own
+    `animal`, and the proposals are written with it.
+    """
+    out = {}
+    for r in index:
+        key = RC.series_animal({"scene_uid": r["id"], "animal": r["animal"],
+                                "marker_channel": marker_of.get(r["id"])}, lookup)
+        out.setdefault(key, []).append(r)
+    for group in out.values():
+        group.sort(key=lambda r: int(r["section_order"]))
+    return out
 
 
 def iou(a, b):
@@ -251,13 +284,12 @@ def main():
     if args.animal:
         index = [r for r in index if r["animal"] == args.animal]
 
-    by_animal = {}
-    for r in index:
-        by_animal.setdefault(r["animal"], []).append(r)
+    lookup, marker_of = manifest_series_inputs()
+    by_series = series_of(index, lookup, marker_of)
 
     proposals = []
-    for animal, group in sorted(by_animal.items(), key=lambda kv: NM.natural_key(kv[0])):
-        group.sort(key=lambda r: int(r["section_order"]))
+    for series, group in sorted(by_series.items(), key=lambda kv: NM.natural_key(kv[0])):
+        animal = RC.series_label(series)
         masks, keep = [], []
         for r in group:
             p = os.path.join(REFORMAT_DIR, "sections", r["id"] + "_mask.npy")
@@ -278,7 +310,7 @@ def main():
         for i, r in enumerate(keep):
             order = np.argsort(-sim[i])[:TOP_K]
             proposals.append({
-                "scene_uid": r["id"], "animal": animal,
+                "scene_uid": r["id"], "animal": r["animal"],
                 "section_order": r["section_order"],
                 "proposed_plate": plate_ids[int(path[i])],
                 "proposed_score": round(float(sim[i, int(path[i])]), 3),

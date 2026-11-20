@@ -50,6 +50,7 @@ import czi_read as CR  # noqa: E402
 import ls_channels as CH  # noqa: E402
 import ls_io as IO  # noqa: E402
 import ls_jsonio as JS  # noqa: E402
+import ls_reagent_controls as RC  # noqa: E402
 
 SOURCE_DIR = CONFIG["source_dir"]
 OUT_ROOT = CONFIG["out_root"]
@@ -375,17 +376,86 @@ def write_sat_raw(by_uid):
 
 # ---------------------------------------------------------------- passes
 
-def sample_display_ranges(scenes, fields, zoom, force):
+def display_sample(scenes, lookup):
+    """The sections the frozen display range is sampled from: SAMPLE_SECTIONS
+    drawn with SEED from the stained scenes only.
+
+    A reagent control (no primary, isotype, unstained) is dim by design, so
+    drawing it into the sample would pull every stained section's range down.
+    Which scenes are controls comes from config through `lookup`
+    (ls_reagent_controls.expand), per scene and marker: a multiplex scene that
+    is a control for one marker is still drawn for the other.
+    """
+    pool = [r for r in scenes
+            if not RC.is_control(lookup, r["scene_uid"], r["marker_channel"])]
+    if scenes and not pool:
+        raise SystemExit(
+            f"every one of the {len(scenes)} section(s) in the manifest is a reagent "
+            f"control, so there is no stained section to set the display range from. "
+            f"Check reagent_controls in Set up.")
+    rng = np.random.default_rng(SEED)
+    rng.shuffle(pool)
+    return pool[:SAMPLE_SECTIONS]
+
+
+#: The key in display_ranges.json recording which (scene_uid, marker) the ranges
+#: were sampled from. Not a channel: ranges_id and the readers skip "_" keys.
+SAMPLED_KEY = "_sampled"
+
+
+def channel_ranges(ranges):
+    """The channel entries of display_ranges.json, without the sample record."""
+    return {k: v for k, v in (ranges or {}).items() if not str(k).startswith("_")}
+
+
+def sampled_controls(ranges, lookup):
+    """The (uid, marker) a cached range was sampled from that are now confirmed
+    reagent controls; None for a file written before the sample was recorded."""
+    rec = (ranges or {}).get(SAMPLED_KEY)
+    if rec is None:
+        return None
+    return [(u, m) for u, m in rec if RC.is_control(lookup, u, m)]
+
+
+def sample_display_ranges(scenes, fields, zoom, force, narrowed=False):
+    """The frozen display ranges: display_ranges.json as it is, or sampled again.
+
+    Sampled again on `force`, and on its own when the cached file was drawn
+    from a section that has since been confirmed as a reagent control (its
+    `_sampled` record says which sections it used) - a control is dim by
+    design and pulls every stained section's range down. Not on a `narrowed`
+    (--limit) run, which says to run without it. A file from before the record
+    existed cannot be checked, and says to run with --force when the study has
+    confirmed reagent controls.
+    """
+    lookup = RC.expand(CONFIG, scenes)
+    cached = None
     if os.path.exists(RANGES_PATH) and not force:
         with open(RANGES_PATH, encoding="utf-8") as fh:
             ranges = json.load(fh)
-        print(f"display ranges loaded: {ranges}")
-        return ranges
+        print(f"display ranges loaded: {channel_ranges(ranges)}")
+        bad = sampled_controls(ranges, lookup)
+        if bad is None:
+            if lookup:
+                print(f"  note: {os.path.basename(RANGES_PATH)} was sampled before 01 "
+                      f"recorded which sections it drew from, so it cannot tell whether a "
+                      f"section now confirmed as a reagent control was among them. Run 01 "
+                      f"with --force to sample it again from stained sections only.")
+            return ranges
+        if not bad:
+            return ranges
+        shown = ", ".join(f"{u} [{m}]" for u, m in bad[:5]) + (" ..." if len(bad) > 5 else "")
+        if narrowed:
+            print(f"  !! the display ranges were sampled from {len(bad)} section(s) now "
+                  f"confirmed as reagent controls ({shown}); --limit keeps them as they "
+                  f"are - run without --limit to sample them again")
+            return ranges
+        print(f"  !! the display ranges were sampled from {len(bad)} section(s) now "
+              f"confirmed as reagent controls ({shown}): sampling them again from "
+              f"stained sections only, and drawing every section again with them")
+        cached = ranges
 
-    rng = np.random.default_rng(SEED)
-    pool = list(scenes)
-    rng.shuffle(pool)
-    sample = pool[:SAMPLE_SECTIONS]
+    sample = display_sample(scenes, lookup)
     by_file = {}
     for r in sample:
         by_file.setdefault(r["file"], []).append(r)
@@ -414,11 +484,23 @@ def sample_display_ranges(scenes, fields, zoom, force):
         print(f"\r  sampled {done}/{len(sample)}", end="")
     print()
 
+    if not values and cached is not None:
+        # Resampling on our own initiative and nothing could be read (the
+        # slides folder unreachable, say): an empty file would stop every
+        # export. Keep the old ranges and say so; the next run tries again.
+        print(f"  !! no sampled section could be read, so the display ranges were NOT "
+              f"sampled again; keeping {os.path.basename(RANGES_PATH)} as it is. Run 01 "
+              f"again once the slides can be read.")
+        return cached
+
     ranges = {}
     for name, chunks in values.items():
         v = np.concatenate(chunks)
         ranges[name] = {"lo": int(np.percentile(v, LO_PCT)), "hi": int(np.percentile(v, HI_PCT))}
         print(f"  {name}: {ranges[name]['lo']} .. {ranges[name]['hi']}  (n={v.size})")
+    # Which sections the ranges were drawn from, so a later run can tell when
+    # one of them has since been confirmed as a reagent control.
+    ranges[SAMPLED_KEY] = [[r["scene_uid"], r["marker_channel"]] for r in sample]
     # Atomic: a truncated display_ranges.json still exists, so the next run
     # skips sampling and dies parsing it instead of resampling.
     JS.write_json_atomic(RANGES_PATH, ranges)
@@ -435,7 +517,7 @@ def ranges_id(ranges):
     stops part way - a crash, a dropped drive - leaves the rest drawn with the
     old ones. The stamp is how the next run tells those rows apart.
     """
-    blob = json.dumps(ranges, sort_keys=True, separators=(",", ":"))
+    blob = json.dumps(channel_ranges(ranges), sort_keys=True, separators=(",", ":"))
     return hashlib.sha1(blob.encode("utf-8")).hexdigest()[:12]
 
 
@@ -653,7 +735,7 @@ def main():
     if args.force and args.limit and os.path.exists(RANGES_PATH):
         print(f"--limit: keeping {os.path.basename(RANGES_PATH)} as it is; "
               f"run --force without --limit to resample it")
-    ranges = sample_display_ranges(scenes, fields, zoom, resample)
+    ranges = sample_display_ranges(scenes, fields, zoom, resample, narrowed=bool(args.limit))
     exported, failed, total_rows = export(scenes, fields, ranges, ceilings, zoom, args.limit, args.force)
 
     print()

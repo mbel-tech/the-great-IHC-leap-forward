@@ -202,11 +202,16 @@ with contextlib.redirect_stdout(io.StringIO()):
 picked = chosen.get(("LS45", 3, "AF568"), [])
 chk("the stained scan is chosen over a control with more scenes",
     sorted({r["variant"] for r in picked}), ["a"])
+chk("control_carried: the control scan is not dropped - it is its own entry, in its series",
+    sorted({r["variant"] for r in chosen.get(("LS45#rc", 3, "AF568"), [])}), ["nc"])
+chk("...all its scenes", len(chosen.get(("LS45#rc", 3, "AF568"), [])), 6)
+chk("...the note 01d reads still names the stained pick for the slide",
+    [(n["animal"], n["chosen_variant"]) for n in notes], [("LS45", "a")])
 rows = srows("LS45_3nc.czi", "nc", 6)
 with contextlib.redirect_stdout(io.StringIO()):
     chosen, notes = P2.choose_variants(rows)
-chk("a slide whose only scan is a control keeps its own entry",
-    len(chosen.get(("LS45", 3, "AF568"), [])), 6)
+chk("a slide whose only scan is a control keeps its own entry, in its series",
+    (len(chosen.get(("LS45#rc", 3, "AF568"), [])), ("LS45", 3, "AF568") in chosen), (6, False))
 P2.CONFIG["reagent_controls"] = {"declared": "no"}
 rows = srows("LS45_3a.czi", "a", 4) + srows("LS45_3nc.czi", "nc", 6)
 with contextlib.redirect_stdout(io.StringIO()):

@@ -719,6 +719,7 @@ The full table, generated from the code:
 | `verify` | 00b Verify extraction | Ingest and QC | `00b_verify_extraction.py` | manifest | `qc/extraction_status.csv` | none |  | yes |
 | `czi_selftest` | 00d CZI self-test | Ingest and QC | `00d_czi_selftest.py` |  | `qc/czi_selftest.csv` | pylibCZIrw |  | yes |
 | `overviews` | 01 Export section overviews | Ingest and QC | `01_overviews.py` | manifest | `overviews`, `qc/focus.csv` | pylibCZIrw |  | yes |
+| `reagent_screen` | 01m Screen for reagent controls | Ingest and QC | `01m_reagent_screen.py` | overviews | `qc/reagent_screen.csv` | pylibCZIrw |  | yes |
 | `contactsheets` | 01d Contact sheets and gallery | Ingest and QC | `01d_contactsheets.py` | overviews | `contactsheets` | none |  | yes |
 | `scene_renders` | 01l Pictures of every scene, for viewing | Ingest and QC | `01l_scene_renders.py` | manifest | `qc/scene_renders.csv` | pylibCZIrw |  | yes |
 | `pair` | 02 Pair the two marker passes | Ingest and QC | `02_pair_passes.py` | overviews | `pairs.csv` | none |  | yes |
@@ -1006,11 +1007,18 @@ the raw clipping measurement.
   `qc/display_ranges.json`, `qc/focus.csv`, `qc/saturation_raw.csv`, `qc/censor_raw/<scene_uid>_clipped.png`
   and `qc/overview_failures.csv`.
 - **How:** display ranges are computed once from **tissue** pixels of a random sample of sections and
-  then frozen for the whole study, so brightness differences between sections are real. Clipping is
+  then frozen for the whole study, so brightness differences between sections are real. The sample is
+  drawn from stained sections only: a reagent control (`reagent_controls`, through
+  `ls_reagent_controls.expand`, per scene and marker) is still exported but never sampled, and a study whose
+  every section is a reagent control stops with a message. The ranges file records the (section, marker)
+  pairs it was sampled from (`_sampled`); a later run samples the ranges again by itself when one of them
+  has since been confirmed as a reagent control (not under `--limit`), and a file from before the record
+  says to run with `--force`. Clipping is
   measured on the raw 16-bit plane **before** the tile field is applied (section 3.2 of Part 1 says why).
   The focus score is the mean absolute difference between neighbouring pixels inside tissue, divided by
   the tissue's mean brightness, so a dim section is not mistaken for a blurred one.
-- **Settings:** `pixel_size_um`, `overview_target_um_per_px`, `acquisition`, `display`.
+- **Settings:** `pixel_size_um`, `overview_target_um_per_px`, `acquisition`, `display`,
+  `reagent_controls`.
 - **Failure and re-run:** resumable: a section whose PNGs exist is skipped unless `--force`. `--force`
   chooses what is exported again, not which rows survive: a section exported now replaces its own
   `focus.csv` row and every other row stays, so `--force --limit N` cannot shrink the file. Kept is not
@@ -1044,7 +1052,9 @@ Stage `pick_sections`. Chooses a spread of sections for building the tile-correc
 - **Writes:** `qc/tilefield_sample.csv` (about 72 sections by default; `--n` changes it).
 - **How:** groups sections by animal and marker, and within each group takes sections spread evenly
   along the series (with seeded jitter) from up to `--scenes-per-file` scenes per file, so no one piece of
-  anatomy is baked into the field. Seeded, so the same study gives the same pick.
+  anatomy is baked into the field. Seeded, so the same study gives the same pick. A reagent control is a
+  series of its own (`ls_reagent_controls.series_animal`), as 00 numbered it; the `animal` column written
+  is the row's own.
 
 ### `01c_measure_tile_artifact.py`
 
@@ -1072,7 +1082,9 @@ Stage `contactsheets`. One contact sheet per animal and a browsable gallery.
 - **Writes:** `contactsheets/` (one PNG per animal and channel) and an HTML gallery.
 - **How:** sections in rostro-caudal order across the page, so a gradient along the brain reads as a
   gradient on the page. Sections flagged by QC are marked, not dropped. `--kind`, `--cols` and `--thumb`
-  choose the channel and the layout.
+  choose the channel and the layout. A reagent control (`reagent_controls`, through
+  `ls_reagent_controls.expand`) stays on its animal's sheet, under the same file name, but after the
+  stained series rather than interleaved with it (00 numbers it in a series of its own).
 - **Failure and re-run:** a section in `qc/focus.csv` with no overview PNG of the chosen kind is left off
   the sheets and counted, and the run exits 1 naming the first few; re-run 01 for them.
 
@@ -1188,6 +1200,52 @@ Nothing reads them.
   memory (RAM plus page file) and skips a scene that will not fit, with a reason, rather than crashing. `--workers` runs scenes in
   parallel; `--limit` counts scenes tried.
 
+### `01m_reagent_screen.py`
+
+Stage `reagent_screen`. Proposes sections that look like reagent controls (no primary, unstained) for
+the operator to confirm or reject in Set up. It never assigns one.
+
+- **Reads:** `manifest/manifest_scenes.csv`, `manifest/manifest_files.csv` (marker exposure, clip
+  ceiling), `qc/focus.csv` (DAPI tissue fraction), `qc/display_ranges.json`, and per section the CZI
+  through `czi_read`: the raw nuclear plane at overview zoom, thresholded with 01's method
+  (`01_overviews.tissue_threshold`, never-scanned zero pixels left out; 01 thresholds after the tile
+  field, so the mask can differ slightly), then `TILES` = 12 tiles of
+  512 native pixels drawn uniformly inside it, seeded by a hash of the scene uid.
+- **Writes:** `qc/reagent_screen.csv` (one row per section x marker), `qc/reagent_screen.png`, the
+  resume checkpoint `qc/reagent_screen_features.csv`, `qc/reagent_screen_thumbs/<scene_uid>_<marker>.png`
+  (256 px, 2 x 2 block means; roughly 250-350 MB on LS) and, during a `--reread`,
+  `qc/reagent_screen_reread.json`.
+- **How:** a tile touching a pixel at the clip ceiling in any plane, or under half tissue, is skipped;
+  a tile position is never drawn twice. Every feature is taken over the tile's tissue pixels only (the
+  overview mask under it, and scanned): a batch shifts tissue but not glass.
+  Features and scoring are `ls_reagent_screen`'s. F1 is the median over tiles, skipped for a marker
+  segmented on its own channel (its DAPI declared unusable, `acquisition.marker_segmentation` or the
+  channel table); F2 is the median over tiles of the Spearman against the most similar other marker of
+  the same scan, empty under one marker per scan; F3 is taken over the pooled tissue pixels. Confirmed
+  controls (`ls_reagent_controls.manifest_lookup`) are listed but not scored; `rejected` sections stay in
+  the population and are never proposed again. Guards: DAPI tissue fraction within the study's range,
+  and the file's marker exposure equal to that marker's modal one (recorded for the scan's plane-1
+  marker only; any other marker says so in `note`). The strip shows, per marker, the stored thumbnail of
+  each of the top 8 candidates beside 3 median sections, all at that marker's display range.
+- **Settings:** `reagent_controls.declared`, `.files`, `.scenes`, `.rejected`, `acquisition`, `channels`.
+- **Limits:** cannot see isotype or pre-adsorbed controls; cannot tell a no-primary section from a
+  failed stain or a non-expressing animal; thresholds stay provisional until a validation run on a
+  study with known controls.
+- **Failure and re-run:** runs when `declared` is `unsure`, or `yes` with nothing confirmed, or with
+  `--force`; otherwise prints why and exits 0, writing a header-only CSV only when none exists (so the
+  stage reads as done) and leaving an earlier screen as it was. Resumable: features go to
+  `qc/reagent_screen_features.csv` after every file, keyed by a fingerprint (the CZI's size and
+  modification time, scene, planes, clip ceiling, zoom, feature constants), and a run reads only
+  sections whose key is missing or changed. Scoring and the strip are always redone from the checkpoint
+  and the stored thumbnails, so confirming or rejecting in Set up re-scores without reading a pixel.
+  `--force` only overrides the run gate and still resumes. `--reread` reads every section again, and is
+  resumable too: rows carry the reread's id, kept in `qc/reagent_screen_reread.json` until it finishes,
+  and any run while it is pending continues it. `--limit N` reads at most N and leaves
+  `reagent_screen.csv` as it was until every section has features. A thumbnail that cannot be saved is
+  reported, and the strip reads that tile again. A file that will not open, or a scene missing from it, is
+  listed with empty features and a note, and is tried again next run.
+  Reads no group key.
+
 ### `02_pair_passes.py`
 
 Stage `pair` (paired layout only). Pairs the two marker passes onto the same physical sections.
@@ -1199,7 +1257,10 @@ Stage `pair` (paired layout only). Pairs the two marker passes onto the same phy
   pairing votes for the translation it implies and the one with most inliers wins. The assignment under
   that offset is solved optimally (Hungarian algorithm, `scipy.optimize.linear_sum_assignment`), so one bad
   section cannot cascade. Produces the canonical `section_uid`. Unmatched sections are listed, not
-  dropped.
+  dropped. A scan whose every scene is a confirmed reagent control is never the chosen scan of a slide
+  that has a stained one, and is never dropped either: it is carried as its own entry in the control's
+  series (animal + `#rc`, internal), matched only with the other pass's control scan, and numbered after
+  the animal's stained sections.
 - **Failure and re-run:** refuses when the study does not declare exactly two markers, and says to set
   the layout to `multiplex` if each scan carries every marker. Under `multiplex` the app and `run_all.sh`
   skip it (`ls_layouts`).
@@ -1302,7 +1363,9 @@ assignment does not work on this data.
   `curated_atlas_levels.csv`.
 - **How:** reduces sections and plates to centred, scaled tissue masks and compares them by
   intersection over union (shape only, because Nissl plates and DAPI sections have opposite polarity).
-  A monotonic dynamic programme over each animal's series keeps assignments from running backwards.
+  A monotonic dynamic programme over each animal's series keeps assignments from running backwards. A
+  reagent control is matched in a series of its own (`ls_reagent_controls.series_animal`, from the
+  manifest), never inside its donor's; the `animal` column written is the row's own.
 
 ### `04c_atlas_match.py`
 
@@ -1310,7 +1373,9 @@ Not a stage (`NOT_LISTED`): the second automatic matcher, on reformatted section
 flip hypothesis and a bank of warped plate variants (`--variants`). Measured not to work: the
 correlation between a section's serial order and its best plate is −0.05, 0.00, 0.17 and −0.04 across four
 animals, and adjacent sections differ in silhouette almost as little as sections thirty apart. Writes
-`qc/atlasmatch/atlas_proposals_v2.csv`. The docstring keeps the full measurement.
+`qc/atlasmatch/atlas_proposals_v2.csv`. The docstring keeps the full measurement. A reagent control is
+matched in a series of its own, as in 04b; its marker is read from the manifest, since
+`reformat_index.csv` has none.
 
 ### `04e_register_elastix.py`
 
@@ -1434,6 +1499,9 @@ interpolating the rest.
 - **How:** sections were cut serially at uniform thickness, so level is nearly linear in section number.
   A person sets anchors with a plate slider; sections between anchors are interpolated live and those
   outside are extrapolated and marked. Anchors are forced monotonic. Chapter 7 describes the page.
+  Interpolation runs along a series, not an animal: a reagent control is in its own (animal + `#rc`, as 00
+  numbered it), listed as "<animal> (reagent control)", so it neither takes nor moves its donor's levels;
+  the export's `animal` column is the real animal.
 - **Failure and re-run:** rebuilding the page never loses work: state lives in `localStorage` and in the
   app's curation files (chapter 7).
 
@@ -1494,7 +1562,9 @@ Stage `worklist`. Orders the ROI curation queue so that stopping early still lea
   `--min-sections` deciding the last). Within the core tier, animals advance in proportion to their
   number of sections, and within an animal the order is farthest-point over `section_order` (both ends
   first, then whichever section is furthest from those taken). Any prefix of the list spreads evenly over
-  animals and over the brain. Nothing is deleted; the other tiers keep their reason.
+  animals and over the brain. Nothing is deleted; the other tiers keep their reason. A confirmed
+  reagent control is `core`, at the head of the queue, never held out by `--min-sections` (it is counted
+  in its own series), so its report can be measured.
 - **Failure and re-run:** `--tier X` writes that tier alone to `reformatted/roi_worklist.X.csv`;
   `roi_worklist.csv` keeps every tier (04l and 04o filter it by tier themselves).
 
@@ -1640,6 +1710,9 @@ the whole study.
   and saturation per crop and gives a verdict in words. For a StarDist marker the model runs once per
   crop, objects are counted at each cut in `ls_tune.PROB_GRID`, and `pick_prob_thresh` takes the cut
   where the count changes least. The group key is never read, and there is never a per-section cut.
+  Reagent controls of the marker (`reagent_controls`, through `ls_reagent_controls.expand`) are left out of
+  the sample. While `reagent_controls.declared` is `unsure` and `qc/reagent_screen.csv` has candidates
+  neither confirmed nor rejected, it prints a warning and carries on.
 - **Failure and re-run:** `--no-model` measures quality only, without StarDist.
 
 ### `05c_detect_rois.py`
@@ -1666,7 +1739,10 @@ The longest-running stage (hours).
   `pixel_size_um`, and `groups` only to order the run: by default sections alternate between groups
   (`--order`), round-robin over animals within a group, so a partial run measures both arms to the same
   depth. This is the one read of the group key before 06b, and it decides only the order; no number in the
-  output depends on it.
+  output depends on it. The marker's reagent controls (`reagent_controls`) are measured first, ahead of
+  that order and of `--limit`, so a partial run still reports them; they are found from config, not from
+  the group key. Like 05b, it warns and carries on while `declared` is `unsure` with unanswered screen
+  candidates.
 - **Failure and re-run:** resumable: the done log says which sections are finished, and a resume drops the
   rows of any section it is about to measure again, so nothing is counted twice. A section whose boxes
   changed since it was measured is measured again. `--force` starts over; `--limit` measures a trial
@@ -1682,7 +1758,9 @@ Stage `roi_dataset`. Turns the per-nucleus rows into per-ROI numbers. Still blin
 
 - **Reads:** `results/roi_nuclei.csv`, the done log, the ROI boxes and geometry.
 - **Writes:** `results/roi_measurements.csv`, `results/positivity_cuts.csv`,
-  `results/detector_specificity.csv` and `results/roi_geometry_changed.csv`.
+  `results/detector_specificity.csv` and `results/roi_geometry_changed.csv`; and
+  `results/reagent_controls.csv` and `results/reagent_control_cuts.csv` (each control's own cut, never in
+  `positivity_cuts.csv`) when a measured section is a confirmed reagent control.
 - **How:** **positivity cut** per section and marker from that section's background discs:
   median + 3 × 1.4826 × MAD, needing at least 5 background nuclei (else no cut, and positives are blank,
   not zero). **Specificity:** the fraction of background nuclei above the cut, a measured false-positive
@@ -1691,7 +1769,15 @@ Stage `roi_dataset`. Turns the per-nucleus rows into per-ROI numbers. Still blin
   nucleus-shaped. Censored nuclei count as positive; artifact and off-tissue nuclei are not counted. Disc
   areas come from 05a's measured semi-axes. A marker segmented on its own channel has no denominator:
   fraction positive and total density are withheld and positive density is reported.
-- **Settings:** `section_thickness_um`, `pixel_size_um`, `detection`.
+  **Reagent controls** (per section x marker, from config through `ls_reagent_report.study_lookup`) are
+  routed out in the streaming pass: none of their nuclei reach the files above, the cuts file, h or the
+  Abercrombie fallbacks, and no zero row is written for them. They still pass the join and geometry
+  checks. Their own cut is taken by the same rule, and `ls_reagent_report.report_rows` writes
+  `results/reagent_controls.csv` beside the paired stained sections; with no control, a previous file
+  is removed. The default pairing tiers consider only stained sections with 05a boxes for the marker
+  (the manifest's, when 05a has placed none for it). A confirmed control with nothing measured for a
+  marker gets one row with blank measures and a note saying why (no 05a boxes, or not detected yet).
+- **Settings:** `section_thickness_um`, `pixel_size_um`, `detection`, `reagent_controls`.
 
 ### `06b_join_sampling.py`
 
@@ -1719,10 +1805,18 @@ Stage `excel_sample`. The analysis table as a workbook, one row per ROI per anim
   column from 06b's `results/animal_metadata.csv` (joined by animal, so it follows the sheet, `--xlsx`,
   ID column and matching 06b used; without that file or column it says so and leaves the column blank).
 - **Writes:** `results/roi_dataset.xlsx` (`--out` to change), with sheets `by_roi`, `by_disc`,
-  `by_section` and `coverage`, written with openpyxl (bold header, frozen first row, sized columns).
+  `by_section` and `coverage`, written with openpyxl (bold header, frozen first row, sized columns),
+  and a `Reagent controls` sheet when 06a's `results/reagent_controls.csv` has rows: the same table
+  under a plain-language header (what A and B mean, isotype rows test the antibody and no-primary rows
+  the secondary, a background disc is not a reagent control). `write_workbook` takes an optional third
+  item per sheet, the lines above the table.
 - **How:** groups 06a's rows. Withheld values (no cut, no denominator, Abercrombie not applied) are blank,
-  with the reason carried from 06a.
-- **Failure and re-run:** refuses when `roi_nuclei.csv` or `roi_measurements.csv` is missing. It does not
+  with the reason carried from 06a. Reagent-control boxes are left out of `planned` and `coverage`. The
+  limitation text (`ls_reagent_report.limitation_text`, printed and on the sheet) points to the
+  `Reagent controls` sheet only when a `no_primary` row exists; otherwise it is the existing statement.
+- **Failure and re-run:** refuses when `roi_nuclei.csv` or `roi_measurements.csv` is missing, except
+  early in a run when only reagent controls are measured (05c measures them first): then it writes a
+  workbook with the `Reagent controls` sheet alone and exits 0, and 06d writes nothing and exits 0. It does not
   compare their dates, so run 06a first (06e always does). Buildable at any point during detection.
 
 ### `06d_excel_by_slide.py`
@@ -1730,7 +1824,7 @@ Stage `excel_sample`. The analysis table as a workbook, one row per ROI per anim
 Stage `excel_slide`. The same dataset one level finer: `results/roi_dataset_by_slide.xlsx` with sheets
 `by_slide` and `by_section`, so the spread within an animal is visible. A slide is one CZI file
 (`LS22_s01a`). Only ROIs placed on a slide appear; there are no zero rows for regions nobody marked.
-Formatted by 06c's `write_workbook`.
+Formatted by 06c's `write_workbook`. Reagent-control boxes are left out of `coverage`, as in 06c.
 
 ### `06e_refresh_loop.py`
 
@@ -1786,8 +1880,10 @@ is left blank on these rows. 06a then divides counts by the usable area. Run 06a
 Stage `detection_overlays`. Pictures of every nucleus found, positives filled in, for checking the
 counts by eye.
 
-- **Reads:** the CZIs, the outlines 05c saved, `roi_nuclei.csv`, `roi_measurements.csv` and
-  `positivity_cuts.csv`.
+- **Reads:** the CZIs, the outlines 05c saved, `roi_nuclei.csv`, `roi_measurements.csv`,
+  `positivity_cuts.csv` and, when there is one, `reagent_control_cuts.csv`: a reagent control has no
+  06a row, so it is drawn by its own cut from that file, and its strip prints the counts drawn (no 06a
+  row to check them against).
 - **Writes:** under `detection_overlays/<marker>/<animal>/`, a whole-scene picture, one crop per ROI and
   one per background disc; `detection_overlays/index.csv` and `failures.csv`.
 - **How:** native pixels, nothing resampled. Each crop is the box 05c segmented, with a strip stacked
@@ -1992,9 +2088,57 @@ returns at most one `Match` per path, strong or weak; a weak token that is also 
 proposed, and `IgG`, dye names such as `AF488`, single letters and a trailing `-` never match.
 `entries`, `expand`, `is_control`, `control_subject` and `unanswered` read the `reagent_controls` block of
 the study file: a file entry expands to its scenes, a scene entry overrides it, and `control_subject`
-gives a control file the subject, slide and replicate its name does not carry. It reads no group key and
-opens no file. Settings: `reagent_controls.declared`, `.files`, `.scenes`, `.paired_with`, `.rejected`
-and `.extra_patterns`, checked by `ls_config`. Used by `ls_config`, the manifest and the app.
+gives a control file the subject, slide and replicate its name does not carry. `manifest_lookup` runs
+`expand` over `manifest/manifest_scenes.csv` (never its display-only `reagent_control` column; under
+`multiplex` a scene is expanded for every marker);
+`reagent_order` splits uids into controls and the rest, each in natural order; `series_animal` gives the
+internal series key (`<animal>#rc` for a control) that readers grouping by animal use, and `series_label`
+prints it; `warn_unanswered` reads `qc/reagent_screen.csv` and returns the warning 05b and 05c print. It
+reads no group key. `manifest_rows` is that manifest, one row per scene x marker (multiplex-aware). Settings:
+`reagent_controls.declared`, `.files`, `.scenes`, `.paired_with`, `.rejected`
+and `.extra_patterns`, checked by `ls_config`. Used by `ls_config`, the manifest, 01, 01b, 01d, 01m, 04b, 04c,
+05b, 05c, 06a, `ls_reagent_report` and the app.
+
+### `ls_reagent_report.py`
+
+Shared module: reagent controls, measured. Used by 06a (which writes `results/reagent_controls.csv`), 06c
+(the `Reagent controls` sheet) and 06d. `study_lookup(config)` and `study_rows(config)` are
+`ls_reagent_controls.manifest_lookup` / `manifest_rows` with the study's markers under `multiplex`;
+`drop_controls(rows, lookup)` removes control (scene, marker) rows. `pairing_for(uid, marker, lookup,
+scene_rows, config)` returns `(kind, stained uids)`: the operator's `reagent_controls.paired_with` (a uid or a
+file, either side), else stained scenes on the same file, else the same animal's of that marker, else every
+stained section of that marker (`study_wide`); a control is never paired with. `report_rows(control_nuclei,
+stained_nuclei, cuts, pairing, meta, areas)` gives one row per control x marker x region (`COLUMNS`). A: the
+control under its own cut (`ls_overlay.section_cut`, `is_positive`; blank, never 0, under 5 background nuclei),
+beside each paired section's own pct (median, min, max) and `specificity_margin`. B: control / stained nuclear
+median (censored nuclei out of both), and the control scored against EACH paired section's own cut, median and
+min-max (never a pooled cut); empty under `study_wide`, with `batch` in `note`. For a marker segmented on its
+own channel every fraction is withheld and `positive_per_mm2` (over the usable ROI area, times the
+Abercrombie factor 06a's stained rows of that marker and region carry, so it reads like
+`positive_density_per_mm2`; uncorrected, with a note, when no stained h exists yet) is given, beside
+`stained_positive_per_mm2_*` (each paired section's positive density by the same factor, from
+`stained_areas`); `specificity_margin` is then stained − control in per mm2 and `note` says so (percentage
+points otherwise). A region with discs and no nucleus still gets a row. `limitation_text(rows)`
+is 06c's existing statement unless a `no_primary` row exists; `sheet_header(rows)` is the sheet's header,
+which says a background disc is not a reagent control. It reads no group key.
+
+### `ls_reagent_screen.py`
+
+Shared module, numpy only: the signal screen's features and scoring, used by 01m. Every feature is
+invariant to an additive offset and a positive gain on any channel, because a ~2x background batch
+between animals exists (`LOGS.md`, 2026-08-12); nothing uses absolute level or tissue/background
+contrast. `f1_nuclear_enrichment(marker, dapi)`: spots are local maxima of the lightly smoothed marker
+above median + `SPOT_K` (5) x 1.4826 x MAD, nuclei are a plain Otsu on Gaussian-smoothed DAPI (not 01's
+log-space threshold, which an offset moves); returns (spots in nuclei / spots) / (nuclear area / tile
+area), all over the tile's tissue pixels when a mask is given (Gaussian smoothing normalised over
+the mask, so glass never leaks in), or None with no spots. `f2_channel_similarity(a, b, mask)`: Spearman over the masked pixels.
+`f3_tail_spread(x, mask)`: log(p99.5 - p50) - log(p50 - p5). `robust_z(values)`: (x - median) /
+(1.4826 x MAD), all 0 when the MAD is 0. `score(rows)` adds z1-z3 per marker, signed so control-like is
+positive (-F1, +F2, -F3), computed without rows marked `confirmed`; `n_features`; `candidate` (every
+available z >= `Z_CANDIDATE` (3), at least two features, both guards); `rank` (the minimum available
+z); and `status` (`candidate`, `review` with one feature, `unusual` when a guard fails, or empty; never
+on a `confirmed` or `rejected` row). `file_rollup`, `exposure_ok`, `tissue_ok`, and
+`should_run(config, force)`, the gate 01m runs by. The thresholds are provisional.
 
 ### `ls_sampling.py`
 
@@ -2110,6 +2254,9 @@ straight from `sys.argv`) without running it. A script with no options says "(no
 | `01l_scene_renders.py` | `--force` | off | redraw pictures that already exist (default skips them) |
 | `01l_scene_renders.py` | `--workers` | `DEFAULT_WORKERS` | CZIs drawn at once, while free RAM allows (default half the cores, at most 4: <DEFAULT_WORKERS> here) |
 | `01l_scene_renders.py` | `--limit` | `0` | stop after trying N scenes, drawn or not (0 = all) |
+| `01m_reagent_screen.py` | `--force` | off | screen even when the study does not ask for it (still resumes) |
+| `01m_reagent_screen.py` | `--reread` | off | read every section again rather than reuse the checkpoint; resumable, and a run while one is pending continues it |
+| `01m_reagent_screen.py` | `--limit` | `0` | read at most N sections this run (0: all); a later run resumes |
 | `02_pair_passes.py` | (none) |  |  |
 | `04a2_atlas_remerge.py` | `--dpi` | `300` |  |
 | `04a2_atlas_remerge.py` | `--dry-run` | off |  |
@@ -2290,6 +2437,8 @@ straight from `sys.argv`) without running it. A script with no options says "(no
 | `ls_progress.py` | (none) |  |  |
 | `ls_project.py` | (none) |  |  |
 | `ls_reagent_controls.py` | (none) |  |  |
+| `ls_reagent_report.py` | (none) |  |  |
+| `ls_reagent_screen.py` | (none) |  |  |
 | `ls_sampling.py` | (none) |  |  |
 | `ls_segment.py` | (none) |  |  |
 | `ls_settings_io.py` | (none) |  |  |
@@ -2566,7 +2715,7 @@ against the code. To add or change a file, edit the registry and run `python doc
 One row per CZI file: what the header says about the scan. Read by every stage that needs a file's channels, pixel size or clip ceiling.
 
 - **Written by:** 00_manifest.py
-- **Read by:** 01_overviews.py, 01a_flatfield.groovy, 01h_tilefield_raw.py, 01l_scene_renders.py, 05c_detect_rois.py
+- **Read by:** 01_overviews.py, 01a_flatfield.groovy, 01h_tilefield_raw.py, 01l_scene_renders.py, 01m_reagent_screen.py, 05c_detect_rois.py
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
@@ -2605,7 +2754,7 @@ One row per CZI file: what the header says about the scan. Read by every stage t
 One row per scene, which is one section: where it sits on the slide and its place along the brain.
 
 - **Written by:** 00_manifest.py
-- **Read by:** 01_overviews.groovy, 01_overviews.py, 01b_pick_sections.py, 01l_scene_renders.py, 02_pair_passes.py, 04m_sections_dataset.py, 04n_roi_worklist.py, 04o_section_rgb.py, 04p_section_provenance.py, 05a_roi_geometry.py, 05c_detect_rois.py
+- **Read by:** 01_overviews.groovy, 01_overviews.py, 01b_pick_sections.py, 01l_scene_renders.py, 01m_reagent_screen.py, 02_pair_passes.py, 04c_atlas_match.py, 04m_sections_dataset.py, 04n_roi_worklist.py, 04o_section_rgb.py, 04p_section_provenance.py, 05a_roi_geometry.py, 05c_detect_rois.py, ls_reagent_controls.py
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
@@ -2756,7 +2905,7 @@ One row per file: the four assumptions every reading stage makes, and the measur
 One row per exported section: the quality numbers every later stage reads. Measured on the 5.20 µm overview after the tile correction.
 
 - **Written by:** 01_overviews.py
-- **Read by:** 00c_channel_identity.py, 01_overviews.groovy, 01d_contactsheets.py, 01g_saturation_map.py, 01i_multisection_review.py, 04a_reformat.py, 04b_atlas_match.py, 04f_exclusion_candidates.py, 04g_artifact_mask.py, 04i_propagate_to_perk.py, 04j_censor_clipped.py, 04o_section_rgb.py, 04p_section_provenance.py, 05a_roi_geometry.py
+- **Read by:** 00c_channel_identity.py, 01_overviews.groovy, 01d_contactsheets.py, 01g_saturation_map.py, 01i_multisection_review.py, 01m_reagent_screen.py, 04a_reformat.py, 04b_atlas_match.py, 04f_exclusion_candidates.py, 04g_artifact_mask.py, 04i_propagate_to_perk.py, 04j_censor_clipped.py, 04o_section_rgb.py, 04p_section_provenance.py, 05a_roi_geometry.py
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
@@ -2840,8 +2989,8 @@ Sections 01 could not export this run, and why; rewritten every run.
 The brightness range of every overview picture, frozen once for the dataset from tissue pixels.
 
 - **Written by:** 01_overviews.py
-- **Read by:** 01_overviews.groovy, 01l_scene_renders.py, make_demo_pack.py
-- **Format:** JSON: `{channel name: {"lo": int, "hi": int}}`, the 1st and 99.5th percentiles of sampled tissue pixels.
+- **Read by:** 01_overviews.groovy, 01l_scene_renders.py, 01m_reagent_screen.py, make_demo_pack.py
+- **Format:** JSON: `{channel name: {"lo": int, "hi": int}}`, the 1st and 99.5th percentiles of sampled tissue pixels, plus `"_sampled": [[scene_uid, marker], ...]`, the sections they were sampled from (not a channel: readers and the `display_ranges_id` hash skip it). A later run of 01 samples the ranges again by itself when one of those sections has since been confirmed as a reagent control; a file without the record cannot be checked, and 01 says to run with --force.
 
 #### `qc/censor_raw/<scene_uid>_clipped.png`
 
@@ -3041,7 +3190,7 @@ One row per physical section of a paired study: which scan of each marker shows 
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `section_uid` | text |  | `<animal>_secNNN`, numbered along the brain across the whole animal. |
+| `section_uid` | text |  | `<animal>_secNNN`, numbered along the brain across the whole animal; a reagent control scan is matched only with the other pass's control scan and numbered after the animal's stained sections. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `slide` | text |  | The slide id parsed from the file name. |
 | `slide_serial` | int |  | Position on the slide. |
@@ -3072,7 +3221,7 @@ One row per slide: the shift between the two scans and how firmly the vote found
 | `dy_um` | float | µm | Shift, y. |
 | `inlier_votes` | int |  | Pairings that voted for the winning shift. |
 | `n_matched` | int |  | Sections paired. |
-| `note` | text |  | Why a slide was treated as two. |
+| `note` | text |  | Why a slide was treated as two; starts `reagent control scan` on a reagent control's own row. |
 
 #### `manifest/variant_choices.csv`
 
@@ -3565,7 +3714,7 @@ The ROI curation queue, in an order where any first part is a usable dataset.
 |------------|------|------|---------------------------|
 | `rank` | int |  | Position in the queue. |
 | `tier` | text |  | `core`, `unpaired_unchecked` or `animal_underpowered`. |
-| `tier_reason` | text |  | Why that tier. |
+| `tier_reason` | text |  | Why that tier. A confirmed reagent control is `core`, first in the queue and never held out by --min-sections; its reason starts `reagent control`. |
 | `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `partner_scene_uid` | text |  | The partner section (blank in a multiplex study). |
 | `animal` | text |  | The animal id parsed from the file name. |
@@ -4133,6 +4282,53 @@ The exact cut per section and marker, at full precision, so 06i draws the same c
 | `marker` | text |  | The marker's dye name, as declared in the study. |
 | `cut` | float | grey value | The cut, as Python's repr of the float. |
 
+#### `results/reagent_controls.csv`
+
+The reagent controls, measured: one row per reagent-control section x marker x region. 06a keeps these sections out of roi_measurements.csv, detector_specificity.csv, positivity_cuts.csv and h, and reports them here (ls_reagent_report.report_rows). A: what the positivity rule calls on the control under its own cut, beside the paired stained sections. B: the level comparison and the control scored against each paired section's own cut, empty under study-wide pairing. Written only when a measured section is a confirmed reagent control; otherwise a previous file is removed. 06c turns it into the "Reagent controls" sheet.
+
+- **Written by:** 06a_roi_dataset.py
+- **Read by:** 06c_excel_dataset.py
+
+| Column | Type | Units | Meaning |
+|------------|------|------|---------------------------|
+| `scene_uid` | text |  | The reagent-control section: `<subject>_s<NN><replicate>_sc<NN>`, from `ls_naming.scene_uid`. |
+| `file` | text |  | The CZI file the section is on, from the manifest. |
+| `kind` | text |  | The reagent-control kind confirmed in Set up: `no_primary`, `unstained`, `isotype`, `preadsorbed` or `other`. |
+| `marker` | text |  | The marker this row is a reagent control for. A multiplex scene that is a control for one marker is stained, and in roi_measurements.csv, for the others. |
+| `region` | text |  | The atlas region of the control's ROI discs. |
+| `pairing` | text |  | Which stained sections it is compared with: `operator` (reagent_controls.paired_with), `same_file`, `same_animal`, or `study_wide` (every stained section of the marker). |
+| `n_nuclei` | integer | count | Kept nuclei in the control's ROI discs in this region (artifact and off-tissue dropped, as in 06a). |
+| `n_positive` | integer | count | A: nuclei the positivity rule calls positive under the control's OWN per-section cut (censored counts as positive). Blank when the control has fewer than 5 usable background-disc nuclei. |
+| `pct_positive` | number | % | A: 100 x n_positive / n_nuclei. Blank with no own cut, and for a marker segmented on its own channel (no denominator). |
+| `positive_per_mm2` | number | per mm2 | A: n_positive x the Abercrombie factor 06a gives that marker and region (from stained nuclei; 1.0 where 06a withholds it) over the usable ROI area (outline x usable fraction), as positive_density_per_mm2. Uncorrected, with a note, before any stained h exists. The number to read for a marker segmented on its own channel. |
+| `stained_pct_median` | number | % | A, beside: the median over the paired stained sections of each one's pct_positive in this region, under its own cut. Blank for an own-channel marker. |
+| `stained_pct_min` | number | % | A, beside: the lowest paired stained section's pct_positive. |
+| `stained_pct_max` | number | % | A, beside: the highest paired stained section's pct_positive. |
+| `stained_positive_per_mm2_median` | number | per mm2 | A, beside: the median over the paired stained sections of each one's positive density in this region (n_positive under its own cut x the same Abercrombie factor, over its usable ROI area), the same unit as positive_per_mm2. |
+| `stained_positive_per_mm2_min` | number | per mm2 | A, beside: the lowest paired stained section's positive density. |
+| `stained_positive_per_mm2_max` | number | per mm2 | A, beside: the highest paired stained section's positive density. |
+| `specificity_margin` | number | % points, or per mm2 | A: stained_pct_median - pct_positive, in percentage points. For a marker segmented on its own channel (no fraction): stained_positive_per_mm2_median - positive_per_mm2, in per mm2, and `note` says so. The only column whose unit varies. |
+| `control_nuclear_median` | number | intensity | B: median marker_median of the control's uncensored ROI nuclei in this region. Empty under study_wide pairing. |
+| `stained_nuclear_median` | number | intensity | B: the same over the paired stained sections' ROI nuclei, pooled. Empty under study_wide pairing. |
+| `level_ratio` | number | ratio | B: control_nuclear_median / stained_nuclear_median. Empty under study_wide pairing: across batches it measures the batch. |
+| `pct_above_paired_cut` | number | % | B: the control's ROI nuclei scored against EACH paired stained section's own cut; the median across those sections. Never a pooled cut. Empty under study_wide pairing and for an own-channel marker. |
+| `pct_above_paired_cut_min` | number | % | B: the lowest of those per-section scores. |
+| `pct_above_paired_cut_max` | number | % | B: the highest of those per-section scores. |
+| `note` | text |  | Why a column is blank or empty: no own cut, no denominator, paired sections not measured yet, or study-wide pairing (batch). A confirmed reagent control with nothing measured for that marker gets one row, every measure blank, its note `confirmed reagent control, not measured yet: <why>` (no 05a ROIs, or not detected by 05c yet). |
+
+#### `results/reagent_control_cuts.csv`
+
+Each measured reagent control's own cut (per section and marker, at full precision), from its own background discs by the same rule. Kept apart from positivity_cuts.csv, which lists stained sections only; 06i reads both so a control is drawn by its own cut. Removed when no control is measured.
+
+- **Written by:** 06a_roi_dataset.py
+- **Read by:** 06i_detection_overlays.py
+
+| Column | Type | Units | Meaning |
+|------------|------|------|---------------------------|
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
+| `marker` | text |  | The marker's dye name, as declared in the study. |
+| `cut` | float | grey value | The cut, as Python's repr of the float. |
+
 #### `results/roi_geometry_changed.csv`
 
 Sections whose regions changed after detection; 06a refuses them until 05c measures them again. Removed when there are none.
@@ -4332,6 +4528,77 @@ A person's count of sections in each multi-blob scene; `01i --fit` reads it back
 |------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `n_sections` | int |  | How many sections the scene really holds. |
+
+#### `qc/reagent_screen.csv`
+
+The reagent-control signal screen: one row per section x marker. It proposes and never assigns: `status` is `candidate` for a section whose marker looks like a no-primary or unstained control, and the operator confirms or rejects it in Set up. Every feature is blind to an additive offset and a gain, so a background batch cannot move it. 05b and 05c warn, and carry on, while the study says `unsure` and a candidate is neither confirmed nor rejected (ls_reagent_controls.warn_unanswered). When the stage skips (the study says `no`, or `yes` with controls confirmed), a header-only file is written only if there was no screen yet; an earlier screen is left as it was. A `--limit` run that leaves sections unread does not rewrite it. Rescored from qc/reagent_screen_features.csv on every run. Thresholds are provisional until a validation run on a study with known controls.
+
+- **Written by:** 01m_reagent_screen.py
+- **Read by:** ls_reagent_controls.py
+
+| Column | Type | Units | Meaning |
+|------------|------|------|---------------------------|
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
+| `file` | text |  | The CZI file name. |
+| `marker` | text |  | The marker this row screens, as the study names it. |
+| `f1` | float | ratio | F1, nuclear spot enrichment: (spots in DAPI nuclei / spots) / (nuclear area / tissue area), median over tiles, everything over the tile's tissue pixels only. Spots are local maxima above the tissue's median + 5 x 1.4826 x MAD; nuclei are Otsu on smoothed DAPI. Empty for a marker segmented on its own channel (its DAPI declared unusable). |
+| `f2` | float |  | F2, between-marker similarity: Spearman correlation with the most similar other marker of the same scan over tissue pixels, median over tiles. Empty with one marker per scan. |
+| `f3` | float |  | F3, tail spread: log(p99.5 - p50) - log(p50 - p5) of the pooled tissue pixels. |
+| `z1` | float |  | Robust z of F1 across this marker's sections, (x - median) / (1.4826 x MAD), signed so control-like is positive (-F1). Confirmed reagent controls are left out of the population and have none. |
+| `z2` | float |  | Robust z of F2, signed +F2. |
+| `z3` | float |  | Robust z of F3, signed -F3. |
+| `n_features` | int |  | How many of F1-F3 were available. |
+| `guard_dapi_ok` | bool |  | 1 when the section's DAPI tissue fraction (qc/focus.csv) is within the study's normal range (\|robust z\| <= 3) and at least one tile was read; 0 for a failed or empty section. |
+| `guard_exposure_ok` | bool |  | 1 when the file's marker exposure equals the modal exposure for that marker (manifest_files.csv), or is not recorded (said in note); 0 for a scan-time mistake. |
+| `candidate` | bool |  | 1 when every available z >= 3, at least two features are available, and both guards hold. |
+| `rank` | float |  | The minimum available z: the weakest evidence decides. Higher is more control-like. |
+| `status` | text |  | `candidate`; `review` (control-like on the one feature available, never a candidate); `unusual` (control-like but a guard failed: not a control candidate); or empty. Never set on a confirmed or rejected section. |
+| `note` | text |  | Why a feature is empty, how many tiles were read, a guard that failed or could not be checked, and confirmed or rejected sections. |
+
+#### `qc/reagent_screen.png`
+
+The contact strip the operator decides by eye: per marker, the stored thumbnail of the first screened tile of each of the top 8 candidates, beside 3 median sections of the same marker.
+
+- **Written by:** 01m_reagent_screen.py
+- **Read by:** a person
+- **Format:** RGB PNG: per marker one row of 256 px pictures, each the stored thumbnail (the 512 px native tile as 2 x 2 block means) drawn 1:1, every picture of a marker at that marker's `qc/display_ranges.json` range. Rewritten every screen, so no old candidate lingers.
+
+#### `qc/reagent_screen_features.csv`
+
+01m's resume checkpoint: the features of each section x marker, written atomically after every file (a stop loses at most the file being read). A row is reused while its `fingerprint` still matches (and, during a `--reread`, while it was read under that reread); scoring (z, candidate, status) is always redone from these rows, so an answer in Set up re-scores without reading a pixel. `--force` only overrides the run gate and keeps these rows; `--reread` reads every section again, resumably.
+
+- **Written by:** 01m_reagent_screen.py
+- **Read by:** 01m_reagent_screen.py
+
+| Column | Type | Units | Meaning |
+|------------|------|------|---------------------------|
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
+| `file` | text |  | The CZI file name. |
+| `marker` | text |  | The marker, as the study names it. |
+| `f1` | float | ratio | F1, nuclear spot enrichment over the tiles' tissue pixels (median over tiles); empty when skipped or undefined. |
+| `f2` | float |  | F2, Spearman with the most similar other marker of the scan (median over tiles); empty with one marker per scan. |
+| `f3` | float |  | F3, tail spread of the pooled tissue pixels. |
+| `tiles` | int |  | How many tiles were read (at most 12). |
+| `tile_x` | int | px | The first tile's left edge, native pixels from the scene's own origin; empty when no tile was read. |
+| `tile_y` | int | px | The first tile's top edge, likewise. |
+| `fingerprint` | text |  | A hash of what the features depend on: the CZI's size and modification time, the scene index, the planes read and whether F1 is skipped, the clip ceiling, the overview zoom, the feature constants and FEATURE_VERSION (3: thumbnails at 256 px). A mismatch means the section is read again. |
+| `reread` | text |  | The id of the `--reread` this row was read under, or empty. While a reread is in progress (`qc/reagent_screen_reread.json`), a row with another id is read again. |
+
+#### `qc/reagent_screen_thumbs/<scene_uid>_<marker>.png`
+
+A small picture of each section's first screened tile, per marker, so the contact strip is redrawn after a re-score without reading a CZI.
+
+- **Written by:** 01m_reagent_screen.py
+- **Read by:** 01m_reagent_screen.py
+- **Format:** 16-bit greyscale PNG, 256 x 256: the 512 px native tile as 2 x 2 block means, raw values (no display range). About 100-140 KB each, so roughly 250-350 MB for the ~2,500 LS sections.
+
+#### `qc/reagent_screen_reread.json`
+
+A `--reread` in progress. Every 01m run while it exists continues that reread (sections already read under it are kept); removed when the reread has read every section.
+
+- **Written by:** 01m_reagent_screen.py
+- **Read by:** 01m_reagent_screen.py
+- **Format:** JSON: `{"id": "<start time>-<pid>"}`, the id stamped in the checkpoint's `reread` column.
 <!-- /tables:files -->
 
 ## 10. Tests

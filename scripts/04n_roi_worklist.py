@@ -38,6 +38,16 @@ Nothing is deleted. The excluded tiers are written into the same file with their
 reason, so restoring them is a filter change rather than a re-run, and so the
 count they represent stays visible.
 
+**Reagent controls go first, and are never held out.** A confirmed reagent
+control (no primary, isotype, unstained ...; from config through
+ls_reagent_controls) is in `core` at the head of the queue, whatever its
+animal's count or its pairing: it is not part of any per-animal estimate, so
+`--min-sections` says nothing about it, and its report needs it measured. A
+control file often carries a made-up animal ID with a handful of sections, and
+held out as `animal_underpowered` at the end it was never curated, so never
+measured. Controls are counted in their own series (animal + "#rc"), never in
+their donor animal's.
+
 **`pair_confidence` is deliberately not used for ordering.** It describes how
 well a pERK section matched its *PCNA partner*; ROI curation landmarks a pERK
 section against an *atlas plate*, which the partner plays no part in. A low value
@@ -72,6 +82,7 @@ if _HERE not in sys.path:
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
 import ls_channels as CH  # noqa: E402
 import ls_paths as LP  # noqa: E402
+import ls_reagent_controls as RC  # noqa: E402
 
 OUT_ROOT = CONFIG["out_root"]
 REFORMAT_DIR = os.path.join(OUT_ROOT, "reformatted")
@@ -219,7 +230,16 @@ def main():
         col_uid = col_focus = col_pieces = col_largest = None
     else:
         rows, (col_uid, col_focus, col_pieces, col_largest) = paired_rows()
-    _write(rows, col_uid, col_focus, col_pieces, col_largest, args, min_sections)
+    _write(rows, col_uid, col_focus, col_pieces, col_largest, args, min_sections,
+           reagent_uids())
+
+
+def reagent_uids():
+    """The sections that are a confirmed reagent control: under `paired` for this
+    queue's marker, under `multiplex` for any marker (one scan, curated once)."""
+    if PARTNER is None:
+        return {u for u, _m in RC.manifest_lookup(CONFIG, MARKERS)}
+    return {u for u, m in RC.manifest_lookup(CONFIG) if m == MARKER}
 
 
 def paired_rows():
@@ -259,13 +279,21 @@ def paired_rows():
     return rows, (col_uid, col_focus, col_pieces, col_largest)
 
 
-def _write(rows, col_uid, col_focus, col_pieces, col_largest, args, min_sections):
-    """Tier, order and write the queue. A column of None is blank in every row."""
+def _write(rows, col_uid, col_focus, col_pieces, col_largest, args, min_sections,
+           reagent=frozenset()):
+    """Tier, order and write the queue. A column of None is blank in every row.
+
+    `reagent`: the uids that are confirmed reagent controls - core, first."""
+    def series(r):
+        return r["animal"] + (RC.RC_SERIES if r["scene_uid"] in reagent else "")
+
     per_animal_total = defaultdict(int)
     for r in rows:
-        per_animal_total[r["animal"]] += 1
+        per_animal_total[series(r)] += 1
 
     def tier_of(r):
+        if r["scene_uid"] in reagent:
+            return "core"
         if per_animal_total[r["animal"]] < min_sections:
             return "animal_underpowered"
         if r["paired"] == "0":
@@ -278,19 +306,31 @@ def _write(rows, col_uid, col_focus, col_pieces, col_largest, args, min_sections
                               "rotation never checked against anything",
         "animal_underpowered": f"animal has <{min_sections} measurable sections",
     }
+    rc_reason = ("reagent control: queued first and never held out, so its report "
+                 "can be measured")
 
-    # order within each tier independently, so a tier is self-contained
+    def why(tier, r):
+        if r["scene_uid"] not in reagent:
+            return reason[tier]
+        if r["paired"] == "0":
+            return rc_reason + "; " + reason["unpaired_unchecked"]
+        return rc_reason
+
+    # order within each tier independently, so a tier is self-contained; the
+    # reagent controls ahead of the rest of core, each series spread as usual
     ordered = []
     for tier in ("core", "unpaired_unchecked", "animal_underpowered"):
         tier_rows = [r for r in rows if tier_of(r) == tier]
-        by_animal = defaultdict(list)
-        for r in tier_rows:
-            by_animal[r["animal"]].append(r)
-        queues = {}
-        for animal, rs in by_animal.items():
-            orders = [int(r["section_order"]) for r in rs]
-            queues[animal] = [rs[i] for i in farthest_point_order(orders)]
-        ordered.extend((tier, r) for r in interleave_proportional(queues))
+        for part in ([r for r in tier_rows if r["scene_uid"] in reagent],
+                     [r for r in tier_rows if r["scene_uid"] not in reagent]):
+            by_animal = defaultdict(list)
+            for r in part:
+                by_animal[series(r)].append(r)
+            queues = {}
+            for animal, rs in by_animal.items():
+                orders = [int(r["section_order"]) for r in rs]
+                queues[animal] = [rs[i] for i in farthest_point_order(orders)]
+            ordered.extend((tier, r) for r in interleave_proportional(queues))
 
     def num(r, k):
         # `k` is a column name that came out of pick_column above, so it is
@@ -310,7 +350,7 @@ def _write(rows, col_uid, col_focus, col_pieces, col_largest, args, min_sections
         if args.tier and tier != args.tier:
             continue
         rows.append(dict(zip(COLUMNS, [
-            len(rows) + 1, tier, reason[tier], r["scene_uid"], num(r, col_uid),
+            len(rows) + 1, tier, why(tier, r), r["scene_uid"], num(r, col_uid),
             r["animal"], r["section_order"],
             1 if r["paired"] == "0" else 0,
             r["pair_confidence"], num(r, "pair_align_iou"),
@@ -329,6 +369,9 @@ def _write(rows, col_uid, col_focus, col_pieces, col_largest, args, min_sections
         if counts[tier]:
             note = f"  - {reason[tier]}" if reason[tier] else ""
             print(f"  {tier:22} {counts[tier]:4}{note}")
+    n_rc = sum(1 for _t, r in ordered if r["scene_uid"] in reagent)
+    if n_rc:
+        print(f"  of core, {n_rc} reagent control section(s) first - never held out")
     print(f"  {'total':22} {sum(counts.values()):4}")
 
 

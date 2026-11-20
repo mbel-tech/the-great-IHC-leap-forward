@@ -19,6 +19,9 @@ Only ROIs actually placed on a given slide appear in its rows: the table is
 built from the discs, so a region nobody marked there simply has no row, rather
 than a zero that would read as "looked and found none".
 
+Reagent controls are in neither sheet nor in coverage: their rows are in
+`results/reagent_controls.csv` and 06c's "Reagent controls" sheet.
+
 Run:  python 06d_excel_by_slide.py
 """
 
@@ -43,6 +46,7 @@ if _HERE not in sys.path:
 # lines copy-pasted into every stage.
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
 import ls_naming as NM  # noqa: E402
+import ls_reagent_report as RR  # noqa: E402
 RESULTS = G6C.RESULTS
 XLSX = os.path.join(RESULTS, "roi_dataset_by_slide.xlsx")
 
@@ -144,11 +148,20 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     if not os.path.exists(G6C.MEAS_CSV):
+        rc = os.path.join(os.path.dirname(G6C.MEAS_CSV), RR.REPORT_CSV)
+        if os.path.exists(rc):
+            # 05c measures reagent controls first: early in a run 06a has only
+            # them, and this workbook has nothing to hold yet. Not a failure.
+            print(f"no stained section measured yet (only reagent controls, in "
+                  f"{rc}) - nothing per slide to write")
+            return 0
         print(f"no {G6C.MEAS_CSV} - run 06a_roi_dataset.py first")
         return 1
 
     meas = G5.load_csv(G6C.MEAS_CSV)
-    boxes = G5.all_boxes()          # both markers; see 05a.all_boxes
+    # Both markers (05a.all_boxes), less the reagent controls: 06a writes none
+    # of their rows, so they are not planned sections here either (06c, the same).
+    boxes = RR.drop_controls(G5.all_boxes(), RR.study_lookup(CONFIG))
     groups = G6C.resolve_groups((CONFIG.get("groups") or {}).get("by_animal") or {})
     envs = G6C.animal_environment()
 

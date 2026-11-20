@@ -1107,7 +1107,7 @@
    ],
    "writer": "01_overviews.py",
    "what": "The brightness range of every overview picture, frozen once for the dataset from tissue pixels.",
-   "format": "JSON: `{channel name: {\"lo\": int, \"hi\": int}}`, the 1st and 99.5th percentiles of sampled tissue pixels.",
+   "format": "JSON: `{channel name: {\"lo\": int, \"hi\": int}}`, the 1st and 99.5th percentiles of sampled tissue pixels, plus `\"_sampled\": [[scene_uid, marker], ...]`, the sections they were sampled from (not a channel: readers and the `display_ranges_id` hash skip it). A later run of 01 samples the ranges again by itself when one of those sections has since been confirmed as a reagent control; a file without the record cannot be checked, and 01 says to run with --force.",
    "columns": []
   },
   {
@@ -1764,7 +1764,7 @@
      "name": "section_uid",
      "type": "text",
      "units": "",
-     "meaning": "`<animal>_secNNN`, numbered along the brain across the whole animal."
+     "meaning": "`<animal>_secNNN`, numbered along the brain across the whole animal; a reagent control scan is matched only with the other pass's control scan and numbered after the animal's stained sections."
     },
     {
      "name": "animal",
@@ -1904,7 +1904,7 @@
      "name": "note",
      "type": "text",
      "units": "",
-     "meaning": "Why a slide was treated as two."
+     "meaning": "Why a slide was treated as two; starts `reagent control scan` on a reagent control's own row."
     }
    ]
   },
@@ -3528,7 +3528,7 @@
      "name": "tier_reason",
      "type": "text",
      "units": "",
-     "meaning": "Why that tier."
+     "meaning": "Why that tier. A confirmed reagent control is `core`, first in the queue and never held out by --min-sections; its reason starts `reagent control`."
     },
     {
      "name": "scene_uid",
@@ -5802,6 +5802,196 @@
    ]
   },
   {
+   "path": "results/reagent_controls.csv",
+   "names": [
+    "reagent_controls.csv"
+   ],
+   "writer": "06a_roi_dataset.py",
+   "what": "The reagent controls, measured: one row per reagent-control section x marker x region. 06a keeps these sections out of roi_measurements.csv, detector_specificity.csv, positivity_cuts.csv and h, and reports them here (ls_reagent_report.report_rows). A: what the positivity rule calls on the control under its own cut, beside the paired stained sections. B: the level comparison and the control scored against each paired section's own cut, empty under study-wide pairing. Written only when a measured section is a confirmed reagent control; otherwise a previous file is removed. 06c turns it into the \"Reagent controls\" sheet.",
+   "readers": [
+    "06c_excel_dataset.py"
+   ],
+   "columns_from": "ls_reagent_report.py:COLUMNS",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "The reagent-control section: `<subject>_s<NN><replicate>_sc<NN>`, from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "file",
+     "type": "text",
+     "units": "",
+     "meaning": "The CZI file the section is on, from the manifest."
+    },
+    {
+     "name": "kind",
+     "type": "text",
+     "units": "",
+     "meaning": "The reagent-control kind confirmed in Set up: `no_primary`, `unstained`, `isotype`, `preadsorbed` or `other`."
+    },
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker this row is a reagent control for. A multiplex scene that is a control for one marker is stained, and in roi_measurements.csv, for the others."
+    },
+    {
+     "name": "region",
+     "type": "text",
+     "units": "",
+     "meaning": "The atlas region of the control's ROI discs."
+    },
+    {
+     "name": "pairing",
+     "type": "text",
+     "units": "",
+     "meaning": "Which stained sections it is compared with: `operator` (reagent_controls.paired_with), `same_file`, `same_animal`, or `study_wide` (every stained section of the marker)."
+    },
+    {
+     "name": "n_nuclei",
+     "type": "integer",
+     "units": "count",
+     "meaning": "Kept nuclei in the control's ROI discs in this region (artifact and off-tissue dropped, as in 06a)."
+    },
+    {
+     "name": "n_positive",
+     "type": "integer",
+     "units": "count",
+     "meaning": "A: nuclei the positivity rule calls positive under the control's OWN per-section cut (censored counts as positive). Blank when the control has fewer than 5 usable background-disc nuclei."
+    },
+    {
+     "name": "pct_positive",
+     "type": "number",
+     "units": "%",
+     "meaning": "A: 100 x n_positive / n_nuclei. Blank with no own cut, and for a marker segmented on its own channel (no denominator)."
+    },
+    {
+     "name": "positive_per_mm2",
+     "type": "number",
+     "units": "per mm2",
+     "meaning": "A: n_positive x the Abercrombie factor 06a gives that marker and region (from stained nuclei; 1.0 where 06a withholds it) over the usable ROI area (outline x usable fraction), as positive_density_per_mm2. Uncorrected, with a note, before any stained h exists. The number to read for a marker segmented on its own channel."
+    },
+    {
+     "name": "stained_pct_median",
+     "type": "number",
+     "units": "%",
+     "meaning": "A, beside: the median over the paired stained sections of each one's pct_positive in this region, under its own cut. Blank for an own-channel marker."
+    },
+    {
+     "name": "stained_pct_min",
+     "type": "number",
+     "units": "%",
+     "meaning": "A, beside: the lowest paired stained section's pct_positive."
+    },
+    {
+     "name": "stained_pct_max",
+     "type": "number",
+     "units": "%",
+     "meaning": "A, beside: the highest paired stained section's pct_positive."
+    },
+    {
+     "name": "stained_positive_per_mm2_median",
+     "type": "number",
+     "units": "per mm2",
+     "meaning": "A, beside: the median over the paired stained sections of each one's positive density in this region (n_positive under its own cut x the same Abercrombie factor, over its usable ROI area), the same unit as positive_per_mm2."
+    },
+    {
+     "name": "stained_positive_per_mm2_min",
+     "type": "number",
+     "units": "per mm2",
+     "meaning": "A, beside: the lowest paired stained section's positive density."
+    },
+    {
+     "name": "stained_positive_per_mm2_max",
+     "type": "number",
+     "units": "per mm2",
+     "meaning": "A, beside: the highest paired stained section's positive density."
+    },
+    {
+     "name": "specificity_margin",
+     "type": "number",
+     "units": "% points, or per mm2",
+     "meaning": "A: stained_pct_median - pct_positive, in percentage points. For a marker segmented on its own channel (no fraction): stained_positive_per_mm2_median - positive_per_mm2, in per mm2, and `note` says so. The only column whose unit varies."
+    },
+    {
+     "name": "control_nuclear_median",
+     "type": "number",
+     "units": "intensity",
+     "meaning": "B: median marker_median of the control's uncensored ROI nuclei in this region. Empty under study_wide pairing."
+    },
+    {
+     "name": "stained_nuclear_median",
+     "type": "number",
+     "units": "intensity",
+     "meaning": "B: the same over the paired stained sections' ROI nuclei, pooled. Empty under study_wide pairing."
+    },
+    {
+     "name": "level_ratio",
+     "type": "number",
+     "units": "ratio",
+     "meaning": "B: control_nuclear_median / stained_nuclear_median. Empty under study_wide pairing: across batches it measures the batch."
+    },
+    {
+     "name": "pct_above_paired_cut",
+     "type": "number",
+     "units": "%",
+     "meaning": "B: the control's ROI nuclei scored against EACH paired stained section's own cut; the median across those sections. Never a pooled cut. Empty under study_wide pairing and for an own-channel marker."
+    },
+    {
+     "name": "pct_above_paired_cut_min",
+     "type": "number",
+     "units": "%",
+     "meaning": "B: the lowest of those per-section scores."
+    },
+    {
+     "name": "pct_above_paired_cut_max",
+     "type": "number",
+     "units": "%",
+     "meaning": "B: the highest of those per-section scores."
+    },
+    {
+     "name": "note",
+     "type": "text",
+     "units": "",
+     "meaning": "Why a column is blank or empty: no own cut, no denominator, paired sections not measured yet, or study-wide pairing (batch). A confirmed reagent control with nothing measured for that marker gets one row, every measure blank, its note `confirmed reagent control, not measured yet: <why>` (no 05a ROIs, or not detected by 05c yet)."
+    }
+   ]
+  },
+  {
+   "path": "results/reagent_control_cuts.csv",
+   "names": [
+    "reagent_control_cuts.csv"
+   ],
+   "writer": "06a_roi_dataset.py",
+   "what": "Each measured reagent control's own cut (per section and marker, at full precision), from its own background discs by the same rule. Kept apart from positivity_cuts.csv, which lists stained sections only; 06i reads both so a control is drawn by its own cut. Removed when no control is measured.",
+   "readers": [
+    "06i_detection_overlays.py"
+   ],
+   "columns_from": "06a_roi_dataset.py:CUTS_COLUMNS",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye name, as declared in the study."
+    },
+    {
+     "name": "cut",
+     "type": "float",
+     "units": "grey value",
+     "meaning": "The cut, as Python's repr of the float."
+    }
+   ]
+  },
+  {
    "path": "results/roi_geometry_changed.csv",
    "names": [
     "roi_geometry_changed.csv"
@@ -6365,6 +6555,226 @@
      "meaning": "How many sections the scene really holds."
     }
    ]
+  },
+  {
+   "path": "qc/reagent_screen.csv",
+   "names": [
+    "reagent_screen.csv"
+   ],
+   "writer": "01m_reagent_screen.py",
+   "what": "The reagent-control signal screen: one row per section x marker. It proposes and never assigns: `status` is `candidate` for a section whose marker looks like a no-primary or unstained control, and the operator confirms or rejects it in Set up. Every feature is blind to an additive offset and a gain, so a background batch cannot move it. 05b and 05c warn, and carry on, while the study says `unsure` and a candidate is neither confirmed nor rejected (ls_reagent_controls.warn_unanswered). When the stage skips (the study says `no`, or `yes` with controls confirmed), a header-only file is written only if there was no screen yet; an earlier screen is left as it was. A `--limit` run that leaves sections unread does not rewrite it. Rescored from qc/reagent_screen_features.csv on every run. Thresholds are provisional until a validation run on a study with known controls.",
+   "readers": [
+    "ls_reagent_controls.py"
+   ],
+   "columns_from": "01m_reagent_screen.py:SCREEN_KEYS",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "file",
+     "type": "text",
+     "units": "",
+     "meaning": "The CZI file name."
+    },
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker this row screens, as the study names it."
+    },
+    {
+     "name": "f1",
+     "type": "float",
+     "units": "ratio",
+     "meaning": "F1, nuclear spot enrichment: (spots in DAPI nuclei / spots) / (nuclear area / tissue area), median over tiles, everything over the tile's tissue pixels only. Spots are local maxima above the tissue's median + 5 x 1.4826 x MAD; nuclei are Otsu on smoothed DAPI. Empty for a marker segmented on its own channel (its DAPI declared unusable)."
+    },
+    {
+     "name": "f2",
+     "type": "float",
+     "units": "",
+     "meaning": "F2, between-marker similarity: Spearman correlation with the most similar other marker of the same scan over tissue pixels, median over tiles. Empty with one marker per scan."
+    },
+    {
+     "name": "f3",
+     "type": "float",
+     "units": "",
+     "meaning": "F3, tail spread: log(p99.5 - p50) - log(p50 - p5) of the pooled tissue pixels."
+    },
+    {
+     "name": "z1",
+     "type": "float",
+     "units": "",
+     "meaning": "Robust z of F1 across this marker's sections, (x - median) / (1.4826 x MAD), signed so control-like is positive (-F1). Confirmed reagent controls are left out of the population and have none."
+    },
+    {
+     "name": "z2",
+     "type": "float",
+     "units": "",
+     "meaning": "Robust z of F2, signed +F2."
+    },
+    {
+     "name": "z3",
+     "type": "float",
+     "units": "",
+     "meaning": "Robust z of F3, signed -F3."
+    },
+    {
+     "name": "n_features",
+     "type": "int",
+     "units": "",
+     "meaning": "How many of F1-F3 were available."
+    },
+    {
+     "name": "guard_dapi_ok",
+     "type": "bool",
+     "units": "",
+     "meaning": "1 when the section's DAPI tissue fraction (qc/focus.csv) is within the study's normal range (|robust z| <= 3) and at least one tile was read; 0 for a failed or empty section."
+    },
+    {
+     "name": "guard_exposure_ok",
+     "type": "bool",
+     "units": "",
+     "meaning": "1 when the file's marker exposure equals the modal exposure for that marker (manifest_files.csv), or is not recorded (said in note); 0 for a scan-time mistake."
+    },
+    {
+     "name": "candidate",
+     "type": "bool",
+     "units": "",
+     "meaning": "1 when every available z >= 3, at least two features are available, and both guards hold."
+    },
+    {
+     "name": "rank",
+     "type": "float",
+     "units": "",
+     "meaning": "The minimum available z: the weakest evidence decides. Higher is more control-like."
+    },
+    {
+     "name": "status",
+     "type": "text",
+     "units": "",
+     "meaning": "`candidate`; `review` (control-like on the one feature available, never a candidate); `unusual` (control-like but a guard failed: not a control candidate); or empty. Never set on a confirmed or rejected section."
+    },
+    {
+     "name": "note",
+     "type": "text",
+     "units": "",
+     "meaning": "Why a feature is empty, how many tiles were read, a guard that failed or could not be checked, and confirmed or rejected sections."
+    }
+   ]
+  },
+  {
+   "path": "qc/reagent_screen.png",
+   "names": [],
+   "writer": "01m_reagent_screen.py",
+   "what": "The contact strip the operator decides by eye: per marker, the stored thumbnail of the first screened tile of each of the top 8 candidates, beside 3 median sections of the same marker.",
+   "format": "RGB PNG: per marker one row of 256 px pictures, each the stored thumbnail (the 512 px native tile as 2 x 2 block means) drawn 1:1, every picture of a marker at that marker's `qc/display_ranges.json` range. Rewritten every screen, so no old candidate lingers.",
+   "columns": []
+  },
+  {
+   "path": "qc/reagent_screen_features.csv",
+   "names": [
+    "reagent_screen_features.csv"
+   ],
+   "writer": "01m_reagent_screen.py",
+   "what": "01m's resume checkpoint: the features of each section x marker, written atomically after every file (a stop loses at most the file being read). A row is reused while its `fingerprint` still matches (and, during a `--reread`, while it was read under that reread); scoring (z, candidate, status) is always redone from these rows, so an answer in Set up re-scores without reading a pixel. `--force` only overrides the run gate and keeps these rows; `--reread` reads every section again, resumably.",
+   "readers": [
+    "01m_reagent_screen.py"
+   ],
+   "columns_from": "01m_reagent_screen.py:FEATURE_KEYS",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "file",
+     "type": "text",
+     "units": "",
+     "meaning": "The CZI file name."
+    },
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker, as the study names it."
+    },
+    {
+     "name": "f1",
+     "type": "float",
+     "units": "ratio",
+     "meaning": "F1, nuclear spot enrichment over the tiles' tissue pixels (median over tiles); empty when skipped or undefined."
+    },
+    {
+     "name": "f2",
+     "type": "float",
+     "units": "",
+     "meaning": "F2, Spearman with the most similar other marker of the scan (median over tiles); empty with one marker per scan."
+    },
+    {
+     "name": "f3",
+     "type": "float",
+     "units": "",
+     "meaning": "F3, tail spread of the pooled tissue pixels."
+    },
+    {
+     "name": "tiles",
+     "type": "int",
+     "units": "",
+     "meaning": "How many tiles were read (at most 12)."
+    },
+    {
+     "name": "tile_x",
+     "type": "int",
+     "units": "px",
+     "meaning": "The first tile's left edge, native pixels from the scene's own origin; empty when no tile was read."
+    },
+    {
+     "name": "tile_y",
+     "type": "int",
+     "units": "px",
+     "meaning": "The first tile's top edge, likewise."
+    },
+    {
+     "name": "fingerprint",
+     "type": "text",
+     "units": "",
+     "meaning": "A hash of what the features depend on: the CZI's size and modification time, the scene index, the planes read and whether F1 is skipped, the clip ceiling, the overview zoom, the feature constants and FEATURE_VERSION (3: thumbnails at 256 px). A mismatch means the section is read again."
+    },
+    {
+     "name": "reread",
+     "type": "text",
+     "units": "",
+     "meaning": "The id of the `--reread` this row was read under, or empty. While a reread is in progress (`qc/reagent_screen_reread.json`), a row with another id is read again."
+    }
+   ]
+  },
+  {
+   "path": "qc/reagent_screen_thumbs/<scene_uid>_<marker>.png",
+   "names": [],
+   "writer": "01m_reagent_screen.py",
+   "what": "A small picture of each section's first screened tile, per marker, so the contact strip is redrawn after a re-score without reading a CZI.",
+   "format": "16-bit greyscale PNG, 256 x 256: the 512 px native tile as 2 x 2 block means, raw values (no display range). About 100-140 KB each, so roughly 250-350 MB for the ~2,500 LS sections.",
+   "readers": [
+    "01m_reagent_screen.py"
+   ],
+   "columns": []
+  },
+  {
+   "path": "qc/reagent_screen_reread.json",
+   "names": [],
+   "writer": "01m_reagent_screen.py",
+   "what": "A `--reread` in progress. Every 01m run while it exists continues that reread (sections already read under it are kept); removed when the reread has read every section.",
+   "format": "JSON: `{\"id\": \"<start time>-<pid>\"}`, the id stamped in the checkpoint's `reread` column.",
+   "readers": [
+    "01m_reagent_screen.py"
+   ],
+   "columns": []
   }
  ],
  "not_files": {

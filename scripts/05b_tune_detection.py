@@ -59,6 +59,7 @@ import czi_read as CR  # noqa: E402
 import ls_io as IO  # noqa: E402
 import ls_jsonio  # noqa: E402
 import ls_naming as NM  # noqa: E402
+import ls_reagent_controls as RC  # noqa: E402
 import ls_segment as SG  # noqa: E402
 import ls_tune as TU  # noqa: E402
 
@@ -99,6 +100,18 @@ def sample_sections(uids, n):
             if i < len(picks[a]):
                 out.append(picks[a][i])
     return out[:n]
+
+
+def tuning_sections(uids, lookup, marker, n):
+    """sample_sections over the stained sections of `marker` only.
+
+    A reagent control is dim by design: in the sample it would drag the signal
+    verdict and the chosen probability cut toward its autofluorescence. Which
+    sections are controls comes from config (ls_reagent_controls.expand), per
+    marker, so a multiplex scene that is a control for another marker stays in.
+    """
+    _controls, stained = RC.reagent_order(uids, lookup, marker)
+    return sample_sections(stained, n)
 
 
 def spread(items, n):
@@ -175,7 +188,8 @@ def tune_marker(marker, args, model):
     by_sec = {}
     for b in boxes:
         by_sec.setdefault(b["scene_uid"], []).append(b)
-    uids = sample_sections([u for u in by_sec if u in geom], args.sections)
+    uids = tuning_sections([u for u in by_sec if u in geom], D5.reagent_lookup(),
+                           marker, args.sections)
     print(f"{marker}: sampling {len(uids)} of {len(by_sec)} sections, up to "
           f"{args.rois} ROIs each, native pixels, windows of at most "
           f"{args.window} px")
@@ -313,6 +327,9 @@ def main():
     if not markers:
         print("this study declares no markers")
         return 1
+    unanswered = RC.warn_unanswered(CONFIG)
+    if unanswered:
+        print(unanswered)
     model = None
     if not args.no_model and any(D5.backend_for(m) == "stardist" for m in markers):
         try:

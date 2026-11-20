@@ -725,6 +725,16 @@ is shared. Three internal references stand in: optical zero from off-tissue glas
 tissue-negative floor from nuclei-poor fibre tracts within the same section, and object-level
 annulus background.
 
+**A study with reagent controls** (sections stained without the primary antibody, with an isotype
+IgG, with a pre-adsorbed antibody, or unstained) can say more. Confirmed reagent controls are kept
+out of every experimental output and reported on their own: `results/reagent_controls.csv` and a
+"Reagent controls" sheet in the 06c workbook give, per marker and region, what the positivity rule
+calls on them under their own cut, and how far they reach above the stained sections' cuts. With a
+no-primary reagent control measured for a marker, read that marker's absolute positivity rate against
+the control's rate rather than as zero background; the 06c header names the markers covered. The
+paragraph above holds for a study that has none, and for any marker without one, and a background disc is still not a negative control. See
+"Reagent controls" in the methods guide (`docs/guides/pipeline-methods.md`).
+
 **JPEG-XR tile compression**, where the scan used it, is typically lossy and fixed at acquisition.
 
 **Scans without shading correction at acquisition**, and with unblended tiles, repeat the

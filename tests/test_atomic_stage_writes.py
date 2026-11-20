@@ -94,7 +94,8 @@ with open(p, encoding="utf-8") as fh:
 with contextlib.redirect_stdout(io.StringIO()):
     OV.sample_display_ranges([], {}, 1, force=True)
 with open(OV.RANGES_PATH, encoding="utf-8") as fh:
-    chk("01 write: ranges land", json.load(fh), {})
+    # No channel sampled; the record of which sections were (none) is written too.
+    chk("01 write: ranges land", json.load(fh), {"_sampled": []})
 
 print("\n" + ("ALL PASS" if not fails else f"{fails} FAILED"))
 raise SystemExit(1 if fails else 0)

@@ -9,6 +9,29 @@ where things landed, not which plausible-looking route was tried and abandoned, 
 
 ---
 
+## 2026-11-20 - Reagent controls: final review fixes
+
+**Changed:** a confirmed reagent control can no longer silently vanish. 02 carries a control scan as its
+own entry (its `#rc` series) instead of dropping it when it shares a slide with a stained scan; 01d keeps
+it; 04n queues controls first and never holds them out; 06a lists every confirmed control with nothing
+measured as a row with blank measures and a note saying why. Pairing considers only stained sections with
+05a boxes. The level curator (04k) interpolates each control in its own series. In the confirm list,
+Decide later leaves a confirmed entry untouched and Un-confirm removes it; Save lists the stages to run
+again. 01 records which sections set the display ranges and samples them again when one is now a
+control. 05c tracks only which sections are controls, not the pairing or the declared answer. The
+limitation text names the markers a measured no-primary control covers.
+
+**Why:** the final review found routes by which a control was never measured and never reported (02's
+variant choice, 04n's underpowered tier), pairing that locked onto sections that would never get a cut,
+an answer ("Decide later") that un-confirmed silently, and settings declared on stages that record no
+inputs, so a late confirmation was tracked by nothing.
+
+**Cost / limits:** the operator still re-runs 00, 02, 01, 04n and 05b by hand after a late confirmation;
+the app lists them but does not mark them out of date. A display_ranges.json written before this change
+cannot be checked and asks for `--force`.
+
+---
+
 ## 2026-11-20 - Reagent controls: declared, kept out, measured, reported (docs)
 
 **Changed:** the pipeline now has a notion of a **reagent control**: a section stained without the

@@ -1010,7 +1010,10 @@ the raw clipping measurement.
   then frozen for the whole study, so brightness differences between sections are real. The sample is
   drawn from stained sections only: a reagent control (`reagent_controls`, through
   `ls_reagent_controls.expand`, per scene and marker) is still exported but never sampled, and a study whose
-  every section is a reagent control stops with a message. Clipping is
+  every section is a reagent control stops with a message. The ranges file records the (section, marker)
+  pairs it was sampled from (`_sampled`); a later run samples the ranges again by itself when one of them
+  has since been confirmed as a reagent control (not under `--limit`), and a file from before the record
+  says to run with `--force`. Clipping is
   measured on the raw 16-bit plane **before** the tile field is applied (section 3.2 of Part 1 says why).
   The focus score is the mean absolute difference between neighbouring pixels inside tissue, divided by
   the tissue's mean brightness, so a dim section is not mistaken for a blurred one.
@@ -1254,7 +1257,10 @@ Stage `pair` (paired layout only). Pairs the two marker passes onto the same phy
   pairing votes for the translation it implies and the one with most inliers wins. The assignment under
   that offset is solved optimally (Hungarian algorithm, `scipy.optimize.linear_sum_assignment`), so one bad
   section cannot cascade. Produces the canonical `section_uid`. Unmatched sections are listed, not
-  dropped.
+  dropped. A scan whose every scene is a confirmed reagent control is never the chosen scan of a slide
+  that has a stained one, and is never dropped either: it is carried as its own entry in the control's
+  series (animal + `#rc`, internal), matched only with the other pass's control scan, and numbered after
+  the animal's stained sections.
 - **Failure and re-run:** refuses when the study does not declare exactly two markers, and says to set
   the layout to `multiplex` if each scan carries every marker. Under `multiplex` the app and `run_all.sh`
   skip it (`ls_layouts`).
@@ -1493,6 +1499,9 @@ interpolating the rest.
 - **How:** sections were cut serially at uniform thickness, so level is nearly linear in section number.
   A person sets anchors with a plate slider; sections between anchors are interpolated live and those
   outside are extrapolated and marked. Anchors are forced monotonic. Chapter 7 describes the page.
+  Interpolation runs along a series, not an animal: a reagent control is in its own (animal + `#rc`, as 00
+  numbered it), listed as "<animal> (reagent control)", so it neither takes nor moves its donor's levels;
+  the export's `animal` column is the real animal.
 - **Failure and re-run:** rebuilding the page never loses work: state lives in `localStorage` and in the
   app's curation files (chapter 7).
 
@@ -1553,7 +1562,9 @@ Stage `worklist`. Orders the ROI curation queue so that stopping early still lea
   `--min-sections` deciding the last). Within the core tier, animals advance in proportion to their
   number of sections, and within an animal the order is farthest-point over `section_order` (both ends
   first, then whichever section is furthest from those taken). Any prefix of the list spreads evenly over
-  animals and over the brain. Nothing is deleted; the other tiers keep their reason.
+  animals and over the brain. Nothing is deleted; the other tiers keep their reason. A confirmed
+  reagent control is `core`, at the head of the queue, never held out by `--min-sections` (it is counted
+  in its own series), so its report can be measured.
 - **Failure and re-run:** `--tier X` writes that tier alone to `reformatted/roi_worklist.X.csv`;
   `roi_worklist.csv` keeps every tier (04l and 04o filter it by tier themselves).
 
@@ -1763,7 +1774,9 @@ Stage `roi_dataset`. Turns the per-nucleus rows into per-ROI numbers. Still blin
   Abercrombie fallbacks, and no zero row is written for them. They still pass the join and geometry
   checks. Their own cut is taken by the same rule, and `ls_reagent_report.report_rows` writes
   `results/reagent_controls.csv` beside the paired stained sections; with no control, a previous file
-  is removed.
+  is removed. The default pairing tiers consider only stained sections with 05a boxes for the marker
+  (the manifest's, when 05a has placed none for it). A confirmed control with nothing measured for a
+  marker gets one row with blank measures and a note saying why (no 05a boxes, or not detected yet).
 - **Settings:** `section_thickness_um`, `pixel_size_um`, `detection`, `reagent_controls`.
 
 ### `06b_join_sampling.py`

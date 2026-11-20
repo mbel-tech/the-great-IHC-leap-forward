@@ -3177,7 +3177,7 @@ One row per physical section of a paired study: which scan of each marker shows 
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
-| `section_uid` | text |  | `<animal>_secNNN`, numbered along the brain across the whole animal. |
+| `section_uid` | text |  | `<animal>_secNNN`, numbered along the brain across the whole animal; a reagent control scan is matched only with the other pass's control scan and numbered after the animal's stained sections. |
 | `animal` | text |  | The animal id parsed from the file name. |
 | `slide` | text |  | The slide id parsed from the file name. |
 | `slide_serial` | int |  | Position on the slide. |
@@ -3208,7 +3208,7 @@ One row per slide: the shift between the two scans and how firmly the vote found
 | `dy_um` | float | µm | Shift, y. |
 | `inlier_votes` | int |  | Pairings that voted for the winning shift. |
 | `n_matched` | int |  | Sections paired. |
-| `note` | text |  | Why a slide was treated as two. |
+| `note` | text |  | Why a slide was treated as two; starts `reagent control scan` on a reagent control's own row. |
 
 #### `manifest/variant_choices.csv`
 
@@ -3701,7 +3701,7 @@ The ROI curation queue, in an order where any first part is a usable dataset.
 |------------|------|------|---------------------------|
 | `rank` | int |  | Position in the queue. |
 | `tier` | text |  | `core`, `unpaired_unchecked` or `animal_underpowered`. |
-| `tier_reason` | text |  | Why that tier. |
+| `tier_reason` | text |  | Why that tier. A confirmed reagent control is `core`, first in the queue and never held out by --min-sections; its reason starts `reagent control`. |
 | `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `partner_scene_uid` | text |  | The partner section (blank in a multiplex study). |
 | `animal` | text |  | The animal id parsed from the file name. |
@@ -4301,7 +4301,7 @@ The reagent controls, measured: one row per reagent-control section x marker x r
 | `pct_above_paired_cut` | number | % | B: the control's ROI nuclei scored against EACH paired stained section's own cut; the median across those sections. Never a pooled cut. Empty under study_wide pairing and for an own-channel marker. |
 | `pct_above_paired_cut_min` | number | % | B: the lowest of those per-section scores. |
 | `pct_above_paired_cut_max` | number | % | B: the highest of those per-section scores. |
-| `note` | text |  | Why a column is blank or empty: no own cut, no denominator, paired sections not measured yet, or study-wide pairing (batch). |
+| `note` | text |  | Why a column is blank or empty: no own cut, no denominator, paired sections not measured yet, or study-wide pairing (batch). A confirmed reagent control with nothing measured for that marker gets one row, every measure blank, its note `confirmed reagent control, not measured yet: <why>` (no 05a ROIs, or not detected by 05c yet). |
 
 #### `results/reagent_control_cuts.csv`
 

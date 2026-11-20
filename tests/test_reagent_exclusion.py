@@ -271,6 +271,31 @@ sheet = [dict(r, section_order=int(r["section_order"]), slide=1) for r in a_rows
 key = D1.sheet_order(a_lk)
 chk("01d: one sheet, the control after the stained series, not interleaved",
     [r["scene_uid"] for r in sorted(sheet, key=key)], ["A_sc01", "A_sc02", "A_sc04", "A_sc03"])
+_qc_root = tempfile.mkdtemp()
+os.makedirs(os.path.join(_qc_root, "manifest"))
+with open(os.path.join(_qc_root, "manifest", "variant_choices.csv"), "w", newline="",
+          encoding="utf-8") as fh:
+    fh.write("animal,slide,marker_channel,chosen_variant,candidates,source\n"
+             "A,1,AF568,a,a(2)|nc(1),most_scenes\n")
+_qc = os.path.join(_qc_root, "focus.csv")
+with open(_qc, "w", newline="", encoding="utf-8") as fh:
+    w = csv.DictWriter(fh, ["scene_uid", "file", "animal", "slide", "variant", "marker_channel",
+                            "section_order", "focus_score", "tissue_fraction",
+                            "tissue_area_mm2", "saturated_fraction",
+                            "saturated_fraction_raw"], restval="0")
+    w.writeheader()
+    for uid, var in (("A_sc01", "a"), ("A_sc02", "a"), ("A_sc03", "nc"), ("A_sc04", "b")):
+        w.writerow({"scene_uid": uid, "file": f"A_1{var}.czi", "animal": "A", "slide": "1",
+                    "variant": var, "marker_channel": "AF568", "section_order": "1"})
+_keep = (D1.QC_CSV, D1.OUT_ROOT)
+D1.QC_CSV, D1.OUT_ROOT = _qc, _qc_root
+try:
+    with contextlib.redirect_stdout(io.StringIO()):
+        kept = sorted(r["scene_uid"] for r in D1.load_qc())
+finally:
+    D1.QC_CSV, D1.OUT_ROOT = _keep
+chk("01d_keeps_control_scan: a superseded re-scan is dropped, a reagent control's scan is not",
+    kept, ["A_sc01", "A_sc02", "A_sc03"])
 chk("01d: with no control, plain section order",
     [r["scene_uid"] for r in sorted(sheet, key=D1.sheet_order({}))],
     ["A_sc01", "A_sc03", "A_sc02", "A_sc04"])

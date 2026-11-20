@@ -84,6 +84,41 @@ chk("...and the partner columns are blank",
 chk("each animal's first two picks are its ends",
     [r["section_order"] for r in rows if r["animal"] == "PO16"][:2], ["1", "12"])
 
+print("--- reagent controls: first, never held out ---")
+# A control file with a made-up animal ID (RC1) and three sections: under
+# --min-sections it was tiered animal_underpowered, at the end, and never
+# curated - so never measured, so missing from the report.
+rc_scenes = scenes + [("RC1", i) for i in (1, 2, 3)]
+write(M.MANIFEST_CSV,
+      [{"scene_uid": uid(a, i), "animal": a, "marker_channel": "pERK",
+        "section_order": i} for a, i in rc_scenes])
+write(M.index_csv(),
+      [{"id": uid(a, i), "kind": "section"} for a, i in rc_scenes if (a, i) != ("CD16", 5)]
+      + [{"id": "plate_001", "kind": "plate"}])
+write(M.NAMES.read("analysis_set", M.MARKER),
+      [{"scene_uid": uid(a, i), "animal": a, "section_order": i,
+        "in_analysis_set": 0 if (a, i) == ("CD16", 7) else 1}
+       for a, i in rc_scenes if (a, i) != ("CD16", 5)])
+M.CONFIG["reagent_controls"] = {"declared": "yes", "scenes": {
+    uid("RC1", i): {"kind": "no_primary", "markers": []} for i in (1, 2, 3)}}
+try:
+    with contextlib.redirect_stdout(io.StringIO()):
+        code = M.main()
+finally:
+    M.CONFIG.pop("reagent_controls", None)
+with open(M.OUT_CSV, newline="", encoding="utf-8") as fh:
+    rows = list(csv.DictReader(fh))
+chk("worklist_controls_first: the three reagent controls head the queue",
+    [r["animal"] for r in rows[:3]], ["RC1"] * 3)
+chk("...in core, though RC1 has fewer than --min-sections",
+    {r["tier"] for r in rows if r["animal"] == "RC1"}, {"core"})
+chk("...and the reason says why", all(r["tier_reason"].startswith("reagent control")
+                                      for r in rows if r["animal"] == "RC1"), True)
+chk("...the small stained animal is still held out",
+    {r["tier"] for r in rows if r["animal"] == "AB1"}, {"animal_underpowered"})
+chk("...nothing else moved: the rest is the queue it was",
+    [r["scene_uid"] for r in rows[3:]], uids)
+
 print("--- the stage table: a paired worklist waits for 04m ---")
 sys.path[:0] = [os.path.join(os.path.dirname(HERE), "app")]
 import stages as S                                              # noqa: E402

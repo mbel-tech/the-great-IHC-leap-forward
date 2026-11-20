@@ -113,9 +113,14 @@ def load_qc():
     picks = chosen_variants()
     if picks:
         before = len(rows)
+        # A reagent control's scan is never a superseded re-scan of the stained
+        # one it shares a slide with: 02 carries it as its own entry, so it
+        # stays on the sheet (labelled) whatever variant the slide's pick names.
+        lookup = RC.expand(CONFIG, rows)
         rows = [
             r for r in rows
             if picks.get((r["animal"], r["slide"], r["marker_channel"]), r["variant"]) == r["variant"]
+            or is_reagent_control(r, lookup)
         ]
         if before != len(rows):
             print(f"  dropped {before - len(rows)} sections from superseded re-scans")

@@ -15,11 +15,17 @@ the flag into each section's record, and 01d labels a control's caption.
 """
 
 import csv
+import faulthandler
+import gc
 import json
 import os
 import sys
 import tempfile
 import time
+
+# A crash at interpreter exit (CI run 44737876800 segfaulted after "all passed")
+# names its frame instead of a bare "Segmentation fault".
+faulthandler.enable()
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -47,7 +53,7 @@ exec(compile(src, "test_autodetect_helpers", "exec"), ns)
 xml, write_czi = ns["xml"], ns["write_czi"]
 DAPI, AF568 = ns["DAPI"], ns["AF568"]
 
-from PySide6.QtCore import QCoreApplication                     # noqa: E402
+from PySide6.QtCore import QCoreApplication, QEvent             # noqa: E402
 from PySide6.QtWidgets import QApplication, QMessageBox         # noqa: E402
 
 app = QApplication.instance() or QApplication([])
@@ -351,5 +357,36 @@ kinds = K.reagent_kinds(project.cfg)
 chk("04k: a section of a confirmed control file carries its kind",
     (kinds.get("LS45_s09_sc01"), kinds.get("LS45_s01a_sc01")), ("no_primary", None))
 
+
+
+def teardown():
+    """Take every Qt object down while the application still exists.
+
+    Left to interpreter exit, the main window (its curator web view and local
+    server), the dialogs held in `opened` and the New study dialogs (each with
+    a SlideRead) are destroyed in whatever order Python's finalizer picks,
+    after the QApplication - which crashed on CI. The order here is the one
+    the app itself uses: stop the server, close, delete, let the deletions run.
+    """
+    # A slide read runs on a plain thread and signals back when it ends; one
+    # still running at exit signals into a deleted object. Set up > Slides
+    # starts one when source_dir changes, moments before this.
+    import slide_read as SRD
+    for job in [o for o in gc.get_objects() if isinstance(o, SRD.SlideRead)]:
+        job.wait(60000)
+    win.server.stop()
+    opened.clear()
+    for w in QApplication.topLevelWidgets():
+        w.close()
+        w.deleteLater()
+    for _ in range(3):
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        app.processEvents()
+    gc.collect()
+    app.processEvents()
+
+
+teardown()
 print("\n%s" % ("FAILED: %s" % failures if failures else "all passed"))
+sys.stdout.flush()
 sys.exit(1 if failures else 0)

@@ -192,7 +192,7 @@ kbd{display:inline-block;padding:1px 6px;border:1px solid var(--line);border-rad
   faded = extrapolated beyond the outermost anchors &middot; changes autosave
 </footer>
 <script>
-const DATA = __DATA__;      // [{uid, animal, order, img}]
+const DATA = __DATA__;      // [{uid, animal, series, order, img, reagent_control}]
 const PLATES = __PLATES__;  // [{id, img, regions, missing}]
 const KEY = "ls_level_curator_v1";
 // The key stays the same - the app mirrors it to the project by name (app/state.py
@@ -336,8 +336,23 @@ if(droppedAnchors.length){
   if(box) box.style.display = "";
   if(n) n.textContent = droppedAnchors.length;
 }
-const animals = [...new Set(DATA.map(d => d.animal))].sort((a,b)=>+a.slice(2)-+b.slice(2));
-el("animal").innerHTML = animals.map(a => `<option>${a}</option>`).join("");
+// THE SERIES, NOT THE ANIMAL, is what a level is interpolated along. A reagent
+// control is numbered by 00 in a series of its own (animal + "#rc"): its
+// section_order restarts at 1 and would interleave with its donor animal's, so
+// grouped by animal an unanchored control took a level interpolated from the
+// donor's anchors and anchoring it moved the donor's. The key is internal: the
+// select shows "<animal> (reagent control)" and the export writes the animal.
+const RC_SERIES = "#rc";
+const seriesOf = d => d.series || d.animal;
+const seriesLabel = s => s.endsWith(RC_SERIES)
+  ? s.slice(0, -RC_SERIES.length) + " (reagent control)" : s;
+const seriesBase = s => s.endsWith(RC_SERIES) ? s.slice(0, -RC_SERIES.length) : s;
+const seriesList = () => [...new Set(DATA.map(seriesOf))].sort((a,b) =>
+  (+seriesBase(a).slice(2) - +seriesBase(b).slice(2))
+  || (seriesBase(a) < seriesBase(b) ? -1 : seriesBase(a) > seriesBase(b) ? 1 : 0)
+  || (a.endsWith(RC_SERIES) - b.endsWith(RC_SERIES)));
+const animals = seriesList();
+el("animal").innerHTML = animals.map(a => `<option value="${esc(a)}">${esc(seriesLabel(a))}</option>`).join("");
 el("slider").max = PLATES.length - 1;
 // Writes this study's bucket and carries every other one, every mark, and whatever
 // of the legacy store is not this page's, through unchanged. The key is read AGAIN
@@ -352,7 +367,7 @@ const save = () => {
   if(Object.keys(cur._legacy).length) out._legacy = cur._legacy;
   localStorage.setItem(KEY, JSON.stringify(out));
 };
-const rows = () => DATA.filter(d => d.animal === el("animal").value)
+const rows = () => DATA.filter(d => seriesOf(d) === el("animal").value)
                        .sort((a,b) => a.order - b.order);
 
 // --- the whole method, in one function ---------------------------------------
@@ -472,7 +487,7 @@ function dropAnchor(){ if(active){ delete anchors[active]; save(); render(); } }
 function clearAnimal(){
   const list = rows();
   const n = list.filter(d=>anchors[d.uid]!==undefined).length;
-  if(n && !confirm(`Clear ${n} anchor${n>1?"s":""} for ${el("animal").value}?`)) return;
+  if(n && !confirm(`Clear ${n} anchor${n>1?"s":""} for ${seriesLabel(el("animal").value)}?`)) return;
   list.forEach(d => delete anchors[d.uid]); save(); render();
 }
 
@@ -493,13 +508,14 @@ addEventListener("keydown", e => {
 const PLATE_SET = __PLATESET__;
 function exportCsv(){
   const out = [["scene_uid","animal","section_order","plate_set","plate_id","plate_index","source","regions"]];
-  for(const a of animals){
-    const list = DATA.filter(d=>d.animal===a).sort((x,y)=>x.order-y.order);
+  // Per series, as the page interpolates; the animal column is the real animal.
+  for(const a of seriesList()){
+    const list = DATA.filter(d=>seriesOf(d)===a).sort((x,y)=>x.order-y.order);
     const asg = assign(list);
     list.forEach((d,i) => {
       if(asg[i].plate === null) return;      // animal not curated yet
       const p = plateAt(asg[i].plate);
-      out.push([d.uid, a, d.order, PLATE_SET, p.id, asg[i].plate, asg[i].kind, '"'+(p.regions||"")+'"']);
+      out.push([d.uid, d.animal, d.order, PLATE_SET, p.id, asg[i].plate, asg[i].kind, '"'+(p.regions||"")+'"']);
     });
   }
   const b = new Blob([out.map(r=>r.join(",")).join("\\n")], {type:"text/csv"});
@@ -520,6 +536,18 @@ def reagent_kinds(config):
     for (uid, _m), entry in RC.manifest_lookup(config, markers).items():
         out.setdefault(uid, entry.get("kind") or "other")
     return out
+
+
+def reagent_series(config):
+    """The scene uids 00 numbered in a reagent-control series (animal + "#rc").
+
+    00 flags a manifest row from config for that row's own marker and numbers it
+    in (animal + "#rc") when flagged (00_manifest._series_key), so this asks the
+    same question of the same rows: the manifest lookup with no extra markers.
+    reformat_index has no marker column, so ls_reagent_controls.series_animal
+    (which reads the row's marker) cannot be used on its rows directly.
+    """
+    return {uid for uid, _m in RC.manifest_lookup(config)}
 
 
 def main():
@@ -547,7 +575,12 @@ def main():
     # The kind of reagent control a section is (any marker), or "": a badge on
     # the page, nothing more. From config, never the manifest's display column.
     rc_kind = reagent_kinds(CONFIG)
-    data = [{"uid": r["id"], "animal": r["animal"], "order": int(r["section_order"] or 0),
+    # The series each section's level is interpolated along: its animal, or the
+    # animal + "#rc" series 00 numbered a reagent control in.
+    rc_series = reagent_series(CONFIG)
+    data = [{"uid": r["id"], "animal": r["animal"],
+             "series": r["animal"] + (RC.RC_SERIES if r["id"] in rc_series else ""),
+             "order": int(r["section_order"] or 0),
              "img": f"sections/{r['id']}.png",
              "reagent_control": rc_kind.get(r["id"], "")} for r in rows]
     # Original plate from the configured set, as 04l does - relative to the

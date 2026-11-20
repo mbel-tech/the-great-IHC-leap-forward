@@ -419,6 +419,9 @@ K = load_stage("04k_level_curator.py", name="lsstage_04k_rcdlg")
 kinds = K.reagent_kinds(project.cfg)
 chk("04k: a section of a confirmed control file carries its kind",
     (kinds.get("LS45_s09_sc01"), kinds.get("LS45_s01a_sc01")), ("no_primary", None))
+series = K.reagent_series(project.cfg)
+chk("04k: a control's section is in the #rc series 00 numbered it in, a stained one is not",
+    ("LS45_s09_sc01" in series, "LS45_s01a_sc01" in series), (True, False))
 
 
 

@@ -1204,8 +1204,9 @@ the operator to confirm or reject in Set up. It never assigns one.
 
 - **Reads:** `manifest/manifest_scenes.csv`, `manifest/manifest_files.csv` (marker exposure, clip
   ceiling), `qc/focus.csv` (DAPI tissue fraction), `qc/display_ranges.json`, and per section the CZI
-  through `czi_read`: the nuclear plane at overview zoom for 01's tissue mask
-  (`01_overviews.tissue_threshold`, never-scanned zero pixels left out), then `TILES` = 12 tiles of
+  through `czi_read`: the raw nuclear plane at overview zoom, thresholded with 01's method
+  (`01_overviews.tissue_threshold`, never-scanned zero pixels left out; 01 thresholds after the tile
+  field, so the mask can differ slightly), then `TILES` = 12 tiles of
   512 native pixels drawn uniformly inside it, seeded by a hash of the scene uid.
 - **Writes:** `qc/reagent_screen.csv` (one row per section x marker) and `qc/reagent_screen.png`.
 - **How:** a tile touching a pixel at the clip ceiling in any plane, or under half tissue, is skipped.

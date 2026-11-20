@@ -304,8 +304,8 @@ def _tile(uid, control):
     slow part of this suite, not screening them."""
     key = (uid, control)
     if key not in _TILES:
-        d, a, _b = (control_tile if control else stained_tile)(zlib.crc32(uid.encode()))
-        _TILES[key] = (d.astype(np.float32), a.astype(np.float32))
+        d, a, b = (control_tile if control else stained_tile)(zlib.crc32(uid.encode()))
+        _TILES[key] = (d.astype(np.float32), a.astype(np.float32), b.astype(np.float32))
     return _TILES[key]
 
 
@@ -416,6 +416,25 @@ chk("...unscreened, with the reason and no status",
     ("missing" in got["LS12_s01a_sc00"]["note"], got["LS12_s01a_sc00"]["f3"],
      got["LS12_s01a_sc00"]["guard_dapi_ok"], got["LS12_s01a_sc00"]["status"]),
     (True, "", "0", ""))
+
+print("--- F2 inside the stage: two markers of one scan ---")
+plan2 = {"A": (1, None), "B": (2, "F1 skipped: test")}
+zoom = M.OV.BASE_PX_UM / M.OV.TARGET_UM
+two = {}
+for uid, fname, s_ in (("LS09_s01a_sc01", "LS09_1a.czi", 1), ("LS10_s01a_sc00", "LS10_1a.czi", 0)):
+    doc = _Doc(os.path.join(STUDY.source_dir, fname))
+    two[uid] = M.screen_section(doc, doc.scenes_bounding_rectangle[s_], s_, uid, ["A", "B"],
+                                0, plan2, zoom, 65535)
+print(f"     control f2={two['LS09_s01a_sc01'][0]['A']['f2']:.3f}  "
+      f"stained f2={two['LS10_s01a_sc00'][0]['A']['f2']:.3f}")
+chk("F2 is high for the control section", two["LS09_s01a_sc01"][0]["A"]["f2"] > 0.8)
+chk("F2 is low for a stained section", two["LS10_s01a_sc00"][0]["A"]["f2"] < 0.4)
+chk("F2 is symmetric between the two markers",
+    two["LS10_s01a_sc00"][0]["A"]["f2"] == two["LS10_s01a_sc00"][0]["B"]["f2"])
+chk("F1 skipped only where the plan says so",
+    (two["LS10_s01a_sc00"][0]["A"]["f1"] is not None, two["LS10_s01a_sc00"][0]["B"]["f1"]),
+    (True, None))
+chk("all 12 tiles read", two["LS10_s01a_sc00"][1], RS.TILES)
 
 print("--- which planes, and when F1 is skipped ---")
 paired = {"acquisition": {"layout": "paired", "markers": ["AF568", "AF488"],

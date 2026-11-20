@@ -291,8 +291,10 @@ PLAIN = {
     "reagent_screen": "Looks for sections that may be reagent controls (stained without the "
                       "primary antibody, or not stained), by the pattern of the stain rather "
                       "than its brightness, and lists them for you to confirm or reject in "
-                      "Set up. It never decides for you, and runs only when the study says "
-                      "it is not sure.",
+                      "Set up. It never decides for you. It runs only when the study says it "
+                      "is not sure, or says yes but none is confirmed yet. It cannot see isotype "
+                      "or pre-adsorbed controls, and cannot tell a missing primary from a failed "
+                      "stain or an animal that does not express the marker.",
     "contactsheets": "Puts each animal's sections side by side in brain order, so you can "
                      "browse the whole dataset quickly.",
     "scene_renders": "A picture of every scene on every slide, drawn from the scan files for "

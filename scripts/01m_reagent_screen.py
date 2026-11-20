@@ -12,7 +12,8 @@ confirmed yet, or with --force. Otherwise it says why and exits 0, leaving a
 header-only CSV when there is none, so the stage reads as done.
 
 Per section, TILES tiles of TILE_PX native pixels are drawn inside the DAPI
-tissue mask (01_overviews' own threshold, on the scene read at overview zoom),
+tissue mask (01_overviews' own threshold on the raw nuclear plane at overview zoom;
+01 itself thresholds after the tile field),
 seeded by the scene uid, and a tile touching a pixel at the clip ceiling in any
 plane is skipped. Per section x marker: F1 is the median over tiles (skipped for
 a marker segmented on its own channel, whose DAPI is declared unusable), F2 the
@@ -49,7 +50,8 @@ import ls_io as IO  # noqa: E402
 import ls_reagent_controls as RC  # noqa: E402
 import ls_reagent_screen as RS  # noqa: E402
 
-# 01's tissue threshold and scene reader, so the mask is the one 01 drew.
+# 01's tissue threshold and scene reader: 01's method on the same plane and zoom.
+# Not bit-for-bit 01's mask - 01 thresholds after the tile field, this the raw plane.
 _spec = importlib.util.spec_from_file_location("_ov_01m", os.path.join(_HERE, "01_overviews.py"))
 OV = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(OV)
@@ -447,8 +449,11 @@ def main():
     for f, frac in sorted(RS.file_rollup(scored).items()):
         if frac > 0:
             print(f"  {f}: {frac:.0%} of its sections are candidates")
-    if n_c:
+    if n_c or n_r or n_u:
         print("Confirm or reject them in Set up > Slides. The screen only proposes.")
+    print("Limits: it cannot see isotype or pre-adsorbed controls, and cannot tell a "
+          "no-primary section from a failed stain or an animal that does not express the "
+          "marker. Its thresholds are provisional until a run on a study with known controls.")
     return 0
 
 

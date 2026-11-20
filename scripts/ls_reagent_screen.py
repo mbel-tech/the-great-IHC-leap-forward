@@ -125,30 +125,64 @@ def _ranks(v):
 
 # ---------------------------------------------------------------- features
 
-def nuclear_mask(dapi):
-    """Otsu on Gaussian-smoothed DAPI, per tile; None when the tile is flat."""
-    return _otsu(_gauss(dapi, DAPI_SIGMA))
+def _gauss_masked(a, sigma, mask):
+    """Gaussian over the masked pixels only (normalised convolution): each
+    masked pixel becomes the weighted mean of its masked neighbours. Glass and
+    unscanned pixels never leak in, so shifting the tissue alone shifts the
+    result exactly with it."""
+    m = mask.astype(np.float64)
+    num = _gauss(np.where(mask, a, 0.0), sigma)
+    den = _gauss(m, sigma)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return np.where(mask & (den > 0), num / np.where(den > 0, den, 1.0), 0.0)
 
 
-def f1_nuclear_enrichment(marker, dapi):
-    """(spots in nuclei / spots) / (nuclear area / tile area), or None.
+#: Fewer tissue pixels than this in a tile and F1 is not computed.
+MIN_F1_PIXELS = 1000
 
-    None when there are no spots, when the marker tile is flat (MAD 0), or when
-    the nuclear mask is empty or covers the whole tile: an enrichment over
-    nothing is not a number worth ranking.
+
+def nuclear_mask(dapi, mask=None):
+    """Otsu on Gaussian-smoothed DAPI over the tissue pixels of one tile, as a
+    tile-shaped bool array (False off tissue); None when the tissue is flat."""
+    dapi = np.asarray(dapi, dtype=np.float64)
+    mask = np.ones(dapi.shape, bool) if mask is None else np.asarray(mask, bool)
+    above = _otsu(_gauss_masked(dapi, DAPI_SIGMA, mask)[mask])
+    if above is None:
+        return None
+    nuc = np.zeros(dapi.shape, bool)
+    nuc[mask] = above
+    return nuc
+
+
+def f1_nuclear_enrichment(marker, dapi, mask=None):
+    """(spots in nuclei / spots) / (nuclear area / tissue area), or None.
+
+    Everything is computed over the tile's tissue pixels (`mask`, the whole
+    tile when None): the DAPI Otsu, the spot threshold's median and MAD, the
+    spots and the nuclear area. A tile can be up to half glass, and a batch
+    shifts the tissue but not the glass; over the whole tile Otsu would split
+    tissue from glass instead of nuclei from neuropil.
+
+    None with no spots, a flat marker (MAD 0), too little tissue, or a nuclear
+    mask that is empty or covers all the tissue.
     """
-    nuc = nuclear_mask(dapi)
+    marker = np.asarray(marker, dtype=np.float64)
+    mask = np.ones(marker.shape, bool) if mask is None else np.asarray(mask, bool)
+    n_t = int(mask.sum())
+    if n_t < MIN_F1_PIXELS:
+        return None
+    nuc = nuclear_mask(dapi, mask)
     if nuc is None:
         return None
-    nuc = nuc.reshape(np.shape(dapi))
-    frac = float(nuc.mean())
+    frac = float(nuc.sum()) / n_t
     if frac <= 0.0 or frac >= 1.0:
         return None
-    m = _gauss(marker, MARKER_SIGMA)
-    med, mad = _median_mad(m)
+    m = _gauss_masked(marker, MARKER_SIGMA, mask)
+    med, mad = _median_mad(m[mask])
     if mad <= 0:
         return None
-    spots = _local_maxima(m) & (m > med + SPOT_K * _MAD_SD * mad)
+    spots = _local_maxima(np.where(mask, m, -np.inf)) & mask & (
+        m > med + SPOT_K * _MAD_SD * mad)
     n = int(spots.sum())
     if n == 0:
         return None

@@ -344,7 +344,7 @@ fix.
 
 ## 01m  Screen for reagent controls {#stage-reagent_screen}
 
-*`scripts/01m_reagent_screen.py` → `qc/reagent_screen.csv`, `qc/reagent_screen.png`*
+*`scripts/01m_reagent_screen.py` → `qc/reagent_screen.csv`, `qc/reagent_screen.png`, `qc/reagent_screen_features.csv`*
 
 A reagent control is a section stained without the primary antibody, or not stained at all. When a
 study is not sure whether it has any, or says it has some but has not named them, this step looks
@@ -372,7 +372,10 @@ same brightness, so the operator decides by eye.
 It cannot see isotype or pre-adsorbed controls, and it cannot tell a section stained without the
 primary from a failed stain or from an animal that does not express the marker. Its thresholds stay
 provisional until it has been run on a study with known controls. It runs only when it is needed
-(the study says it is unsure, or yes with none confirmed); otherwise it says why and stops.
+(the study says it is unsure, or yes with none confirmed); otherwise it says why and stops. It can be
+stopped and picks up where it was: what it has measured is kept, section by section, and is read
+again only when the scan file changes. Confirming or rejecting a proposal therefore only re-ranks the
+list, in seconds, without opening a slide.
 
 ## 01d  Contact sheets and gallery {#stage-contactsheets}
 

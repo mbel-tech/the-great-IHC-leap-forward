@@ -6372,7 +6372,7 @@
     "reagent_screen.csv"
    ],
    "writer": "01m_reagent_screen.py",
-   "what": "The reagent-control signal screen: one row per section x marker. It proposes and never assigns: `status` is `candidate` for a section whose marker looks like a no-primary or unstained control, and the operator confirms or rejects it in Set up. Every feature is blind to an additive offset and a gain, so a background batch cannot move it. 05b and 05c warn, and carry on, while the study says `unsure` and a candidate is neither confirmed nor rejected (ls_reagent_controls.warn_unanswered). Header only when the stage skipped (the study says `no`, or `yes` with controls confirmed). Thresholds are provisional until a validation run on a study with known controls.",
+   "what": "The reagent-control signal screen: one row per section x marker. It proposes and never assigns: `status` is `candidate` for a section whose marker looks like a no-primary or unstained control, and the operator confirms or rejects it in Set up. Every feature is blind to an additive offset and a gain, so a background batch cannot move it. 05b and 05c warn, and carry on, while the study says `unsure` and a candidate is neither confirmed nor rejected (ls_reagent_controls.warn_unanswered). When the stage skips (the study says `no`, or `yes` with controls confirmed), a header-only file is written only if there was no screen yet; an earlier screen is left as it was. A `--limit` run that leaves sections unread does not rewrite it. Rescored from qc/reagent_screen_features.csv on every run. Thresholds are provisional until a validation run on a study with known controls.",
    "readers": [
     "ls_reagent_controls.py"
    ],
@@ -6400,7 +6400,7 @@
      "name": "f1",
      "type": "float",
      "units": "ratio",
-     "meaning": "F1, nuclear spot enrichment: (spots in DAPI nuclei / spots) / (nuclear area / tile area), median over tiles. Spots are local maxima above the tile's median + 5 x 1.4826 x MAD; nuclei are Otsu on smoothed DAPI. Empty for a marker segmented on its own channel (its DAPI declared unusable)."
+     "meaning": "F1, nuclear spot enrichment: (spots in DAPI nuclei / spots) / (nuclear area / tissue area), median over tiles, everything over the tile's tissue pixels only. Spots are local maxima above the tissue's median + 5 x 1.4826 x MAD; nuclei are Otsu on smoothed DAPI. Empty for a marker segmented on its own channel (its DAPI declared unusable)."
     },
     {
      "name": "f2",
@@ -6481,7 +6481,92 @@
    "names": [],
    "writer": "01m_reagent_screen.py",
    "what": "The contact strip the operator decides by eye: per marker, one native tile of each of the top 8 candidates beside 3 median sections of the same marker.",
-   "format": "RGB PNG, 256 px thumbnails (512 native px block-averaged), every tile of a marker at that marker's `qc/display_ranges.json` range. Rewritten every screen, so no old candidate lingers.",
+   "format": "RGB PNG: per marker one row of 256 px pictures (the stored 128 px thumbnail of each section's first tile, drawn at twice its size), every picture of a marker at that marker's `qc/display_ranges.json` range. Rewritten every screen, so no old candidate lingers.",
+   "columns": []
+  },
+  {
+   "path": "qc/reagent_screen_features.csv",
+   "names": [
+    "reagent_screen_features.csv"
+   ],
+   "writer": "01m_reagent_screen.py",
+   "what": "01m's resume checkpoint: the features of each section x marker, written atomically after every file. A row is reused while its `fingerprint` still matches; scoring (z, candidate, status) is always redone from these rows, so an answer in Set up re-scores without reading a pixel. `--force` starts it afresh.",
+   "readers": [
+    "01m_reagent_screen.py"
+   ],
+   "columns_from": "01m_reagent_screen.py:FEATURE_KEYS",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "file",
+     "type": "text",
+     "units": "",
+     "meaning": "The CZI file name."
+    },
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker, as the study names it."
+    },
+    {
+     "name": "f1",
+     "type": "float",
+     "units": "ratio",
+     "meaning": "F1, nuclear spot enrichment over the tiles' tissue pixels (median over tiles); empty when skipped or undefined."
+    },
+    {
+     "name": "f2",
+     "type": "float",
+     "units": "",
+     "meaning": "F2, Spearman with the most similar other marker of the scan (median over tiles); empty with one marker per scan."
+    },
+    {
+     "name": "f3",
+     "type": "float",
+     "units": "",
+     "meaning": "F3, tail spread of the pooled tissue pixels."
+    },
+    {
+     "name": "tiles",
+     "type": "int",
+     "units": "",
+     "meaning": "How many tiles were read (at most 12)."
+    },
+    {
+     "name": "tile_x",
+     "type": "int",
+     "units": "px",
+     "meaning": "The first tile's left edge, native pixels from the scene's own origin; empty when no tile was read."
+    },
+    {
+     "name": "tile_y",
+     "type": "int",
+     "units": "px",
+     "meaning": "The first tile's top edge, likewise."
+    },
+    {
+     "name": "fingerprint",
+     "type": "text",
+     "units": "",
+     "meaning": "A hash of what the features depend on: the CZI's size and modification time, the scene index, the planes read and whether F1 is skipped, the clip ceiling, the overview zoom, the feature constants and FEATURE_VERSION. A mismatch means the section is read again."
+    }
+   ]
+  },
+  {
+   "path": "qc/reagent_screen_thumbs/<scene_uid>_<marker>.png",
+   "names": [],
+   "writer": "01m_reagent_screen.py",
+   "what": "A small picture of each section's first screened tile, per marker, so the contact strip is redrawn after a re-score without reading a CZI.",
+   "format": "16-bit greyscale PNG, 128 x 128: the 512 px native tile as 4 x 4 block means, raw values (no display range).",
+   "readers": [
+    "01m_reagent_screen.py"
+   ],
    "columns": []
   }
  ],

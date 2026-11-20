@@ -291,7 +291,7 @@ PLAIN = {
     "reagent_screen": "Looks for sections that may be reagent controls (stained without the "
                       "primary antibody, or not stained), by the pattern of the stain rather "
                       "than its brightness, and lists them for you to confirm or reject in "
-                      "Set up. It never decides for you. It runs only when the study says it "
+                      "Set up. It never decides for you. It can be stopped and resumes; answering in Set up only re-scores, without reading the slides again. It runs only when the study says it "
                       "is not sure, or says yes but none is confirmed yet. It cannot see isotype "
                       "or pre-adsorbed controls, and cannot tell a missing primary from a failed "
                       "stain or an animal that does not express the marker.",
@@ -559,10 +559,15 @@ OPTIONS = {
     ],
     "overviews": [_force("sections"), _limit()],
     "reagent_screen": [
-        Opt("--force", "bool", "Screen anyway",
+        Opt("--force", "bool", "Screen anyway, from scratch",
             "Normally the screen runs only when the study says it is not sure whether it "
-            "has reagent controls, or says yes with none confirmed. Turn this on to "
-            "screen every section regardless."),
+            "has reagent controls, or says yes with none confirmed, and it resumes: a "
+            "section already read is not read again. Turn this on to screen every section, "
+            "reading each one again."),
+        Opt("--limit", "int", "Read at most N sections",
+            "Stop after reading this many sections; the next run resumes where it stopped. "
+            "The list of candidates is written once every section has been read. 0 means "
+            "all sections.", default=0, cli_default=0, minimum=0, zero="all"),
     ],
     # Folder, resolution and brightness are study settings (Set up > Pictures).
     "scene_renders": [

@@ -10,7 +10,9 @@ the guards, the run gate, and one run of the stage on a stand-in for pylibCZIrw.
     python tests/test_reagent_screen.py
 """
 
+import contextlib
 import csv
+import io
 import json
 import os
 import sys
@@ -134,6 +136,35 @@ for label, (d, a, b) in (("stained", (sd, sa, sb)), ("control", (cd, ca, cb))):
     # Marker only, DAPI left alone: the batch effect is per channel.
     chk(f"{label}: f1 unchanged when only the marker shifts",
         abs(RS.f1_nuclear_enrichment(a * 1.7 + 800, d) - RS.f1_nuclear_enrichment(a, d)) < 1e-6)
+
+print("--- a batch shift of the TISSUE only, on a tile with glass or unscanned zeros ---")
+# A tile may be up to half glass. A batch moves the tissue's level, not the glass's, so a
+# feature computed over the whole tile would see tissue-vs-glass instead of nuclei.
+for label, fill, cut in (("glass", 300.0, 150), ("zeros", 0.0, 52)):
+    for kind, make in (("stained", stained_tile), ("control", control_tile)):
+        d, a, b = (x.copy() for x in make(5 if kind == "stained" else 6))
+        tm = np.ones((N, N), bool)
+        tm[:, :cut] = False
+        for x in (d, a, b):
+            x[~tm] = fill
+        base = (RS.f1_nuclear_enrichment(a, d, tm), RS.f2_channel_similarity(a, b, tm),
+                RS.f3_tail_spread(a, tm))
+        sh = []
+        for x in (d, a, b):
+            y = x.copy()
+            y[tm] = y[tm] * 2.0 + 1500
+            sh.append(y)
+        moved = (RS.f1_nuclear_enrichment(sh[1], sh[0], tm), RS.f2_channel_similarity(sh[1], sh[2], tm),
+                 RS.f3_tail_spread(sh[1], tm))
+        print(f"     {label}/{kind}: before {base}  after {moved}")
+        chk(f"{label}, {kind}: F1/F2/F3 unchanged when only the tissue shifts",
+            all(p is not None and q is not None and abs(p - q) < 1e-6 for p, q in zip(base, moved)))
+        # One tile with a third of it glass holds ~28 puncta, so a control's F1 is
+        # noisy here (the stage takes the median of 12 tiles); the level check is loose.
+        if kind == "stained":
+            chk(f"{label}, stained: F1 still reads stained (> 2)", base[0] > 2.0)
+        else:
+            chk(f"{label}, control: F1 still reads unenriched (< 2)", base[0] < 2.0)
 
 print("--- robust_z ---")
 z = RS.robust_z({"a": 1.0, "b": 2.0, "c": 3.0, "d": 4.0, "e": 100.0})
@@ -350,13 +381,20 @@ with open(os.path.join(OUT, "qc", "display_ranges.json"), "w", encoding="utf-8")
     json.dump({"DAPI": {"lo": 200, "hi": 4000}, MARKER: {"lo": 500, "hi": 12000}}, fh)
 
 
+LAST = [""]
+
+
 def run(*argv):
+    """main() with its output kept out of this log (in LAST[0], for the checks)."""
     saved = sys.argv
     sys.argv = ["01m"] + list(argv)
+    buf = io.StringIO()
     try:
-        return M.main()
+        with contextlib.redirect_stdout(buf):
+            return M.main()
     finally:
         sys.argv = saved
+        LAST[0] = buf.getvalue()
 
 
 def read_screen():
@@ -364,7 +402,34 @@ def read_screen():
         return list(csv.DictReader(fh))
 
 
+def sections_read():
+    """(file, scene) of every section a pixel was read from since READS was cleared."""
+    return {(n, s_) for n, s_, _c, _z in READS}
+
+
+def uid_of(name, scene):
+    return f"{name[:-4].replace('_1a', '_s01a')}_sc{scene:02d}"
+
+
+def checkpointed():
+    with open(M.FEATURES_CSV, newline="", encoding="utf-8") as fh:
+        return {r["scene_uid"] for r in csv.DictReader(fh)}
+
+
+ALL_SECTIONS = {(r["file"], int(r["scene_index"])) for r in scenes}
+
+print("--- resume: --limit stops early, a re-run reads only the rest ---")
+del READS[:]
+chk("--limit 5 exits 0", run("--limit", "5"), 0)
+first5 = sections_read()
+chk("...read exactly 5 sections", len(first5), 5)
+chk("...checkpointed exactly those", checkpointed(), {uid_of(n, s_) for n, s_ in first5})
+chk("...and wrote no screen yet (it is scored once every section has features)",
+    os.path.exists(os.path.join(OUT, "qc", "reagent_screen.csv")), False)
+chk("...and says how many are left", "15 section(s) still to read" in LAST[0])
+del READS[:]
 run()
+chk("the next run reads only the other 15", sections_read(), ALL_SECTIONS - first5)
 got = read_screen()
 chk("the CSV has the stated columns", list(got[0]),
     ["scene_uid", "file", "marker", "f1", "f2", "f3", "z1", "z2", "z3", "n_features",
@@ -377,45 +442,105 @@ chk("...and the row says so", all("F2" in r["note"] for r in got))
 chk("the batch gain on LS0x does not make them candidates",
     [r["scene_uid"] for r in got if r["scene_uid"].startswith("LS0") and r["status"]
      and r["scene_uid"] not in NC_UIDS], [])
-chk("no tile touches a clipped pixel and reads stay native",
+chk("reads stay native, apart from the overview mask",
     {z for _n, _s, _c, z in READS if z >= 1}, {1.0})
 chk("the contact strip is written", os.path.exists(os.path.join(OUT, "qc", "reagent_screen.png")))
+chk("the progress line is ended before the next line is printed",
+    "read 15/15\n" in LAST[0] and "/15  " not in LAST[0] and "15/15!!" not in LAST[0])
 import ls_reagent_controls as RC                                 # noqa: E402
 cfg = dict(STUDY.config, reagent_controls={"declared": "unsure"})
 chk("05b/05c would warn about the unanswered candidate", bool(RC.warn_unanswered(cfg)), True)
-first = [(r["scene_uid"], r["f1"], r["f3"]) for r in got]
-run()
-chk("the same sections give the same features on a re-run (seeded tiles)",
-    [(r["scene_uid"], r["f1"], r["f3"]) for r in read_screen()], first)
+first = [(r["scene_uid"], r["f1"], r["f3"], r["status"]) for r in got]
 
-print("--- all stained: zero candidates ---")
-NC_UIDS = set()
+del READS[:]
 run()
+chk("a re-run with nothing changed reads no pixels", READS, [])
+chk("...and gives the same screen", [(r["scene_uid"], r["f1"], r["f3"], r["status"])
+                                     for r in read_screen()], first)
+
+print("--- an answer in Set up re-scores without reading a pixel ---")
+M.CONFIG["reagent_controls"] = {"declared": "unsure", "rejected": ["LS09_s01a_sc01"]}
+os.remove(os.path.join(OUT, "qc", "reagent_screen.png"))
+del READS[:]
+run()
+chk("rejecting the candidate reads no pixels", READS, [])
+chk("...it is no longer proposed",
+    [r["scene_uid"] for r in read_screen() if r["status"]], [])
+chk("...and the strip is redrawn from the stored thumbnails",
+    os.path.exists(os.path.join(OUT, "qc", "reagent_screen.png")))
+M.CONFIG["reagent_controls"] = {"declared": "unsure",
+                                "scenes": {"LS09_s01a_sc01": {"kind": "no_primary",
+                                                              "markers": []}}}
+del READS[:]
+run()
+got = {r["scene_uid"]: r for r in read_screen()}
+chk("confirming it reads no pixels either", READS, [])
+chk("the confirmed section has no z and no status",
+    (got["LS09_s01a_sc01"]["z1"], got["LS09_s01a_sc01"]["status"]), ("", ""))
+chk("...and says why", "confirmed" in got["LS09_s01a_sc01"]["note"])
+M.CONFIG["reagent_controls"] = {"declared": "unsure"}
+
+print("--- a run stopped part-way resumes from the last finished file ---")
+STOP = {"after": 7}
+
+
+class _Stop(BaseException):
+    """Stands in for the operator pressing Stop (not an error the stage catches)."""
+
+
+_orig_read = _Doc.read
+
+
+def _stopping_read(self, roi, plane, scene, zoom):
+    if zoom < 1:
+        STOP["after"] -= 1
+        if STOP["after"] < 0:
+            raise _Stop()
+    return _orig_read(self, roi, plane, scene, zoom)
+
+
+_Doc.read = _stopping_read
+del READS[:]
+try:
+    run("--force")
+    chk("the stand-in stop happened", False)
+except _Stop:
+    pass
+_Doc.read = _orig_read
+done_before = checkpointed()
+chk("whole files done before the stop are checkpointed", len(done_before), 6)
+del READS[:]
+run()
+chk("the resumed run reads only what was not checkpointed",
+    {uid_of(n, s_) for n, s_ in sections_read()}, {r["scene_uid"] for r in scenes} - done_before)
+chk("...and gives the same screen as before", [(r["scene_uid"], r["f1"], r["f3"], r["status"])
+                                               for r in read_screen()], first)
+
+print("--- a changed CZI is read again, and only that one ---")
+NC_UIDS = set()                     # the stand-in now serves LS09 stained...
+p09 = os.path.join(STUDY.source_dir, "LS09_1a.czi")
+st = os.stat(p09)
+os.utime(p09, ns=(st.st_atime_ns, st.st_mtime_ns + 10 ** 9))   # ...as a rewritten file would
+del READS[:]
+run()
+chk("only LS09's sections are read", sections_read(), {("LS09_1a.czi", 0), ("LS09_1a.czi", 1)})
 got = read_screen()
 chk("zero candidates on a study with no reagent controls",
     [r["scene_uid"] for r in got if r["status"] == "candidate"], [])
 chk("warn_unanswered has nothing to say", RC.warn_unanswered(cfg), None)
-
-print("--- a confirmed control is passed through, not scored ---")
 NC_UIDS = {"LS09_s01a_sc01"}
-M.CONFIG["reagent_controls"] = {"declared": "unsure",
-                                "scenes": {"LS09_s01a_sc01": {"kind": "no_primary",
-                                                              "markers": []}}}
-run("--force")
-got = {r["scene_uid"]: r for r in read_screen()}
-chk("the confirmed section has no z and no status",
-    (got["LS09_s01a_sc01"]["z1"], got["LS09_s01a_sc01"]["status"]), ("", ""))
-chk("...and says why", "confirmed" in got["LS09_s01a_sc01"]["note"])
 
 print("--- a missing CZI is listed, not dropped ---")
 os.remove(os.path.join(STUDY.source_dir, "LS12_1a.czi"))
-run("--force")
+del READS[:]
+run()
 got = {r["scene_uid"]: r for r in read_screen()}
 chk("its sections still have rows", "LS12_s01a_sc00" in got and "LS12_s01a_sc01" in got)
 chk("...unscreened, with the reason and no status",
     ("missing" in got["LS12_s01a_sc00"]["note"], got["LS12_s01a_sc00"]["f3"],
      got["LS12_s01a_sc00"]["guard_dapi_ok"], got["LS12_s01a_sc00"]["status"]),
     (True, "", "0", ""))
+chk("...and nothing else is read", READS, [])
 
 print("--- F2 inside the stage: two markers of one scan ---")
 plan2 = {"A": (1, None), "B": (2, "F1 skipped: test")}

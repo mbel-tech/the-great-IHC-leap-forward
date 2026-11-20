@@ -1208,8 +1208,11 @@ the operator to confirm or reject in Set up. It never assigns one.
   (`01_overviews.tissue_threshold`, never-scanned zero pixels left out; 01 thresholds after the tile
   field, so the mask can differ slightly), then `TILES` = 12 tiles of
   512 native pixels drawn uniformly inside it, seeded by a hash of the scene uid.
-- **Writes:** `qc/reagent_screen.csv` (one row per section x marker) and `qc/reagent_screen.png`.
-- **How:** a tile touching a pixel at the clip ceiling in any plane, or under half tissue, is skipped.
+- **Writes:** `qc/reagent_screen.csv` (one row per section x marker), `qc/reagent_screen.png`, the
+  resume checkpoint `qc/reagent_screen_features.csv` and `qc/reagent_screen_thumbs/<scene_uid>_<marker>.png`.
+- **How:** a tile touching a pixel at the clip ceiling in any plane, or under half tissue, is skipped;
+  a tile position is never drawn twice. Every feature is taken over the tile's tissue pixels only (the
+  overview mask under it, and scanned): a batch shifts tissue but not glass.
   Features and scoring are `ls_reagent_screen`'s. F1 is the median over tiles, skipped for a marker
   segmented on its own channel (its DAPI declared unusable, `acquisition.marker_segmentation` or the
   channel table); F2 is the median over tiles of the Spearman against the most similar other marker of
@@ -1224,9 +1227,15 @@ the operator to confirm or reject in Set up. It never assigns one.
   failed stain or a non-expressing animal; thresholds stay provisional until a validation run on a
   study with known controls.
 - **Failure and re-run:** runs when `declared` is `unsure`, or `yes` with nothing confirmed, or with
-  `--force`; otherwise prints why and exits 0, writing a header-only CSV only when none exists, so the
-  stage reads as done. Not resumable: a run screens every section again (same tiles, same numbers). A
-  file that will not open, or a scene missing from it, is listed with empty features and a note.
+  `--force`; otherwise prints why and exits 0, writing a header-only CSV only when none exists (so the
+  stage reads as done) and leaving an earlier screen as it was. Resumable: features go to
+  `qc/reagent_screen_features.csv` after every file, keyed by a fingerprint (the CZI's size and
+  modification time, scene, planes, clip ceiling, zoom, feature constants), and a run reads only
+  sections whose key is missing or changed. Scoring and the strip are always redone from the checkpoint
+  and the stored thumbnails, so confirming or rejecting in Set up re-scores without reading a pixel.
+  `--force` reads every section again; `--limit N` reads at most N and leaves `reagent_screen.csv` as it
+  was until every section has features. A file that will not open, or a scene missing from it, is
+  listed with empty features and a note, and is tried again next run.
   Reads no group key.
 
 ### `02_pair_passes.py`
@@ -2061,7 +2070,8 @@ between animals exists (`LOGS.md`, 2026-08-12); nothing uses absolute level or t
 contrast. `f1_nuclear_enrichment(marker, dapi)`: spots are local maxima of the lightly smoothed marker
 above median + `SPOT_K` (5) x 1.4826 x MAD, nuclei are a plain Otsu on Gaussian-smoothed DAPI (not 01's
 log-space threshold, which an offset moves); returns (spots in nuclei / spots) / (nuclear area / tile
-area), or None with no spots. `f2_channel_similarity(a, b, mask)`: Spearman over the masked pixels.
+area), all over the tile's tissue pixels when a mask is given (Gaussian smoothing normalised over
+the mask, so glass never leaks in), or None with no spots. `f2_channel_similarity(a, b, mask)`: Spearman over the masked pixels.
 `f3_tail_spread(x, mask)`: log(p99.5 - p50) - log(p50 - p5). `robust_z(values)`: (x - median) /
 (1.4826 x MAD), all 0 when the MAD is 0. `score(rows)` adds z1-z3 per marker, signed so control-like is
 positive (-F1, +F2, -F3), computed without rows marked `confirmed`; `n_features`; `candidate` (every
@@ -2184,7 +2194,8 @@ straight from `sys.argv`) without running it. A script with no options says "(no
 | `01l_scene_renders.py` | `--force` | off | redraw pictures that already exist (default skips them) |
 | `01l_scene_renders.py` | `--workers` | `DEFAULT_WORKERS` | CZIs drawn at once, while free RAM allows (default half the cores, at most 4: <DEFAULT_WORKERS> here) |
 | `01l_scene_renders.py` | `--limit` | `0` | stop after trying N scenes, drawn or not (0 = all) |
-| `01m_reagent_screen.py` | `--force` | off | screen even when the study does not ask for it |
+| `01m_reagent_screen.py` | `--force` | off | screen even when the study does not ask for it, and read every section again rather than resume |
+| `01m_reagent_screen.py` | `--limit` | `0` | read at most N sections this run (0: all); a later run resumes |
 | `02_pair_passes.py` | (none) |  |  |
 | `04a2_atlas_remerge.py` | `--dpi` | `300` |  |
 | `04a2_atlas_remerge.py` | `--dry-run` | off |  |
@@ -4411,7 +4422,7 @@ A person's count of sections in each multi-blob scene; `01i --fit` reads it back
 
 #### `qc/reagent_screen.csv`
 
-The reagent-control signal screen: one row per section x marker. It proposes and never assigns: `status` is `candidate` for a section whose marker looks like a no-primary or unstained control, and the operator confirms or rejects it in Set up. Every feature is blind to an additive offset and a gain, so a background batch cannot move it. 05b and 05c warn, and carry on, while the study says `unsure` and a candidate is neither confirmed nor rejected (ls_reagent_controls.warn_unanswered). Header only when the stage skipped (the study says `no`, or `yes` with controls confirmed). Thresholds are provisional until a validation run on a study with known controls.
+The reagent-control signal screen: one row per section x marker. It proposes and never assigns: `status` is `candidate` for a section whose marker looks like a no-primary or unstained control, and the operator confirms or rejects it in Set up. Every feature is blind to an additive offset and a gain, so a background batch cannot move it. 05b and 05c warn, and carry on, while the study says `unsure` and a candidate is neither confirmed nor rejected (ls_reagent_controls.warn_unanswered). When the stage skips (the study says `no`, or `yes` with controls confirmed), a header-only file is written only if there was no screen yet; an earlier screen is left as it was. A `--limit` run that leaves sections unread does not rewrite it. Rescored from qc/reagent_screen_features.csv on every run. Thresholds are provisional until a validation run on a study with known controls.
 
 - **Written by:** 01m_reagent_screen.py
 - **Read by:** ls_reagent_controls.py
@@ -4421,7 +4432,7 @@ The reagent-control signal screen: one row per section x marker. It proposes and
 | `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `file` | text |  | The CZI file name. |
 | `marker` | text |  | The marker this row screens, as the study names it. |
-| `f1` | float | ratio | F1, nuclear spot enrichment: (spots in DAPI nuclei / spots) / (nuclear area / tile area), median over tiles. Spots are local maxima above the tile's median + 5 x 1.4826 x MAD; nuclei are Otsu on smoothed DAPI. Empty for a marker segmented on its own channel (its DAPI declared unusable). |
+| `f1` | float | ratio | F1, nuclear spot enrichment: (spots in DAPI nuclei / spots) / (nuclear area / tissue area), median over tiles, everything over the tile's tissue pixels only. Spots are local maxima above the tissue's median + 5 x 1.4826 x MAD; nuclei are Otsu on smoothed DAPI. Empty for a marker segmented on its own channel (its DAPI declared unusable). |
 | `f2` | float |  | F2, between-marker similarity: Spearman correlation with the most similar other marker of the same scan over tissue pixels, median over tiles. Empty with one marker per scan. |
 | `f3` | float |  | F3, tail spread: log(p99.5 - p50) - log(p50 - p5) of the pooled tissue pixels. |
 | `z1` | float |  | Robust z of F1 across this marker's sections, (x - median) / (1.4826 x MAD), signed so control-like is positive (-F1). Confirmed reagent controls are left out of the population and have none. |
@@ -4441,7 +4452,35 @@ The contact strip the operator decides by eye: per marker, one native tile of ea
 
 - **Written by:** 01m_reagent_screen.py
 - **Read by:** a person
-- **Format:** RGB PNG, 256 px thumbnails (512 native px block-averaged), every tile of a marker at that marker's `qc/display_ranges.json` range. Rewritten every screen, so no old candidate lingers.
+- **Format:** RGB PNG: per marker one row of 256 px pictures (the stored 128 px thumbnail of each section's first tile, drawn at twice its size), every picture of a marker at that marker's `qc/display_ranges.json` range. Rewritten every screen, so no old candidate lingers.
+
+#### `qc/reagent_screen_features.csv`
+
+01m's resume checkpoint: the features of each section x marker, written atomically after every file. A row is reused while its `fingerprint` still matches; scoring (z, candidate, status) is always redone from these rows, so an answer in Set up re-scores without reading a pixel. `--force` starts it afresh.
+
+- **Written by:** 01m_reagent_screen.py
+- **Read by:** 01m_reagent_screen.py
+
+| Column | Type | Units | Meaning |
+|------------|------|------|---------------------------|
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
+| `file` | text |  | The CZI file name. |
+| `marker` | text |  | The marker, as the study names it. |
+| `f1` | float | ratio | F1, nuclear spot enrichment over the tiles' tissue pixels (median over tiles); empty when skipped or undefined. |
+| `f2` | float |  | F2, Spearman with the most similar other marker of the scan (median over tiles); empty with one marker per scan. |
+| `f3` | float |  | F3, tail spread of the pooled tissue pixels. |
+| `tiles` | int |  | How many tiles were read (at most 12). |
+| `tile_x` | int | px | The first tile's left edge, native pixels from the scene's own origin; empty when no tile was read. |
+| `tile_y` | int | px | The first tile's top edge, likewise. |
+| `fingerprint` | text |  | A hash of what the features depend on: the CZI's size and modification time, the scene index, the planes read and whether F1 is skipped, the clip ceiling, the overview zoom, the feature constants and FEATURE_VERSION. A mismatch means the section is read again. |
+
+#### `qc/reagent_screen_thumbs/<scene_uid>_<marker>.png`
+
+A small picture of each section's first screened tile, per marker, so the contact strip is redrawn after a re-score without reading a CZI.
+
+- **Written by:** 01m_reagent_screen.py
+- **Read by:** 01m_reagent_screen.py
+- **Format:** 16-bit greyscale PNG, 128 x 128: the 512 px native tile as 4 x 4 block means, raw values (no display range).
 <!-- /tables:files -->
 
 ## 10. Tests

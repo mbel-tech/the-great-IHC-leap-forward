@@ -51,6 +51,15 @@ except ImportError:                                         # pragma: no cover
     # can start".
     atlas_registry = None
 
+try:
+    import ls_reagent_controls
+except ImportError:                                         # pragma: no cover
+    # Same reasoning as above: a sibling, and a hard dependency would stop every stage.
+    ls_reagent_controls = None
+
+REAGENT_KINDS = (tuple(ls_reagent_controls.KINDS) if ls_reagent_controls
+                 else ("no_primary", "unstained", "isotype", "preadsorbed", "other"))
+
 #: The built-in atlases, from the registry that owns the concept, so the
 #: settings dialog's dropdown, the generated docs and `ls_atlas.source()` are
 #: one list. A study's own atlases (the `atlases` block) are judged by the
@@ -176,6 +185,8 @@ class Key:
 # --------------------------------------------------------------------------
 # The spec. Order here is the order keys appear in a generated config.
 # --------------------------------------------------------------------------
+
+_RC_CONSUMERS = ["00", "01", "01m", "02", "05b", "05c", "06a", "06c", "app"]
 
 SPEC = [
     Key("schema_version", "int",
@@ -837,6 +848,53 @@ note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
              "reported and skipped rather than guessed at. The metadata-join "
              "sub-project replaces this with a real table join.",
         consumers=["04l", "05c", "06b", "06c", "06d"]),
+
+    # ---- reagent controls (slides stained without the primary, isotype, unstained...) ----
+    Key("reagent_controls.declared", "str",
+        "Whether this study has reagent controls: no, yes, or unsure.",
+        default="no", choices=["no", "yes", "unsure"], label="Reagent controls in this study",
+        note="Records the operator's answer and nothing else; behaviour depends on the "
+             "confirmed entries. A reagent control is a slide or section stained without the "
+             "primary antibody, with an isotype IgG, pre-adsorbed, or unstained. It says how "
+             "a section was stained, not which animal or treatment it is, so it is not "
+             "blinding information.",
+        consumers=_RC_CONSUMERS),
+
+    Key("reagent_controls.files", "raw",
+        "Slide files confirmed as reagent controls, by file name.",
+        default={}, ui=False, in_example=False,
+        note="{<file basename>: {kind, markers, source, subject, slide, replicate}}. kind is "
+             "one of no_primary, unstained, isotype, preadsorbed, other. markers [] means "
+             "every marker. A file entry covers all its scenes; a scenes entry overrides it. "
+             "subject (no underscore), slide and replicate name a file whose name does not "
+             "parse; subject is the donor animal's real ID when known, else a made-up ID.",
+        consumers=_RC_CONSUMERS),
+
+    Key("reagent_controls.scenes", "raw",
+        "Scenes confirmed as reagent controls, by scene uid.",
+        default={}, ui=False, in_example=False,
+        note="{<scene_uid>: {kind, markers, source, pattern, note}}. Overrides the entry for "
+             "the scene's file.",
+        consumers=_RC_CONSUMERS),
+
+    Key("reagent_controls.paired_with", "raw",
+        "Which stained scenes or files each reagent control is compared with.",
+        default={}, ui=False, in_example=False,
+        note="{<scene_uid or file>: [<stained scene_uid or file>, ...]}.",
+        consumers=_RC_CONSUMERS),
+
+    Key("reagent_controls.rejected", "list_str",
+        "Scenes or files the operator said are NOT reagent controls.",
+        default=[], ui=False, in_example=False,
+        note="Stops the name scan and the screen proposing the same item again.",
+        consumers=_RC_CONSUMERS),
+
+    Key("reagent_controls.extra_patterns", "raw",
+        "Lab-specific file-name patterns that mark a reagent control.",
+        default=[], ui=False, in_example=False,
+        note="[{regex, kind}]. Each regex is searched case-insensitively in the path relative "
+             "to the slides folder and must compile.",
+        consumers=_RC_CONSUMERS),
 ]
 
 BY_PATH = {k.path: k for k in SPEC}
@@ -979,6 +1037,68 @@ def _check_project(value):
             out.append(f"`{field}` must be a list of records")
         elif len(v) > cap:
             out.append(f"`{field}` holds {len(v)} records; the most kept is {cap}")
+    return out
+
+
+def _check_reagent_controls(value):
+    """Problems with a `reagent_controls` block, as a list of strings."""
+    if value is None:
+        return []
+    if not isinstance(value, dict):
+        return [f"must be a block of settings, not a {type(value).__name__}"]
+    out = []
+    kinds = ", ".join(REAGENT_KINDS)
+
+    def entry(where, name, ent, file_entry):
+        if not isinstance(ent, dict):
+            out.append(f"`{where}.{name}` must be a block of settings")
+            return
+        kind = ent.get("kind", "no_primary")
+        if kind not in REAGENT_KINDS:
+            out.append(f"`{where}.{name}.kind` {kind!r} must be one of {kinds}")
+        mk = ent.get("markers", [])
+        if not isinstance(mk, list) or any(not isinstance(m, str) for m in mk):
+            out.append(f"`{where}.{name}.markers` must be a list of marker names")
+        if file_entry:
+            subj = ent.get("subject")
+            if subj is not None and (not isinstance(subj, str) or not subj.strip()
+                                     or "_" in subj):
+                out.append(f"`{where}.{name}.subject` must be text without an underscore "
+                           f"(it becomes part of the scene uid): {subj!r}")
+            slide = ent.get("slide")
+            if slide is not None and (not isinstance(slide, int) or isinstance(slide, bool)):
+                out.append(f"`{where}.{name}.slide` must be a whole number")
+            rep = ent.get("replicate")
+            if rep is not None and not isinstance(rep, str):
+                out.append(f"`{where}.{name}.replicate` must be text")
+
+    for where, file_entry in (("files", True), ("scenes", False)):
+        block = value.get(where)
+        if block is None:
+            continue
+        if not isinstance(block, dict):
+            out.append(f"`{where}` must be a table keyed by name")
+            continue
+        for name, ent in block.items():
+            entry(where, name, ent, file_entry)
+    extra = value.get("extra_patterns")
+    if extra is not None:
+        if not isinstance(extra, list):
+            out.append("`extra_patterns` must be a list of {regex, kind}")
+        else:
+            for i, e in enumerate(extra):
+                if not isinstance(e, dict) or not isinstance(e.get("regex"), str):
+                    out.append(f"`extra_patterns[{i}]` must be {{regex, kind}}")
+                    continue
+                try:
+                    re.compile(e["regex"])
+                except re.error as exc:
+                    out.append(f"`extra_patterns[{i}].regex` is not a valid regex: {exc}")
+                if e.get("kind") not in REAGENT_KINDS:
+                    out.append(f"`extra_patterns[{i}].kind` must be one of {kinds}")
+    pw = value.get("paired_with")
+    if pw is not None and not isinstance(pw, dict):
+        out.append("`paired_with` must be a table")
     return out
 
 
@@ -1159,6 +1279,8 @@ def validate(cfg, path="<config>", strict_paths=False):
             errors.append(f"{path}: `project` {problem}")
         for problem in _check_curation(cfg.get("curation")):
             errors.append(f"{path}: `curation` {problem}")
+        for problem in _check_reagent_controls(cfg.get("reagent_controls")):
+            errors.append(f"{path}: `reagent_controls` {problem}")
 
     # The study's own atlases are judged by the registry, which owns the rules
     # (own folder, no shadowing, no path tricks). Reported here as a config error

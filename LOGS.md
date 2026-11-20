@@ -9,6 +9,27 @@ where things landed, not which plausible-looking route was tried and abandoned, 
 
 ---
 
+## 2026-11-20 - Slide manifest: slides per animal, checked against the workbook (app / tests / docs)
+
+**Changed:** Set up > Slides has a **Slide manifest…** button. It lists each animal in the slides
+folder (read with the study's naming rule; Prepare's `manifest_files.csv` when the folder cannot be
+read) with its slide count (distinct slide numbers, so `10a` + `10b` is one), file count, files,
+treatment and a status: OK, in the workbook with no slides, slides with no workbook row, on two
+workbook rows, sharing a row, or fewer slides / files than the most common count in the study.
+Unrecognised file names are listed apart. **Save as CSV** writes `manifest/slide_manifest.csv`
+(atomically). The logic is Qt-free in `app/slide_manifest.py`, tested by
+`tests/test_slide_manifest.py`; the window is `app/slide_manifest_dialog.py`.
+
+**Why:** there was no single place to see how many animals and slides a study has and what is
+missing against the sampling workbook; Check workbook gave one line of text. The workbook join is
+`ls_sampling.check`, the one Check workbook and Unblind use, so the three never disagree.
+
+**Cost:** the window and the CSV show each animal's treatment, by the operator's choice, which the
+Slides tab otherwise never does. The CSV is not one of the files a study bundle carries
+(`ls_bundle.OPERATOR_PATTERNS`), so a blinded bundle still has no key.
+
+---
+
 ## 2026-11-16 - Final review fixes: stages that could never pass (04o / 04g / 05a / app / tests / docs)
 
 **Changed:** 04o takes its sections from `focus.csv` the way 04a does (`frames_for`): under

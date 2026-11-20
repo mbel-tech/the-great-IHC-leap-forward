@@ -906,6 +906,13 @@ class SetupScreen(QWidget):
             "writing anything: how many get a group, which have no row, which are blank")
         self.check_workbook_btn.clicked.connect(self.check_workbook)
         book.addWidget(self.check_workbook_btn)
+        self.manifest_btn = QPushButton("Slide manifest…")
+        self.manifest_btn.setToolTip(
+            "Every animal in the slides folder with its slide count and treatment, checked "
+            "against the workbook: animals with no slides, slides with no workbook row, "
+            "and animals with fewer slides than most")
+        self.manifest_btn.clicked.connect(self.show_slide_manifest)
+        book.addWidget(self.manifest_btn)
         sl.addLayout(book)
         self.workbook_line = QLabel("")
         self.workbook_line.setWordWrap(True)
@@ -951,6 +958,9 @@ class SetupScreen(QWidget):
         self._load_groups_after_check = False
         self.workbook_check = WC.WorkbookCheck(self)
         self.workbook_check.finished.connect(self._workbook_checked)
+        import slide_manifest_dialog as SMD
+        self.manifest_job = SMD.ManifestJob(self)
+        self.manifest_job.finished.connect(self._slide_manifest_ready)
         self._sync_report_btn()
         self.current = QLabel("")
         self.current.setWordWrap(True)
@@ -1229,6 +1239,34 @@ class SetupScreen(QWidget):
         say("Pasted %d fish rows and %d columns into %s. Next: Match the sheet."
             % (len(rows) - 1, width, path))
         return path
+
+    def show_slide_manifest(self):
+        """Build the slide manifest off the window's thread; it opens in _slide_manifest_ready."""
+        import workbook_check as WC
+        project = self.session.project
+        typed = self.workbook_field.value()
+        path = WC.workbook_path(project.cfg, {"--xlsx": typed} if typed else
+                                project.stage_options("join_sampling"))
+        self.manifest_btn.setEnabled(False)
+        self.manifest_btn.setText("Building…")
+        self.manifest_job.start(project.cfg, path)
+
+    def _slide_manifest_ready(self, manifest):
+        import slide_manifest_dialog as SMD
+        self.manifest_btn.setEnabled(True)
+        self.manifest_btn.setText("Slide manifest…")
+        if manifest.get("error"):
+            self.workbook_line.setText("The slide manifest could not be built: %s."
+                                       % manifest["error"])
+            self.workbook_line.setStyleSheet(f"color:{COLOUR['failed']}")
+            return None
+        project = self.session.project
+        dlg = SMD.SlideManifestDialog(manifest, project.get("out_root"),
+                                      project.read_only, self)
+        dlg.exec()
+        if dlg.saved_path:
+            self.logged.emit("slide manifest saved: %s" % dlg.saved_path)
+        return dlg
 
     def match_sheet(self):
         """Open Match the sheet on the chosen workbook; Save keeps the study's `sampling`."""

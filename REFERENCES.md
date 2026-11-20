@@ -158,8 +158,6 @@ image, so the screen does not try.
 
 ---
 
-## Immunofluorescence normalisation---
-
 ## Immunofluorescence normalisation — UniFORM
 
 > Wang K, Ait-Ahmad K, Kupp S, Sims Z, Cramer E, Sayar Z, Yu J, Wong MH, Mills GB, Eksi SE,

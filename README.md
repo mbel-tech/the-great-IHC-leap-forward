@@ -729,8 +729,9 @@ annulus background.
 IgG, with a pre-adsorbed antibody, or unstained) can say more. Confirmed reagent controls are kept
 out of every experimental output and reported on their own: `results/reagent_controls.csv` and a
 "Reagent controls" sheet in the 06c workbook give, per marker and region, what the positivity rule
-calls on them under their own cut, and how far they reach above the stained sections' cuts. Read an
-absolute positivity rate against that rate rather than as zero background. The paragraph above
+calls on them under their own cut, and how far they reach above the stained sections' cuts. With a
+no-primary reagent control reported, read an absolute positivity rate against that rate rather than
+as zero background. The paragraph above
 holds for a study that has none, and a background disc is still not a negative control. See
 "Reagent controls" in the methods guide (`docs/guides/pipeline-methods.md`).
 

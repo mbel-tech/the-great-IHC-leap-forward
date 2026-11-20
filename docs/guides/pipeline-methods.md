@@ -661,7 +661,8 @@ tissue is not a reagent control here; it is experimental tissue stained normally
 reference discs are not reagent controls either.
 
 *Naming.* The operator says whether the slide folder holds reagent controls (no, yes, or not sure).
-On every answer the path of each file, folders included, is scanned against a fixed set of tokens
+On every answer the slide file names (and, for a .zip, the archive and member names) are scanned
+against a fixed set of tokens
 (no primary, secondary only, a marker named after "no", isotype or IgG, pre-adsorbed, unstained,
 negative control); each match is confirmed by the operator, with its kind and the markers it controls.
 Looser tokens such as `NC` or `ctrl` are only listed, never pre-ticked, and a token that is also a
@@ -678,10 +679,11 @@ and ranks sections that look like a control. Three features are used, each uncha
 offset or a multiplicative gain of the channel, because the background differs by about a factor of two
 between animal batches and any measure of absolute level or of tissue-to-background contrast would
 find the batch rather than a control. F1 is the fraction of bright local maxima that fall inside DAPI
-nuclei, over the nuclear area fraction: a nuclear stain is enriched, autofluorescent specks are not. F2
+nuclei, over the nuclear area fraction: a nuclear stain is enriched, autofluorescent specks are not.
+It is skipped for a marker segmented on its own channel or whose DAPI plane is unusable. F2
 is the Spearman correlation between two marker channels over tissue pixels, median over tiles, which
 is high when autofluorescence, broad-band across 425 to 738 nm (Wizenty et al., 2018), dominates
-both; it is undefined for a single-marker scan. F3 is log(p99.5 − p50) − log(p50 − p5), the weight of
+both; it is undefined for a single-marker scan. F3 is log(p99.5 − p50) − log(p50 − p5) of the section's pooled tissue pixels, the weight of
 the bright tail, heavy for a specific stain. Each feature becomes a robust z across the study's
 sections of that marker (median and 1.4826 × MAD), signed so that control-like is positive. A section
 is a candidate when every available z is at least 3 and at least two features are available, and its
@@ -692,7 +694,8 @@ marker, and its thresholds are provisional until it has been run on a study with
 
 *Keeping them out.* Confirmed controls are left out of the display ranges, the detection-tuning
 sample and every experimental output; they are still curated and detected, and 05c measures them
-first so that a partial run reports them. The flag says how a section was stained, not which animal it is, so it is not blinding information and the stages before the unblinding step read it.
+first so that a partial run reports them. Because the flag is not blinding information, the stages
+before the unblinding step read it.
 
 *What is reported.* Stage 06a writes `results/reagent_controls.csv`, one row per control section,
 marker and region, from the same nuclei and the same cut machinery as the stained sections, and the
@@ -711,7 +714,6 @@ measures the batch and not the reagent. The 06c workbook carries the table as a 
 sheet; with a no-primary control reported, its limitation text points there instead of saying that
 absolute rates are not defensible.
 
-# 13. Blinding
 # 13. Blinding
 
 No stage described in this document reads the treatment group. Every intermediate file is keyed

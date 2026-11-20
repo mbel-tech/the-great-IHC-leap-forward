@@ -110,7 +110,7 @@ PREPARE = Screen(
         ("Read and check the slides",
          "Reads every slide file, checks it, exports a picture of every section and "
          "measures where the camera saturated.",
-         ["manifest", "verify", "czi_selftest", "overviews", "contactsheets", "scene_renders", "pair",
+         ["manifest", "verify", "czi_selftest", "overviews", "reagent_screen", "contactsheets", "scene_renders", "pair",
           "channel_identity", "saturation_raw", "saturation_map"]),
         ("Build the atlas",
          "Turns the atlas into a set of plates with the regions marked. Only the "
@@ -288,6 +288,11 @@ PLAIN = {
     "overviews": "Saves a picture of every section at one fixed size and brightness, "
                  "scores each for focus and saturation, and marks where the camera hit "
                  "its maximum.",
+    "reagent_screen": "Looks for sections that may be reagent controls (stained without the "
+                      "primary antibody, or not stained), by the pattern of the stain rather "
+                      "than its brightness, and lists them for you to confirm or reject in "
+                      "Set up. It never decides for you, and runs only when the study says "
+                      "it is not sure.",
     "contactsheets": "Puts each animal's sections side by side in brain order, so you can "
                      "browse the whole dataset quickly.",
     "scene_renders": "A picture of every scene on every slide, drawn from the scan files for "
@@ -551,6 +556,12 @@ OPTIONS = {
         _limit("files"),
     ],
     "overviews": [_force("sections"), _limit()],
+    "reagent_screen": [
+        Opt("--force", "bool", "Screen anyway",
+            "Normally the screen runs only when the study says it is not sure whether it "
+            "has reagent controls, or says yes with none confirmed. Turn this on to "
+            "screen every section regardless."),
+    ],
     # Folder, resolution and brightness are study settings (Set up > Pictures).
     "scene_renders": [
         _force("pictures"), _limit("scenes"),

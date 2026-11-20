@@ -6372,7 +6372,117 @@
     "reagent_screen.csv"
    ],
    "writer": "01m_reagent_screen.py",
-   "what": "The reagent-control signal screen: one row per section x marker, with `scene_uid`, `file`, `marker` and `status` (`candidate` for a section that looks like a reagent control). 05b and 05c warn, and carry on, while the study says `unsure` and a candidate is neither confirmed nor rejected (ls_reagent_controls.warn_unanswered). The screen stage that writes it is not built yet; its full column list is added with it."
+   "what": "The reagent-control signal screen: one row per section x marker. It proposes and never assigns: `status` is `candidate` for a section whose marker looks like a no-primary or unstained control, and the operator confirms or rejects it in Set up. Every feature is blind to an additive offset and a gain, so a background batch cannot move it. 05b and 05c warn, and carry on, while the study says `unsure` and a candidate is neither confirmed nor rejected (ls_reagent_controls.warn_unanswered). Header only when the stage skipped (the study says `no`, or `yes` with controls confirmed). Thresholds are provisional until a validation run on a study with known controls.",
+   "readers": [
+    "ls_reagent_controls.py"
+   ],
+   "columns_from": "01m_reagent_screen.py:SCREEN_KEYS",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "file",
+     "type": "text",
+     "units": "",
+     "meaning": "The CZI file name."
+    },
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker this row screens, as the study names it."
+    },
+    {
+     "name": "f1",
+     "type": "float",
+     "units": "ratio",
+     "meaning": "F1, nuclear spot enrichment: (spots in DAPI nuclei / spots) / (nuclear area / tile area), median over tiles. Spots are local maxima above the tile's median + 5 x 1.4826 x MAD; nuclei are Otsu on smoothed DAPI. Empty for a marker segmented on its own channel (its DAPI declared unusable)."
+    },
+    {
+     "name": "f2",
+     "type": "float",
+     "units": "",
+     "meaning": "F2, between-marker similarity: Spearman correlation with the most similar other marker of the same scan over tissue pixels, median over tiles. Empty with one marker per scan."
+    },
+    {
+     "name": "f3",
+     "type": "float",
+     "units": "",
+     "meaning": "F3, tail spread: log(p99.5 - p50) - log(p50 - p5) of the pooled tissue pixels."
+    },
+    {
+     "name": "z1",
+     "type": "float",
+     "units": "",
+     "meaning": "Robust z of F1 across this marker's sections, (x - median) / (1.4826 x MAD), signed so control-like is positive (-F1). Confirmed reagent controls are left out of the population and have none."
+    },
+    {
+     "name": "z2",
+     "type": "float",
+     "units": "",
+     "meaning": "Robust z of F2, signed +F2."
+    },
+    {
+     "name": "z3",
+     "type": "float",
+     "units": "",
+     "meaning": "Robust z of F3, signed -F3."
+    },
+    {
+     "name": "n_features",
+     "type": "int",
+     "units": "",
+     "meaning": "How many of F1-F3 were available."
+    },
+    {
+     "name": "guard_dapi_ok",
+     "type": "bool",
+     "units": "",
+     "meaning": "1 when the section's DAPI tissue fraction (qc/focus.csv) is within the study's normal range (|robust z| <= 3) and at least one tile was read; 0 for a failed or empty section."
+    },
+    {
+     "name": "guard_exposure_ok",
+     "type": "bool",
+     "units": "",
+     "meaning": "1 when the file's marker exposure equals the modal exposure for that marker (manifest_files.csv), or is not recorded (said in note); 0 for a scan-time mistake."
+    },
+    {
+     "name": "candidate",
+     "type": "bool",
+     "units": "",
+     "meaning": "1 when every available z >= 3, at least two features are available, and both guards hold."
+    },
+    {
+     "name": "rank",
+     "type": "float",
+     "units": "",
+     "meaning": "The minimum available z: the weakest evidence decides. Higher is more control-like."
+    },
+    {
+     "name": "status",
+     "type": "text",
+     "units": "",
+     "meaning": "`candidate`; `review` (control-like on the one feature available, never a candidate); `unusual` (control-like but a guard failed: not a control candidate); or empty. Never set on a confirmed or rejected section."
+    },
+    {
+     "name": "note",
+     "type": "text",
+     "units": "",
+     "meaning": "Why a feature is empty, how many tiles were read, a guard that failed or could not be checked, and confirmed or rejected sections."
+    }
+   ]
+  },
+  {
+   "path": "qc/reagent_screen.png",
+   "names": [],
+   "writer": "01m_reagent_screen.py",
+   "what": "The contact strip the operator decides by eye: per marker, one native tile of each of the top 8 candidates beside 3 median sections of the same marker.",
+   "format": "RGB PNG, 256 px thumbnails (512 native px block-averaged), every tile of a marker at that marker's `qc/display_ranges.json` range. Rewritten every screen, so no old candidate lingers.",
+   "columns": []
   }
  ],
  "not_files": {

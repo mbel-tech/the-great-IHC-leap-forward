@@ -187,6 +187,9 @@ class Key:
 # --------------------------------------------------------------------------
 
 _RC_CONSUMERS = ["00", "01", "01b", "01d", "01m", "02", "04b", "04c", "05b", "05c", "06a", "06c", "app"]
+#: 01m (the signal screen) reads which sections are confirmed or rejected, never the
+#: pairing or the name-scan patterns, so those two keys do not mark it out of date.
+_RC_CONSUMERS_NOT_01M = [c for c in _RC_CONSUMERS if c != "01m"]
 
 SPEC = [
     Key("schema_version", "int",
@@ -881,7 +884,7 @@ note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
         "Which stained scenes or files each reagent control is compared with.",
         default={}, ui=False, in_example=False,
         note="{<scene_uid or file>: [<stained scene_uid or file>, ...]}.",
-        consumers=_RC_CONSUMERS),
+        consumers=_RC_CONSUMERS_NOT_01M),
 
     Key("reagent_controls.rejected", "list_str",
         "Scenes or files the operator said are NOT reagent controls.",
@@ -894,7 +897,7 @@ note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
         default=[], ui=False, in_example=False,
         note="[{regex, kind}]. Each regex is searched case-insensitively in the path relative "
              "to the slides folder and must compile.",
-        consumers=_RC_CONSUMERS),
+        consumers=_RC_CONSUMERS_NOT_01M),
 ]
 
 BY_PATH = {k.path: k for k in SPEC}

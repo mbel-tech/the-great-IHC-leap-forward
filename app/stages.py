@@ -355,6 +355,21 @@ STAGES = [
                 "the same read, so 01k has nothing left to do. Applies the "
                 "tile field if one exists."),
 
+    Stage("reagent_screen", "01m  Screen for reagent controls", "Ingest and QC",
+          script="01m_reagent_screen.py", reader="pylibCZIrw",
+          outputs=["qc/reagent_screen.csv"],
+          needs=["overviews"],
+          made_from=["overviews"],
+          # It screens only while the study is unsure (or says yes with nothing
+          # confirmed), and never proposes what is confirmed or rejected.
+          settings=["reagent_controls.declared", "reagent_controls.files",
+                    "reagent_controls.scenes", "reagent_controls.rejected"],
+          blurb="Proposes sections that look like reagent controls (no primary, "
+                "unstained) from 12 native tiles each: nuclear spot enrichment, "
+                "similarity between markers and tail spread, all blind to brightness. "
+                "Never assigns: you confirm or reject in Set up. Runs only when the "
+                "study says unsure, or yes with nothing confirmed; otherwise skips."),
+
     Stage("contactsheets", "01d  Contact sheets and gallery", "Ingest and QC",
           script="01d_contactsheets.py",
           outputs=["contactsheets"],

@@ -65,9 +65,9 @@ A key marked *required* has to be present before any stage will run.
 | `reagent_controls.declared` | str | `"no"` | `00`, `01`, `01b`, `01d`, `01m`, `02`, `04b`, `04c`, `05b`, `05c`, `06a`, `06c`, `app` | Whether this study has reagent controls: no, yes, or unsure. |
 | `reagent_controls.files` | raw | `{}` | `00`, `01`, `01b`, `01d`, `01m`, `02`, `04b`, `04c`, `05b`, `05c`, `06a`, `06c`, `app` | Slide files confirmed as reagent controls, by file name. |
 | `reagent_controls.scenes` | raw | `{}` | `00`, `01`, `01b`, `01d`, `01m`, `02`, `04b`, `04c`, `05b`, `05c`, `06a`, `06c`, `app` | Scenes confirmed as reagent controls, by scene uid. |
-| `reagent_controls.paired_with` | raw | `{}` | `00`, `01`, `01b`, `01d`, `01m`, `02`, `04b`, `04c`, `05b`, `05c`, `06a`, `06c`, `app` | Which stained scenes or files each reagent control is compared with. |
+| `reagent_controls.paired_with` | raw | `{}` | `00`, `01`, `01b`, `01d`, `02`, `04b`, `04c`, `05b`, `05c`, `06a`, `06c`, `app` | Which stained scenes or files each reagent control is compared with. |
 | `reagent_controls.rejected` | list_str | `[]` | `00`, `01`, `01b`, `01d`, `01m`, `02`, `04b`, `04c`, `05b`, `05c`, `06a`, `06c`, `app` | Scenes or files the operator said are NOT reagent controls. |
-| `reagent_controls.extra_patterns` | raw | `[]` | `00`, `01`, `01b`, `01d`, `01m`, `02`, `04b`, `04c`, `05b`, `05c`, `06a`, `06c`, `app` | Lab-specific file-name patterns that mark a reagent control. |
+| `reagent_controls.extra_patterns` | raw | `[]` | `00`, `01`, `01b`, `01d`, `02`, `04b`, `04c`, `05b`, `05c`, `06a`, `06c`, `app` | Lab-specific file-name patterns that mark a reagent control. |
 
 ## Keys removed in schema v1
 

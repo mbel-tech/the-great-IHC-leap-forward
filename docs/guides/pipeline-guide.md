@@ -342,6 +342,38 @@ fix.
 > return CR.read_plane(czidoc, rect, channel, scene=scene, zoom=zoom)
 > ```
 
+## 01m  Screen for reagent controls {#stage-reagent_screen}
+
+*`scripts/01m_reagent_screen.py` → `qc/reagent_screen.csv`, `qc/reagent_screen.png`*
+
+A reagent control is a section stained without the primary antibody, or not stained at all. When a
+study is not sure whether it has any, or says it has some but has not named them, this step looks
+for sections whose marker channel *looks* like one, and lists them for the operator to confirm or
+reject in Set up. It proposes; it never decides.
+
+It reads twelve small tiles of each section at full resolution, from inside the tissue, and skips any
+tile that touches a pixel the camera pinned at its maximum. Three things are measured on the marker:
+
+- whether its bright spots sit in nuclei more often than chance (a stained nuclear marker does;
+  autofluorescent specks sit anywhere);
+- whether two markers of the same scan look alike (autofluorescence shines in every channel, so a
+  section stained with neither primary looks the same in both);
+- how heavy the bright tail of the pixel values is (a real stain has one, background does not).
+
+**None of them depends on how bright a section is.** Between animal batches the background differs by
+about a factor of two. A measure built on brightness, or on tissue against background, would flag a
+batch rather than a control, so every measure here is unchanged when a channel is made uniformly
+brighter or offset. A section is proposed only when every available measure is at least three robust
+standard deviations towards "control-like" against the rest of the study, and when its tissue area
+and its exposure time are normal for the study, since a failed section or a scan-time mistake can look
+the same. The picture beside the list shows each proposal next to three typical sections, at the
+same brightness, so the operator decides by eye.
+
+It cannot see isotype or pre-adsorbed controls, and it cannot tell a section stained without the
+primary from a failed stain or from an animal that does not express the marker. Its thresholds stay
+provisional until it has been run on a study with known controls. It runs only when it is needed
+(the study says it is unsure, or yes with none confirmed); otherwise it says why and stops.
+
 ## 01d  Contact sheets and gallery {#stage-contactsheets}
 
 *`scripts/01d_contactsheets.py` → `contactsheets/`*

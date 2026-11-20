@@ -692,8 +692,11 @@ class ReagentControlsDialog(QDialog):
         self.e = RC.entries(self.project.cfg)
         confirmed_changed = (self.e["files"] != was["files"]
                              or self.e["scenes"] != was["scenes"])
-        self.rerun_text = rerun_text(confirmed_changed,
-                                     self.e["paired_with"] != was["paired_with"])
+        # Before 00 has listed the sections (New study) nothing has run, so
+        # there is nothing to run again.
+        self.rerun_text = (rerun_text(confirmed_changed,
+                                      self.e["paired_with"] != was["paired_with"])
+                           if self._scene_rows else "")
         lines = []
         if unconfirmed:
             lines.append("Un-confirmed (no longer reagent controls, and not marked as "

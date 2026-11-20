@@ -109,10 +109,19 @@ try:
         O.ranges_id(dict(OLD, _sampled=[["A_sc01", "AF568"]])), O.ranges_id(OLD))
     got, said = sample_with(dict(OLD, _sampled=[["A_sc01", "AF568"], ["B_sc01", "AF568"]]))
     chk("a cached range drawn from stained sections only is kept", got.get("DAPI"), OLD["DAPI"])
-    got, said = sample_with(dict(OLD, _sampled=[["A_sc01", "AF568"], ["RC_sc01", "AF568"]]))
+    drawn = []
+    _ds = O.display_sample
+    O.display_sample = lambda sc, lk: drawn.append(_ds(sc, lk)) or drawn[-1]
+    try:
+        got, said = sample_with(dict(OLD, _sampled=[["A_sc01", "AF568"], ["RC_sc01", "AF568"]]))
+    finally:
+        O.display_sample = _ds
     chk("01_resamples: one drawn from a section now confirmed is sampled again",
-        (got.get("DAPI"), "RC_sc01" in json.dumps(got.get("_sampled"))), (None, False))
+        (len(drawn), [r["scene_uid"] for r in (drawn or [[]])[0] if r["scene_uid"] == "RC_sc01"]),
+        (1, []))
     chk("...and says so, naming it", "reagent control" in said and "RC_sc01" in said, True)
+    chk("...with no slide readable here it keeps the old ranges rather than an empty file",
+        (got.get("DAPI"), "NOT" in said), (OLD["DAPI"], True))
     got, said = sample_with(dict(OLD, _sampled=[["RC_sc01", "AF568"]]), narrowed=True)
     chk("...not on a --limit run, which says to run without it",
         (got.get("DAPI"), "--limit" in said), (OLD["DAPI"], True))
@@ -303,8 +312,10 @@ chk("01d: with no control, plain section order",
 print("--- blinding: no reagent-control code reads the group key ---")
 # A reagent control is not blinding information, and handling one must never
 # need the animal-to-group key: no code (docstrings and comments aside) in the
-# reagent-control modules names `by_animal`, and none imports the module that
-# reads it (ls_sampling). Stages before 06b that touch reagent controls are
+# reagent-control modules reads `by_animal` as a string key or an attribute (a
+# local variable of that name, a per-animal tally, is not the key), and none
+# imports the module that reads it (ls_sampling). Stages before 06b that touch
+# reagent controls are
 # covered too. The group LABELS (groups.order) may be read: the name scan uses
 # them to keep a weak token that is a group name from being proposed.
 import ast  # noqa: E402
@@ -313,7 +324,9 @@ BLIND = ["scripts/01m_reagent_screen.py", "scripts/ls_reagent_controls.py",
          "scripts/ls_reagent_screen.py", "scripts/ls_reagent_report.py",
          "app/reagent_dialog.py", "scripts/00_manifest.py", "scripts/01_overviews.py",
          "scripts/01d_contactsheets.py", "scripts/04k_level_curator.py",
-         "scripts/05b_tune_detection.py", "scripts/06a_roi_dataset.py"]
+         "scripts/05b_tune_detection.py", "scripts/06a_roi_dataset.py",
+         "scripts/02_pair_passes.py", "scripts/04n_roi_worklist.py", "scripts/01b_pick_sections.py",
+         "scripts/04b_atlas_match.py", "scripts/04c_atlas_match.py"]
 
 
 def reads_group_key(path):
@@ -327,8 +340,6 @@ def reads_group_key(path):
         if (isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in docs
                 and "by_animal" in n.value):
             hits.append(f"string at line {n.lineno}")
-        elif isinstance(n, ast.Name) and n.id == "by_animal":
-            hits.append(f"name at line {n.lineno}")
         elif isinstance(n, ast.Attribute) and n.attr == "by_animal":
             hits.append(f"attribute at line {n.lineno}")
         elif isinstance(n, (ast.Import, ast.ImportFrom)):
@@ -340,6 +351,8 @@ def reads_group_key(path):
 
 for path in BLIND:
     chk(f"blinding: {path} does not read groups.by_animal", reads_group_key(path), [])
+chk("...and the check bites: 05c, which reads the key for its order, is flagged",
+    bool(reads_group_key("scripts/05c_detect_rois.py")), True)
 
 print()
 print("all passed" if not fails else f"{fails} FAILED")

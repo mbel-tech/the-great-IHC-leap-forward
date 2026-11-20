@@ -429,6 +429,7 @@ def sample_display_ranges(scenes, fields, zoom, force, narrowed=False):
     confirmed reagent controls.
     """
     lookup = RC.expand(CONFIG, scenes)
+    cached = None
     if os.path.exists(RANGES_PATH) and not force:
         with open(RANGES_PATH, encoding="utf-8") as fh:
             ranges = json.load(fh)
@@ -452,6 +453,7 @@ def sample_display_ranges(scenes, fields, zoom, force, narrowed=False):
         print(f"  !! the display ranges were sampled from {len(bad)} section(s) now "
               f"confirmed as reagent controls ({shown}): sampling them again from "
               f"stained sections only, and drawing every section again with them")
+        cached = ranges
 
     sample = display_sample(scenes, lookup)
     by_file = {}
@@ -481,6 +483,15 @@ def sample_display_ranges(scenes, fields, zoom, force, narrowed=False):
                 done += 1
         print(f"\r  sampled {done}/{len(sample)}", end="")
     print()
+
+    if not values and cached is not None:
+        # Resampling on our own initiative and nothing could be read (the
+        # slides folder unreachable, say): an empty file would stop every
+        # export. Keep the old ranges and say so; the next run tries again.
+        print(f"  !! no sampled section could be read, so the display ranges were NOT "
+              f"sampled again; keeping {os.path.basename(RANGES_PATH)} as it is. Run 01 "
+              f"again once the slides can be read.")
+        return cached
 
     ranges = {}
     for name, chunks in values.items():

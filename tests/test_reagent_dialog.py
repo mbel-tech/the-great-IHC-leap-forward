@@ -138,6 +138,8 @@ weak = d.row_for("LS45_NC.czi") if d else None
 chk("weak_not_preticked: LS45_NC.czi is listed", weak is not None, True)
 chk("...unticked", weak is not None and weak.accept.isChecked(), False)
 chk("...and says why", weak is not None and "ambiguous" in weak.label.text(), True)
+chk("...Save at New study (no stage has run) lists nothing to run again",
+    (d.save(), d.rerun_text) if d else None, (True, ""))
 
 print("--- the confirm list on its own ---")
 SRC = folder("rc", ["LS45_1a.czi", "LS45_2a.czi", "LS45_noPrimary.czi", "NC_3.czi",

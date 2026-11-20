@@ -119,6 +119,25 @@ chk("...the small stained animal is still held out",
 chk("...nothing else moved: the rest is the queue it was",
     [r["scene_uid"] for r in rows[3:]], uids)
 
+# The paired route: a control with no partner in the geometry-source pass used
+# to land in unpaired_unchecked, which 04l --tier core never shows.
+import argparse  # noqa: E402
+prow = lambda u, a, o, p: {"scene_uid": u, "animal": a, "section_order": str(o),  # noqa: E731
+                           "paired": p, "pair_confidence": ""}
+prs = [prow(f"LS1_sc{i:02d}", "LS1", i, "1") for i in range(1, 13)] + [prow("LS1_s09nc_sc01",
+                                                                          "LS1", 3, "0")]
+with contextlib.redirect_stdout(io.StringIO()):
+    M._write(prs, None, None, None, None, argparse.Namespace(tier=None), 10,
+             {"LS1_s09nc_sc01"})
+with open(M.OUT_CSV, newline="", encoding="utf-8") as fh:
+    got = list(csv.DictReader(fh))
+chk("paired: an unpaired reagent control is core and first, not unpaired_unchecked",
+    (got[0]["scene_uid"], got[0]["tier"]), ("LS1_s09nc_sc01", "core"))
+chk("...its reason gives both", ("reagent control" in got[0]["tier_reason"],
+                                 "no partner" in got[0]["tier_reason"]), (True, True))
+chk("...and it is not counted in its donor's series (12 stained, all core)",
+    sorted({r["tier"] for r in got[1:]}), ["core"])
+
 print("--- the stage table: a paired worklist waits for 04m ---")
 sys.path[:0] = [os.path.join(os.path.dirname(HERE), "app")]
 import stages as S                                              # noqa: E402

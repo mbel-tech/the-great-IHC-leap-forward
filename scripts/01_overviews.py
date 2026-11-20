@@ -398,14 +398,62 @@ def display_sample(scenes, lookup):
     return pool[:SAMPLE_SECTIONS]
 
 
-def sample_display_ranges(scenes, fields, zoom, force):
+#: The key in display_ranges.json recording which (scene_uid, marker) the ranges
+#: were sampled from. Not a channel: ranges_id and the readers skip "_" keys.
+SAMPLED_KEY = "_sampled"
+
+
+def channel_ranges(ranges):
+    """The channel entries of display_ranges.json, without the sample record."""
+    return {k: v for k, v in (ranges or {}).items() if not str(k).startswith("_")}
+
+
+def sampled_controls(ranges, lookup):
+    """The (uid, marker) a cached range was sampled from that are now confirmed
+    reagent controls; None for a file written before the sample was recorded."""
+    rec = (ranges or {}).get(SAMPLED_KEY)
+    if rec is None:
+        return None
+    return [(u, m) for u, m in rec if RC.is_control(lookup, u, m)]
+
+
+def sample_display_ranges(scenes, fields, zoom, force, narrowed=False):
+    """The frozen display ranges: display_ranges.json as it is, or sampled again.
+
+    Sampled again on `force`, and on its own when the cached file was drawn
+    from a section that has since been confirmed as a reagent control (its
+    `_sampled` record says which sections it used) - a control is dim by
+    design and pulls every stained section's range down. Not on a `narrowed`
+    (--limit) run, which says to run without it. A file from before the record
+    existed cannot be checked, and says to run with --force when the study has
+    confirmed reagent controls.
+    """
+    lookup = RC.expand(CONFIG, scenes)
     if os.path.exists(RANGES_PATH) and not force:
         with open(RANGES_PATH, encoding="utf-8") as fh:
             ranges = json.load(fh)
-        print(f"display ranges loaded: {ranges}")
-        return ranges
+        print(f"display ranges loaded: {channel_ranges(ranges)}")
+        bad = sampled_controls(ranges, lookup)
+        if bad is None:
+            if lookup:
+                print(f"  note: {os.path.basename(RANGES_PATH)} was sampled before 01 "
+                      f"recorded which sections it drew from, so it cannot tell whether a "
+                      f"section now confirmed as a reagent control was among them. Run 01 "
+                      f"with --force to sample it again from stained sections only.")
+            return ranges
+        if not bad:
+            return ranges
+        shown = ", ".join(f"{u} [{m}]" for u, m in bad[:5]) + (" ..." if len(bad) > 5 else "")
+        if narrowed:
+            print(f"  !! the display ranges were sampled from {len(bad)} section(s) now "
+                  f"confirmed as reagent controls ({shown}); --limit keeps them as they "
+                  f"are - run without --limit to sample them again")
+            return ranges
+        print(f"  !! the display ranges were sampled from {len(bad)} section(s) now "
+              f"confirmed as reagent controls ({shown}): sampling them again from "
+              f"stained sections only, and drawing every section again with them")
 
-    sample = display_sample(scenes, RC.expand(CONFIG, scenes))
+    sample = display_sample(scenes, lookup)
     by_file = {}
     for r in sample:
         by_file.setdefault(r["file"], []).append(r)
@@ -439,6 +487,9 @@ def sample_display_ranges(scenes, fields, zoom, force):
         v = np.concatenate(chunks)
         ranges[name] = {"lo": int(np.percentile(v, LO_PCT)), "hi": int(np.percentile(v, HI_PCT))}
         print(f"  {name}: {ranges[name]['lo']} .. {ranges[name]['hi']}  (n={v.size})")
+    # Which sections the ranges were drawn from, so a later run can tell when
+    # one of them has since been confirmed as a reagent control.
+    ranges[SAMPLED_KEY] = [[r["scene_uid"], r["marker_channel"]] for r in sample]
     # Atomic: a truncated display_ranges.json still exists, so the next run
     # skips sampling and dies parsing it instead of resampling.
     JS.write_json_atomic(RANGES_PATH, ranges)
@@ -455,7 +506,7 @@ def ranges_id(ranges):
     stops part way - a crash, a dropped drive - leaves the rest drawn with the
     old ones. The stamp is how the next run tells those rows apart.
     """
-    blob = json.dumps(ranges, sort_keys=True, separators=(",", ":"))
+    blob = json.dumps(channel_ranges(ranges), sort_keys=True, separators=(",", ":"))
     return hashlib.sha1(blob.encode("utf-8")).hexdigest()[:12]
 
 
@@ -673,7 +724,7 @@ def main():
     if args.force and args.limit and os.path.exists(RANGES_PATH):
         print(f"--limit: keeping {os.path.basename(RANGES_PATH)} as it is; "
               f"run --force without --limit to resample it")
-    ranges = sample_display_ranges(scenes, fields, zoom, resample)
+    ranges = sample_display_ranges(scenes, fields, zoom, resample, narrowed=bool(args.limit))
     exported, failed, total_rows = export(scenes, fields, ranges, ceilings, zoom, args.limit, args.force)
 
     print()

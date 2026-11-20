@@ -345,10 +345,9 @@ STAGES = [
           script="01_overviews.py", reader="pylibCZIrw",
           outputs=["overviews", "qc/focus.csv"],
           needs=["manifest"],
-          # Which sections are reagent controls decides which ones the
-          # study-wide estimate leaves out (display ranges, tuning sample).
-          settings=["reagent_controls.declared", "reagent_controls.files",
-                    "reagent_controls.scenes"],
+          # No settings: this stage records no inputs (made_from None), so a
+          # list here would track nothing. When the confirmed reagent controls
+          # change, the confirm list says to run it again (reagent_dialog).
           blurb="Every section at exactly 5.2 um/px with a frozen display "
                 "range, plus per-section QC including clipping measured on the "
                 "raw plane. Writes the raw clipping masks 04j censors from in "
@@ -374,20 +373,18 @@ STAGES = [
           script="01d_contactsheets.py",
           outputs=["contactsheets"],
           needs=["overviews"],
-          # Which sections are reagent controls orders each animal's sheet:
-          # its controls after its stained series.
-          settings=["reagent_controls.declared", "reagent_controls.files",
-                    "reagent_controls.scenes"],
+          # No settings: this stage records no inputs (made_from None), so a
+          # list here would track nothing. When the confirmed reagent controls
+          # change, the confirm list says to run it again (reagent_dialog).
           blurb="Per-animal montages in rostro-caudal order, plus an HTML gallery."),
 
     Stage("scene_renders", "01l  Pictures of every scene, for viewing", "Ingest and QC",
           script="01l_scene_renders.py", reader="pylibCZIrw",
           outputs=["qc/scene_renders.csv"],
           needs=["manifest"],
-          # Which sections are reagent controls decides which ones the
-          # study-wide estimate leaves out (display ranges, tuning sample).
-          settings=["reagent_controls.declared", "reagent_controls.files",
-                    "reagent_controls.scenes"],
+          # No settings: this stage records no inputs (made_from None), so a
+          # list here would track nothing. When the confirmed reagent controls
+          # change, the confirm list says to run it again (reagent_dialog).
           blurb="Every scene of every slide drawn from the CZI, read in bands "
                 "so memory stays small, several slides at once while free RAM "
                 "allows. Two folders per marker: the stain over "
@@ -747,10 +744,9 @@ STAGES = [
           script="05b_tune_detection.py", reader="pylibCZIrw",
           outputs=["qc/detection_tuning.md"],
           needs=["roi_geometry"],
-          # Which sections are reagent controls decides which ones the
-          # study-wide estimate leaves out (display ranges, tuning sample).
-          settings=["reagent_controls.declared", "reagent_controls.files",
-                    "reagent_controls.scenes"],
+          # No settings: this stage records no inputs (made_from None), so a
+          # list here would track nothing. When the confirmed reagent controls
+          # change, the confirm list says to run it again (reagent_dialog).
           blurb="Samples ROIs from sections spread over every animal, measures "
                 "background, signal, noise, signal-to-noise, contrast and "
                 "saturation on the plane detection uses, and picks StarDist's "
@@ -772,8 +768,11 @@ STAGES = [
                     "detection.threshold.mad_k", "detection.threshold.min_area_um2",
                     "detection.stardist.prob_thresh", "detection.stardist.nms_thresh",
                     "detection.stardist.use_auto", "detection.auto",
-                    "reagent_controls.declared", "reagent_controls.files", "reagent_controls.scenes",
-                    "reagent_controls.paired_with", "reagent_controls.rejected", "reagent_controls.extra_patterns"],
+                    # Which sections are reagent controls: 05c measures them
+                    # first. Only these two - the pairing, the rejected names,
+                    # the patterns and the declared answer change nothing it
+                    # measures, and each would put hours of detection out of date.
+                    "reagent_controls.files", "reagent_controls.scenes"],
           cli_only=detect_cli_reason,
           blurb="Reads each box at 0.65 um/px, segments nuclei on DAPI with "
                 "StarDist, measures the marker under each nuclear mask. One row "
@@ -787,8 +786,8 @@ STAGES = [
           made_from=["roi_geometry", "detect"],
           settings=["pixel_size_um", "section_thickness_um",
                     "acquisition.marker_segmentation", "detection.abercrombie.enabled",
-                    "reagent_controls.declared", "reagent_controls.files", "reagent_controls.scenes",
-                    "reagent_controls.paired_with", "reagent_controls.rejected", "reagent_controls.extra_patterns"],
+                    "reagent_controls.files", "reagent_controls.scenes",
+                    "reagent_controls.paired_with"],
           blurb="Positivity cut from each section's own background discs "
                 "(median + 3 x 1.4826 x MAD), the detector's false-positive "
                 "rate, two densities, Abercrombie. Still keyed by animal only."),
@@ -815,9 +814,9 @@ STAGES = [
           script="06c_excel_dataset.py",
           outputs=["results/roi_dataset.xlsx"],
           needs=["roi_dataset"],
-          # Which sections are reagent controls leaves their boxes out of
-          # `planned` and coverage; their report is 06a's output.
-          settings=["reagent_controls.files", "reagent_controls.scenes"],
+          # No settings: this stage records no inputs (made_from None), so a
+          # list here would track nothing. When the confirmed reagent controls
+          # change, the confirm list says to run it again (reagent_dialog).
           blurb="One row per ROI per sample, plus per-disc, per-section and "
                 "coverage sheets. A row here is one animal, which is why the "
                 "per-ROI figures read this one. Buildable mid-run."),
@@ -826,7 +825,9 @@ STAGES = [
           script="06d_excel_by_slide.py",
           outputs=["results/roi_dataset_by_slide.xlsx"],
           needs=["roi_dataset"],
-          settings=["reagent_controls.files", "reagent_controls.scenes"],
+          # No settings: this stage records no inputs (made_from None), so a
+          # list here would track nothing. When the confirmed reagent controls
+          # change, the confirm list says to run it again (reagent_dialog).
           blurb="The same table one level finer, so within-animal spread is "
                 "visible. plot_by_slide.R draws that spread; the per-ROI "
                 "figures and their statistics read 06c's per-animal sheet."),
@@ -843,8 +844,8 @@ STAGES = [
           settings=["pixel_size_um", "section_thickness_um",
                     "acquisition.marker_segmentation", "detection.abercrombie.enabled",
                     "groups.order", "groups.by_animal",
-                    "reagent_controls.declared", "reagent_controls.files", "reagent_controls.scenes",
-                    "reagent_controls.paired_with", "reagent_controls.rejected", "reagent_controls.extra_patterns"],
+                    "reagent_controls.files", "reagent_controls.scenes",
+                    "reagent_controls.paired_with"],
           blurb="06a, 06c and 06d in one run, then the figures for every "
                 "measured marker - the same pass the hourly loop makes, made "
                 "once. 06b, the unblinding join, stays its own step. The R "

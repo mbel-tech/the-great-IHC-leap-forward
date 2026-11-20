@@ -2977,7 +2977,7 @@ The brightness range of every overview picture, frozen once for the dataset from
 
 - **Written by:** 01_overviews.py
 - **Read by:** 01_overviews.groovy, 01l_scene_renders.py, 01m_reagent_screen.py, make_demo_pack.py
-- **Format:** JSON: `{channel name: {"lo": int, "hi": int}}`, the 1st and 99.5th percentiles of sampled tissue pixels.
+- **Format:** JSON: `{channel name: {"lo": int, "hi": int}}`, the 1st and 99.5th percentiles of sampled tissue pixels, plus `"_sampled": [[scene_uid, marker], ...]`, the sections they were sampled from (not a channel: readers and the `display_ranges_id` hash skip it). A later run of 01 samples the ranges again by itself when one of those sections has since been confirmed as a reagent control; a file without the record cannot be checked, and 01 says to run with --force.
 
 #### `qc/censor_raw/<scene_uid>_clipped.png`
 

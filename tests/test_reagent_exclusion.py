@@ -80,6 +80,57 @@ chk("a control for one marker only is still sampled for the other",
      for r in O.display_sample(mrows, RC.expand({"reagent_controls": mp}, mrows))],
     [("M_sc01", "AF488")])
 
+print("--- display_ranges_resample: a cached range drawn from a now-confirmed control ---")
+import json  # noqa: E402
+_rp = O.RANGES_PATH
+O.RANGES_PATH = os.path.join(tempfile.mkdtemp(), "display_ranges.json")
+OLD = {"DAPI": {"lo": 1, "hi": 9}, "AF568": {"lo": 2, "hi": 8}}
+
+
+def sample_with(cached, **kw):
+    if cached is None:
+        if os.path.exists(O.RANGES_PATH):
+            os.remove(O.RANGES_PATH)
+    else:
+        with open(O.RANGES_PATH, "w", encoding="utf-8") as fh:
+            json.dump(cached, fh)
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        got = O.sample_display_ranges(scenes, {}, 1, False, **kw)
+    return got, out.getvalue()
+
+
+try:
+    got, said = sample_with(None)
+    chk("01_records_sample: a fresh sample records the (uid, marker) it drew from",
+        sorted(map(tuple, got.get("_sampled", []))),
+        sorted((r["scene_uid"], r["marker_channel"]) for r in O.display_sample(scenes, lookup)))
+    chk("...and the record is not a channel: ranges_id ignores it",
+        O.ranges_id(dict(OLD, _sampled=[["A_sc01", "AF568"]])), O.ranges_id(OLD))
+    got, said = sample_with(dict(OLD, _sampled=[["A_sc01", "AF568"], ["B_sc01", "AF568"]]))
+    chk("a cached range drawn from stained sections only is kept", got.get("DAPI"), OLD["DAPI"])
+    got, said = sample_with(dict(OLD, _sampled=[["A_sc01", "AF568"], ["RC_sc01", "AF568"]]))
+    chk("01_resamples: one drawn from a section now confirmed is sampled again",
+        (got.get("DAPI"), "RC_sc01" in json.dumps(got.get("_sampled"))), (None, False))
+    chk("...and says so, naming it", "reagent control" in said and "RC_sc01" in said, True)
+    got, said = sample_with(dict(OLD, _sampled=[["RC_sc01", "AF568"]]), narrowed=True)
+    chk("...not on a --limit run, which says to run without it",
+        (got.get("DAPI"), "--limit" in said), (OLD["DAPI"], True))
+    got, said = sample_with(OLD)
+    chk("a range older than the record is kept, with a note to resample with --force",
+        (got.get("DAPI"), "--force" in said and "reagent control" in said), (OLD["DAPI"], True))
+finally:
+    O.RANGES_PATH = _rp
+L1 = load_stage("01l_scene_renders.py", name="lsstage_01l_rcx")
+_lp = L1.RANGES_PATH
+L1.RANGES_PATH = os.path.join(tempfile.mkdtemp(), "display_ranges.json")
+with open(L1.RANGES_PATH, "w", encoding="utf-8") as fh:
+    json.dump(dict(OLD, _sampled=[["A_sc01", "AF568"]]), fh)
+try:
+    chk("01l reads channels only, not the record", sorted(L1.load_ranges()), ["AF568", "DAPI"])
+finally:
+    L1.RANGES_PATH = _lp
+
 print("--- tune_sample_excludes ---")
 B5 = load_stage("05b_tune_detection.py", name="lsstage_05b_rcx")
 uids = ["A_sc01", "A_sc02", "RC_sc01", "B_sc01", "B_sc02"]
@@ -164,13 +215,35 @@ chk("no screen yet, no warning",
     RC.warn_unanswered({"out_root": tempfile.mkdtemp(),
                         "reagent_controls": {"declared": "unsure"}}), None)
 
-print("--- settings_tracked ---")
+print("--- confirming late: what is tracked, and what Save says instead ---")
+# 05c and 06a record what they read, so a change to the confirmed reagent
+# controls marks them out of date (tests/test_workflow.py checks the status).
+# The earlier stages that leave controls out - 01's display ranges, 01d, 01l,
+# 05b's tuning sample, 06c and 06d - record no inputs at all: a settings list
+# there tracked nothing. They list none now, and the confirm list's Save names
+# them to run again instead.
 import stages as S  # noqa: E402
-for sid in ("overviews", "scene_renders", "tune_detection", "detect"):
-    chk(f"{sid} lists the reagent control settings",
-        [k for k in ("reagent_controls.declared", "reagent_controls.files",
-                     "reagent_controls.scenes") if k not in S.BY_ID[sid].settings], [])
-
+for sid in ("overviews", "contactsheets", "scene_renders", "tune_detection", "excel_sample",
+            "excel_slide"):
+    chk(f"{sid}: records no inputs, so lists no reagent_controls setting",
+        (S.BY_ID[sid].made_from,
+         [k for k in S.BY_ID[sid].settings if k.startswith("reagent_controls")]), (None, []))
+chk("05c tracks which sections are controls, and nothing else of the block",
+    [k for k in S.BY_ID["detect"].settings if k.startswith("reagent_controls")],
+    ["reagent_controls.files", "reagent_controls.scenes"])
+chk("06a tracks them and the pairing",
+    [k for k in S.BY_ID["roi_dataset"].settings if k.startswith("reagent_controls")],
+    ["reagent_controls.files", "reagent_controls.scenes", "reagent_controls.paired_with"])
+try:
+    import reagent_dialog as RD  # noqa: E402
+except ImportError:                 # no Qt here: the words are not testable
+    RD = None
+if RD is not None:
+    said = RD.rerun_text(True)
+    chk("rerun_listed: Save names each stage to run again, the untracked ones included",
+        [w for w in ("00  Read slide headers", "02  Pair", "01  Export section overviews",
+                     "04n", "05b", "05c", "06a", "06c") if w not in said], [])
+    chk("...nothing when nothing changed", RD.rerun_text(False), "")
 print("--- animal_with_control_two_series ---")
 chk("series_animal: a stained row is its animal",
     RC.series_animal(row("A_sc01"), RC.expand(CFG, [row("A_sc01")])), "A")

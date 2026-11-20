@@ -321,6 +321,26 @@ _cfg3["project"]["runs"].append({"stage": "detect", "ok": True, "options": {"--l
 chk("...and a trial run since does not make it current",
     bool(W.outdated(S.BY_ID["detect"], study(_cfg3))), True)
 
+# Confirming a reagent control late: 05c measures controls first and 06a routes
+# them to their own report, so a change to WHICH sections are controls puts both
+# out of date. The pairing changes only 06a's report; the rejected names, the
+# name patterns and the declared answer change nothing either measures, and
+# must not cost hours of detection.
+_rc = json.loads(json.dumps(_cfg))
+_rc["reagent_controls"] = {"files": {"NC_3.czi": {"kind": "no_primary", "markers": []}}}
+chk("reagent_controls_files: a newly confirmed reagent control puts 05c and 06a out of date",
+    [W.state(S.BY_ID[x], study(_rc)) for x in ("detect", "roi_dataset")],
+    ["outdated", "outdated"])
+_rc = json.loads(json.dumps(_cfg))
+_rc["reagent_controls"] = {"paired_with": {"NC_3.czi": ["A"]}}
+chk("...a new pairing only 06a", [W.state(S.BY_ID[x], study(_rc)) for x in ("detect", "roi_dataset")],
+    ["done", "outdated"])
+_rc = json.loads(json.dumps(_cfg))
+_rc["reagent_controls"] = {"declared": "unsure", "rejected": ["X.czi"],
+                           "extra_patterns": [{"regex": "blank", "kind": "unstained"}]}
+chk("...the declared answer, rejected names and patterns neither",
+    [W.state(S.BY_ID[x], study(_rc)) for x in ("detect", "roi_dataset")], ["done", "done"])
+
 # 06c takes its groups from 06b's animal_metadata.csv (resolve_groups), so the
 # results are made from 06b's output, and 06b and the results from the
 # workbook's content. Re-running 06b with new groups used to leave the results

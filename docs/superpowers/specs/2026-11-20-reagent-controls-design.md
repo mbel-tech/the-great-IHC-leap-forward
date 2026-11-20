@@ -123,7 +123,8 @@ experimental tissue stained normally.
                     "pattern": "<matched token or null>", "note": ""}
   },
   "files": {
-    "<file basename>": {"kind": "...", "markers": [...], "source": "...", "subject": "NC1"}
+    "<file basename>": {"kind": "...", "markers": [...], "source": "...",
+                        "subject": "LS45", "slide": 3, "replicate": "nc"}
   },
   "paired_with": {"<scene_uid or file>": ["<stained scene_uid or file>", "..."]},
   "rejected": ["<scene_uid or file the operator said is NOT a control>"]
@@ -135,7 +136,12 @@ experimental tissue stained normally.
 - `markers: []` is read as all markers.
 - `files` entries expand to scenes when the manifest is built. A scene entry overrides its file's
   entry.
-- `files.<name>.subject` gives an ID to a control file whose name does not parse. The manifest uses
+- `files.<name>.subject` / `slide` / `replicate` give a control file whose name does not parse
+  the parts its uid needs. `subject` is the **donor animal's real ID** when the operator knows it,
+  which lets pairing rule 2 work. Otherwise it is a made-up ID such as `RC1`. `slide` is required
+  and `replicate` is optional, so two control files from one animal cannot collide in
+  `duplicate_uids`. The confirm list fills these from the name where it can.
+- Old wording kept for reference: the subject field gives an ID to a control file whose name does not parse. The manifest uses
   it instead of reporting the file as a failure, and the uid stays the standard shape. It must
   satisfy the subject rules (no `_`).
 - `rejected` stops the name scan and the screen from proposing the same item again.
@@ -286,10 +292,30 @@ thresholds are wrong, not the study.
 a partial run should still report them. This does not touch the group key.
 
 **Curation.** The level and ROI curators show a "reagent control" badge on these sections. They
-are curated exactly like the others. No new curator logic, only the badge text.
+are curated exactly like the others, except that stage 04 places a control in **its own series**
+(key `subject` + `#rc`, internal only, never in the uid). It is not merged into the donor animal's
+series, so it cannot disturb that animal's level order or atlas matching.
 
-**06b.** A reagent-control section's animal is exempt from the missing-row stop. Its rows get
-`treatment = "reagent control"` and never enter a group comparison.
+**Where control rows go (per scene × marker).**
+- 06a writes them only to `results/reagent_controls.csv` and drops them from its main ROI
+  dataset.
+- 06b, 06c (except the new sheet) and 06d never see them.
+- In a multiplex study, a scene that is a control for marker A and stained for marker B keeps its
+  B rows as normal experimental rows.
+- No per-animal "reagent control" treatment exists, so `animal_metadata.csv` is unchanged.
+
+**Confirming late.** Confirming or un-confirming a control after a stage has run marks that
+stage's outputs out of date, through the app's existing out-of-date tracking (Task 18). The stages
+are 01 display ranges / 01l renders, 05b, 05c, 06a-06d, and the app lists them to re-run. 05b and
+05c **warn**, but do not refuse, while `declared` is `unsure` and the screen's candidates are
+unanswered.
+
+**Scope of "dataset-wide estimates".** The list above is complete, plus the screen's own robust z,
+which leaves out sections already confirmed as controls. `00c`, `01g`/`01k`, `04f` and `06g` are
+per-section QC, and controls appear in them, labelled.
+
+**06b.** An animal whose every scene is a reagent control is exempt from the missing-row stop
+and is absent from 06b outputs.
 
 **Pairing.** This decides which stained sections a control is compared with. Default, in order:
 1. stained scenes on the **same file**;
@@ -319,9 +345,11 @@ The same 05c nuclei and the same 06a cut machinery are used, so nothing is re-re
   - `control_nuclear_median`: the median of ROI nuclei `marker_median` on the control.
   - `stained_nuclear_median`: the same over its paired stained sections.
   - `level_ratio` = control / stained.
-  - The paired stained sections' cut applied to the control's nuclei: `pct_above_paired_cut`. This
-    is the borrowed cut. It answers how much of the positive call level the secondary alone
-    reaches.
+  - `pct_above_paired_cut` (median) and `pct_above_paired_cut_min`/`_max`. The control's nuclei
+    are scored against **each** paired stained section's own cut, and the median and range across
+    those sections are reported. This is the borrowed cut. It answers how much of the positive
+    call level the secondary alone reaches. *(Proposed; awaiting the operator's choice, see the
+    open question below.)*
   - **Left empty when `pairing = study-wide`**, with the reason in a `note` column. Across batches
     the ratio measures the batch, not the reagent (LOGS 2026-08-12).
 
@@ -369,7 +397,20 @@ studies without controls is unchanged.
 - Wording of the user guide, wiki and technical-guide entries (`docs/guides/file_formats.json` gets
   the two new files).
 
+## Open question for the operator
+
+How should part B's borrowed cut combine several paired stained sections?
+- **(a)** Score against each section's cut, then report the median and range. This is the
+  proposed default.
+- **(b)** Pool all their background discs into one cut.
+
 ## Calls made without the operator (open to correction)
+
+- Control-file IDs are a real donor ID when known, else made up, and always carry a slide number.
+  Controls get their own series in stage 04.
+- Control rows are dropped from the main datasets per scene × marker. There is no per-animal
+  "reagent control" treatment.
+- A late confirmation marks outputs out of date and warns. It does not block.
 
 - The term "reagent control", and scene-level storage with file-level shorthand.
 - The F1/F2/F3 features and the "all available features z ≥ 3" candidate rule.

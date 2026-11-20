@@ -740,7 +740,9 @@ STAGES = [
                     "channels.marker_index", "detection.nucleus_diameter_um",
                     "detection.threshold.mad_k", "detection.threshold.min_area_um2",
                     "detection.stardist.prob_thresh", "detection.stardist.nms_thresh",
-                    "detection.stardist.use_auto", "detection.auto"],
+                    "detection.stardist.use_auto", "detection.auto",
+                    "reagent_controls.declared", "reagent_controls.files", "reagent_controls.scenes",
+                    "reagent_controls.paired_with", "reagent_controls.rejected", "reagent_controls.extra_patterns"],
           cli_only=detect_cli_reason,
           blurb="Reads each box at 0.65 um/px, segments nuclei on DAPI with "
                 "StarDist, measures the marker under each nuclear mask. One row "
@@ -753,7 +755,9 @@ STAGES = [
           # 05a's boxes too: 06a joins each nucleus to the CURRENT roi_boxes.
           made_from=["roi_geometry", "detect"],
           settings=["pixel_size_um", "section_thickness_um",
-                    "acquisition.marker_segmentation", "detection.abercrombie.enabled"],
+                    "acquisition.marker_segmentation", "detection.abercrombie.enabled",
+                    "reagent_controls.declared", "reagent_controls.files", "reagent_controls.scenes",
+                    "reagent_controls.paired_with", "reagent_controls.rejected", "reagent_controls.extra_patterns"],
           blurb="Positivity cut from each section's own background discs "
                 "(median + 3 x 1.4826 x MAD), the detector's false-positive "
                 "rate, two densities, Abercrombie. Still keyed by animal only."),
@@ -803,7 +807,9 @@ STAGES = [
           made_from=["roi_geometry", "detect"],
           settings=["pixel_size_um", "section_thickness_um",
                     "acquisition.marker_segmentation", "detection.abercrombie.enabled",
-                    "groups.order", "groups.by_animal"],
+                    "groups.order", "groups.by_animal",
+                    "reagent_controls.declared", "reagent_controls.files", "reagent_controls.scenes",
+                    "reagent_controls.paired_with", "reagent_controls.rejected", "reagent_controls.extra_patterns"],
           blurb="06a, 06c and 06d in one run, then the figures for every "
                 "measured marker - the same pass the hourly loop makes, made "
                 "once. 06b, the unblinding join, stays its own step. The R "

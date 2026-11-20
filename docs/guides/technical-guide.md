@@ -1983,6 +1983,19 @@ change recorded as a decision; a change to `groups` is recorded by name, never b
 `save` and `save_as` (atomic, with a few backups), `revert`, and `record_run`, which appends to `runs` on disk
 without saving any other unsaved edit. The window layer is `app/project_session.py`.
 
+### `ls_reagent_controls.py`
+
+Shared module: which slides or sections are reagent controls, meaning stained without the primary
+antibody, with an isotype IgG, pre-adsorbed or unstained. `scan(paths, markers, group_labels, extra)`
+reads file names relative to the slides folder (so a folder called `Negative controls` counts) and
+returns at most one `Match` per path, strong or weak; a weak token that is also a group label is never
+proposed, and `IgG`, dye names such as `AF488`, single letters and a trailing `-` never match.
+`entries`, `expand`, `is_control`, `control_subject` and `unanswered` read the `reagent_controls` block of
+the study file: a file entry expands to its scenes, a scene entry overrides it, and `control_subject`
+gives a control file the subject, slide and replicate its name does not carry. It reads no group key and
+opens no file. Settings: `reagent_controls.declared`, `.files`, `.scenes`, `.paired_with`, `.rejected`
+and `.extra_patterns`, checked by `ls_config`. Used by `ls_config`, the manifest and the app.
+
 ### `ls_sampling.py`
 
 Shared module: reads the sampling workbook (an `.xlsx`, parsed from its zip and XML with the standard
@@ -2276,6 +2289,7 @@ straight from `sys.argv`) without running it. A script with no options says "(no
 | `ls_paths.py` | `--table` | off | print every artifact path, per marker. |
 | `ls_progress.py` | (none) |  |  |
 | `ls_project.py` | (none) |  |  |
+| `ls_reagent_controls.py` | (none) |  |  |
 | `ls_sampling.py` | (none) |  |  |
 | `ls_segment.py` | (none) |  |  |
 | `ls_settings_io.py` | (none) |  |  |

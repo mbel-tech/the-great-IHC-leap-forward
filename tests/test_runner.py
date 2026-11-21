@@ -264,6 +264,9 @@ with tempfile.TemporaryDirectory() as tmp:
     chk("...with the stopped text",
         (res.error, res.record_error()) if res else None,
         ("stopped while the drive was disconnected",) * 2)
+    chk("...with the pause it was stopped in recorded",
+        [(p["folder"], p["seconds"] >= 0) for p in res.pauses] if res else None,
+        [(watch, True)])
     chk("the stop file is cleaned up", os.path.exists(stop_file), False)
     chk("LS_STOP_FILE is put back as it was", os.environ.get("LS_STOP_FILE"), None)
     shutil.move(watch + "-gone", watch)
@@ -294,6 +297,25 @@ with tempfile.TemporaryDirectory() as tmp:
     chk("a stop asked for as the run starts still stops it",
         (hung, res.stopped if res else None), (False, True))
     shutil.move(watch + "-gone", watch)
+    os.environ.pop("LS_WATCH", None)
+    if before_watch is not None:
+        os.environ["LS_WATCH"] = before_watch
+
+    # A wait in this process that ends with the drive back is in the result's
+    # pauses, as a supervised child's is: the run history records it.
+    os.environ["LS_WATCH"] = watch
+    shutil.move(watch, watch + "-gone")
+    threading.Timer(0.4, lambda: shutil.move(watch + "-gone", watch)).start()
+    out.clear()
+    lines.clear()
+    go()
+    res = out.get("res")
+    chk("an in-process wait that ends: the run is ok", res.ok if res else None, True)
+    chk("...and its pause is recorded",
+        [(p["folder"], p["seconds"] >= 0.2, sorted(p)) for p in res.pauses] if res else None,
+        [(watch, True, ["at", "folder", "label", "seconds"])])
+    chk("...the marker lines still reach the log",
+        [ln.split()[1] for ln in lines if ln.startswith("@@drive")], ["lost", "back"])
     os.environ.pop("LS_WATCH", None)
     if before_watch is not None:
         os.environ["LS_WATCH"] = before_watch

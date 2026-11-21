@@ -16,6 +16,11 @@ runs as a child process of this same interpreter, `python -m app --stage <id>
 it dies while the drive is gone. Inside that child (env `LS_CHILD=1`) the stage
 runs in-process as before.
 
+A stage run in this process can wait for the drive too (an ls_io write on
+out_root); its `@@drive` lines are read by the supervisor's own parser
+(supervise._Run), so those waits reach `StageResult.pauses` and the run
+history as a child's do.
+
 Two things the stages already do that this has to respect:
 
   * Several of them `raise SystemExit(message)` on bad input - `analysis_uids`
@@ -348,8 +353,17 @@ class Runner:
             return self._run_child(stage, on_line, list(stage.argv) + list(extra_argv))
 
         argv = [stage.script] + self.expand_argv(list(stage.argv) + list(extra_argv))
-        tee = _Tee(on_line)
+        # The stage's `@@drive` lines, read by the supervisor's own parser, so
+        # a wait in this process is in the result's pauses as a child's is.
+        drive = SV._Run(on_line)
+        tee = _Tee(drive.line)
         t0 = time.time()
+
+        def done(res):
+            drive.finish()
+            drive.close_quietly()       # a loss still open ends with the stage
+            res.pauses = drive.pauses
+            return res
 
         # A stage run here can wait for a dropped drive too (ls_io.retry on
         # out_root); Stop reaches that wait through its own LS_STOP_FILE. In
@@ -388,9 +402,9 @@ class Runner:
                     said = [ln.strip() for ln in tee.text().splitlines() if ln.strip()]
                     msg = rc if isinstance(rc, str) else (
                         said[-1] if said else f"stage exited with status {rc}")
-                    return StageResult(stage.sid, False, time.time() - t0,
-                                       tee.text(), msg)
-                return StageResult(stage.sid, True, time.time() - t0, tee.text())
+                    return done(StageResult(stage.sid, False, time.time() - t0,
+                                            tee.text(), msg))
+                return done(StageResult(stage.sid, True, time.time() - t0, tee.text()))
 
             except SystemExit as e:
                 # argparse exits 0 for --help; a stage exits non-zero, or with a
@@ -399,19 +413,19 @@ class Runner:
                 tee.flush()
                 code = e.code
                 if code in (0, None):
-                    return StageResult(stage.sid, True, time.time() - t0, tee.text())
+                    return done(StageResult(stage.sid, True, time.time() - t0, tee.text()))
                 msg = code if isinstance(code, str) else f"stage exited with status {code}"
-                return StageResult(stage.sid, False, time.time() - t0, tee.text(), msg)
+                return done(StageResult(stage.sid, False, time.time() - t0, tee.text(), msg))
 
             except BaseException as e:                      # noqa: BLE001
                 tee.flush()
                 if _is_stopped(e):
-                    return StageResult(stage.sid, False, time.time() - t0, tee.text(),
-                                       SV.STOPPED_IN_PAUSE, stopped=True)
+                    return done(StageResult(stage.sid, False, time.time() - t0, tee.text(),
+                                            SV.STOPPED_IN_PAUSE, stopped=True))
                 detail = "".join(traceback.format_exception(type(e), e, e.__traceback__))
-                return StageResult(stage.sid, False, time.time() - t0,
-                                   tee.text(), f"{type(e).__name__}: {e}\n\n{detail}",
-                                   interrupted=isinstance(e, KeyboardInterrupt))
+                return done(StageResult(stage.sid, False, time.time() - t0,
+                                        tee.text(), f"{type(e).__name__}: {e}\n\n{detail}",
+                                        interrupted=isinstance(e, KeyboardInterrupt)))
 
             finally:
                 if own_stop:

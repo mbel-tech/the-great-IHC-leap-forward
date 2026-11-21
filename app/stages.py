@@ -800,6 +800,22 @@ STAGES = [
                 "the detector's false-positive "
                 "rate, two densities, Abercrombie. Still keyed by animal only."),
 
+    Stage("nucleus_features", "06l  Per-nucleus shape and texture", "Quantification",
+          script="06l_nucleus_features.py", reader="pylibCZIrw",
+          outputs=["results/nucleus_features.csv"],
+          needs=["detect"],
+          # The outlines 05c saved and the boxes they sit on. No settings: the
+          # planes it reads (and, under multiplex, which other marker) are in
+          # each section's fingerprint, so a changed channel setting re-reads
+          # exactly the sections it changes on the next run.
+          made_from=["detect"],
+          blurb="Roundness, solidity, the marker's coefficient of variation above "
+                "the box's own glass and its spot count, for every nucleus in "
+                "roi_nuclei.csv, from the outlines 05c saved and the marker plane "
+                "re-read under them; under multiplex also the other marker's median. "
+                "Never runs StarDist; roi_nuclei.csv is unchanged. For the "
+                "autofluorescence score. Resumable per section."),
+
     # ---- Beyond blinding ----------------------------------------------------
     Stage("join_sampling", "06b  Join the experiment", "Beyond blinding",
           script="06b_join_sampling.py", unblinds=True,

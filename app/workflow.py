@@ -173,6 +173,10 @@ MEASURE = Screen(
         ("Count and measure nuclei",
          "Finds nuclei, measures the marker in each, then builds the per-region table.",
          ["tune_detection", "detect", "roi_dataset"]),
+        ("Nucleus shape and texture",
+         "For the autofluorescence check only, on request: the shape of every nucleus "
+         "found and how grainy its stain is. Reads the slides again, never redetects.",
+         ["nucleus_features"]),
         ("Repairs for older results",
          "Only for a results file written by an older version of the pipeline. "
          "Each one that changes a file backs it up first.",
@@ -252,8 +256,14 @@ REPAIRS = {"recensor", "off_tissue", "seg_provenance", "roi_area"}
 #: a screen's progress.
 VIEW_ONLY = {"scene_renders", "detection_overlays"}
 
+#: Backfills a later stage asks for, run on request: each re-reads the slides
+#: for every measured section, which a study that will never use the result
+#: should not pay for on every Run all remaining. 06l's features are read by the
+#: autofluorescence score only.
+ON_REQUEST = {"nucleus_features"}
+
 #: Never planned by Run all remaining.
-BY_HAND = REPAIRS | VIEW_ONLY
+BY_HAND = REPAIRS | VIEW_ONLY | ON_REQUEST
 
 #: Run all remaining uses the one-pass Build results stage instead of the
 #: spreadsheet stages it already runs. They keep their own Run buttons.
@@ -391,6 +401,10 @@ PLAIN = {
                 "tissue. Build the per-region table again afterwards.",
     "roi_dataset": "Turns the nuclei into per-region numbers: how many cells, how many are "
                    "positive, per square millimetre. Still blind.",
+    "nucleus_features": "Measures the shape of every nucleus already found, and how grainy "
+                        "its marker stain is, for the check that flags autofluorescence. "
+                        "It does not look for nuclei again and does not change the "
+                        "nucleus table; it can be stopped and picks up where it was.",
     "join_sampling": "Unblinds: joins each animal to its treatment group from the sampling "
                      "workbook.",
     "excel_sample": "The spreadsheet with one row per region per animal."
@@ -571,6 +585,13 @@ OPTIONS = {
             "Stop after reading this many sections; the next run resumes where it stopped. "
             "The list of candidates is written once every section has been read. 0 means "
             "all sections.", default=0, cli_default=0, minimum=0, zero="all"),
+    ],
+    "nucleus_features": [
+        _force("sections"),
+        Opt("--limit", "int", "Read at most N sections",
+            "Stop after reading this many sections; the next run resumes where it "
+            "stopped. 0 means all sections.", default=0, cli_default=0, minimum=0,
+            zero="all"),
     ],
     # Folder, resolution and brightness are study settings (Set up > Pictures).
     "scene_renders": [

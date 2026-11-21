@@ -168,6 +168,18 @@ chk("other stages are not read for it", W.shortfall("manifest", _out), None)
 chk("04o's picture stages are not read for a shortfall",
     [W.shortfall(sid, "wrote 9 composites\n  2 not built:\n")
      for sid in ("rgb_perk", "rgb_pcna")], [None, None])
+print("--- 06l nucleus features: on Measure, on request only ---")
+chk("nucleus features are a stage", "nucleus_features" in S.BY_ID)
+chk("...run by hand, never by Run all remaining", "nucleus_features" in W.BY_HAND)
+chk("...shown on Measure", "nucleus_features" in W.SCREENS["measure"].stage_ids(), True)
+chk("...after the per-ROI dataset in the stage list",
+    [st.sid for st in S.STAGES].index("nucleus_features")
+    == [st.sid for st in S.STAGES].index("roi_dataset") + 1)
+chk("...made from detection", S.BY_ID["nucleus_features"].made_from, ["detect"])
+chk("...with plain words", bool(W.PLAIN.get("nucleus_features", "").strip()))
+chk("...whose options are its flags",
+    [o.flag for o in W.options_for("nucleus_features")], ["--force", "--limit"])
+
 print("--- 06i detection overlays: a Results button, on request only ---")
 chk("overlays are a stage", "detection_overlays" in S.BY_ID)
 chk("...run by hand, never by Run all remaining", "detection_overlays" in W.BY_HAND)

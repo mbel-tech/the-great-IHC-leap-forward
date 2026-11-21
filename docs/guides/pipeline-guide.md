@@ -1623,6 +1623,31 @@ together.
 > `bg` is that section's own background nuclei. The scale factor is what makes the median absolute
 > deviation comparable to a standard deviation.
 
+## 06l  Per-nucleus shape and texture {#stage-nucleus_features}
+
+*`scripts/06l_nucleus_features.py` → `results/nucleus_features.csv`* · run on request
+
+Adds, for every nucleus the detection step found, how round and how solid its outline is and how its
+marker stain is spread inside it: how much the stain varies across the nucleus, and how many bright
+spots it holds. A stained nucleus tends to be filled evenly; autofluorescent debris tends to be
+granular and irregular. These are the measurements the autofluorescence check learns from, and nothing
+else reads them. With several markers on one scan, it also records the other marker's level inside the
+same nucleus.
+
+It does not look for nuclei again. It takes the outlines the detection step saved and re-reads only the
+marker under them, so every row matches a row of the nucleus table one for one, and the nucleus table
+itself is not changed. A section whose outlines were never saved (measured by an older version) is
+listed and skipped; drawing the detection overlays saves them once.
+
+The two texture measurements are made so that a uniform brightening or darkening of a whole section —
+the background differs by about a factor of two between animals — cannot change them. The variation
+is taken above the region's own background glass rather than above zero, and a spot is counted against
+the nucleus's own median and spread.
+
+It reads one section at a time and can be stopped; the next run reads only what is left, or a section
+whose detection has changed since.
+
+
 \newpage
 
 # Part 6 — Beyond blinding

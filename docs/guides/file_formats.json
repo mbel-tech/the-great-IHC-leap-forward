@@ -5308,12 +5308,111 @@
    "path": "detection_outlines/<marker>/<scene_uid>.npz",
    "names": [],
    "writer": "05c_detect_rois.py",
-   "what": "Every detected nucleus's outline, so 06i can draw them without detecting again.",
+   "what": "Every detected nucleus's outline, so 06i can draw them and 06l measure their shape without detecting again.",
    "format": "Compressed NumPy archive: `roiNN` (uint32 label image of box NN, 0 = background) and `roiNN_origin` (the box's CZI x, y).",
    "readers": [
-    "06i_detection_overlays.py"
+    "06i_detection_overlays.py",
+    "06l_nucleus_features.py"
    ],
    "columns": []
+  },
+  {
+   "path": "results/nucleus_features.csv",
+   "names": [
+    "nucleus_features.csv"
+   ],
+   "writer": "06l_nucleus_features.py",
+   "what": "Shape and marker texture of every nucleus in roi_nuclei.csv, one row per roi_nuclei.csv row and keyed as it is, for the autofluorescence score (06k). Computed from the outlines 05c saved and the marker plane re-read under them; StarDist is never run again and roi_nuclei.csv is never written. Appended one section at a time; a section is current while its line in nucleus_features_done.csv carries today's fingerprint. A section with no saved outlines has no rows. Provisional until the Task 8 validation.",
+   "readers": [],
+   "columns_from": "06l_nucleus_features.py:COLUMNS",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker whose nucleus this is, as roi_nuclei.csv names it."
+    },
+    {
+     "name": "roi_index",
+     "type": "int",
+     "units": "",
+     "meaning": "The box, 1-based, as in roi_nuclei.csv."
+    },
+    {
+     "name": "nucleus_id",
+     "type": "int",
+     "units": "",
+     "meaning": "The nucleus's label in its box's saved outlines, as in roi_nuclei.csv."
+    },
+    {
+     "name": "roundness",
+     "type": "float",
+     "units": "",
+     "meaning": "4 pi A / P^2 of the nucleus's mask (skimage perimeter), capped at 1. About 0.9 for a filled disc. Blank for an object with no perimeter."
+    },
+    {
+     "name": "solidity",
+     "type": "float",
+     "units": "",
+     "meaning": "Pixel area over the pixels whose centres lie in the convex hull of its pixel centres: 1.0 for a digital disc of any size."
+    },
+    {
+     "name": "marker_cv",
+     "type": "float",
+     "units": "",
+     "meaning": "sd of the marker inside the nucleus / max(mean - b, s), b and s the median and 1.4826 x MAD of the box's pixels in no nucleus: a coefficient of variation above the box's own glass, unchanged by an offset or a gain. Blank when the box has no such pixels, or the nucleus is not above them and they are flat."
+    },
+    {
+     "name": "marker_spots",
+     "type": "int",
+     "units": "count",
+     "meaning": "Local maxima of the marker inside the nucleus (8 neighbours, a plateau counted once) above its own median + 3 x 1.4826 x MAD. Unchanged by an offset or a gain."
+    },
+    {
+     "name": "other_marker_median",
+     "type": "float",
+     "units": "grey value",
+     "meaning": "Under multiplex, the other marker's median inside the nucleus (the first other marker of the declared order on another plane). Blank under paired."
+    }
+   ]
+  },
+  {
+   "path": "results/nucleus_features_done.csv",
+   "names": [
+    "nucleus_features_done.csv"
+   ],
+   "writer": "06l_nucleus_features.py",
+   "what": "06l's resume log: one line per section whose rows in nucleus_features.csv were written whole, appended after them. A section is read again when its fingerprint no longer matches (outlines re-saved, boxes moved, other nuclei in roi_nuclei.csv, a new feature version); its rows are dropped first.",
+   "readers": [
+    "06l_nucleus_features.py"
+   ],
+   "columns_from": "06l_nucleus_features.py:DONE_COLUMNS",
+   "columns": [
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker."
+    },
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "fingerprint",
+     "type": "text",
+     "units": "",
+     "meaning": "Hash of what the section's features were computed from: the feature version and spot k, the outline file's size and mtime, its (roi_index, nucleus_id) list, its box rectangles, its CZI file and scene, and the planes read."
+    }
+   ]
   },
   {
    "path": "detection_overlays/index.csv",

@@ -328,6 +328,8 @@ Detection takes hours; finished sections are kept, so a stopped run resumes.
   hourly while detection runs.
 - **06i** draws every detected nucleus over its marker picture, coloured by whether it was called
   positive, for checking by eye.
+- **06l** (on request, from the Measure screen) adds the shape and marker texture of every detected
+  nucleus to `nucleus_features.csv`, from the outlines 05c saved, for the autofluorescence score.
 - **R statistics and figures** (`analysis/`, switched off in the app for now and run by hand). With one row
   per animal the model is ordinary least squares, `lm(value ~ group)`; given a table with several rows per
   animal it fits a mixed model with a random intercept per animal instead (`lmerTest::lmer`), so sections
@@ -767,6 +769,7 @@ The full table, generated from the code:
 | `tune_detection` | 05b Check signal quality and tune detection | Quantification | `05b_tune_detection.py` | roi_geometry | `qc/detection_tuning.md` | pylibCZIrw |  | yes |
 | `detect` | 05c Detect and measure nuclei | Quantification | `05c_detect_rois.py` | roi_geometry, tune_detection | `results/roi_nuclei.csv` | pylibCZIrw |  | from source only (needs StarDist) |
 | `roi_dataset` | 06a Per-ROI dataset | Quantification | `06a_roi_dataset.py` | detect | `results/roi_measurements.csv`, `results/detector_specificity.csv` | none |  | yes |
+| `nucleus_features` | 06l Per-nucleus shape and texture | Quantification | `06l_nucleus_features.py` | detect | `results/nucleus_features.csv` | pylibCZIrw |  | yes |
 | `join_sampling` | 06b Join the experiment | Beyond blinding | `06b_join_sampling.py` | roi_dataset | `results/roi_dataset.csv`, `results/animal_metadata.csv` | none |  | yes |
 | `excel_sample` | 06c Spreadsheet - per sample | Beyond blinding | `06c_excel_dataset.py` | roi_dataset | `results/roi_dataset.xlsx` | none |  | yes |
 | `excel_slide` | 06d Spreadsheet - per slide | Beyond blinding | `06d_excel_by_slide.py` | roi_dataset | `results/roi_dataset_by_slide.xlsx` | none |  | yes |
@@ -1984,6 +1987,29 @@ counts by eye.
   section's boxes or its scene picture are read, it waits for the drive (`ls_drive`) and reads them again,
   the CZI opened afresh; a read that fails with the drive there lists the section not drawn, as before.
 
+### `06l_nucleus_features.py`
+
+Stage `nucleus_features` (Quantification, run on request). Shape and marker texture of every nucleus in
+`roi_nuclei.csv`, for the autofluorescence score, written to `results/nucleus_features.csv` keyed as
+`roi_nuclei.csv` is (`scene_uid, marker, roi_index, nucleus_id`): `roundness`, `solidity`, `marker_cv`,
+`marker_spots` and, under multiplex, `other_marker_median` (blank under paired). The features are
+`ls_nucleus_features.features`.
+
+- **Reads:** each section's boxes (05a), the label images 05c saved (`detection_outlines/<marker>/<uid>.npz`),
+  the section's rows of `roi_nuclei.csv` (scanned 32 sections at a time) and, from the CZI, the marker
+  plane of each box that has nuclei (and the other marker's plane under multiplex). Never DAPI, never
+  StarDist: a section with no saved outlines is listed as not done and skipped (06i saves them once).
+- **Checks** before a section is read: each box's saved origin and shape are the box's now, and every
+  `nucleus_id` is a label in its box. A section that fails is not done, with the reason; its old rows go.
+- **Resumes per section:** rows appended and synced, then one line in `nucleus_features_done.csv` with a
+  fingerprint of the outline file, the section's nucleus list, its boxes, its CZI scene, the planes read
+  and the feature version. A section with no current line is read; its rows are dropped first, through a
+  temp file and one replace, and a torn last line is cut back. `--limit N`, `--force`, `--marker`.
+- **Drive:** each section is one `ls_drive.per_slide_settled` unit, as in 05c and 06i: a read that fails
+  because the slide drive went away waits for it and reads the section again; nothing is written until the
+  unit returns.
+- `roi_nuclei.csv` is read and never written.
+
 ### `atlas_pdf.py`
 
 Shared module. Decides which image XObjects on a salmon atlas page are plates. Since the 2026-09
@@ -2146,6 +2172,19 @@ A name that does not match is reported, never skipped. The uid's shape is fixed 
 from the grammar: subject, slide and replicate give `LS105_s10a_sc03`; subject and slide give
 `LS105_s10_sc03`; subject alone gives `LS105_sc03`. The uid is the key of every table and of the saved
 curation, so making its shape configurable would let an edit orphan every result.
+
+### `ls_nucleus_features.py`
+
+Shared module, NumPy, SciPy and scikit-image: `features(label_img, nucleus_id, dapi, marker, other=None)`
+for 06l. `roundness` is 4 pi A / P^2 (skimage perimeter, capped at 1). `solidity` counts the hull in
+pixels, the pixels whose centres lie in the convex hull of the nucleus's pixel centres, so a digital disc
+is 1.0 at any size (skimage's own `solidity` takes the corners' hull and reads 0.86 to 0.95 for a disc of
+radius 4 to 12 px). `marker_cv` is sd / max(mean - b, s) with b and s the median and 1.4826 x MAD of the
+box's pixels in no nucleus: a plain sd / mean moves with an additive background, and two nuclei of
+different brightness can swap order under the ~2x batch between animals; this one does not move under
+x * gain + offset. `marker_spots` counts local maxima (8 neighbours, a plateau once) above the nucleus's
+median + 3 x 1.4826 x MAD; comparisons only, so also unchanged. `dapi` feeds no key. `bboxes()` and
+`background()` let a caller scan a box once for all its nuclei. Reads no study file.
 
 ### `ls_overlay.py`
 
@@ -2503,6 +2542,9 @@ straight from `sys.argv`) without running it. A script with no options says "(no
 | `06i_detection_overlays.py` | `--force` | off | redraw sections whose inputs have not changed (and the crops 05c drew) |
 | `06i_detection_overlays.py` | `--workers` | `0` | whole-scene pictures drawn at once, each only when there is memory for it (default 0: half the cores, at most 4 - <DEFAULT_WORKERS> here) |
 | `06j_backfill_roi_area.py` | (none) |  |  |
+| `06l_nucleus_features.py` | `--marker` |  | only this marker (default: every marker with boxes) Choices: G5.MARKERS. |
+| `06l_nucleus_features.py` | `--limit` | `0` | read at most N sections this run; run again to go on |
+| `06l_nucleus_features.py` | `--force` | off | read sections again even when their features are current |
 | `atlas_pdf.py` | (none) |  |  |
 | `atlas_polygons.py` | (none) |  |  |
 | `atlas_registry.py` | (none) |  |  |
@@ -2550,6 +2592,7 @@ straight from `sys.argv`) without running it. A script with no options says "(no
 | `ls_jsonio.py` | (none) |  |  |
 | `ls_layouts.py` | (none) |  |  |
 | `ls_naming.py` | (none) |  |  |
+| `ls_nucleus_features.py` | (none) |  |  |
 | `ls_overlay.py` | (none) |  |  |
 | `ls_paths.py` | `--migrate` | off | list the legacy files on the drive. Moves nothing. |
 | `ls_paths.py` | `--table` | off | print every artifact path, per marker. |
@@ -4285,11 +4328,43 @@ Sections measured with no artifact mask, so `artifact` is 0 there because nothin
 
 #### `detection_outlines/<marker>/<scene_uid>.npz`
 
-Every detected nucleus's outline, so 06i can draw them without detecting again.
+Every detected nucleus's outline, so 06i can draw them and 06l measure their shape without detecting again.
 
 - **Written by:** 05c_detect_rois.py
-- **Read by:** 06i_detection_overlays.py
+- **Read by:** 06i_detection_overlays.py, 06l_nucleus_features.py
 - **Format:** Compressed NumPy archive: `roiNN` (uint32 label image of box NN, 0 = background) and `roiNN_origin` (the box's CZI x, y).
+
+#### `results/nucleus_features.csv`
+
+Shape and marker texture of every nucleus in roi_nuclei.csv, one row per roi_nuclei.csv row and keyed as it is, for the autofluorescence score (06k). Computed from the outlines 05c saved and the marker plane re-read under them; StarDist is never run again and roi_nuclei.csv is never written. Appended one section at a time; a section is current while its line in nucleus_features_done.csv carries today's fingerprint. A section with no saved outlines has no rows. Provisional until the Task 8 validation.
+
+- **Written by:** 06l_nucleus_features.py
+- **Read by:** a person
+
+| Column | Type | Units | Meaning |
+|------------|------|------|---------------------------|
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
+| `marker` | text |  | The marker whose nucleus this is, as roi_nuclei.csv names it. |
+| `roi_index` | int |  | The box, 1-based, as in roi_nuclei.csv. |
+| `nucleus_id` | int |  | The nucleus's label in its box's saved outlines, as in roi_nuclei.csv. |
+| `roundness` | float |  | 4 pi A / P^2 of the nucleus's mask (skimage perimeter), capped at 1. About 0.9 for a filled disc. Blank for an object with no perimeter. |
+| `solidity` | float |  | Pixel area over the pixels whose centres lie in the convex hull of its pixel centres: 1.0 for a digital disc of any size. |
+| `marker_cv` | float |  | sd of the marker inside the nucleus / max(mean - b, s), b and s the median and 1.4826 x MAD of the box's pixels in no nucleus: a coefficient of variation above the box's own glass, unchanged by an offset or a gain. Blank when the box has no such pixels, or the nucleus is not above them and they are flat. |
+| `marker_spots` | int | count | Local maxima of the marker inside the nucleus (8 neighbours, a plateau counted once) above its own median + 3 x 1.4826 x MAD. Unchanged by an offset or a gain. |
+| `other_marker_median` | float | grey value | Under multiplex, the other marker's median inside the nucleus (the first other marker of the declared order on another plane). Blank under paired. |
+
+#### `results/nucleus_features_done.csv`
+
+06l's resume log: one line per section whose rows in nucleus_features.csv were written whole, appended after them. A section is read again when its fingerprint no longer matches (outlines re-saved, boxes moved, other nuclei in roi_nuclei.csv, a new feature version); its rows are dropped first.
+
+- **Written by:** 06l_nucleus_features.py
+- **Read by:** 06l_nucleus_features.py
+
+| Column | Type | Units | Meaning |
+|------------|------|------|---------------------------|
+| `marker` | text |  | The marker. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
+| `fingerprint` | text |  | Hash of what the section's features were computed from: the feature version and spot k, the outline file's size and mtime, its (roi_index, nucleus_id) list, its box rectangles, its CZI file and scene, and the planes read. |
 
 #### `detection_overlays/index.csv`
 

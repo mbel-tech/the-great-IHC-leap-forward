@@ -131,8 +131,10 @@ def other_marker(marker):
 def scan_nuclei(marker, uids=None):
     """One pass over roi_nuclei.csv for `marker`.
 
-    With `uids` None: {uid: sha1 of its (roi_index, nucleus_id) list} for every
-    section. With `uids`: {uid: [(roi_index, nucleus_id), ...]} for those.
+    With `uids` None: {uid: sha1 of its (roi_index, nucleus_id, czi_x, czi_y)
+    list} for every section. With `uids`: {uid: [(roi_index, nucleus_id, czi_x,
+    czi_y), ...]} for those. The centroid is what ties a row to ITS label (see
+    check); a label id alone is not.
     """
     out = {}
     with open(NUCLEI_CSV, newline="", encoding="utf-8") as fh:
@@ -141,10 +143,11 @@ def scan_nuclei(marker, uids=None):
         try:
             iu, im = header.index("scene_uid"), header.index("marker")
             ir, inid = header.index("roi_index"), header.index("nucleus_id")
+            ix, iy = header.index("czi_x"), header.index("czi_y")
         except ValueError:
             raise SystemExit(f"!! {NUCLEI_CSV} has no scene_uid / marker / "
-                             f"roi_index / nucleus_id column") from None
-        need = max(iu, im, ir, inid)
+                             f"roi_index / nucleus_id / czi_x / czi_y column") from None
+        need = max(iu, im, ir, inid, ix, iy)
         for row in rd:
             if len(row) <= need or row[im] != marker:
                 continue
@@ -153,9 +156,11 @@ def scan_nuclei(marker, uids=None):
                 h = out.get(uid)
                 if h is None:
                     h = out[uid] = hashlib.sha1()
-                h.update(f"{row[ir]},{row[inid]};".encode("ascii", "replace"))
+                h.update(f"{row[ir]},{row[inid]},{row[ix]},{row[iy]};"
+                         .encode("ascii", "replace"))
             elif uid in uids:
-                out.setdefault(uid, []).append((int(row[ir]), int(row[inid])))
+                out.setdefault(uid, []).append((int(row[ir]), int(row[inid]),
+                                                float(row[ix]), float(row[iy])))
     if uids is None:
         return {u: h.hexdigest() for u, h in out.items()}
     return out
@@ -189,12 +194,25 @@ def load_outlines(marker, uid):
     return out
 
 
+#: The most a row's centroid may differ from its label's, in native px: 06i's
+#: CENTROID_TOL. The CSV rounds to 0.1, so a true match is within 0.071.
+CENTROID_TOL = 0.5
+
+
 def check(outlines, keys, boxes):
     """{roi_index: [nucleus_id, ...]} to measure; NotDone when the saved
-    outlines do not hold what roi_nuclei.csv says they do."""
-    want = {}
-    for ri, nid in keys:
+    outlines do not hold what roi_nuclei.csv says they do.
+
+    Every row's label must exist AND have its centroid within CENTROID_TOL of
+    the row's czi_x / czi_y, as 06i's match() requires. Outlines re-segmented
+    after the rows were written (06i saves them before it checks them) number
+    their labels 1..N again, so an id alone would almost always "exist" and
+    join another object's features to the row.
+    """
+    want, at = {}, {}
+    for ri, nid, cx, cy in keys:
         want.setdefault(ri, []).append(nid)
+        at[(ri, nid)] = (cx, cy)
     for ri, nids in sorted(want.items()):
         if ri < 1 or ri > len(boxes):
             raise NotDone(f"roi{ri:02d}: roi_nuclei.csv has rows for a box the "
@@ -211,11 +229,19 @@ def check(outlines, keys, boxes):
                           f"{b['czi_h']}x{b['czi_w']}")
         if len(set(nids)) != len(nids):
             raise NotDone(f"roi{ri:02d}: a nucleus_id is in roi_nuclei.csv twice")
-        present = set(np.unique(labels).tolist())
-        missing = [n for n in nids if n not in present]
+        cents = D5.centroids(labels, x0, y0)
+        missing = [n for n in nids if n not in cents]
         if missing:
             raise NotDone(f"roi{ri:02d}: nucleus_id {missing[0]} is not in the "
                           f"saved outlines ({len(missing)} missing)")
+        for nid in sorted(nids):
+            (lx, ly), (cx, cy) = cents[nid], at[(ri, nid)]
+            d = float(np.hypot(lx - cx, ly - cy))
+            if d > CENTROID_TOL:
+                raise NotDone(f"roi{ri:02d}: nucleus {nid} of the saved outlines is "
+                              f"{d:.2f} px from its roi_nuclei.csv centroid - the "
+                              f"outlines are not the ones these rows were measured "
+                              f"on (re-run 05c for this section)")
     return want
 
 
@@ -246,7 +272,7 @@ def measure(doc, marker, uid, boxes, outlines, want, scene):
         rest = NF.background(labels, mark)
         for nid in sorted(want[ri]):
             f = NF.features(labels, nid, None, mark, oth, bbox=bbox[nid],
-                            background=rest)
+                            rest=rest)
             rows.append([uid, marker, ri, nid, _fmt(f["roundness"], 4),
                          _fmt(f["solidity"], 4), _fmt(f["marker_cv"], 4),
                          f["marker_spots"], _fmt(f["other_marker_median"], 1)])
@@ -353,15 +379,20 @@ def commit(marker, uid, fp, rows):
 
 
 def plan(args):
-    """[(marker, by_sec, geom, [(uid, fingerprint)])] for every marker with boxes,
-    the sections being those with rows in roi_nuclei.csv."""
-    out = []
+    """([(marker, by_sec, geom, [(uid, fingerprint)])] for every marker with
+    boxes, the sections being those with rows in roi_nuclei.csv; [markers
+    looked at whose box or geometry file is gone]).
+
+    Features of a marker without boxes cannot be checked against them, so its
+    rows and done lines are dropped rather than kept on trust."""
+    out, gone = [], []
     markers = [args.marker] if args.marker else list(G5.MARKERS)
     for marker in markers:
         G5.use_marker(marker)
         if not os.path.exists(G5.BOX_CSV) or not os.path.exists(G5.GEOM_CSV):
             print(f"marker: {marker}  skipped (no {os.path.basename(G5.BOX_CSV)} "
                   f"or {os.path.basename(G5.GEOM_CSV)}; run 05a --marker {marker})")
+            gone.append(marker)
             continue
         by_sec = {}
         for b in G5.load_csv(G5.BOX_CSV):
@@ -371,7 +402,7 @@ def plan(args):
         secs = [(u, fingerprint(marker, u, hashes[u], by_sec.get(u, []), geom.get(u)))
                 for u in sorted(hashes)]
         out.append((marker, by_sec, geom, secs))
-    return out
+    return out, gone
 
 
 def main():
@@ -381,13 +412,15 @@ def main():
     ap.add_argument("--limit", type=int, default=0, metavar="N",
                     help="read at most N sections this run; run again to go on")
     ap.add_argument("--force", action="store_true",
-                    help="read sections again even when their features are current")
+                    help="read sections again even when their features are current. "
+                         "A section's old rows are dropped before it is read: one "
+                         "that then fails is left with none (absent, not stale)")
     args = ap.parse_args()
 
     if not os.path.exists(NUCLEI_CSV):
         print(f"no {NUCLEI_CSV} - run 05c_detect_rois.py first")
         return 1
-    work = plan(args)
+    work, gone = plan(args)
     if not work:
         # Refused before anything is written: a header-only file would read as
         # this stage having run.
@@ -399,8 +432,13 @@ def main():
 
     # What is kept: current sections, not being read this run, and every
     # logged section of a marker this run does not look at.
-    looked = {m for m, *_ in work}
+    looked = {m for m, *_ in work} | set(gone)
     keep = {k: v for k, v in done.items() if k[0] not in looked}
+    for m in gone:
+        n = sum(1 for k in done if k[0] == m)
+        if n:
+            print(f"  {m}: its boxes are gone, so the features of its {n} "
+                  f"section(s) are dropped")
     todo, budget, not_done = [], args.limit or None, []
     for marker, by_sec, geom, secs in work:
         for uid, fp in secs:

@@ -68,9 +68,6 @@ def background(label_img, marker):
     return med, _MAD_SD * float(np.median(np.abs(v - med)))
 
 
-_non_nuclear = background
-
-
 def _pad(sl, shape):
     """`sl` grown by one pixel each side, inside `shape`."""
     return tuple(slice(max(s.start - 1, 0), min(s.stop + 1, n)) for s, n in zip(sl, shape))
@@ -106,10 +103,10 @@ def _spots(vals2d, mask):
 
 
 def features(label_img, nucleus_id, dapi, marker, other=None, *, bbox=None,
-             background=None):
+             rest=None):
     """The five features of nucleus `nucleus_id`. See the module docstring.
 
-    `bbox` (from `bboxes`) and `background` (from `background`) may be passed
+    `bbox` (from `bboxes`) and `rest` (from `background`) may be passed
     in by a caller measuring every nucleus of a box, so the box is scanned once
     rather than once per nucleus; each is computed here when absent.
     """
@@ -121,8 +118,8 @@ def features(label_img, nucleus_id, dapi, marker, other=None, *, bbox=None,
         if 1 not in found:
             raise ValueError(f"nucleus {nid} is not in the label image")
         bbox = found[1]
-    if background is None:
-        background = _non_nuclear(labels, marker)
+    if rest is None:
+        rest = background(labels, marker)
     sl = _pad(bbox, labels.shape)
     mask = labels[sl] == nid
     if not mask.any():
@@ -137,8 +134,8 @@ def features(label_img, nucleus_id, dapi, marker, other=None, *, bbox=None,
     m = np.asarray(marker, dtype=np.float64)[sl]
     vals = m[mask]
     cv = ""
-    if background is not None:
-        b, s = background
+    if rest is not None:
+        b, s = rest
         denom = max(float(vals.mean()) - b, s)
         if denom > 0:
             cv = float(vals.std()) / denom

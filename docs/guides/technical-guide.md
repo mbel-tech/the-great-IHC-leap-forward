@@ -2547,7 +2547,7 @@ straight from `sys.argv`) without running it. A script with no options says "(no
 | `06j_backfill_roi_area.py` | (none) |  |  |
 | `06l_nucleus_features.py` | `--marker` |  | only this marker (default: every marker with boxes) Choices: G5.MARKERS. |
 | `06l_nucleus_features.py` | `--limit` | `0` | read at most N sections this run; run again to go on |
-| `06l_nucleus_features.py` | `--force` | off | read sections again even when their features are current |
+| `06l_nucleus_features.py` | `--force` | off | read sections again even when their features are current. A section's old rows are dropped before it is read: one that then fails is left with none (absent, not stale) |
 | `atlas_pdf.py` | (none) |  |  |
 | `atlas_polygons.py` | (none) |  |  |
 | `atlas_registry.py` | (none) |  |  |

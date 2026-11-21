@@ -126,7 +126,7 @@ except ValueError:
     chk("features() raises for a nucleus id the label image does not have", True)
 sl = NF.bboxes(labels)
 chk("bboxes() gives the slice of each label",
-    NF.features(labels, 2, dapi, marker, bbox=sl[2], background=NF.background(labels, marker)),
+    NF.features(labels, 2, dapi, marker, bbox=sl[2], rest=NF.background(labels, marker)),
     NF.features(labels, 2, dapi, marker))
 
 # ---------------------------------------------------------------- the stage
@@ -365,6 +365,38 @@ chk("...and the file is what an uninterrupted run writes",
     sorted(map(tuple, (r.values() for r in features_rows()))), before)
 chk("...nothing listed as not done but the one with no outlines",
     "1 section(s) not done" in LAST[0])
+
+print("--- outlines that are not the rows' (relabelled) are refused ---")
+u3 = UIDS[3]
+swapped = LABELS.copy()
+swapped[LABELS == 1], swapped[LABELS == 2] = 2, 1   # same ids, other objects
+D5.save_outlines(MARKER, u3, {1: (swapped, 10, 20), 2: (LABELS, 200, 20)})
+del READS[:]
+chk("exits 0", run(), 0)
+chk("...the section is NOT DONE, naming the centroid",
+    f"{u3}: NOT DONE" in LAST[0] and "centroid" in LAST[0])
+chk("...and has no rows", u3 in {r["scene_uid"] for r in features_rows()}, False)
+chk("...and was not read", SCENE[u3] in scenes_read(), False)
+D5.save_outlines(MARKER, u3, {1: (LABELS, 10, 20), 2: (LABELS, 200, 20)})
+run()
+chk("the right outlines back: the section is done again",
+    sum(1 for r in features_rows() if r["scene_uid"] == u3), 4)
+
+print("--- a marker whose boxes are gone loses its features ---")
+G5.use_marker("AF488")
+write_rows(G5.GEOM_CSV, [dict(g, marker="AF488") for g in read_rows(
+    G5.resolve_paths(MARKER)[0])])
+write_rows(G5.BOX_CSV, [dict(b, marker="AF488") for b in boxes])
+G5.use_marker(MARKER)
+box_csv = G5.BOX_CSV
+os.rename(box_csv, box_csv + ".aside")
+run()
+chk("...its rows are dropped", {r["marker"] for r in features_rows()}, set())
+chk("...and it says why", "boxes are gone" in LAST[0])
+os.rename(box_csv + ".aside", box_csv)
+run()
+chk("...and they come back once its boxes do",
+    len(features_rows()), len(nuclei) - 4)          # UIDS[0] has no outlines
 
 print("--- roi_nuclei_untouched ---")
 chk("roi_nuclei.csv is byte-identical after every run", digest(D5.NUCLEI_CSV), NUCLEI_SHA)

@@ -168,8 +168,7 @@ def native_sample(scenes, n, ceilings, seed=20260901):
         if len(rows) >= n:
             break
         path = os.path.join(SOURCE_DIR, fname)
-        OV.wait_if_gone(fname)
-        if not os.path.exists(path):
+        if not OV.present(path, fname):
             continue
         ceiling = OV.ceiling_for(ceilings, fname)
 
@@ -364,10 +363,9 @@ def main():
         if args.limit and measured >= args.limit:
             break
         path = os.path.join(SOURCE_DIR, fname)
-        # Before the exists check: a CZI on a drive that has just dropped is
-        # waited for, not recorded as missing.
-        OV.wait_if_gone(fname)
-        if not os.path.exists(path):
+        # A CZI on a drive that has just dropped is waited for, not recorded
+        # as missing.
+        if not OV.present(path, fname):
             failed += len(rs)
             lose(rs)
             continue

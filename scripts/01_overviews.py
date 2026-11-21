@@ -59,13 +59,19 @@ DR = IO.drive_module()
 
 
 def per_slide(fn, *, label):
-    """Run one self-contained slide unit, redoing it after a dropped drive."""
-    return DR.per_slide(fn, label=label) if DR is not None else fn()
+    """Run one self-contained slide unit, redoing it after a dropped drive - also
+    when the drive went during it without the unit failing (ls_drive's
+    per_slide_settled): an atomic write inside it that waited for the drive
+    leaves the slide's open CZI handles dead, and the next scene's read would
+    otherwise be recorded as that scene's failure."""
+    return DR.per_slide_settled(fn, label=label) if DR is not None else fn()
 
 
-def wait_if_gone(label):
-    """Wait while a watched folder is unreachable; 0.0 at once otherwise."""
-    return DR.wait_if_gone(label) if DR is not None else 0.0
+def present(path, label):
+    """os.path.exists for a file on the drive (ls_drive's present): one that is
+    absent because the drive has dropped is waited for and looked for again,
+    never reported missing - even when the drive drops as it is looked for."""
+    return DR.present(path, label) if DR is not None else os.path.exists(path)
 
 
 def is_stop(exc):
@@ -489,8 +495,7 @@ def sample_display_ranges(scenes, fields, zoom, force, narrowed=False):
         path = os.path.join(SOURCE_DIR, fname)
         # A CZI that is "missing" because the drive dropped is waited for, not
         # skipped: a skipped file changes the ranges every section is drawn with.
-        wait_if_gone(fname)
-        if not os.path.exists(path):
+        if not present(path, fname):
             continue
 
         def unit(path=path, rows=rows):
@@ -629,10 +634,9 @@ def export(scenes, fields, ranges, ceilings, zoom, limit, force):
         if limit and exported >= limit:
             break
         path = os.path.join(SOURCE_DIR, fname)
-        # Before the exists check: a CZI on a drive that has just dropped is
-        # waited for, not recorded as missing.
-        wait_if_gone(fname)
-        if not os.path.exists(path):
+        # A CZI on a drive that has just dropped is waited for, not recorded
+        # as missing.
+        if not present(path, fname):
             failed += len(rows)
             record_failures(failures, fname, rows,
                             f"CZI missing from {SOURCE_DIR} (drive unplugged, or still zipped?)")

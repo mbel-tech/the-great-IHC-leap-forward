@@ -549,10 +549,9 @@ def main():
     for r in scenes:
         uid, fname = r["scene_uid"], r["file"]
         path = os.path.join(SOURCE_DIR, fname)
-        # Before the exists check: a CZI on a drive that has just dropped is
-        # waited for, not listed missing.
-        OV.wait_if_gone(fname)
-        if not os.path.exists(path):
+        # A CZI on a drive that has just dropped is waited for, not listed
+        # missing.
+        if not OV.present(path, fname):
             problems[uid] = "not screened: the CZI is missing"
             continue
         fps[uid] = fingerprint(path, r, section_markers(r, multiplex, plan), nuc_c, plan,

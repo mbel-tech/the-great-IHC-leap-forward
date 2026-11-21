@@ -104,6 +104,13 @@ def wait_if_gone(label):
     return DR.wait_if_gone(label) if DR is not None else 0.0
 
 
+def present(path, label):
+    """os.path.exists for a file on the drive (ls_drive's present): one that is
+    absent because the drive has dropped is waited for and looked for again,
+    never reported missing - even when the drive drops as it is looked for."""
+    return DR.present(path, label) if DR is not None else os.path.exists(path)
+
+
 def is_stop(exc):
     """True for ls_drive.Stopped, which a per-file `except Exception` must not
     record as that file's failure: the operator asked the stage to stop."""
@@ -726,7 +733,7 @@ def build(regions_csv, limit=None, plates_csv=None, require_background=True,
             continue
         src = os.path.join(OVERVIEW_DIR, f["animal"], f["marker_channel"],
                            uid + "_DAPI.png")
-        if not os.path.exists(src):
+        if not present(src, uid):
             skipped.append((uid, "overview PNG missing"))
             continue
 
@@ -1078,10 +1085,9 @@ def verify_czi(limit=4):
         uid = g["scene_uid"]
         ov = os.path.join(OVERVIEW_DIR, g["animal"], g["marker"], uid + "_DAPI.png")
         path = os.path.join(CONFIG["source_dir"], g["czi_file"])
-        # Before the exists check: a CZI on a drive that has just dropped is
-        # waited for, not passed over.
-        wait_if_gone(g["czi_file"])
-        if not (os.path.exists(ov) and os.path.exists(path)):
+        # A CZI on a drive that has just dropped is waited for, not passed
+        # over.
+        if not (present(ov, uid) and present(path, g["czi_file"])):
             continue
         stored = np.asarray(Image.open(ov).convert("L")).astype(np.float64)
         rx, ry, rw, rh = (int(g[k]) for k in ("scene_x", "scene_y", "scene_w", "scene_h"))

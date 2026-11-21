@@ -161,9 +161,11 @@ def per_slide(fn, *, label):
     return DR.per_slide_settled(fn, label=label) if DR is not None else fn()
 
 
-def wait_if_gone(label):
-    """Wait while a watched folder is unreachable; 0.0 at once otherwise."""
-    return DR.wait_if_gone(label) if DR is not None else 0.0
+def present(path, label):
+    """os.path.exists for a file on the drive (ls_drive's present): one that is
+    absent because the drive has dropped is waited for and looked for again,
+    never reported missing - even when the drive drops as it is looked for."""
+    return DR.present(path, label) if DR is not None else os.path.exists(path)
 
 
 def is_stop(exc):
@@ -895,10 +897,9 @@ def main():
         """(index rows by key, failures, uids drawn) for one CZI's scenes."""
         marker, colour, n_idx, m_idx, fields_nm, mdir = info
         path = os.path.join(SOURCE_DIR, fname)
-        # Before the exists check: a CZI on a drive that has just dropped is
-        # waited for, not recorded as not found.
-        wait_if_gone(fname)
-        if not os.path.exists(path):
+        # A CZI on a drive that has just dropped is waited for, not recorded
+        # as not found.
+        if not present(path, fname):
             return {}, [(r["scene_uid"], f"CZI not found: {path}") for r in todo], set()
 
         # One file is the unit a dropped drive redoes (see 01_overviews'

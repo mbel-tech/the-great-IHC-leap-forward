@@ -57,13 +57,17 @@ DR = IO.drive_module()
 
 
 def per_slide(fn, *, label):
-    """Run one self-contained file unit, redoing it after a dropped drive."""
-    return DR.per_slide(fn, label=label) if DR is not None else fn()
+    """Run one self-contained file unit, redoing it after a dropped drive - also
+    when the drive went during it without the unit failing (ls_drive's
+    per_slide_settled)."""
+    return DR.per_slide_settled(fn, label=label) if DR is not None else fn()
 
 
-def wait_if_gone(label):
-    """Wait while a watched folder is unreachable; 0.0 at once otherwise."""
-    return DR.wait_if_gone(label) if DR is not None else 0.0
+def present(path, label):
+    """os.path.exists for a file on the drive (ls_drive's present): one that is
+    absent because the drive has dropped is waited for and looked for again,
+    never reported missing - even when the drive drops as it is looked for."""
+    return DR.present(path, label) if DR is not None else os.path.exists(path)
 
 SOURCE_DIR = CONFIG["source_dir"]
 OUT_ROOT = CONFIG["out_root"]
@@ -231,8 +235,7 @@ def main():
         p = os.path.join(SOURCE_DIR, r["file"])
         # A file "absent" because the drive has just dropped is waited for:
         # leaving it out would change the pool, and so which files are sampled.
-        wait_if_gone(r["file"])
-        if os.path.exists(p):
+        if present(p, r["file"]):
             by_marker[r["marker_channel"]].append((p, r["marker_channel"]))
         else:
             absent.append(r["file"])

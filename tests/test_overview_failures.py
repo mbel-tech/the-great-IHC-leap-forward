@@ -377,6 +377,75 @@ chk("...same display ranges and outputs, byte for byte",
 chk("...no .tmp left", tmp_left(), [])
 
 print()
+print("--- a write waits out a drop and succeeds; the next read is redone ---")
+# The case per_slide alone missed: the drive goes away while a picture is
+# being written, ls_io's write waits for it and then succeeds, and nothing
+# has failed - but the file's open CZI handles are to the volume that went.
+# The next scene's read then fails with every folder reachable, and was
+# recorded as that scene's failure. The handles here go stale exactly so:
+# a document refuses to read once a wait has ended since it was opened.
+# The drop is too short for the watchdog (polling once a second) to see, so
+# only the absorbed wait tells the stage anything happened.
+real_init, real_read = _BigDoc.__init__, _BigDoc.read
+
+
+def _init_gen(self, path):
+    real_init(self, path)
+    self.gen = len(DR.PAUSES)
+
+
+def _read_stale(self, roi, plane, scene, zoom):
+    if len(DR.PAUSES) > self.gen:
+        raise OSError(116, "Stale file handle", self.path)
+    return real_read(self, roi, plane, scene, zoom)
+
+
+_BigDoc.__init__, _BigDoc.read = _init_gen, _read_stale
+real_save = OV.IO.save_image
+ABSORB = {"armed": False}
+
+
+def _save_absorbing(im, path, *a, **kw):
+    if ABSORB["armed"]:
+        ABSORB["armed"] = False
+        gone = STUDY.source_dir + ".gone"
+        os.rename(STUDY.source_dir, gone)
+        threading.Timer(0.02, lambda: os.rename(gone, STUDY.source_dir)).start()
+        # What ls_io.retry does when a write fails with the drive gone.
+        DR.wait_for_drive(f"write to {path}", poll=0.01)
+    return real_save(im, path, *a, **kw)
+
+
+OV.IO.save_image = _save_absorbing
+saved_poll = DR.POLL
+DR.POLL = 1.0
+try:
+    write_manifest(drop_scenes)
+    clear_outputs()
+    rc, text = run_main()
+    chk("uninterrupted run exits zero", rc, 0)
+    base_w = snapshot()
+    clear_outputs()
+    ABSORB["armed"] = True
+    n_pauses = len(DR.PAUSES)
+    rc, text = run_main()
+finally:
+    OV.IO.save_image = real_save
+    DR.POLL = saved_poll
+    _BigDoc.__init__, _BigDoc.read = real_init, real_read
+chk("the write absorbed a wait", (ABSORB["armed"], len(DR.PAUSES) > n_pauses), (False, True))
+chk("exits zero", rc, 0)
+keys, rows = read_failures()
+chk("...no scene recorded as failed", [r["scene_uid"] for r in rows or []], [])
+got = snapshot()
+chk("...the same files", sorted(got), sorted(base_w))
+chk("...byte for byte as uninterrupted", [k for k in base_w if got.get(k) != base_w[k]], [])
+with open(OV.QC_CSV, newline="", encoding="utf-8") as fh:
+    uids = [r["scene_uid"] for r in csv.DictReader(fh)]
+chk("...no duplicate rows", len(uids), len(set(uids)))
+chk("...no .tmp left", tmp_left(), [])
+
+print()
 print("--- Stopped is not swallowed as a per-file failure ---")
 clear_outputs()
 stop = os.path.join(STUDY.root if hasattr(STUDY, "root") else os.path.dirname(STUDY.out_root),

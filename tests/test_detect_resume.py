@@ -1370,6 +1370,48 @@ def drive_drop_check():
             chk("the stop file stops the stage", type(rc).__name__, "Stopped")
             chk("...the stopped section is not logged done",
                 sorted(M.read_done_log(M.DONE_LOG, marker) or set()), ["AB12_1a-s0"])
+
+            print()
+            print("--- 05c: a mask looked for as the drive blips is not 'absent' ---")
+            # The race ls_drive.present closes: the folder is away for the one
+            # look at the artifact mask and back before anything polls. Read
+            # as absent, every nucleus of the section would say artifact=0 -
+            # wrong counts, and nothing anywhere to say so.
+            for u in secs:
+                np.save(os.path.join(mask_dir, f"{u}_artifact.npy"),
+                        np.ones((256, 256), dtype=bool))
+            clear()
+            rc, text = run05c()
+            chk("with artifact masks: exits zero", rc, 0)
+            base_art = snap()
+            # Section 1's boxes lie on the 256 grid (identity map), so the
+            # mask flags its nuclei; section 2's lie off it.
+            chk("...every nucleus of section 1 is on an artifact",
+                sorted({r["artifact"] for r in read(M.NUCLEI_CSV)
+                        if r["scene_uid"] == "AB12_1a-s0"}), ["1"])
+            target = os.path.join(mask_dir, "AB12_1a-s0_artifact.npy")
+            real_exists = os.path.exists
+            looks = []
+
+            def blip(p):
+                if p == target:
+                    looks.append(p)
+                    if len(looks) == 2:      # 1: the no-artifact warning; 2: the read
+                        return False
+                return real_exists(p)
+            clear()
+            os.path.exists = blip
+            try:
+                rc, text = run05c()
+            finally:
+                os.path.exists = real_exists
+            chk("the blip happened", len(looks) >= 2, True)
+            chk("...exits zero", rc, 0)
+            got = snap()
+            chk("...the counts are as uninterrupted, artifact flags and all",
+                [k for k in base_art if got.get(k) != base_art[k]], [])
+            for u in secs:
+                os.remove(os.path.join(mask_dir, f"{u}_artifact.npy"))
         finally:
             DR.POLL = saved_poll
             for k, v in saved_env.items():

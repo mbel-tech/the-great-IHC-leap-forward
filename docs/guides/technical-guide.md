@@ -936,7 +936,10 @@ alike, without decoding a pixel, and builds the tables every later stage keys on
   without one, as ZEN writes for a single scene, is not compared), an archive that will not
   open, or a `source_files` name found nowhere. A QC table with no rows is written header-only. A paired
   study whose `acquisition.markers` do not name the scans' channels stops after the tables are written.
-  `--accept-suggestions` writes the suggested row counts into `layout_overrides.csv`.
+  `--accept-suggestions` writes the suggested row counts into `layout_overrides.csv`. If the drive drops
+  while the folder is listed, an archive opened or a header read, it waits for the drive (`ls_drive`)
+  and does that again, the archive opened afresh; a read that fails with the drive there is a failure as
+  above.
 
 ### `00b_verify_extraction.py`
 
@@ -951,7 +954,9 @@ came from.
 - **Failure and re-run:** a mismatch is a row with its status, not an exception, but any corrupt, missing
   or still-extracting file, or an unreadable archive, makes the run exit 1 with the counts as its last
   line. No zips at all is nothing to verify, and exits 0. With `source_files`, only the named zips and
-  the named CZIs inside zips are checked, as in 00. Re-running rechecks everything.
+  the named CZIs inside zips are checked, as in 00. Re-running rechecks everything. If the drive drops
+  while the folder is listed, an archive read or a CZI checked, it waits for the drive (`ls_drive`) and
+  does that again, so a dropped drive is never reported as missing files.
 
 ### `00c_channel_identity.py`
 
@@ -1722,7 +1727,9 @@ the whole study.
   Reagent controls of the marker (`reagent_controls`, through `ls_reagent_controls.expand`) are left out of
   the sample. While `reagent_controls.declared` is `unsure` and `qc/reagent_screen.csv` has candidates
   neither confirmed nor rejected, it prints a warning and carries on.
-- **Failure and re-run:** `--no-model` measures quality only, without StarDist.
+- **Failure and re-run:** `--no-model` measures quality only, without StarDist. If the drive drops while
+  a section's crops are read, it waits for the drive (`ls_drive`) and reads that section again, the CZI
+  opened afresh, so the sample is the one an uninterrupted run takes.
 
 ### `05c_detect_rois.py`
 
@@ -1759,7 +1766,11 @@ The longest-running stage (hours).
   tissue mask (`<uid>_mask.npy` from 04a) or no intensity range to share is skipped, not measured and
   not logged done; the run then exits 1 with the number skipped on its last line, after writing and
   logging every section it did measure, so a resume measures only those. ROIs not segmented inside a
-  measured section (`results/roi_box_status.csv`) do not fail the run.
+  measured section (`results/roi_box_status.csv`) do not fail the run. If the drive drops while a
+  section is measured, it waits for the drive (`ls_drive`) and measures that section again from its first
+  ROI, masks and CZI read afresh; nothing of it is written until it is whole, so the rows are those of an
+  uninterrupted run and none is written twice. A read that fails with the drive there stops the run as
+  before, with every earlier section on disk and logged.
 
 ### `06a_roi_dataset.py`
 
@@ -1902,7 +1913,9 @@ counts by eye.
   written in bands.
 - **Failure and re-run:** resumable per picture; `--force` redraws. Exit 2 before drawing anything when
   `roi_measurements.csv` or `positivity_cuts.csv` is missing or older than `roi_nuclei.csv`: a picture
-  that disagrees with the numbers is worse than none, so 06a must run first.
+  that disagrees with the numbers is worse than none, so 06a must run first. If the drive drops while a
+  section's boxes or its scene picture are read, it waits for the drive (`ls_drive`) and reads them again,
+  the CZI opened afresh; a read that fails with the drive there lists the section not drawn, as before.
 
 ### `atlas_pdf.py`
 
@@ -2039,7 +2052,7 @@ and its entry is carried over, never taken from another study. Used by 04k, 04l,
 
 ### `ls_drive.py`
 
-Shared module, standard library only: what a stage does when the slides or output drive goes away. `reachable()` checks the watched folders (`source_dir` and `out_root`, or `LS_WATCH`), `wait_for_drive` waits for them with no time limit (polling every 2 s, ended by the `LS_STOP_FILE` file or Ctrl+C), and `per_slide` reruns one slide's work from its start once the drive is back. `per_slide_settled` also reruns an attempt the drive went away during without it failing (an `ls_io` write that waited for the drive and then succeeded leaves the attempt's CZI handles pointing at a volume that went), judged by `disturbed_since(mark())`, which a stage's per-item `except` inside the unit also uses to re-raise rather than record the drive's failure as the item's. It prints `@@drive lost <folder> | <label>` and `@@drive back <seconds>` when `LS_PROGRESS=1`, which the app turns into its banner; a watchdog thread prints the first even while a read is stuck. Stages reach the one shared instance through `ls_io.drive_module()`.
+Shared module, standard library only: what a stage does when the slides or output drive goes away. `reachable()` checks the watched folders (`source_dir` and `out_root`, or `LS_WATCH`), `wait_for_drive` waits for them with no time limit (polling every 2 s, ended by the `LS_STOP_FILE` file or Ctrl+C), and `per_slide` reruns one slide's work from its start once the drive is back. `per_slide_settled` also reruns an attempt the drive went away during without it failing (an `ls_io` write that waited for the drive and then succeeded leaves the attempt's CZI handles pointing at a volume that went), judged by `disturbed_since(mark())`, which a stage's per-item `except` inside the unit also uses to re-raise rather than record the drive's failure as the item's. `present(path, label)` is `os.path.exists` for a file on the drive: a file absent because the drive has dropped is waited for and looked for again, never reported missing, even when the drive drops just as it is looked for. It prints `@@drive lost <folder> | <label>` and `@@drive back <seconds>` when `LS_PROGRESS=1`, which the app turns into its banner; a watchdog thread prints the first even while a read is stuck. Stages reach the one shared instance through `ls_io.drive_module()`.
 
 ### `ls_io.py`
 

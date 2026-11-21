@@ -165,6 +165,14 @@ def wait_if_gone(label):
     return DR.wait_if_gone(label) if DR is not None else 0.0
 
 
+def present(path, label):
+    """os.path.exists for a file on the drive (ls_drive's present): a mask
+    absent because the drive has dropped - even for the one look, the drive
+    back before anything polled - is waited for and looked for again. Read as
+    absent, a section would be measured with no artifact or tissue test."""
+    return DR.present(path, label) if DR is not None else os.path.exists(path)
+
+
 def is_stop(exc):
     """True for ls_drive.Stopped, which an `except Exception` that only says
     "crops not drawn" must not swallow: the operator asked the stage to stop."""
@@ -1821,14 +1829,14 @@ def mask_at(uid, kind):
     """The 256-frame artifact or censor mask, or None."""
     for d in section_dirs():
         p = os.path.join(d, f"{uid}_{kind}.npy")
-        if os.path.exists(p):
+        if present(p, uid):
             return np.load(p)
     return None
 
 
 def has_mask(uid, kind):
     """Whether mask_at(uid, kind) would find a file, without loading it."""
-    return any(os.path.exists(os.path.join(d, f"{uid}_{kind}.npy"))
+    return any(present(os.path.join(d, f"{uid}_{kind}.npy"), uid)
                for d in section_dirs())
 
 
@@ -1867,7 +1875,7 @@ def overview_tissue(uid, g):
     different reformats.
     """
     for d in section_dirs():
-        if os.path.exists(os.path.join(d, f"{uid}_mask.npy")):
+        if present(os.path.join(d, f"{uid}_mask.npy"), uid):
             return overview_mask(os.path.join(d, f"{uid}_tissue_overview.png"), g)
     return None
 
@@ -1881,7 +1889,7 @@ def overview_mask(p, g):
         shape = (int(g["src_h"]), int(g["src_w"]))
     except (KeyError, TypeError, ValueError):
         return None
-    if not os.path.exists(p):
+    if not present(p, os.path.basename(p)):
         return None
     from PIL import Image
     a = np.asarray(Image.open(p)) > 0

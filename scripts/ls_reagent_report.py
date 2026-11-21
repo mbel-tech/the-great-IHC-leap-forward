@@ -403,6 +403,12 @@ NO_CUT_NOTE = ("left out, fewer than {n} usable background nuclei for a cut of i
 NO_CONTROL_RATE = "no no_primary control with a cut of its own and ROI nuclei: no rate"
 OWN_NOTE = ("segmented on the marker's own channel: there is no count of all cells, "
             "so no false-positive rate (06a withholds it too) and no suggestion")
+#: The fewest nuclei a rate is given from (positivity.fp_min_nuclei's default).
+FP_MIN_NUCLEI = 50
+FEW_CONTROL = ("{n} reagent-control nuclei, fewer than the minimum {min}: no rate and "
+               "no suggested k")
+FEW_DISC = ("{n} stained background-disc nuclei left out in turn, fewer than the "
+            "minimum {min}: no disc rate")
 NO_DISC_RATE = (f"no stained section with two background discs of "
                 f">={LO.CUT_MIN_NUCLEI} usable nuclei: no disc rate")
 
@@ -420,24 +426,29 @@ def wilson(k, n, z=1.96):
 
 
 def _no_primary(c):
-    return (c.get("kind") or "no_primary") == "no_primary"
+    """Only an entry that says it is no_primary: a missing kind is not one."""
+    return c.get("kind") == "no_primary"
 
 
-def cut_check_rows(controls, stained_discs, fp_target, ks=K_GRID):
+def cut_check_rows(controls, stained_discs, fp_target, ks=K_GRID,
+                   fp_min_nuclei=FP_MIN_NUCLEI):
     """results/reagent_cut_check.csv's rows: per marker x k, CUT_CHECK_COLUMNS.
 
     `controls`: (scene_uid, marker) -> {"bg": usable background values, "roi":
-    [(median, censored)] of its ROI nuclei}, no_primary only. An entry with a
-    "kind" other than no_primary is ignored; one with "own": True is a marker
-    segmented on its own channel, which gets rows with no rate. `stained_discs`:
-    (scene_uid, marker) -> that STAINED section's background discs, each a list
-    of (median, censored) pairs or None (ls_overlay.leave_one_disc_out).
+    [(median, censored)] of its ROI nuclei, "kind": "no_primary"}. An entry
+    whose "kind" is not no_primary (or is missing) is ignored; one with
+    "own": True is a marker segmented on its own channel, which gets rows
+    with no rate. `stained_discs`: (scene_uid, marker) -> that STAINED
+    section's background discs, each a list of (median, censored) pairs or
+    None (ls_overlay.leave_one_disc_out).
 
     control_fp: each control section's ROI nuclei against its OWN cut at k
     (ls_overlay.section_cut over its own background), pooled over sections,
     with a Wilson 95% interval. disc_fp: leave-one-disc-out at k over the
     stained sections, pooled. suggested = 1 on the smallest k that meets
-    fp_target. A blank is a rate that cannot be given, never a 0.
+    fp_target. A blank is a rate that cannot be given, never a 0: with fewer
+    than `fp_min_nuclei` control nuclei (positivity.fp_min_nuclei) there is no
+    control rate and no suggestion, and with fewer disc nuclei no disc rate.
     """
     by_marker = {}
     for (uid, mk), c in controls.items():
@@ -460,12 +471,14 @@ def cut_check_rows(controls, stained_discs, fp_target, ks=K_GRID):
             notes.append(OWN_NOTE)
         elif not n:
             notes.append(NO_CONTROL_RATE)
+        elif n < fp_min_nuclei:
+            notes.append(FEW_CONTROL.format(n=n, min=fp_min_nuclei))
         m_rows = []
         for k in ks:
             row = dict.fromkeys(CUT_CHECK_COLUMNS, "")
             row.update(marker=mk, k=float(k), n_control_sections=len(with_cut),
                        n_control_nuclei=n)
-            if n and not own:
+            if n and n >= fp_min_nuclei and not own:
                 fp = 0
                 for bg, roi in with_cut:
                     cut = LO.section_cut(bg, k)
@@ -480,9 +493,10 @@ def cut_check_rows(controls, stained_discs, fp_target, ks=K_GRID):
                 if got:
                     dfp += got[0]
                     dn += got[1]
-            if dn:
+            if dn and dn >= fp_min_nuclei:
                 row.update(disc_fp=round(dfp / dn, 4), disc_fp_n=dn)
             m_rows.append(row)
+            row["_dn"] = dn
         rated = [r for r in m_rows if r["meets_target"] != ""]
         meeting = [r for r in rated if r["meets_target"] == 1]
         if meeting:
@@ -490,7 +504,10 @@ def cut_check_rows(controls, stained_discs, fp_target, ks=K_GRID):
         elif rated:
             notes.append(NO_K_MEETS)
         for r in m_rows:
-            r["note"] = "; ".join(notes + ([NO_DISC_RATE] if r["disc_fp"] == "" else []))
+            dn = r.pop("_dn")
+            why = ([] if r["disc_fp"] != "" else
+                   [FEW_DISC.format(n=dn, min=fp_min_nuclei)] if dn else [NO_DISC_RATE])
+            r["note"] = "; ".join(notes + why)
         rows.extend(m_rows)
     return rows
 

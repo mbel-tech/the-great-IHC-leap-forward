@@ -1786,11 +1786,12 @@ Stage `roi_dataset`. Turns the per-nucleus rows into per-ROI numbers. Still blin
   (`ls_overlay.leave_one_disc_out`, the rule `detector_specificity.csv`'s `loo_` columns use), and
   `suggested` = 1 on the smallest k meeting `positivity.fp_target`. isotype, preadsorbed and unstained
   controls are not used; a control with fewer than 5 usable background nuclei is left out and named in
-  the note. The console prints the suggested k per marker and whether the disc rate falls inside the
+  the note. Under `positivity.fp_min_nuclei` control nuclei there is no rate and no suggested k, and under
+  it disc nuclei no disc rate (blank, with the count in the note). The console prints the suggested k per marker and whether the disc rate falls inside the
   controls' interval at the k in force. It never changes `positivity.cut_k`. With no measured
   no_primary control the file is removed.
 - **Settings:** `section_thickness_um`, `pixel_size_um`, `detection`, `reagent_controls`,
-  `positivity.cut_k`, `positivity.fp_target`.
+  `positivity.cut_k`, `positivity.fp_target`, `positivity.fp_min_nuclei`.
 
 ### `06b_join_sampling.py`
 
@@ -2146,7 +2147,7 @@ fp_target, ks=K_GRID)` gives `results/reagent_cut_check.csv`'s rows (`CUT_CHECK_
 no_primary controls only (an entry of another `kind` is ignored), each control's ROI nuclei against its own
 cut at k, pooled, with a `wilson` 95% interval; the stained sections' leave-one-disc-out rate at k;
 `suggested` on the smallest k meeting `fp_target`, else `NO_K_MEETS` in the note. Blank, never 0, when a
-rate cannot be given; rates withheld for a marker segmented on its own channel. `agreement(row)` says
+rate cannot be given, including under `fp_min_nuclei` nuclei; rates withheld for a marker segmented on its own channel. `agreement(row)` says
 whether the disc rate falls inside the controls' interval. It reads no group key.
 
 ### `ls_reagent_screen.py`
@@ -4369,11 +4370,11 @@ The k check, provisional until validated on a study with known controls: the pos
 | `k` | float |  | The multiplier the cut is formed at for this row. |
 | `n_control_sections` | int |  | no_primary control sections with a cut of their own (at least 5 usable background nuclei) counted at this k. |
 | `n_control_nuclei` | int |  | Their ROI nuclei, censored included: the rate's denominator. |
-| `control_fp` | float | fraction | Control ROI nuclei called positive (above their own section's cut at k, or censored) over n_control_nuclei, pooled over control sections. Blank when there is no such nucleus, or for a marker segmented on its own channel. |
+| `control_fp` | float | fraction | Control ROI nuclei called positive (above their own section's cut at k, or censored) over n_control_nuclei, pooled over control sections. Blank when there are fewer than positivity.fp_min_nuclei such nuclei (the note gives the count), or for a marker segmented on its own channel. |
 | `control_fp_lo` | float | fraction | Lower end of the Wilson 95% interval on control_fp. |
 | `control_fp_hi` | float | fraction | Upper end of the Wilson 95% interval on control_fp. |
-| `disc_fp` | float | fraction | The stained sections' background discs, leave-one-disc-out at k (the rule of detector_specificity.csv's loo_ columns), pooled over sections. Blank with no section of two discs of 5 usable nuclei. |
-| `disc_fp_n` | int |  | The nuclei disc_fp is over. |
+| `disc_fp` | float | fraction | The stained sections' background discs, leave-one-disc-out at k (the rule of detector_specificity.csv's loo_ columns), pooled over sections. Blank under positivity.fp_min_nuclei nuclei, or with no section of two discs of 5 usable nuclei. |
+| `disc_fp_n` | int |  | The nuclei disc_fp is over; blank with it. |
 | `meets_target` | 0/1 |  | 1 when control_fp <= positivity.fp_target, else 0; blank when control_fp is. |
 | `suggested` | 0/1 |  | 1 on the smallest k that meets the target, 0 on the others; blank when there is no rate. |
 | `note` | text |  | Why something is blank or left out: a control with too few background nuclei for a cut (named), no control rate, own-channel marker, no disc rate, or `no k on the grid meets the target`. |

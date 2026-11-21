@@ -903,8 +903,10 @@ note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
         "below it the rate is left blank with a note, never 0.",
         default=50, minimum=1, label="Reagent-control minimum nuclei",
         note="A rate from a handful of nuclei is noise with a decimal point. "
-             "Blank rather than 0, because 0 reads as `looked and found none`.",
-        consumers=["app"], consumers_pending=True),
+             "Blank rather than 0, because 0 reads as `looked and found none`. "
+             "06a's reagent-control check of the cut gives no rate and no "
+             "suggested k from fewer.",
+        consumers=["06a", "app"]),
 
     # ---- reagent controls (slides stained without the primary, isotype, unstained...) ----
     Key("reagent_controls.declared", "str",

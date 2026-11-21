@@ -181,6 +181,9 @@ def measured_empty(path, have):
 T_UM = CONFIG["section_thickness_um"]
 #: The false-positive rate the k check holds the cut to (positivity.fp_target).
 FP_TARGET = float((CONFIG.get("positivity") or {}).get("fp_target", 0.01))
+#: ...and the fewest nuclei it gives a rate from (positivity.fp_min_nuclei).
+FP_MIN_NUCLEI = int((CONFIG.get("positivity") or {}).get("fp_min_nuclei",
+                                                          RR.FP_MIN_NUCLEI))
 AB = CONFIG["detection"].get("abercrombie", {})
 AB_ON = bool(AB.get("enabled"))
 BASE_PX_UM = CONFIG["pixel_size_um"]
@@ -627,7 +630,7 @@ def cut_check_lines(rows, st_discs, lookup, rc_nuc, rc_bg):
             here = [r for r in RR.cut_check_rows(
                 cut_check_controls(lookup, rc_nuc, rc_bg),
                 {key: d for key, d in st_discs.items() if key[1] == mk},
-                FP_TARGET, ks=(k,)) if r["marker"] == mk]
+                FP_TARGET, ks=(k,), fp_min_nuclei=FP_MIN_NUCLEI) if r["marker"] == mk]
         said = RR.agreement(here[0]) if here else None
         if said:
             r = here[0]
@@ -1124,7 +1127,7 @@ def main(argv=None):
     # The k check: the no_primary controls' own cuts at every k on the grid,
     # beside the stained sections' leave-one-disc-out rate at the same k.
     kc_rows = RR.cut_check_rows(cut_check_controls(rc_lookup, rc_nuc, rc_bg), st_discs,
-                                FP_TARGET)
+                                FP_TARGET, fp_min_nuclei=FP_MIN_NUCLEI)
     kc_csv = os.path.join(os.path.dirname(MEAS_CSV), RR.CUT_CHECK_CSV)
     rc_csv = os.path.join(os.path.dirname(MEAS_CSV), RR.REPORT_CSV)
     # A control's own cut, at full precision, for 06i to draw it by - in a file

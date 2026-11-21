@@ -382,6 +382,13 @@ try:
                         "cut_k_source": {"by": "default"}}
     chk("the defaults written out (Set up saves them) change nothing", why(c3),
         dict.fromkeys(WATCH))
+    for _leaf, _v in (("fp_target", 0.02), ("fp_min_nuclei", 80)):
+        c5 = json.loads(json.dumps(rec))
+        c5["positivity"] = {_leaf: _v}
+        got = why(c5)
+        chk(f"a new {_leaf} puts 06a and the results build out of date, not 05c",
+            (bool(got["roi_dataset"]), bool(got["build_results"]), got["detect"]),
+            (True, True, None))
     c4 = json.loads(json.dumps(rec))
     c4["positivity"] = {"cut_k": {"AF568": 3.0, "AF488": 3}}
     chk("...nor does every marker at 3.0", why(c4), dict.fromkeys(WATCH))

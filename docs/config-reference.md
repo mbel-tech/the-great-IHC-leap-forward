@@ -65,7 +65,7 @@ A key marked *required* has to be present before any stage will run.
 | `positivity.fp_target` | float | `0.01` | `06a`, `app` | The false-positive rate on no-primary reagent controls the cut is checked against: 0.01 accepts 1 in 100 control nuclei called positive. |
 | `positivity.cut_k` | raw | `{"*": 3.0}` | `05c`, `06a`, `06c`, `06i`, `app` | How many spreads above a section's own background median a nucleus must be to count as positive, per marker, with "*" for every marker not named. |
 | `positivity.cut_k_source` | raw | `{"by": "default"}` | `app` | Where positivity.cut_k came from: the default, the operator, or the reagent-control check, and when. |
-| `positivity.fp_min_nuclei` | int | `50` | not read yet; will be `app` | The fewest reagent-control nuclei a false-positive rate is given for; below it the rate is left blank with a note, never 0. |
+| `positivity.fp_min_nuclei` | int | `50` | `06a`, `app` | The fewest reagent-control nuclei a false-positive rate is given for; below it the rate is left blank with a note, never 0. |
 | `reagent_controls.declared` | str | `"no"` | `01m`, `app` | Whether this study has reagent controls: no, yes, or unsure. |
 | `reagent_controls.files` | raw | `{}` | `00`, `01`, `01b`, `01d`, `01m`, `02`, `04b`, `04c`, `04k`, `04n`, `05b`, `05c`, `06a`, `06c`, `06d`, `app` | Slide files confirmed as reagent controls, by file name. |
 | `reagent_controls.scenes` | raw | `{}` | `00`, `01`, `01b`, `01d`, `01m`, `02`, `04b`, `04c`, `04k`, `04n`, `05b`, `05c`, `06a`, `06c`, `06d`, `app` | Scenes confirmed as reagent controls, by scene uid. |

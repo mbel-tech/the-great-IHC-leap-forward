@@ -54,7 +54,7 @@ RC_BLOCK = {
 STUDY = use_temp_study(
     acquisition={"layout": "multiplex", "channels": CHANNELS},
     reagent_controls=RC_BLOCK,
-    positivity={"fp_target": 0.05, "cut_k": {"*": 3.0}})
+    positivity={"fp_target": 0.05, "cut_k": {"*": 3.0}, "fp_min_nuclei": 10})
 
 import ls_overlay as LO  # noqa: E402
 import ls_reagent_report as RR  # noqa: E402
@@ -69,6 +69,14 @@ def chk(label, got, want=True):
         fails += 1
     print(("ok   " if ok else "FAIL ") + label.ljust(66) + f" {got!r}"
           + ("" if ok else f"   want {want!r}"))
+
+
+def cc(controls, stained, target, fp_min_nuclei=1, **kw):
+    """cut_check_rows with every control marked no_primary unless it says
+    otherwise, and no minimum count unless one is given."""
+    return RR.cut_check_rows({k: dict({"kind": "no_primary"}, **c)
+                              for k, c in controls.items()},
+                             stained, target, fp_min_nuclei=fp_min_nuclei, **kw)
 
 
 def of(rows, marker):
@@ -97,7 +105,7 @@ chk("columns", RR.CUT_CHECK_COLUMNS,
 
 print("--- fp_falls_with_k ---")
 controls = {("C1", "pERK"): {"bg": BG, "roi": ROI}}
-rows = RR.cut_check_rows(controls, {}, 0.05)
+rows = cc(controls, {}, 0.05)
 chk("one row per k", [r["k"] for r in rows], list(RR.K_GRID))
 chk("every row has every column, in order",
     all(list(r) == RR.CUT_CHECK_COLUMNS for r in rows), True)
@@ -117,7 +125,7 @@ chk("no stained discs: disc_fp blank, not 0", (r3["disc_fp"], r3["disc_fp_n"]), 
 
 print("--- censored ---")
 cen = {("C1", "pERK"): {"bg": BG, "roi": [(1.0, True), (100.0, False)]}}
-rc = RR.cut_check_rows(cen, {}, 0.05)
+rc = cc(cen, {}, 0.05)
 chk("a censored nucleus is positive at every k",
     [r["control_fp"] for r in rc], [0.5] * len(RR.K_GRID))
 
@@ -127,7 +135,7 @@ ctl2 = {("C1", "pERK"): {"bg": BG, "roi": [(float(v), False) for v in
                                            [100] * 180 + [135, 150, 160, 170, 180,
                                                           190, 200, 210, 220, 230]]},
         ("C2", "PCNA"): {"bg": BG, "roi": [(100.0, False)] * 50}}
-rows = RR.cut_check_rows(ctl2, {}, 0.05)
+rows = cc(ctl2, {}, 0.05)
 for mk in ("pERK", "PCNA"):
     m = of(rows, mk)
     first = next(r["k"] for r in m if r["control_fp"] <= 0.05)
@@ -141,7 +149,7 @@ chk("pERK: 10 of 190 at k=2 misses 5%, 9 of 190 at k=2.5 meets it",
 chk("rows are marker by marker, k ascending",
     [(r["marker"], r["k"]) for r in rows],
     [("PCNA", k) for k in RR.K_GRID] + [("pERK", k) for k in RR.K_GRID])
-high = RR.cut_check_rows({("C1", "pERK"): {"bg": BG, "roi": [(1000.0, False)] * 10}},
+high = cc({("C1", "pERK"): {"bg": BG, "roi": [(1000.0, False)] * 10}},
                          {}, 0.05)
 chk("none meets the target: no row suggested",
     [r["suggested"] for r in high], [0] * len(RR.K_GRID))
@@ -152,12 +160,12 @@ chk("NO_K_MEETS is the brief's words", RR.NO_K_MEETS, "no k on the grid meets th
 print("--- control_without_cut_excluded ---")
 ctl3 = {("C1", "pERK"): {"bg": BG, "roi": ROI},
         ("THIN_s01_sc01", "pERK"): {"bg": [100.0] * 4, "roi": [(1000.0, False)] * 20}}
-rows = RR.cut_check_rows(ctl3, {}, 0.05)
+rows = cc(ctl3, {}, 0.05)
 chk("a control with 4 background values is not counted",
     {r["n_control_sections"] for r in rows}, {1})
 chk("...nor are its nuclei", {r["n_control_nuclei"] for r in rows}, {32})
 chk("...and the note names it", all("THIN_s01_sc01" in r["note"] for r in rows), True)
-only_thin = RR.cut_check_rows({("THIN_s01_sc01", "pERK"): {"bg": [100.0] * 4,
+only_thin = cc({("THIN_s01_sc01", "pERK"): {"bg": [100.0] * 4,
                                                            "roi": [(1000.0, False)]}},
                               {}, 0.05)
 chk("no control with a cut: rates, meets_target and suggested blank, not 0",
@@ -168,7 +176,7 @@ print("--- multiplex_partial_control_k (function) ---")
 ctl4 = {("M1", "pERK"): {"bg": BG, "roi": ROI},
         ("RC", "pERK"): {"bg": BG, "roi": ROI},
         ("RC", "PCNA"): {"bg": BG, "roi": ROI}}
-rows = RR.cut_check_rows(ctl4, {}, 0.05)
+rows = cc(ctl4, {}, 0.05)
 chk("pERK counts both its controls", {r["n_control_sections"] for r in of(rows, "pERK")}, {2})
 chk("PCNA counts only the control for PCNA",
     {r["n_control_sections"] for r in of(rows, "PCNA")}, {1})
@@ -177,12 +185,12 @@ print("--- isotype_not_used (function) ---")
 iso = dict(ctl4)
 iso[("ISO", "pERK")] = {"bg": BG, "roi": [(1000.0, False)] * 40, "kind": "isotype"}
 chk("an isotype control contributes nothing",
-    RR.cut_check_rows(iso, {}, 0.05), RR.cut_check_rows(ctl4, {}, 0.05))
+    cc(iso, {}, 0.05), cc(ctl4, {}, 0.05))
 chk("only isotype: no rows at all",
-    RR.cut_check_rows({("ISO", "pERK"): iso[("ISO", "pERK")]}, {}, 0.05), [])
+    cc({("ISO", "pERK"): iso[("ISO", "pERK")]}, {}, 0.05), [])
 
 print("--- own channel ---")
-own = RR.cut_check_rows({("C1", "PCNA"): {"bg": BG, "roi": ROI, "own": True}}, {}, 0.05)
+own = cc({("C1", "PCNA"): {"bg": BG, "roi": ROI, "own": True}}, {}, 0.05)
 chk("own-channel marker: no rate and no suggestion (06a withholds the rate)",
     {(r["control_fp"], r["meets_target"], r["suggested"]) for r in own}, {("", "", "")})
 chk("...and the note says why", all("own channel" in r["note"] for r in own), True)
@@ -192,11 +200,48 @@ d1 = [(float(v), False) for v in (90, 95, 100, 105, 110, 150)]
 d2 = [(float(v), False) for v in (92, 97, 100, 103, 108, 300)]
 d3 = [(float(v), False) for v in (100, 100, 100)]           # too thin to leave out
 stained = {("S1", "pERK"): [d1, d2, d3], ("S2", "pERK"): [d1, None]}
-rows = RR.cut_check_rows({("C1", "pERK"): {"bg": BG, "roi": ROI}}, stained, 0.05)
+rows = cc({("C1", "pERK"): {"bg": BG, "roi": ROI}}, stained, 0.05)
 for r in rows:
     want = LO.leave_one_disc_out([d1, d2, d3], r["k"])
     chk(f"k={r['k']}: disc_fp from S1 only (S2 has one usable disc)",
         (r["disc_fp"], r["disc_fp_n"]), (round(want[0] / want[1], 4), want[1]))
+
+print("--- missing kind ---")
+chk("an entry with no kind is not no_primary",
+    RR.cut_check_rows({("C1", "pERK"): {"bg": BG, "roi": ROI}}, {}, 0.05, fp_min_nuclei=1), [])
+
+print("--- fp_min_nuclei gate ---")
+chk("the default minimum is positivity.fp_min_nuclei's", RR.FP_MIN_NUCLEI, 50)
+zero49 = {("C1", "pERK"): {"bg": BG, "roi": [(100.0, False)] * 49, "kind": "no_primary"}}
+g49 = RR.cut_check_rows(zero49, {}, 0.05)
+chk("49 control nuclei, 0 positive: no suggested row",
+    [r["suggested"] for r in g49], [""] * len(RR.K_GRID))
+chk("...control_fp, its interval and meets_target blank, never 0",
+    {(r["control_fp"], r["control_fp_lo"], r["control_fp_hi"], r["meets_target"])
+     for r in g49}, {("", "", "", "")})
+chk("...n_control_nuclei still says 49", {r["n_control_nuclei"] for r in g49}, {49})
+chk("...the note names the count and the minimum",
+    all("49 reagent-control nuclei, fewer than the minimum 50: no rate and no suggested k"
+        in r["note"] for r in g49), True)
+chk("...and not NO_K_MEETS", any(RR.NO_K_MEETS in r["note"] for r in g49), False)
+zero50 = {("C1", "pERK"): {"bg": BG, "roi": [(100.0, False)] * 50, "kind": "no_primary"}}
+g50 = RR.cut_check_rows(zero50, {}, 0.05)
+chk("50 control nuclei: the suggestion is there (k=2.0)",
+    [r["k"] for r in g50 if r["suggested"] == 1], [2.0])
+chk("...with a rate of 0.0", g50[0]["control_fp"], 0.0)
+chk("a study minimum is honoured (fp_min_nuclei=60 blanks 50)",
+    {r["suggested"] for r in RR.cut_check_rows(zero50, {}, 0.05, fp_min_nuclei=60)}, {""})
+dd = [(float(v), False) for v in (90, 95, 100, 105, 110, 150)]
+dstained = {("S1", "pERK"): [dd, dd]}                         # 12 disc nuclei
+gd = RR.cut_check_rows(zero50, dstained, 0.05, fp_min_nuclei=13)
+chk("disc gate: 12 disc nuclei under a minimum of 13 -> disc_fp, disc_fp_n blank",
+    {(r["disc_fp"], r["disc_fp_n"]) for r in gd}, {("", "")})
+chk("...the note names the count and the minimum",
+    all("12 stained background-disc nuclei left out in turn, fewer than the minimum 13"
+        in r["note"] for r in gd), True)
+chk("...at the minimum it is given",
+    {r["disc_fp_n"] for r in RR.cut_check_rows(zero50, dstained, 0.05, fp_min_nuclei=12)},
+    {12})
 
 # ======================================================= 06a, leave_one_disc_out
 print("--- leave_one_disc_out_k3_unchanged ---")
@@ -337,7 +382,8 @@ npath, bpath = write_fixture(tmp)
 code, out6a = run_06a(tmp, npath, bpath)
 chk("06a runs", code, 0)
 chk("06a reads positivity.fp_target from the study (0.05 here)",
-    G6A.CONFIG["positivity"]["fp_target"], 0.05)
+    (G6A.CONFIG["positivity"]["fp_target"], G6A.FP_TARGET), (0.05, 0.05))
+chk("...and positivity.fp_min_nuclei (10 here)", G6A.FP_MIN_NUCLEI, 10)
 kc = read(os.path.join(tmp, RR.CUT_CHECK_CSV))
 chk("reagent_cut_check.csv is written beside roi_measurements.csv", kc is not None, True)
 chk("its header is CUT_CHECK_COLUMNS", list(kc[0]) if kc else None, RR.CUT_CHECK_COLUMNS)
@@ -355,11 +401,11 @@ chk("...16 ROI nuclei per control section",
 print("--- isotype_not_used (06a) ---")
 chk("the isotype control (every nucleus at 1000) is in no rate",
     max(float(r["control_fp"]) for r in kc) < 1.0, True)
-want = RR.cut_check_rows(
+want = cc(
     {("LS45_s09_sc01", "pERK"): {"bg": BG, "roi": [(float(v), False) for v in SPREAD]},
      ("RC1_s01_sc01", "pERK"): {"bg": BG, "roi": [(float(v), False) for v in SPREAD]},
      ("RC1_s01_sc01", "PCNA"): {"bg": BG, "roi": [(float(v), False) for v in SPREAD]}},
-    {}, 0.05)
+    {}, 0.05, fp_min_nuclei=10)
 chk("control_fp is the no_primary controls' alone",
     [r["control_fp"] for r in kc], [str(r["control_fp"]) for r in want])
 
@@ -389,6 +435,10 @@ chk("says whether the discs agree at the k in force, per marker",
                               "discs overstate", "cannot compare"))
         for ln in out6a.splitlines()), 2)
 chk("labels it provisional", "provisional" in out6a, True)
+few = G6A.cut_check_lines(
+    RR.cut_check_rows(zero49, {}, 0.05), {}, {}, [], {})
+chk("too few control nuclei: the console says no suggested k, and why",
+    few[0].startswith("[pERK] no suggested k: 49 reagent-control nuclei"), True)
 
 print("--- agreement ---")
 chk("inside the interval", RR.agreement({"disc_fp": 0.02, "control_fp_lo": 0.01,

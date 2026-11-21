@@ -6031,7 +6031,7 @@
      "name": "control_fp",
      "type": "float",
      "units": "fraction",
-     "meaning": "Control ROI nuclei called positive (above their own section's cut at k, or censored) over n_control_nuclei, pooled over control sections. Blank when there is no such nucleus, or for a marker segmented on its own channel."
+     "meaning": "Control ROI nuclei called positive (above their own section's cut at k, or censored) over n_control_nuclei, pooled over control sections. Blank when there are fewer than positivity.fp_min_nuclei such nuclei (the note gives the count), or for a marker segmented on its own channel."
     },
     {
      "name": "control_fp_lo",
@@ -6049,13 +6049,13 @@
      "name": "disc_fp",
      "type": "float",
      "units": "fraction",
-     "meaning": "The stained sections' background discs, leave-one-disc-out at k (the rule of detector_specificity.csv's loo_ columns), pooled over sections. Blank with no section of two discs of 5 usable nuclei."
+     "meaning": "The stained sections' background discs, leave-one-disc-out at k (the rule of detector_specificity.csv's loo_ columns), pooled over sections. Blank under positivity.fp_min_nuclei nuclei, or with no section of two discs of 5 usable nuclei."
     },
     {
      "name": "disc_fp_n",
      "type": "int",
      "units": "",
-     "meaning": "The nuclei disc_fp is over."
+     "meaning": "The nuclei disc_fp is over; blank with it."
     },
     {
      "name": "meets_target",

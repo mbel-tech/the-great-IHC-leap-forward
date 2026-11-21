@@ -1,4 +1,4 @@
-"""01k and 01h wait out a dropped drive and redo the slide they were on.
+"""01k, 01h and 00b wait out a dropped drive and redo the unit they were on.
 
 The slides are on a USB drive that goes away rather than failing a read. A read
 that raises while the slides folder is unreachable is not the file's fault: the
@@ -493,6 +493,91 @@ settle()
 os.environ.pop("LS_STOP_FILE")
 os.remove(stop)
 chk("the stop file stops 01h", stopped)
+
+# ===================================================================== 00b
+
+print()
+print("--- 00b: the drive drops while the archives and the CZIs are checked ---")
+# 00b reads every transfer zip's central directory, then looks at each
+# extracted CZI's size (and with --crc its bytes). A drive that drops lists as
+# empty and its CZIs look missing; an archive's directory read fails. Each is
+# waited out and done again, and the status table is what an uninterrupted
+# run writes. zipfile is a stand-in that drops on the read named.
+import zipfile  # noqa: E402
+
+V = load_stage("00b_verify_extraction.py")
+for f in glob.glob(os.path.join(STUDY.source_dir, "*")):
+    os.remove(f)
+ZIPS = {"t1.zip": {"LS07_1a.czi": b"a" * 100, "LS07_2a.czi": b"b" * 50},
+        "t2.zip": {"LS07_3a.czi": b"c" * 70}}
+for zname, members in ZIPS.items():
+    with zipfile.ZipFile(os.path.join(STUDY.source_dir, zname), "w") as z:
+        for m, data in members.items():
+            z.writestr(m, data)
+    for m, data in members.items():
+        with open(os.path.join(STUDY.source_dir, m), "wb") as fh:
+            fh.write(data)
+STATUS = os.path.join(V.QC_DIR, "extraction_status.csv")
+
+
+class _DropZip(zipfile.ZipFile):
+    def infolist(self):
+        maybe_drop(("zip", os.path.basename(self.filename)), self.filename)
+        return super().infolist()
+
+
+class _DropZipModule:
+    ZipFile = _DropZip
+    BadZipFile = zipfile.BadZipFile
+
+
+V.zipfile = _DropZipModule
+real_getsize = V.os.path.getsize
+
+
+def _getsize(path):
+    maybe_drop(("size", os.path.basename(path)), path)
+    return real_getsize(path)
+
+
+def v_run(*argv):
+    if os.path.exists(STATUS):
+        os.remove(STATUS)
+    V.os.path.getsize = _getsize
+    try:
+        rc, text = run(V, ["00b", *argv])
+    finally:
+        V.os.path.getsize = real_getsize
+    settle()
+    with open(STATUS, "rb") as fh:
+        return rc, text, fh.read()
+
+
+rc, text, base_v = v_run("--crc")
+chk("uninterrupted 00b exits zero", rc, 0)
+chk("...checks every CZI", base_v.count(b",ok,"), 3)
+for what, key in (("an archive's directory", ("zip", "t2.zip")),
+                  ("a CZI's size", ("size", "LS07_2a.czi"))):
+    DROP["at"] = key
+    rc, text, got = v_run("--crc")
+    chk(f"drop on {what}: it fired", DROP["at"], None)
+    chk("...exits zero", rc, 0)
+    chk("...says the drive came back", "@@drive back" in text)
+    chk("...the same status table, byte for byte", got, base_v)
+    chk("...no .tmp left", tmp_left(), [])
+
+t = vanish_for(0.3)
+rc, text, got = v_run("--crc")
+t.join(5)
+chk("the folder gone as 00b starts: exits zero", rc, 0)
+chk("...after waiting, not finding nothing", "@@drive back" in text)
+chk("...the same status table", got, base_v)
+
+os.remove(os.path.join(STUDY.source_dir, "LS07_3a.czi"))
+rc, text, got = v_run()
+chk("a CZI missing with the folder there: exits 1", rc, 1)
+chk("...listed missing", b"LS07_3a.czi,t2.zip,70,,missing," in got)
+chk("...without waiting for a drive that never left", "@@drive" in text, False)
 
 print()
 print("FAILURES" if fails else "ALL PASS")

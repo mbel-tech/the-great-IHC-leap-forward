@@ -111,6 +111,27 @@ chk("Stop goes back to how it was",
     (d.stop_btn.isVisibleTo(d), d.stop_btn.text()), (False, "Stop after this stage"))
 chk("no raw marker reached the log", "@@drive" in log(), False)
 
+print("--- a second lost after Stop now keeps Stop disabled ---")
+_stops = []
+_real_stop = w.runner.stop
+w.runner.stop = lambda: _stops.append(True)
+w._stage_line(LOST)
+pump(banner_up)
+d.stop_btn.click()
+chk("Stop now pressed: Runner.stop called, button disabled",
+    (_stops, d.stop_btn.isEnabled()), ([True], False))
+w._stage_line("@@drive lost E:\\Slides | LS53_1a scene 9")
+chk("a second lost does not enable it again", d.stop_btn.isEnabled(), False)
+chk("...but the banner names the newest label", "LS53_1a scene 9" in d.banner.text())
+chk("the banner has an accessible name", d.banner.accessibleName(), "Drive disconnected")
+w._stage_line("@@drive back 30")
+chk("after back, Stop stays disabled while a stop is asked for",
+    (d.stop_btn.text(), d.stop_btn.isEnabled()), ("Stop after this stage", False))
+w.runner.stop = _real_stop
+w._stop_requested = False
+d.stop_btn.setEnabled(True)
+del notes[:]
+
 print("--- a short drop: only the log line ---")
 del notes[:]
 w._drive.after = 10.0

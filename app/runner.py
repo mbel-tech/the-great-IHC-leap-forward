@@ -320,8 +320,20 @@ class Runner:
         tee = _Tee(on_line)
         t0 = time.time()
 
+        # A stage run here can wait for a dropped drive too (ls_io.retry on
+        # out_root); Stop reaches that wait through its own LS_STOP_FILE. In
+        # the supervised child the supervisor's stop file is already set, and
+        # is the one that counts.
+        own_stop = not os.environ.get("LS_CHILD")
+        if own_stop:
+            with self._stop_lock:
+                self._starting, self._stop_pending = True, False
         with self._lock:
             old_argv, old_cwd = sys.argv, os.getcwd()
+            if own_stop:
+                old_stop = os.environ.get("LS_STOP_FILE")
+                stop_file = self._new_stop_file()
+                os.environ["LS_STOP_FILE"] = stop_file
             try:
                 mod = self.load(stage.script)
                 sys.argv = argv
@@ -362,13 +374,21 @@ class Runner:
 
             except BaseException as e:                      # noqa: BLE001
                 tee.flush()
+                if _is_stopped(e):
+                    return StageResult(stage.sid, False, time.time() - t0, tee.text(),
+                                       SV.STOPPED_IN_PAUSE, stopped=True)
                 detail = "".join(traceback.format_exception(type(e), e, e.__traceback__))
                 return StageResult(stage.sid, False, time.time() - t0,
                                    tee.text(), f"{type(e).__name__}: {e}\n\n{detail}",
-                                   stopped=_is_stopped(e),
                                    interrupted=isinstance(e, KeyboardInterrupt))
 
             finally:
+                if own_stop:
+                    if old_stop is None:
+                        os.environ.pop("LS_STOP_FILE", None)
+                    else:
+                        os.environ["LS_STOP_FILE"] = old_stop
+                    self._drop_stop_file(stop_file)
                 sys.argv = old_argv
                 try:
                     os.chdir(old_cwd)
@@ -398,15 +418,7 @@ class Runner:
         with self._stop_lock:
             self._starting, self._stop_pending = True, False
         with self._lock:
-            fd, stop_file = tempfile.mkstemp(prefix="ls-stop-", suffix=".flag")
-            os.close(fd)
-            os.remove(stop_file)          # its existence is the request
-            with self._stop_lock:
-                self._stop_file = stop_file
-                self._starting = False
-                if self._stop_pending:
-                    open(stop_file, "w").close()
-                    self._stop_pending = False
+            stop_file = self._new_stop_file()
             t0 = time.time()
             try:
                 rc, pauses, tail = SV.run_child(
@@ -422,12 +434,7 @@ class Runner:
                                    interrupted=isinstance(e, KeyboardInterrupt))
             finally:
                 self._proc = None
-                with self._stop_lock:
-                    self._stop_file = None
-                try:
-                    os.remove(stop_file)
-                except OSError:
-                    pass
+                self._drop_stop_file(stop_file)
             # A stop during a wait for the drive is the supervisor's own verdict
             # (the stop file was there and the drive was out): it says so with
             # STOPPED_IN_PAUSE, never from the child's text alone.
@@ -436,12 +443,36 @@ class Runner:
                                stopped=(rc == 1 and tail == SV.STOPPED_IN_PAUSE),
                                interrupted=(rc == 130))
 
-    def stop(self):
-        """Ask a stage running as a child to stop now.
+    def _new_stop_file(self):
+        """A fresh stop-file name for the run starting now (the file itself is
+        absent: its existence is the request), with a stop that came while the
+        run was starting honoured at once. Called holding self._lock."""
+        fd, stop_file = tempfile.mkstemp(prefix="ls-stop-", suffix=".flag")
+        os.close(fd)
+        os.remove(stop_file)
+        with self._stop_lock:
+            self._stop_file = stop_file
+            self._starting = False
+            if self._stop_pending:
+                open(stop_file, "w").close()
+                self._stop_pending = False
+        return stop_file
 
-        Creates the stop file - a wait for the drive, the child's or the
-        supervisor's, ends on it - and terminates the child. A stage running
-        in this process is not affected.
+    def _drop_stop_file(self, stop_file):
+        with self._stop_lock:
+            self._stop_file = None
+        try:
+            os.remove(stop_file)
+        except OSError:
+            pass
+
+    def stop(self):
+        """Ask the running stage to stop now.
+
+        Creates the run's stop file - a wait for the drive ends on it, in a
+        child, its supervisor or a stage run in this process - and terminates
+        the child if there is one. A stage in this process that is not waiting
+        for the drive is not affected until it next waits.
         """
         with self._stop_lock:
             stop_file, proc = self._stop_file, self._proc

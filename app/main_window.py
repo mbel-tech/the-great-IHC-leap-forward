@@ -79,6 +79,7 @@ class ActivityDrawer(QFrame):
         # A slides drive that has been gone for a while (show_drive_lost).
         self.banner = QLabel("")
         self.banner.setObjectName("driveBanner")
+        self.banner.setAccessibleName("Drive disconnected")
         self.banner.setWordWrap(True)
         self.banner.setStyleSheet(
             f"background:{T.WARN_BG}; color:{T.WARN}; border:1px solid {T.WARN_LINE};"
@@ -1160,7 +1161,9 @@ class MainWindow(QMainWindow):
         if drive[0] == "lost":
             new = self._drive.lost(now, drive[1], drive[2])
             if self._drive.flagged:
-                self.drawer.show_drive_lost(drive[1], drive[2])
+                # Same drop, newer label: the words only. Stop stays as it is
+                # (disabled once Stop now was pressed).
+                self.drawer.banner.setText(PR.drive_lost_words(drive[1], drive[2]))
             elif new:
                 self._drive_timer.start(int(1000 * self._drive.left(now)))
             return

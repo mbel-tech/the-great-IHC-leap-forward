@@ -636,33 +636,45 @@ NO_STAINED_CUT = (f"no positivity cut on this section (fewer than {LO.CUT_MIN_NU
                   f"usable background-disc nuclei): no rate to correct")
 
 
-def controls_for(uid, marker, lookup, scene_rows, config, boxed=None, pairs=None):
+def controls_for(uid, marker, lookup, scene_rows, config, boxed=None):
     """(tier, control uids): the no_primary reagent controls whose readings
-    correct a stained section's rate, for one marker. The inverse of
-    pairing_for: a control is a candidate when its own pairing (the
-    operator's paired_with, else the same file, else the same animal) names
-    this section, and the best tier among the candidates wins (operator, then
-    same_file, then same_animal). A control the operator paired elsewhere is
-    not taken by the file or animal rule. Study-wide pairing is never used:
-    with no candidate the answer is ("none", []).
+    correct a stained section's rate, for one marker. pairing_for's tiers
+    turned round, from the stained section's side, first that has any:
 
-    Only `no_primary` controls; isotype, preadsorbed and unstained never.
-    `pairs`: {(control uid, marker): pairing_for(...)} already worked out
-    (06a passes it so each control is paired once).
+      operator     controls whose `reagent_controls.paired_with` (keyed by the
+                   control's uid or file) names this section or its file;
+      same_file    controls on this section's file;
+      same_animal  controls of this section's animal.
+
+    Study-wide pairing is never used: with none of these the answer is
+    ("none", []). Only `no_primary` controls; isotype, preadsorbed and
+    unstained never. `boxed`: {(scene_uid, marker)} 05a placed boxes on; as in
+    pairing_for, the default tiers consider only those when 05a has boxed any
+    section of this marker. The operator's choice is kept as chosen.
     """
-    best = {}
-    for (cu, mk), entry in lookup.items():
-        if mk != marker or cu == uid or not _no_primary(entry or {}):
-            continue
-        got = (pairs or {}).get((cu, mk))
-        if got is None:
-            got = pairing_for(cu, mk, lookup, scene_rows, config, boxed)
-        tier, stained = got
-        if tier in CORRECTION_TIERS and uid in stained:
-            best.setdefault(tier, []).append(cu)
-    for tier in CORRECTION_TIERS:
-        if best.get(tier):
-            return tier, sorted(set(best[tier]), key=NM.natural_key)
+    info = {}
+    for r in scene_rows:
+        info.setdefault(r["scene_uid"], (_base(r.get("file")), r.get("animal", "")))
+    file, animal = info.get(uid, ("", ""))
+    cands = sorted({cu for (cu, mk), e in lookup.items()
+                    if mk == marker and cu != uid and _no_primary(e or {})},
+                   key=NM.natural_key)
+    pw = RC.entries(config)["paired_with"]
+    got = [cu for cu in cands
+           if any(t in (uid, file) for t in
+                  (pw.get(cu) or pw.get(info.get(cu, ("", ""))[0]) or []))]
+    if got:
+        return "operator", got
+    if boxed and any(m == marker for _u, m in boxed):
+        cands = [cu for cu in cands if (cu, marker) in boxed]
+    if file:
+        got = [cu for cu in cands if info.get(cu, ("", ""))[0] == file]
+        if got:
+            return "same_file", got
+    if animal:
+        got = [cu for cu in cands if info.get(cu, ("", ""))[1] == animal]
+        if got:
+            return "same_animal", got
     return "none", []
 
 
@@ -821,6 +833,8 @@ def corrected_rows(stained, control_nuclei, cuts, control_sets,
             out.append(row)
             continue
         row["fp_rate_n"] = f_n
+        if not own:
+            row["fp_rate"] = round(f_pos / f_n, 4)
         if pos == "":
             notes.append(NO_STAINED_CUT)
         elif own:
@@ -840,7 +854,6 @@ def corrected_rows(stained, control_nuclei, cuts, control_sets,
             else:
                 notes.append(dc["note"])
         else:
-            row["fp_rate"] = round(f_pos / f_n, 4)
             rg_out = rogan_gladen(pos, n, f_pos, f_n, draws, seed)
             row.update({c: (round(rg_out[k], 4) if rg_out[k] != "" else "")
                         for c, k in (("frac_positive_corrected", "corrected"),

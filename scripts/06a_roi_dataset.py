@@ -598,18 +598,16 @@ def corrected_report(lookup, rc_nuc, rc_cuts, rows, st_areas, st_ab, rc_areas,
     from (ROI discs only), per (section, marker, region): their n_nuclei and
     n_positive, blank when any disc had no cut; the usable ROI area (st_areas)
     and the Abercrombie factor those rows were given (st_ab). Nothing is
-    added to those rows. Each stained section's controls are the inverse of
-    the report's pairing (ls_reagent_report.controls_for: operator, same file,
-    same animal; never study-wide), each counted against its own cut
-    (rc_cuts).
+    added to those rows. Each stained section's controls are the report's
+    pairing tiers from the stained side (ls_reagent_report.controls_for:
+    operator, same file, same animal; never study-wide), each counted against
+    its own cut (rc_cuts).
     """
     np_keys = sorted(k for k in lookup
                      if k in measured and (lookup[k] or {}).get("kind") == "no_primary")
     if not np_keys:
         return []
     scene_rows = RR.study_rows(CONFIG)
-    pairs = {k: RR.pairing_for(k[0], k[1], lookup, scene_rows, CONFIG, boxed)
-             for k in np_keys}
     np_lookup = {k: lookup[k] for k in np_keys}
     stained = {}
     for r in rows:
@@ -622,11 +620,11 @@ def corrected_report(lookup, rc_nuc, rc_cuts, rows, st_areas, st_ab, rc_areas,
         s["n"] += r["n_nuclei"]
         s["pos"] = "" if (s["pos"] == "" or r["n_positive"] == "") else s["pos"] + r["n_positive"]
         s["own"] = s["own"] or bool(r["denominator_withheld_reason"])
-    sets = {(u, m): RR.controls_for(u, m, np_lookup, scene_rows, CONFIG, boxed, pairs)
+    sets = {(u, m): RR.controls_for(u, m, np_lookup, scene_rows, CONFIG, boxed)
             for u, m in {(k[0], k[1]) for k in stained}}
     return RR.corrected_rows(stained, rc_nuc, rc_cuts, sets, fp_min_nuclei=FP_MIN_NUCLEI,
                              control_areas={k: v for k, v in rc_areas.items()
-                                            if (k[0], k[1]) in pairs})
+                                            if (k[0], k[1]) in np_lookup})
 
 
 def cut_check_controls(lookup, rc_nuc, rc_bg):

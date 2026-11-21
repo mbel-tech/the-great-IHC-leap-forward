@@ -118,9 +118,9 @@ LOOKUP = {("A1_s01_sc02", "pERK"): {"kind": "no_primary"},
 CFG = {"reagent_controls": {"declared": "yes", "paired_with": {}}}
 chk("a same-file control wins over a same-animal one",
     RR.controls_for("A1_s01_sc01", "pERK", LOOKUP, ROWS, CFG), ("same_file", ["A1_s01_sc02"]))
-chk("...a section on its own file gets the same-animal control",
+chk("...a section on its own file gets both of its animal's controls",
     RR.controls_for("A1_s03_sc01", "pERK", LOOKUP, ROWS, CFG),
-    ("same_animal", ["A1_s02_sc01"]))
+    ("same_animal", ["A1_s01_sc02", "A1_s02_sc01"]))
 chk("with no same-animal control: none, never study-wide",
     RR.controls_for("B2_s01_sc01", "pERK", LOOKUP, ROWS, CFG), ("none", []))
 CFG_PW = {"reagent_controls": {"declared": "yes",
@@ -370,9 +370,9 @@ chk("no control on the file or animal: none, never study-wide",
     (b["fp_rate_source"], b["frac_positive_corrected"]),
     ("none: no same-slide or same-animal control", ""))
 a2 = one(corr, "A1_s02_sc01")
-chk("the inverse of the report's pairing: A1's pERK control pairs on its own file, "
-    "so A1's other file gets none", a2["fp_rate_source"],
-    "none: no same-slide or same-animal control")
+chk("A1's other file: the same-animal pERK control", a2["fp_rate_source"].startswith(
+    "same_animal: A1_s01_sc02"), True)
+chk("...(0.4 - 0.1) / 0.9", approx(a2["frac_positive_corrected"], round(0.3 / 0.9, 4)), True)
 chk("06a says it wrote it", "roi_corrected.csv" in out6a, True)
 
 print("--- roi_measurements_unchanged ---")
@@ -400,6 +400,37 @@ finally:
     G6A.CONFIG["reagent_controls"] = RC_BLOCK
 chk("isotype controls only: no file either",
     os.path.exists(os.path.join(tmp, "roi_corrected.csv")), False)
+
+print("--- own_marker_density (06a, end to end) ---")
+# PCNA segmented on its own channel: the stained density and the control's in
+# the note are 06a's positive_density_per_mm2 and the report's positive_per_mm2.
+otmp = tempfile.mkdtemp(prefix="corr_own_")
+onpath, obpath = write_fixture(otmp, DATA)
+with open(onpath, newline="", encoding="utf-8") as fh:
+    orows = list(csv.DictReader(fh))
+for r in orows:
+    r["segmented_on"] = "PCNA" if r["marker"] == "PCNA" else ""
+    r["nucleus_shaped"] = "1"
+with open(onpath, "w", newline="", encoding="utf-8") as fh:
+    w = csv.DictWriter(fh, fieldnames=list(orows[0]))
+    w.writeheader()
+    w.writerows(orows)
+code, _o = run_06a(otmp, onpath, obpath)
+chk("06a runs", code, 0)
+ocorr = read(os.path.join(otmp, "roi_corrected.csv"))
+omeas = read(os.path.join(otmp, "roi_measurements.csv"))
+orep = read(os.path.join(otmp, "reagent_controls.csv"))
+oc = one(ocorr, "A1_s01_sc01", "PCNA")
+om = [r for r in omeas if (r["scene_uid"], r["marker"], r["roi_kind"])
+      == ("A1_s01_sc01", "PCNA", "roi")][0]
+orc = one(orep, "A1_s02_sc01", "PCNA")
+chk("own marker: no fraction, no corrected fraction, no fp_rate",
+    (oc["frac_positive"], oc["frac_positive_corrected"], oc["fp_rate"]), ("", "", ""))
+chk("...the note's stained density is 06a's positive_density_per_mm2",
+    f"stained {om['positive_density_per_mm2']}," in oc["correction_note"], True)
+chk("...and its control density the report's positive_per_mm2",
+    f"control {orc['positive_per_mm2']}," in oc["correction_note"], True)
+chk("...and a corrected density is given", "corrected " in oc["correction_note"], True)
 
 # ===================================================== 06c
 print("--- 06c: the corrected columns beside the raw rate ---")

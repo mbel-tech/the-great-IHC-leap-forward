@@ -601,7 +601,9 @@ with the app (it is in `requirements.txt` and in the installer's smoke test), bu
 - **How it works:** Qt draws the window and dispatches every click and key to the code that handles it;
   PySide6 is the official binding of Qt for Python. Stages run inside the app's own Python, each on a
   worker thread (`app/runner.py`), because the installed app has no separate Python to start; a stage
-  that stops with an error is logged as a failed stage rather than taking the window down.
+  that stops with an error is logged as a failed stage rather than taking the window down. A stage that
+  reads CZI pixels runs instead as a child process of that same Python (section 5.3), so a native crash
+  when the slides drive drops cannot take the window down either.
 - **Version and citation:** PySide6 6.11.2 on Windows (the Mac app holds it at 6.9). The Qt Company,
   *Qt for Python*, <https://doc.qt.io/qtforpython-6/>.
 
@@ -782,7 +784,7 @@ second list, and `bash run_all.sh from 5` resumes at step 5.
 ### 5.3 The runner: stages in-process
 
 `app/runner.py` runs a stage **inside the app's own Python process**, on a worker thread, not as a
-subprocess. The installed app has no separate Python to start, so importing the stage and calling its
+subprocess (the exception, stages that read CZI pixels, is below). The installed app has no separate Python to start, so importing the stage and calling its
 `main()` is what lets one bundled interpreter be the whole application.
 
 `Runner.run(stage)`:
@@ -800,6 +802,19 @@ subprocess. The installed app has no separate Python to start, so importing the 
      is a failure with that message;
    - any other exception is a failure with its traceback.
 5. Restores `sys.argv` and the working directory.
+
+**Stages that read CZI pixels run in a child process.** A stage whose `reader` is `pylibCZIrw` or
+`czifile` is started as `python -m app --stage <id> <study.json> --child` with the app's own interpreter
+(the console `python.exe` beside a `pythonw.exe`), because a crash inside native libCZI as the slides
+drive drops would otherwise close the window. `app/supervise.py` watches it: its output reaches the log
+pane line by line as before, and its `@@drive lost` / `@@drive back` lines (`ls_drive.py`)
+become the run's `pauses`, recorded with the run in the study file and shown in the run history as
+"ok, paused 2x (3 min)". Exit status 0, 1, 2 and 130 are the stage's own answers; any other status, or
+death by a signal, while a watched folder is unreachable means the supervisor waits for the drive and
+starts the stage again, and its resumability skips what is done. With the drive there, that death is an
+ordinary failure. `Runner.stop()` creates the stop file (`LS_STOP_FILE`) and ends the child; a stop
+during a pause is recorded as a failed run, "stopped while the drive was disconnected", with its pauses.
+Inside the child (`LS_CHILD=1`) the stage runs in-process as above.
 
 Stages read the study file **at import** into module-level constants. The runner therefore hashes the
 study file (without its `project` and `curation` blocks, which change on every run and every curation
@@ -2052,7 +2067,7 @@ and its entry is carried over, never taken from another study. Used by 04k, 04l,
 
 ### `ls_drive.py`
 
-Shared module, standard library only: what a stage does when the slides or output drive goes away. `reachable()` checks the watched folders (`source_dir` and `out_root`, or `LS_WATCH`), `wait_for_drive` waits for them with no time limit (polling every 2 s, ended by the `LS_STOP_FILE` file or Ctrl+C), and `per_slide` reruns one slide's work from its start once the drive is back. `per_slide_settled` also reruns an attempt the drive went away during without it failing (an `ls_io` write that waited for the drive and then succeeded leaves the attempt's CZI handles pointing at a volume that went), judged by `disturbed_since(mark())`, which a stage's per-item `except` inside the unit also uses to re-raise rather than record the drive's failure as the item's. `present(path, label)` is `os.path.exists` for a file on the drive: a file absent because the drive has dropped is waited for and looked for again, never reported missing, even when the drive drops just as it is looked for. It prints `@@drive lost <folder> | <label>` and `@@drive back <seconds>` when `LS_PROGRESS=1`, which the app turns into its banner; a watchdog thread prints the first even while a read is stuck. Stages reach the one shared instance through `ls_io.drive_module()`.
+Shared module, standard library only: what a stage does when the slides or output drive goes away. `reachable()` checks the watched folders (`source_dir` and `out_root`, or `LS_WATCH`), `wait_for_drive` waits for them with no time limit (polling every 2 s, ended by the `LS_STOP_FILE` file or Ctrl+C), and `per_slide` reruns one slide's work from its start once the drive is back. `per_slide_settled` also reruns an attempt the drive went away during without it failing (an `ls_io` write that waited for the drive and then succeeded leaves the attempt's CZI handles pointing at a volume that went), judged by `disturbed_since(mark())`, which a stage's per-item `except` inside the unit also uses to re-raise rather than record the drive's failure as the item's. `present(path, label)` is `os.path.exists` for a file on the drive: a file absent because the drive has dropped is waited for and looked for again, never reported missing, even when the drive drops just as it is looked for. It prints `@@drive lost <folder> | <label>` and `@@drive back <seconds>`, each on a line of its own, when `LS_PROGRESS=1`, which the app turns into its banner; a watchdog thread prints the first even while a read is stuck. Stages reach the one shared instance through `ls_io.drive_module()`.
 
 ### `ls_io.py`
 

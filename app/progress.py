@@ -13,6 +13,11 @@ Two kinds of line count:
 Anything else returns None and the bar stays as it was (busy, if no count has
 arrived yet).
 
+`@@drive lost <folder> | <label>` and `@@drive back <seconds>` (scripts/ls_drive.py)
+say the slides drive went and came back. `parse_drive` reads them, wherever on the
+line they are - a `\r  12/454` counter has no newline after it, so a marker can
+arrive glued to one - and `parse` never takes their numbers for a count.
+
 The time arithmetic is here too, Qt-free so it can be tested without a window:
 how long a running stage has left (TimeLeft, left_words) and how long a stage's
 last complete run took (last_took, last_run_words).
@@ -22,6 +27,9 @@ import re
 from datetime import datetime
 
 MARK = "@@progress "
+DRIVE_MARK = "@@drive "
+
+_DRIVE = re.compile(r"@@drive (?:lost (?P<folder>.*?) \| (?P<label>.*?)|back (?P<secs>\d+(?:\.\d+)?))\s*$")
 
 _COUNT = re.compile(r"(?<![\w./\\-])(\d{1,7})\s?/\s?(\d{1,7})(?![\w./\\])")
 
@@ -38,7 +46,7 @@ class Progress:
 
 def parse(line):
     """A Progress for a line that carries a count, else None."""
-    if not line:
+    if not line or DRIVE_MARK in line:
         return None
     text = line.strip()
     if text.startswith(MARK):
@@ -57,6 +65,26 @@ def parse(line):
     if total <= 0 or done > total:
         return None
     return Progress(done, total)
+
+
+def parse_drive(line):
+    """("lost", folder, label), ("back", seconds) or None for one line."""
+    if not line or DRIVE_MARK not in line:
+        return None
+    m = _DRIVE.search(line)
+    if not m:
+        return None
+    if m.group("secs") is not None:
+        return ("back", float(m.group("secs")))
+    return ("lost", m.group("folder"), m.group("label"))
+
+
+def pause_words(pauses):
+    """`paused 2x (3 min)` for a run's `pauses`; '' when there were none."""
+    if not pauses:
+        return ""
+    total = sum(float(p.get("seconds") or 0) for p in pauses)
+    return f"paused {len(pauses)}x ({duration_words(total)})"
 
 
 def words(p):

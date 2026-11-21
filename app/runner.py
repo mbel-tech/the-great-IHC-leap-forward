@@ -9,6 +9,13 @@ In-process rather than subprocess, for one reason that matters: the frozen build
 has no external Python to shell out to. Running the stages as imported modules is
 what lets a single bundled interpreter be the whole application.
 
+The exception is a stage that reads CZI pixels (`reader` pylibCZIrw or czifile):
+a native crash as the slides drive drops would take the window with it, so it
+runs as a child process of this same interpreter, `python -m app --stage <id>
+<study.json> --child`, supervised by app/supervise.py, which starts it again if
+it dies while the drive is gone. Inside that child (env `LS_CHILD=1`) the stage
+runs in-process as before.
+
 Two things the stages already do that this has to respect:
 
   * Several of them `raise SystemExit(message)` on bad input - `analysis_uids`
@@ -29,20 +36,34 @@ import json
 import hashlib
 import os
 import sys
+import tempfile
 import threading
 import time
 import traceback
 
 import stages as SG
+import supervise as SV
+
+#: Stages run in a supervised child process rather than in this one.
+CHILD_READERS = ("pylibCZIrw", "czifile")
 
 
 class StageResult:
-    def __init__(self, sid, ok, seconds, output, error=None):
+    def __init__(self, sid, ok, seconds, output, error=None, pauses=None):
         self.sid = sid
         self.ok = ok
         self.seconds = seconds
         self.output = output
         self.error = error
+        # Waits for a dropped drive: [{at, seconds, folder, label}].
+        self.pauses = list(pauses or [])
+
+    def record_error(self):
+        """What the run history keeps of a failure: its first line, short. None if ok."""
+        if self.ok or not self.error:
+            return None
+        first = str(self.error).strip().splitlines()
+        return first[0][:300] if first else None
 
 
 class _Tee(io.TextIOBase):
@@ -90,6 +111,9 @@ class Runner:
         self._modules = {}
         self._config_stamp = None
         self._lock = threading.Lock()
+        # The running child, and the file that asks it (and its supervisor) to stop.
+        self._proc = None
+        self._stop_file = None
         # The stages resolve config.json relative to their own file unless
         # LS_CONFIG says otherwise. Frozen, their own file is inside _internal/
         # and config.json is beside the executable, so without this every
@@ -267,6 +291,10 @@ class Runner:
             return StageResult(stage.sid, False, 0.0, "",
                                f"{stage.title} has no script to run")
 
+        if (getattr(stage, "reader", None) in CHILD_READERS
+                and not os.environ.get("LS_CHILD")):
+            return self._run_child(stage, on_line)
+
         argv = [stage.script] + self.expand_argv(list(stage.argv) + list(extra_argv))
         tee = _Tee(on_line)
         t0 = time.time()
@@ -323,3 +351,64 @@ class Runner:
                     os.chdir(old_cwd)
                 except OSError:
                     pass
+
+    # ---- in a child process -----------------------------------------------
+
+    def _run_child(self, stage, on_line):
+        """Run a reader stage as a supervised child (app/supervise.py).
+
+        The child is `python -m app --stage <id> <study.json> --child`, which
+        reads the stage's options from the study itself.
+        """
+        out = []
+
+        def line(text):
+            out.append(text + "\n")
+            if on_line:
+                on_line(text)
+
+        def track(proc):
+            self._proc = proc
+
+        with self._lock:
+            fd, stop_file = tempfile.mkstemp(prefix="ls-stop-", suffix=".flag")
+            os.close(fd)
+            os.remove(stop_file)          # its existence is the request
+            self._stop_file = stop_file
+            t0 = time.time()
+            try:
+                rc, pauses, tail = SV.run_child(
+                    SV.child_argv(stage.sid, self.config_path), line, stop_file,
+                    env={"LS_CONFIG": self.config_path}, cwd=SV.APP_PARENT, on_proc=track)
+            except BaseException as e:                      # noqa: BLE001
+                detail = "".join(traceback.format_exception(type(e), e, e.__traceback__))
+                return StageResult(stage.sid, False, time.time() - t0, "".join(out),
+                                   f"{type(e).__name__}: {e}\n\n{detail}")
+            finally:
+                self._proc = None
+                self._stop_file = None
+                try:
+                    os.remove(stop_file)
+                except OSError:
+                    pass
+            return StageResult(stage.sid, rc == 0, time.time() - t0, "".join(out),
+                               None if rc == 0 else tail, pauses)
+
+    def stop(self):
+        """Ask a stage running as a child to stop now.
+
+        Creates the stop file - a wait for the drive, the child's or the
+        supervisor's, ends on it - and terminates the child. A stage running
+        in this process is not affected.
+        """
+        stop_file, proc = self._stop_file, self._proc
+        if stop_file:
+            try:
+                open(stop_file, "w").close()
+            except OSError:
+                pass
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.terminate()
+            except OSError:
+                pass

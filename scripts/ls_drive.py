@@ -27,8 +27,10 @@ the wait notices within one poll and raises `Stopped`.
 
 What the app sees. With env `LS_PROGRESS=1` the module prints exactly
 `@@drive lost <folder> | <label>` and `@@drive back <seconds>`, in the style of
-ls_progress's `@@progress` lines. Otherwise it prints a human line when the
-wait starts, one a minute while it lasts, and "back after N s".
+ls_progress's `@@progress` lines, each after a newline of its own: a stage's
+`\r  12/454` counter ends without one, and the marker must not be glued onto
+it. Otherwise it prints a human line when the wait starts, one a minute while
+it lasts, and "back after N s".
 
 `per_slide_settled` also redoes an attempt the drive went away DURING without
 the attempt failing: an ls_io write inside it waited for the drive and then
@@ -108,7 +110,7 @@ def reachable(paths=None):
 
 def _say_lost(folder, label):
     if _progress():
-        print(f"@@drive lost {folder} | {label}", flush=True)
+        print(f"\n@@drive lost {folder} | {label}", flush=True)
     else:
         print(f"  !! drive unreachable ({folder}), paused at {label}; "
               "waiting, Ctrl+C to stop", flush=True)
@@ -116,7 +118,7 @@ def _say_lost(folder, label):
 
 def _say_back(seconds):
     if _progress():
-        print(f"@@drive back {seconds:.1f}", flush=True)
+        print(f"\n@@drive back {seconds:.1f}", flush=True)
     else:
         print(f"  drive back after {seconds:.1f} s", flush=True)
 

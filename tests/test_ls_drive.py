@@ -103,6 +103,10 @@ try:
     chk("exactly one lost line", out.count("@@drive lost "), 1)
     chk("exactly one back line", out.count("@@drive back "), 1)
     chk("lost line format", f"@@drive lost {b} | slide 7" in out)
+    # A stage's `\r 12/454` counter has no newline after it; the marker starts
+    # its own line so it is never glued onto the counter.
+    chk("lost marker starts a fresh line", f"\n@@drive lost {b} | slide 7\n" in out)
+    chk("back marker starts a fresh line", "\n@@drive back " in out)
     chk("PAUSES label", D.PAUSES[-1]["label"], "slide 7")
     chk("PAUSES grew by 1", len(D.PAUSES) - n0, 1)
     chk("reachable wait is 0.0", D.wait_for_drive("x"), 0.0)
@@ -114,6 +118,7 @@ try:
     _, out = capture(lambda: D.wait_for_drive("slide 8", poll=0.1))
     t.join()
     chk("human mode has no markers", "@@drive" not in out)
+    chk("human mode has no blank lines", "\n\n" in out or out.startswith("\n"), False)
     chk("human mode says paused", "paused at slide 8" in out and "back after" in out)
 
     # per_slide: redo after drop

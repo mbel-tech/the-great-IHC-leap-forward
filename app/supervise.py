@@ -41,6 +41,10 @@ in-process path would hand `expand_argv`, i.e. `stage.argv` as
     poll, and a child that ends while it exists is never started again. A
     stop while the drive was gone is reported as STOPPED_IN_PAUSE, with the
     pause so far kept.
+  * Ctrl+C (KeyboardInterrupt in this process, wherever it lands: reading the
+    child, waiting for it, or waiting for the drive) ends the child and
+    returns 130 with the pauses seen so far, a loss still open included, so
+    the parent records the run as it would any other.
 
 The supervisor's own wait does not call `ls_drive.wait_for_drive`: that prints
 to this process's stdout (the app's, on a worker thread) and reads the stop
@@ -91,6 +95,7 @@ NORMAL_EXITS = (0, 1, 2, 130)
 
 STOPPED_IN_PAUSE = "stopped while the drive was disconnected"
 STOPPED = "stopped before the stage finished"
+STOPPED_CTRL_C = "stopped by Ctrl+C"
 
 #: Restarts in a row of a child that printed nothing before dying.
 MAX_IDLE_RELAUNCHES = 5
@@ -276,59 +281,79 @@ def run_child(argv, on_line, stop_file, *, env=None, cwd=None, poll=None, on_pro
     stopped = lambda: bool(stop_file) and os.path.exists(stop_file)     # noqa: E731
     idle = 0                        # deaths in a row with nothing printed
 
-    while True:
-        if stopped():
-            run.close_quietly()
-            return 1, run.pauses, STOPPED
-        said = run.said
-        proc = _launch(argv, child_env, cwd)
+    cur = [None]                    # the child running now, for a Ctrl+C
+
+    def track(proc):
+        cur[0] = proc
         if on_proc:
             on_proc(proc)
-        if stopped():
-            proc.terminate()        # a stop that came between the check and the start
-        eof = False
-        try:
-            eof = _stream(proc, run)
-        finally:
-            if not eof:
-                # on_line raised: nobody reads the pipe any more, and a child
-                # still printing would block on it for ever.
-                proc.kill()
-            rc = proc.wait()
-            if on_proc:
-                on_proc(None)
 
-        ok, folder = DR.reachable()
-        drive_out = not ok or run.open is not None
-        if stopped():
-            # Checked before the status: a terminated child's status says
-            # nothing about why (-15 on POSIX, 1 on Windows).
-            if drive_out:
-                if not ok and run.open is None:
-                    run.open = {"t0": time.time(), "folder": folder, "label": label}
-                run.close_quietly()
-                return 1, run.pauses, STOPPED_IN_PAUSE
-            if rc == 0:
-                return 0, run.pauses, _tail(run, 0)
-            return 1, run.pauses, f"{STOPPED} (its process's status was {rc})"
-        if rc in NORMAL_EXITS or not drive_out:
-            run.close_quietly()     # a loss the child left open ends with the stage
-            return _rc(rc), run.pauses, _tail(run, rc)
-
-        # Died abnormally with the drive gone: wait for it, then start again.
-        idle = idle + 1 if run.said == said else 0
-        if idle > MAX_IDLE_RELAUNCHES:
-            run.close_quietly()
-            return 1, run.pauses, (
-                f"the stage's process kept ending (last status {rc}) without printing "
-                f"anything; gave up after {MAX_IDLE_RELAUNCHES} restarts in a row")
-        run.note(f"the stage's process ended (status {rc}) while the drive was "
-                 "disconnected; it starts again when the drive is back")
-        if not ok:
-            run.say_lost(folder, label)
-        while not DR.reachable()[0]:
+    try:
+        while True:
             if stopped():
                 run.close_quietly()
-                return 1, run.pauses, STOPPED_IN_PAUSE
-            time.sleep(poll)
-        run.say_back()
+                return 1, run.pauses, STOPPED
+            said = run.said
+            proc = _launch(argv, child_env, cwd)
+            track(proc)
+            if stopped():
+                proc.terminate()        # a stop that came between the check and the start
+            eof = False
+            try:
+                eof = _stream(proc, run)
+            finally:
+                if not eof:
+                    # on_line raised: nobody reads the pipe any more, and a child
+                    # still printing would block on it for ever.
+                    proc.kill()
+                rc = proc.wait()
+                track(None)
+
+            ok, folder = DR.reachable()
+            drive_out = not ok or run.open is not None
+            if stopped():
+                # Checked before the status: a terminated child's status says
+                # nothing about why (-15 on POSIX, 1 on Windows).
+                if drive_out:
+                    if not ok and run.open is None:
+                        run.open = {"t0": time.time(), "folder": folder, "label": label}
+                    run.close_quietly()
+                    return 1, run.pauses, STOPPED_IN_PAUSE
+                if rc == 0:
+                    return 0, run.pauses, _tail(run, 0)
+                return 1, run.pauses, f"{STOPPED} (its process's status was {rc})"
+            if rc in NORMAL_EXITS or not drive_out:
+                run.close_quietly()     # a loss the child left open ends with the stage
+                return _rc(rc), run.pauses, _tail(run, rc)
+
+            # Died abnormally with the drive gone: wait for it, then start again.
+            idle = idle + 1 if run.said == said else 0
+            if idle > MAX_IDLE_RELAUNCHES:
+                run.close_quietly()
+                return 1, run.pauses, (
+                    f"the stage's process kept ending (last status {rc}) without printing "
+                    f"anything; gave up after {MAX_IDLE_RELAUNCHES} restarts in a row")
+            run.note(f"the stage's process ended (status {rc}) while the drive was "
+                     "disconnected; it starts again when the drive is back")
+            if not ok:
+                run.say_lost(folder, label)
+            while not DR.reachable()[0]:
+                if stopped():
+                    run.close_quietly()
+                    return 1, run.pauses, STOPPED_IN_PAUSE
+                time.sleep(poll)
+            run.say_back()
+    except KeyboardInterrupt:
+        # Ctrl+C on the command line: end the child and give back what was
+        # seen, so the parent can still record the run with its pauses.
+        proc = cur[0]
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.terminate()
+                proc.wait(timeout=10)
+            except (OSError, subprocess.TimeoutExpired):
+                proc.kill()
+                proc.wait()
+        run.finish()
+        run.close_quietly()
+        return 130, run.pauses, STOPPED_CTRL_C

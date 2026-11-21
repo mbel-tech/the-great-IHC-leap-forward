@@ -2085,7 +2085,13 @@ Shared module: which slides or sections are reagent controls, meaning stained wi
 antibody, with an isotype IgG, pre-adsorbed or unstained. `scan(paths, markers, group_labels, extra)`
 reads file names relative to the slides folder (so a folder called `Negative controls` counts) and
 returns at most one `Match` per path, strong or weak; a weak token that is also a group label is never
-proposed, and `IgG`, dye names such as `AF488`, single letters and a trailing `-` never match.
+proposed, and `IgG`, dye names such as `AF488`, single letters and a trailing `-` never match by
+themselves. A lab's own mark is a per-study opt-in: `NAMING_PRESETS` (first `trailing_dash`, a `-` just
+before `.czi` or before a marker suffix such as `_A568`, kind `no_primary`; in LS a trailing `-` marks a
+re-scan, so it is not built in) or other text through `token_pattern(text)` (escaped, bounded like every
+built-in token). `naming_entry`, `naming_of` and `with_naming` write and read the one
+`extra_patterns` entry that carries `preset` or `token`, leaving hand-written entries as they are; New
+study and the confirm list set it.
 `entries`, `expand`, `is_control`, `control_subject` and `unanswered` read the `reagent_controls` block of
 the study file: a file entry expands to its scenes, a scene entry overrides it, and `control_subject`
 gives a control file the subject, slide and replicate its name does not carry. `manifest_lookup` runs

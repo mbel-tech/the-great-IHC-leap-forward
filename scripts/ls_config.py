@@ -59,6 +59,8 @@ except ImportError:                                         # pragma: no cover
 
 REAGENT_KINDS = (tuple(ls_reagent_controls.KINDS) if ls_reagent_controls
                  else ("no_primary", "unstained", "isotype", "preadsorbed", "other"))
+REAGENT_PRESETS = (tuple(ls_reagent_controls.NAMING_PRESETS) if ls_reagent_controls
+                   else ("trailing_dash",))
 
 #: The built-in atlases, from the registry that owns the concept, so the
 #: settings dialog's dropdown, the generated docs and `ls_atlas.source()` are
@@ -902,7 +904,11 @@ note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
         "Lab-specific file-name patterns that mark a reagent control.",
         default=[], ui=False, in_example=False,
         note="[{regex, kind}]. Each regex is searched case-insensitively in the path relative "
-             "to the slides folder and must compile.",
+             "to the slides folder and must compile. At most one entry also carries `preset` "
+             "(a named lab convention, e.g. trailing_dash: a '-' at the end of the name) or "
+             "`token` (other text, matched as a whole token); the app writes that one from "
+             "'How does your lab mark reagent controls in file names?' and leaves the others "
+             "as they are.",
         consumers=["00", "app"]),
 ]
 
@@ -1105,6 +1111,12 @@ def _check_reagent_controls(value):
                     out.append(f"`extra_patterns[{i}].regex` is not a valid regex: {exc}")
                 if e.get("kind") not in REAGENT_KINDS:
                     out.append(f"`extra_patterns[{i}].kind` must be one of {kinds}")
+                if "preset" in e and e["preset"] not in REAGENT_PRESETS:
+                    out.append(f"`extra_patterns[{i}].preset` {e['preset']!r} must be one of "
+                               + ", ".join(REAGENT_PRESETS))
+                if "token" in e and (not isinstance(e["token"], str)
+                                     or not e["token"].strip()):
+                    out.append(f"`extra_patterns[{i}].token` must be non-empty text")
     pw = value.get("paired_with")
     if pw is not None and not isinstance(pw, dict):
         out.append("`paired_with` must be a table")

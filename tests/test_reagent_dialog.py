@@ -425,6 +425,94 @@ series = K.reagent_series(project.cfg)
 chk("04k: a control's section is in the #rc series 00 numbered it in, a stained one is not",
     ("LS45_s09_sc01" in series, "LS45_s01a_sc01" in series), (True, False))
 
+print("--- how the lab marks reagent controls in file names ---")
+import ls_reagent_controls as RCM                                # noqa: E402
+fresh = NewStudyDialog()
+nm = getattr(fresh, "naming", None)
+chk("naming_default: New study offers the naming control", nm is not None, True)
+chk("...Nothing special by default", nm.combo.currentText() if nm else None, "Nothing special")
+chk("...its choices: nothing, the presets, other text",
+    [nm.combo.itemText(i) for i in range(nm.combo.count())] if nm else None,
+    ["Nothing special"] + [p["label"] for p in RCM.NAMING_PRESETS.values()] + ["Other text…"])
+chk("...the text box is hidden until Other text…", nm.other.isHidden() if nm else None, True)
+if nm:
+    nm.combo.setCurrentIndex(nm.combo.count() - 1)
+chk("...and shown for Other text…", nm.other.isHidden() if nm else None, False)
+fresh.close()
+fresh.deleteLater()
+chk("...the default study wrote no naming entry",
+    RCM.naming_of(LP.Project.open(AD.study_file(os.path.join(STUDY.root, "o_default"))).cfg),
+    (None, None))
+chk("...nor any extra_patterns",
+    LP.Project.open(AD.study_file(os.path.join(STUDY.root, "o_default")))
+    .get("reagent_controls.extra_patterns"), None)
+
+DASHF = folder("dash", ["LS45_1a.czi", "LS45_3a-.czi"])
+opened.clear()
+warned.clear()
+dd = NewStudyDialog()
+dd.slides.edit.setText(DASHF)
+dd._read_slides()
+settle(dd)
+dd.output.edit.setText(os.path.join(STUDY.root, "o_dash"))
+dd.thickness.setValue(14.0)
+if getattr(dd, "naming", None):
+    dd.naming.set_value("trailing_dash", None)
+dd._create()
+chk("naming_preset_new_study: Create made the study (no warning)", warned, [])
+chk("...writes the naming entry", RCM.naming_of(dd.project.cfg) if dd.project else None,
+    ("trailing_dash", None))
+chk("...saved", RCM.naming_of(LP.Project.open(dd.path).cfg) if dd.path else None,
+    ("trailing_dash", None))
+nrec = [r for r in (dd.project.block.get("decisions", []) if dd.project else [])
+        if r["key"] == "reagent_controls.extra_patterns"]
+chk("...recorded as by New study", [r["by"] for r in nrec][-1:], ["New study"])
+chk("...and opens the confirm list", len(opened), 1)
+drow = opened[0].row_for("LS45_3a-.czi") if opened else None
+chk("...with LS45_3a-.czi pre-ticked", drow is not None and drow.accept.isChecked(), True)
+chk("...its '-' shown as the token", drow.token if drow else None, "-")
+chk("...LS45_1a.czi is not listed", opened[0].row_for("LS45_1a.czi") if opened else "x", None)
+
+print("--- the confirm list: naming switched live ---")
+DASH2 = folder("dash2", ["LS45_1a.czi", "LS45_3a-.czi", "LS45_noPrimary.czi"])
+had = [{"regex": "blankslide", "kind": "unstained"}]
+project.set("reagent_controls.extra_patterns", had, by="test")
+before = json.dumps(project.cfg, sort_keys=True)
+live = RD.ReagentControlsDialog(project, DASH2)
+chk("confirm_list_naming: the list has the naming control", hasattr(live, "naming"), True)
+chk("...starts at Nothing special", live.naming.value(), (None, None))
+chk("...LS45_3a-.czi is not listed yet", live.row_for("LS45_3a-.czi"), None)
+kept = live.row_for("LS45_noPrimary.czi")
+live.naming.set_value("trailing_dash", None)
+lrow = live.row_for("LS45_3a-.czi")
+chk("...switching the preset on lists it live, pre-ticked",
+    lrow is not None and lrow.accept.isChecked(), True)
+chk("...the rows already there are kept", live.row_for("LS45_noPrimary.czi") is kept, True)
+chk("...still nothing written", json.dumps(project.cfg, sort_keys=True) == before, True)
+live.naming.set_value(None, None)
+chk("...switching it off again drops the row", live.row_for("LS45_3a-.czi"), None)
+chk("...and its widget", lrow is not None and lrow not in live.rows, True)
+live.naming.set_value(None, "noPrimary")
+chk("...Other text matches as a token", live.row_for("LS45_noPrimary.czi") is kept, True)
+live.naming.set_value("trailing_dash", None)
+live.row_for("LS45_3a-.czi").later.setChecked(True)
+chk("...Save works", live.save(), True)
+chk("...Save writes the naming", RCM.naming_of(project.cfg), ("trailing_dash", None))
+chk("...keeping the hand-written patterns", [x for x in project.get(
+    "reagent_controls.extra_patterns") if "preset" not in x and "token" not in x], had)
+chk("...naming alone changes no confirmed entry, so nothing to run again",
+    (live.changed, live.rerun_text), (True, ""))
+nrec = [r for r in project.block.get("decisions", [])
+        if r["key"] == "reagent_controls.extra_patterns"]
+chk("...recorded as by reagent controls", [r["by"] for r in nrec][-1:], ["reagent controls"])
+reo = RD.ReagentControlsDialog(project, DASH2)
+chk("...reopening shows it selected", (reo.naming.value(), reo.naming.combo.currentText()),
+    (("trailing_dash", None), RCM.NAMING_PRESETS["trailing_dash"]["label"]))
+chk("...and lists the row", reo.row_for("LS45_3a-.czi") is not None, True)
+for w_ in (live, reo):
+    w_.close()
+    w_.deleteLater()
+
 
 
 def teardown():

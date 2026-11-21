@@ -57,6 +57,60 @@ _WEAK = _tok(r"nc\d*|cn|nk|neg\d*|ctrl|ctl|control|kontroll")
 
 _MARKER_PREFIX = r"(?:no|w/?o|minus|without|senza|ohne|uten)" + _S
 
+# How a lab marks its reagent controls, chosen per study (New study / the confirm list)
+# and stored as one entry in `reagent_controls.extra_patterns`. Not built in: in the LS
+# study a trailing "-" marks a re-scan or second imaging pass (LS85_7b- re-scans LS85_7a).
+NAMING_PRESETS = {
+    "trailing_dash": {
+        "label": "A '-' at the end of the name (before .czi, or before a marker suffix "
+                 "such as _A568)",
+        "regex": r"-(?=(_[A-Za-z0-9]+)?\.czi$)",
+        "kind": "no_primary",
+    },
+}
+
+
+def token_pattern(text):
+    """A regex matching `text` literally as a whole token, bounded like every built-in
+    token (start, end, space _ - . ( ) / \\). Case-insensitive once compiled by scan."""
+    return _D + "(?:" + re.escape(str(text).strip()) + ")" + _E
+
+
+def naming_entry(preset=None, token=None, kind="no_primary"):
+    """The `extra_patterns` entry for a naming preset or for other text, or None for
+    neither (nothing special). A preset wins over text."""
+    if preset:
+        p = NAMING_PRESETS[preset]
+        return {"regex": p["regex"], "kind": p["kind"], "preset": preset}
+    token = str(token or "").strip()
+    if token:
+        return {"regex": token_pattern(token), "kind": kind, "token": token}
+    return None
+
+
+def _is_naming(e):
+    return isinstance(e, dict) and ("preset" in e or "token" in e)
+
+
+def naming_of(config):
+    """(preset, token) of the study's naming entry; (None, None) when there is none."""
+    for e in entries(config)["extra_patterns"]:
+        if _is_naming(e):
+            if e.get("preset"):
+                return e["preset"], None
+            return None, e.get("token") or None
+    return None, None
+
+
+def with_naming(extra, preset=None, token=None, kind="no_primary"):
+    """A new `extra_patterns` list: the hand-written entries as they were, in order, then
+    the one naming entry (none when neither preset nor token is given)."""
+    out = [e for e in extra or () if not _is_naming(e)]
+    ent = naming_entry(preset, token, kind)
+    if ent:
+        out.append(ent)
+    return out
+
 
 @dataclass
 class Match:

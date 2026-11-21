@@ -65,6 +65,59 @@ chk("backslash path + strongest wins", [(x.kind, x.tier) for x in m],
     [("no_primary", "strong"), ("isotype", "strong")])
 chk("one match per path", len(R.scan(["LS45_isotype_unstained_NC.czi"], [])), 1)
 
+print("--- naming presets: how a lab marks reagent controls ---")
+DASH = ["LS85_7b-.czi", "LS53_2b-_A568.czi", "LS53_5b-_A568.czi"]
+chk("preset off: LS re-scan names ending '-' never match", R.scan(DASH, MARKERS), [])
+chk("preset off: the never-match list still gives none", R.scan(REAL, MARKERS), [])
+chk("trailing_dash preset is first", list(R.NAMING_PRESETS)[:1], ["trailing_dash"])
+P = R.NAMING_PRESETS.get("trailing_dash") or {}
+chk("trailing_dash label", P.get("label"),
+    "A '-' at the end of the name (before .czi, or before a marker suffix such as _A568)")
+chk("trailing_dash regex", P.get("regex"), r"-(?=(_[A-Za-z0-9]+)?\.czi$)")
+chk("trailing_dash kind", P.get("kind"), "no_primary")
+ON = [R.naming_entry(preset="trailing_dash")] if hasattr(R, "naming_entry") else []
+for n in ("LS45_3a-.czi", "LS53_2b-_A568.czi", "archive.zip/LS45_3a-.czi"):
+    chk(f"preset on: {n}", [(x.kind, x.tier, x.token) for x in R.scan([n], MARKERS, extra=ON)],
+        [("no_primary", "strong", "-")])
+for n in ("LS45_8b_A488.czi", "LS105_10a.czi", "X-1_3a.czi", "AB12_2b-s0"):
+    chk(f"preset on, still none: {n}", R.scan([n], MARKERS, extra=ON), [])
+
+tp = getattr(R, "token_pattern", lambda t: "(?!)")
+NEG2 = [{"regex": tp("NEG2"), "kind": "no_primary"}]
+chk("token NEG2 matches LS45_NEG2_3.czi",
+    [(x.tier, x.token) for x in R.scan(["LS45_NEG2_3.czi"], [], extra=NEG2)],
+    [("strong", "NEG2")])
+chk("token is case-insensitive", len(R.scan(["LS45_neg2_3.czi"], [], extra=NEG2)), 1)
+chk("token NEG2 does not match inside NEG23",
+    [x.tier for x in R.scan(["LS45_NEG23.czi"], [], extra=NEG2) if x.tier == "strong"], [])
+AB = [{"regex": tp("a+b"), "kind": "no_primary"}]
+chk("token escapes metacharacters: a+b matches LS45_a+b_3.czi",
+    len(R.scan(["LS45_a+b_3.czi"], [], extra=AB)), 1)
+chk("...and not LS45_aab_3.czi", R.scan(["LS45_aab_3.czi"], [], extra=AB), [])
+
+print("--- naming entry round trip ---")
+ne = getattr(R, "naming_entry", lambda **k: {})
+nof = getattr(R, "naming_of", lambda c: "missing")
+wn = getattr(R, "with_naming", lambda x, **k: "missing")
+chk("naming_entry preset", ne(preset="trailing_dash"),
+    {"regex": r"-(?=(_[A-Za-z0-9]+)?\.czi$)", "kind": "no_primary", "preset": "trailing_dash"})
+chk("naming_entry token", ne(token="NEG2"),
+    {"regex": tp("NEG2"), "kind": "no_primary", "token": "NEG2"})
+chk("naming_entry nothing", ne(), None)
+chk("naming_of nothing", nof({}), (None, None))
+HAND = [{"regex": "blankslide", "kind": "unstained"}, {"regex": "iso2", "kind": "isotype"}]
+cfgn = {"reagent_controls": {"extra_patterns": wn(HAND, preset="trailing_dash")}}
+chk("naming_of preset", nof(cfgn), ("trailing_dash", None))
+chk("...hand-written patterns kept, in order, before it",
+    cfgn["reagent_controls"]["extra_patterns"][:2], HAND)
+cfgn["reagent_controls"]["extra_patterns"] = wn(cfgn["reagent_controls"]["extra_patterns"],
+                                                token="NEG2")
+chk("naming_of token replaces the preset", nof(cfgn), (None, "NEG2"))
+chk("...only one naming entry", len(cfgn["reagent_controls"]["extra_patterns"]), 3)
+cleared = wn(cfgn["reagent_controls"]["extra_patterns"])
+chk("clearing leaves the hand-written ones exactly", cleared, HAND)
+chk("with_naming does not change its input", len(cfgn["reagent_controls"]["extra_patterns"]), 3)
+
 print("--- lookup ---")
 ROWS = [{"scene_uid": "A_s01_sc01", "file": "A_1.czi", "marker_channel": "pERK"},
         {"scene_uid": "A_s01_sc01", "file": "A_1.czi", "marker_channel": "PCNA"},
@@ -105,6 +158,12 @@ chk("bad regex refused", bool(errs({"extra_patterns": [{"regex": "(", "kind": "u
 chk("extra kind refused", bool(errs({"extra_patterns": [{"regex": "x", "kind": "zzz"}]})), True)
 chk("good extra ok", errs({"extra_patterns": [{"regex": "blank", "kind": "unstained"}]}), [])
 chk("rejected must be list of str", bool(errs({"rejected": [1]})), True)
+chk("a preset entry ok", errs({"extra_patterns": [ne(preset="trailing_dash") or {}]}), [])
+chk("a token entry ok", errs({"extra_patterns": [ne(token="NEG2") or {}]}), [])
+chk("unknown preset refused", bool(errs({"extra_patterns": [
+    {"regex": "-", "kind": "no_primary", "preset": "bogus"}]})), True)
+chk("empty token refused", bool(errs({"extra_patterns": [
+    {"regex": "x", "kind": "no_primary", "token": "  "}]})), True)
 
 if failures:
     print(f"\n{len(failures)} FAILED: {failures}")

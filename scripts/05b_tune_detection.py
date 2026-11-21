@@ -292,7 +292,11 @@ def constrain_marker(marker, pairs, skipped, by_sec, geom, args, model, grid,
     rec = {"fp_target": target,
            "controls": [{"control": u, "range_from": s, "pairing": t}
                         for u, s, t in pairs if u in used],
-           "skipped": [{"control": u, "why": w} for u, w in skipped],
+           "skipped": [{"control": u, "why": w} for u, w in skipped]
+                      + [{"control": u, "why": f"no window could be read at its "
+                                               f"stained pair's range ({s}: flat, "
+                                               f"empty or too small)"}
+                         for u, s, _t in pairs if u not in used],
            "control_crops": len(cxs),
            "area_stained_mm2": round(area_s, 6),
            "area_control_mm2": round(area_c, 6),

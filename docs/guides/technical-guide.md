@@ -1779,8 +1779,10 @@ The longest-running stage (hours).
   one intensity range per section. A `no_primary` reagent control of such a marker is detected at its
   paired stained section's range (operator, same file or same animal; the first in name order with
   boxes), not its own, which would stretch its noise to full scale; with no such pair it takes its own,
-  and `roi_normalisation.csv`'s `range_from` says which. A resume re-detects only a control whose range
-  source changed. A nucleus is `censored` when any of its native pixels is at the clip
+  and `roi_normalisation.csv`'s `range_from` says which. A resume re-detects only a section whose range
+  source changed (a control re-paired, confirmed or de-confirmed), or whose source section is itself being
+  re-measured. A source section whose boxes changed is caught only through the existing box-fingerprint
+  check: one not among this marker's measured sections does not trigger a control re-detect. A nucleus is `censored` when any of its native pixels is at the clip
   ceiling, and `off_tissue` when it falls outside the tissue mask. Each row records `segmented_on`,
   `backend` and `nucleus_shaped`. The `ls_segment` threshold backend serves markers that are not
   nucleus-shaped.

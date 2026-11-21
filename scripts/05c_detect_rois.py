@@ -2282,27 +2282,30 @@ def main():
                   f"before this stage recorded what they were measured on, so "
                   f"a box changed since cannot be seen - kept as they are. "
                   f"--force re-measures them.")
-    # A REAGENT CONTROL WHOSE RANGE SOURCE CHANGED is measured again, and only
-    # it: a control of a shared-range marker is detected at its stained pair's
-    # range (borrowed_from), so a new pairing - or a pair whose boxes changed -
-    # makes its rows ones made at another stretch. With no confirmed control
-    # the lookup is empty and nothing here reads a file.
+    # A SECTION WHOSE RANGE SOURCE CHANGED is measured again, and only it: a
+    # control of a shared-range marker is detected at its stained pair's range
+    # (borrowed_from), so a new pairing - or a pair whose boxes changed -
+    # makes its rows ones made at another stretch. EVERY measured section is
+    # compared, not just today's controls: a control since de-confirmed is a
+    # stained section now, and its rows made at a borrowed range must go. With
+    # no confirmed control and no borrowed range on record nothing is redone,
+    # and nothing past roi_normalisation.csv is read.
     lookup = reagent_lookup()
     sources = range_sources(sorted(by_sec), args.marker, by_sec, geom, lookup)
-    if exists and not args.force and lookup \
-            and needs_shared_norm(args.marker):
+    if exists and not args.force and needs_shared_norm(args.marker):
         rec_from = recorded_range_from(args.marker)
-        repaired = sorted(
-            (u for u in measured - changed
-             if (u, args.marker) in lookup and u in rec_from
-             and (rec_from[u] != sources.get(u, OWN_RANGE)
-                  or sources.get(u) in changed)), key=NM.natural_key)
-        if repaired:
-            changed |= set(repaired)
-            print(f"  {len(repaired)} {args.marker} reagent control section(s) "
-                  f"now take their intensity range from another section - "
-                  f"measured again: " + ", ".join(repaired[:5])
-                  + (" ..." if len(repaired) > 5 else ""))
+        if lookup or any(v != OWN_RANGE for v in rec_from.values()):
+            repaired = sorted(
+                (u for u in measured - changed if u in rec_from
+                 and (rec_from[u] != sources.get(u, OWN_RANGE)
+                      or sources.get(u) in changed)), key=NM.natural_key)
+            if repaired:
+                changed |= set(repaired)
+                print(f"  {len(repaired)} {args.marker} section(s) now take their "
+                      f"intensity range from a different section, or their own "
+                      f"(a reagent control confirmed or de-confirmed, or "
+                      f"re-paired) - measured again: " + ", ".join(repaired[:5])
+                      + (" ..." if len(repaired) > 5 else ""))
     # SECTIONS TAKEN OUT OF THE CURATION lose their rows, so the dataset is
     # the sections the boxes name. Unless MOST of what was measured has gone:
     # 05a --limit writes a box file of its first N sections, and dropping the

@@ -230,6 +230,14 @@ def detect(cfg_over, controls, argv_extra=(), manifest_extra=()):
     for u in uids:
         np.save(os.path.join(mask_dir, f"{u}_mask.npy"), np.ones((256, 256), bool))
     rec = Recorder()
+    detect.calls = {"borrowed_from": 0, "borrowed_range": 0}
+    for name in detect.calls:
+        real = getattr(D5, name)
+
+        def wrapped(*a, _real=real, _name=name, **k):
+            detect.calls[_name] += 1
+            return _real(*a, **k)
+        setattr(D5, name, wrapped)
     saved = (pyczi.open_czi, sys.argv)
     pyczi.open_czi = PG.fake_open
     saved_load = D5.load_model
@@ -282,6 +290,13 @@ with temp_study(acquisition=PG.ACQ) as study:
     chk("no controls: every stained row says range_from own",
         sorted((u, r["range_from"]) for u, r in base_rows.items()),
         [(u, "own") for u in sorted(PG.STAINED)])
+    chk("no controls: the borrowed-range code was not entered (spy)",
+        detect.calls, {"borrowed_from": 0, "borrowed_range": 0})
+    rc, again, means0, _D = detect({}, [])
+    chk("no controls: a plain resume re-measures nothing",
+        (rc, len(means0), again == base_rows), (0, 0, True))
+    chk("...and enters no borrowed-range code (spy)",
+        detect.calls, {"borrowed_from": 0, "borrowed_range": 0})
 
 RC_BLOCK = {"declared": "yes",
             "scenes": {"AB1_1a_s03": {"kind": "no_primary", "markers": []},
@@ -335,6 +350,23 @@ with temp_study(acquisition=PG.ACQ, reagent_controls=RC_BLOCK) as study:
     chk("...and the rest kept their rows",
         {u: rows2[u] for u in PG.STAINED + ["AB1_1a_s03"]},
         {u: rows[u] for u in PG.STAINED + ["AB1_1a_s03"]})
+
+    print()
+    print("--- a control de-confirmed is measured again at its own range ---")
+    cfg = json.load(open(study.path, encoding="utf-8"))
+    del cfg["reagent_controls"]["scenes"]["AB1_1a_s03"]
+    json.dump(cfg, open(study.path, "w", encoding="utf-8"), indent=2)
+    rc, rows3, means3, D5 = detect({}, CONTROLS)
+    chk("the resume runs", rc, 0)
+    chk("only the former control was segmented again (2 boxes)", len(means3), 2)
+    chk("...now at its own range, and says so",
+        (rows3.get("AB1_1a_s03", {}).get("range_from"),
+         rows3.get("AB1_1a_s03", {}).get("norm_hi") != rows2["AB1_1a_s01"]["norm_hi"]),
+        ("own", True))
+    chk("...the model saw it stretched by its own range", means3[0] > 0.1, True)
+    chk("...and the rest kept their rows",
+        {u: rows3[u] for u in PG.STAINED + ["ZZ9_9a_s01"]},
+        {u: rows2[u] for u in PG.STAINED + ["ZZ9_9a_s01"]})
 
 print()
 print("--- an old roi_normalisation.csv is backfilled with range_from own ---")

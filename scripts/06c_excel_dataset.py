@@ -54,7 +54,22 @@ above: 06a routes their rows to `results/reagent_controls.csv`, and when that
 file has rows they are the "Reagent controls" sheet, under a plain-language
 header. Their boxes are left out of `planned` and `coverage` too, by the same
 config lookup 06a uses (ls_reagent_controls), so an animal whose only sections
-are controls is not reported as unmeasured.
+are controls is not reported as unmeasured. When 06a also wrote
+`results/reagent_cut_check.csv` (the reagent k check), the same sheet carries it
+below the controls' table as a "Cut check" block, labelled provisional: the k
+each marker's controls suggest. It is applied only from the app's Results page.
+
+**The corrected rate.** When 06a wrote `results/roi_corrected.csv` (a
+no-primary reagent control is measured), its rows are the "corrected_rate"
+sheet: per stained section, marker and region, the raw pooled `frac_positive`
+with `frac_positive_corrected` and its 95% interval right beside it, under a
+header that states the sensitivity-1 assumption (the correction is a
+lower-bound adjustment) and that it is provisional; for a marker segmented on
+its own channel, positive_density_per_mm2 beside positive_density_corrected
+instead. It is per section, the
+grain the operator chose, so it is its own sheet rather than columns on
+`by_roi`, which is per animal; nothing is pooled to the animal here. The
+other sheets are unchanged, with or without it.
 
 **What "total tissue area" means here.** It is the area of the ROI discs
 themselves, mapped onto the slide and summed - not the whole section, and not a
@@ -108,6 +123,7 @@ if _HERE not in sys.path:
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
 import ls_naming as NM  # noqa: E402
 import ls_reagent_report as RR  # noqa: E402
+import ls_overlay as LO  # noqa: E402
 OUT_ROOT = G5.OUT_ROOT
 RESULTS = os.path.join(OUT_ROOT, "results")
 NUCLEI_CSV = os.path.join(RESULTS, "roi_nuclei.csv")
@@ -161,6 +177,10 @@ def write_workbook(path, sheets):
     A sheet may be (name, rows, lines): the lines are written one per row above
     the table, with a blank row between, and the panes freeze under the table's
     header instead of the first row.
+
+    A fourth element is more tables below the first: [(lines, rows)], each
+    after a blank row, its lines above it and its header bold. The columns are
+    sized to the first table alone.
     """
     from openpyxl import Workbook
     from openpyxl.styles import Font
@@ -189,6 +209,18 @@ def write_workbook(path, sheets):
         for c, col in enumerate(cols, 1):
             width = max(len(str(col)), *(len(str(r[col])) for r in data)) + 2
             ws.column_dimensions[get_column_letter(c)].width = min(width, 30)
+        for more_lines, more in (sheet[3] if len(sheet) > 3 else ()):
+            ws.append([])
+            for line in more_lines:
+                ws.append([line])
+            if not more:
+                continue
+            more_cols = list(more[0].keys())
+            ws.append(more_cols)
+            for c in range(1, len(more_cols) + 1):
+                ws.cell(row=ws.max_row, column=c).font = Font(bold=True)
+            for row in more:
+                ws.append([row[c] for c in more_cols])
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with IO.atomic_save(path) as tmp:
         wb.save(tmp)
@@ -218,6 +250,58 @@ def _cell(v):
     return float(v) if "." in v else int(v)
 
 
+def _cut_ks(rc_rows):
+    """{marker: the k its cut is formed at} for the reagent-control sheet's
+    header, so it states the multiplier in force (positivity.cut_k)."""
+    return {m: LO.cut_k(CONFIG, m) for m in sorted({r.get("marker") or "" for r in rc_rows})
+            if m}
+
+
+#: Above the k check's table on the "Reagent controls" sheet.
+CUT_CHECK_LINES = (
+    "Cut check (provisional until validated on a study with known controls): the "
+    "positivity cut's multiplier k tested against the no-primary reagent controls, from "
+    "results/reagent_cut_check.csv. control_fp is the rate of control ROI nuclei called "
+    "positive by each control's own cut at k, with its 95% interval (control_fp_lo, "
+    "control_fp_hi); disc_fp is the stained sections' leave-one-disc-out rate at the same "
+    "k. suggested = 1 on the smallest k that meets positivity.fp_target. A blank is a rate "
+    "that cannot be given (the note says why), never 0. The suggestion never changes the "
+    "cut by itself: it is applied only from the app's Results page.",
+)
+
+
+#: The sheet results/roi_corrected.csv is shown on, when 06a wrote it.
+CORRECTED_SHEET = "corrected_rate"
+
+
+def _corrected_sheet():
+    """The corrected-rate sheet from results/roi_corrected.csv beside
+    MEAS_CSV, or None when 06a wrote none (no no_primary control measured).
+    The raw frac_positive sits right beside the corrected columns, as in the
+    file; the header states the sensitivity-1 assumption."""
+    path = os.path.join(os.path.dirname(MEAS_CSV), RR.ROI_CORRECTED_CSV)
+    rows = G5.load_csv(path) if os.path.exists(path) else []
+    if not rows:
+        return None
+    return (CORRECTED_SHEET,
+            [{c: _cell(r.get(c, "")) for c in RR.ROI_CORRECTED_COLUMNS} for r in rows],
+            RR.corrected_sheet_header())
+
+
+def _rc_sheet(rc_rows):
+    """The "Reagent controls" sheet: the controls' table, then the k check's
+    when 06a wrote results/reagent_cut_check.csv beside reagent_controls.csv.
+    The path is taken from MEAS_CSV when called, as rc_path is."""
+    kc_path = os.path.join(os.path.dirname(MEAS_CSV), RR.CUT_CHECK_CSV)
+    kc_rows = G5.load_csv(kc_path) if os.path.exists(kc_path) else []
+    sheet = ("Reagent controls", [{k: _cell(v) for k, v in r.items()} for r in rc_rows],
+             RR.sheet_header(rc_rows, _cut_ks(rc_rows)))
+    if kc_rows:
+        sheet += ([(list(CUT_CHECK_LINES) + [RR.cut_rule_text(_cut_ks(kc_rows))],
+                    [{k: _cell(v) for k, v in r.items()} for r in kc_rows])],)
+    return sheet
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=XLSX)
@@ -236,9 +320,7 @@ def main(argv=None):
         # hence no roi_measurements.csv, and a report. That is a partial run
         # reporting what it has, not a missing input - and failing here would
         # end 06e's loop on the first cycle.
-        write_workbook(args.out, [("Reagent controls",
-                                   [{k: _cell(v) for k, v in r.items()} for r in rc_rows],
-                                   RR.sheet_header(rc_rows))])
+        write_workbook(args.out, [_rc_sheet(rc_rows)])
         print(f"no stained section measured yet - only the reagent controls "
               f"({len(rc_rows)} rows) -> {args.out}")
         print(f"  {RR.limitation_text(rc_rows)}")
@@ -551,16 +633,18 @@ def main(argv=None):
 
     sheets = [("by_roi", by_roi), ("by_disc", by_disc),
               ("by_section", by_section), ("coverage", coverage)]
+    corrected = _corrected_sheet()
+    if corrected:
+        sheets.append(corrected)
     if rc_rows:
-        sheets.append(("Reagent controls", [{k: _cell(v) for k, v in r.items()}
-                                            for r in rc_rows],
-                       RR.sheet_header(rc_rows)))
+        sheets.append(_rc_sheet(rc_rows))
     write_workbook(args.out, sheets)
 
     print("=" * 72)
     print(f"{len(by_roi)} rows (one per ROI per sample) -> {args.out}")
     print(f"  sheets: by_roi, by_disc ({len(by_disc)}), "
           f"by_section ({len(by_section)}), coverage"
+          + (f", {CORRECTED_SHEET} ({len(corrected[1])})" if corrected else "")
           + (f", Reagent controls ({len(rc_rows)})" if rc_rows else ""))
     print(f"  {RR.limitation_text(rc_rows)}")
     # Sections, not by_section rows: under `multiplex` a section has a row per

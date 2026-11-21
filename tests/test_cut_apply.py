@@ -1,0 +1,250 @@
+"""The reagent k check, shown and applied.
+
+06a writes results/reagent_cut_check.csv (Task 2). Here: 06c's "Reagent
+controls" sheet carries it as a "Cut check" block, labelled provisional; the
+Results page shows each marker's suggested k against the k in force, with a
+"Use the suggested multiplier…" button; and cut_apply.apply_suggested_k writes
+positivity.cut_k[marker] with its provenance, refusing after 06b (the
+unblinding) unless the operator types the confirmation.
+
+    python tests/test_cut_apply.py
+"""
+
+import contextlib
+import csv
+import faulthandler
+import gc
+import hashlib
+import io
+import os
+import sys
+import tempfile
+
+faulthandler.enable()
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(HERE)
+sys.path[:0] = [os.path.join(REPO, "app"), os.path.join(REPO, "scripts"), HERE]
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from _fixture import use_temp_study, load_stage                # noqa: E402
+
+STUDY = use_temp_study()
+os.environ["LS_HOME"] = tempfile.mkdtemp()
+
+failures = []
+
+
+def chk(name, got, want=True):
+    ok = got == want
+    print(f"{'ok  ' if ok else 'FAIL'} {name:<70} {got!r}" + ("" if ok else f"  (wanted {want!r})"))
+    if not ok:
+        failures.append(name)
+
+
+import ls_reagent_report as RR                                  # noqa: E402
+import ls_project as LP                                         # noqa: E402
+import ls_config as LC                                          # noqa: E402
+
+
+def check_rows(suggest=True):
+    """A pERK cut check: k 2.0 and 2.5 miss the target, 3.5 is the first that meets it."""
+    rows = []
+    for k, fp in zip(RR.K_GRID, (0.08, 0.04, 0.012, 0.006, 0.003, 0.001, 0.0)):
+        r = dict.fromkeys(RR.CUT_CHECK_COLUMNS, "")
+        r.update(marker="pERK", k=k, n_control_sections=2, n_control_nuclei=400,
+                 control_fp=fp, control_fp_lo=max(0.0, fp - 0.005), control_fp_hi=fp + 0.01,
+                 meets_target=int(fp <= 0.01), suggested=0)
+        rows.append(r)
+    if suggest:
+        rows[3]["suggested"] = 1
+    else:
+        for r in rows:
+            r.update(control_fp="", control_fp_lo="", control_fp_hi="", meets_target="",
+                     suggested="", note="12 reagent-control nuclei, fewer than the minimum 50: "
+                                         "no rate and no suggested k")
+    return rows
+
+
+def write_csv(path, rows, cols):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=cols)
+        w.writeheader()
+        w.writerows(rows)
+
+
+def out_root(name, suggest=True):
+    root = os.path.join(STUDY.root, name)
+    write_csv(os.path.join(root, "results", RR.CUT_CHECK_CSV), check_rows(suggest),
+              RR.CUT_CHECK_COLUMNS)
+    return root
+
+
+import cut_apply as CA                                          # noqa: E402
+
+# ============================================================ apply_suggested_k
+print("--- apply_suggested_k ---")
+ROOT = out_root("o_apply")
+csv_path = os.path.join(ROOT, "results", RR.CUT_CHECK_CSV)
+project = LP.Project.open(STUDY.path)
+ok, msg = CA.apply_suggested_k(project, ROOT, "pERK", None)
+chk("apply_writes_k_and_source: applied", ok, True)
+chk("...cut_k['pERK'] is the suggested k", (project.get("positivity.cut_k") or {}).get("pERK"),
+    3.5)
+chk("...the '*' entry is kept", (project.get("positivity.cut_k") or {}).get("*"), 3.0)
+src = project.get("positivity.cut_k_source") or {}
+chk("...source['pERK']['by'] == 'controls'", (src.get("pERK") or {}).get("by"), "controls")
+with open(csv_path, "rb") as fh:
+    sha = hashlib.sha256(fh.read()).hexdigest()
+chk("...the check sha is the file's", (src.get("pERK") or {}).get("check"), sha)
+chk("...and when", bool((src.get("pERK") or {}).get("at")), True)
+chk("...no flat 'by' beside the marker entries", "by" in src, False)
+chk("...the decision is recorded by the cut check",
+    [d["by"] for d in project.block.get("decisions", []) if d["key"] == "positivity.cut_k"],
+    ["cut check"])
+chk("...the config still validates", project.validate()[0], [])
+chk("...the message names the marker and k", "pERK" in msg and "3.5" in msg, True)
+ok2, msg2 = CA.apply_suggested_k(project, ROOT, "PCNA", None)
+chk("a marker with no suggestion: refused", ok2, False)
+
+print("--- apply_after_unblinding_requires_confirmation ---")
+ROOT_B = out_root("o_blind")
+write_csv(os.path.join(ROOT_B, "results", "animal_metadata.csv"),
+          [{"animal": "LS1", "treatment": "control"}], ["animal", "treatment"])
+chk("unblinded() sees 06b's output", CA.unblinded(ROOT_B), True)
+chk("...and not on a study 06b has not run on", CA.unblinded(ROOT), False)
+project = LP.Project.open(STUDY.path)
+before = (project.get("positivity.cut_k"), project.get("positivity.cut_k_source"),
+          len(project.block.get("decisions", [])))
+ok, msg = CA.apply_suggested_k(project, ROOT_B, "pERK", None)
+chk("apply_after_unblinding_requires_confirmation: refused without it", ok, False)
+chk("...says the study is unblinded and what to type",
+    "unblind" in msg and CA.CONFIRM_TEXT in msg, True)
+chk("...config unchanged", (project.get("positivity.cut_k"),
+                            project.get("positivity.cut_k_source"),
+                            len(project.block.get("decisions", []))), before)
+ok, _ = CA.apply_suggested_k(project, ROOT_B, "pERK", "apply after unblindng")
+chk("...a mistyped confirmation is refused", ok, False)
+ok, _ = CA.apply_suggested_k(project, ROOT_B, "pERK", "apply after unblinding")
+chk("...'apply after unblinding' succeeds", ok, True)
+chk("...and writes the k", (project.get("positivity.cut_k") or {}).get("pERK"), 3.5)
+ok, msg = CA.apply_suggested_k(project, os.path.join(STUDY.root, "nowhere"), "pERK", None)
+chk("no check file: refused", ok, False)
+
+print("--- the config warns on a cut_k key that is not a marker ---")
+cfg = {"acquisition": {"layout": "paired", "markers": ["pERK", "PCNA"]},
+       "positivity": {"cut_k": {"*": 3.0, "pERK": 3.5, "pERKK": 4.0}}}
+errs, warns = LC.validate(cfg)
+chk("an unknown marker key warns", any("pERKK" in w and "positivity.cut_k" in w for w in warns),
+    True)
+chk("...and is not an error", any("pERKK" in e for e in errs), False)
+chk("...a study marker does not warn", any("`pERK`" in w or "'pERK'" in w for w in warns), False)
+cfg["acquisition"] = {"layout": "paired", "markers": []}
+chk("...no markers declared: no warning",
+    any("pERKK" in w for w in LC.validate(cfg)[1]), False)
+
+# ============================================================== 06c sheet
+print("--- sheet_has_cut_check ---")
+G6C = load_stage("06c_excel_dataset.py", name="lsstage_06c_ca")
+tmp = os.path.join(STUDY.root, "o_sheet", "results")
+write_csv(os.path.join(tmp, RR.CUT_CHECK_CSV), check_rows(), RR.CUT_CHECK_COLUMNS)
+rc = dict.fromkeys(RR.COLUMNS, "")
+rc.update(scene_uid="RC1_s01_sc01", kind="no_primary", marker="pERK", region="Dm",
+          pct_positive="0.6")
+write_csv(os.path.join(tmp, RR.REPORT_CSV), [rc], RR.COLUMNS)
+npath = os.path.join(tmp, "roi_nuclei.csv")
+write_csv(npath, [], ["scene_uid", "marker"])
+saved = (G6C.NUCLEI_CSV, G6C.MEAS_CSV)
+G6C.NUCLEI_CSV, G6C.MEAS_CSV = npath, os.path.join(tmp, "roi_measurements.csv")
+xlsx = os.path.join(tmp, "roi_dataset.xlsx")
+try:
+    with contextlib.redirect_stdout(io.StringIO()):
+        code = G6C.main(["--out", xlsx])
+finally:
+    G6C.NUCLEI_CSV, G6C.MEAS_CSV = saved
+chk("06c runs", code, 0)
+import openpyxl                                                 # noqa: E402
+ws = openpyxl.load_workbook(xlsx)["Reagent controls"]
+cells = [list(r) for r in ws.iter_rows(values_only=True)]
+text = " ".join(str(c) for r in cells for c in r if c is not None)
+chk("sheet_has_cut_check: the sheet says 'Cut check'", "Cut check" in text, True)
+chk("...and 'provisional'", "provisional" in text, True)
+hdr = [i for i, r in enumerate(cells) if r and r[0] == "marker" and "k" in r]
+chk("...a table headed by CUT_CHECK_COLUMNS",
+    list(cells[hdr[0]][:len(RR.CUT_CHECK_COLUMNS)]) if hdr else None, RR.CUT_CHECK_COLUMNS)
+krows = [r for r in cells[hdr[0] + 1:] if r and r[0] == "pERK"] if hdr else []
+chk("...one row per k", [r[1] for r in krows], list(RR.K_GRID))
+chk("...the suggested row is marked", [r[1] for r in krows if r[10] == 1], [3.5])
+chk("...the reagent-control table is still there",
+    any(r and r[0] == "scene_uid" for r in cells), True)
+
+# ============================================================ the Results page
+print("--- the Results page ---")
+from PySide6.QtCore import QCoreApplication, QEvent             # noqa: E402
+from PySide6.QtWidgets import QApplication, QInputDialog, QMessageBox  # noqa: E402
+
+app = QApplication.instance() or QApplication([])
+asked, typed = [], []
+QMessageBox.question = staticmethod(lambda *a, **k: (asked.append(a[2]), QMessageBox.Yes)[1])
+QMessageBox.warning = staticmethod(lambda *a, **k: asked.append(a[2]))
+QInputDialog.getText = staticmethod(lambda *a, **k: (typed.append(a[2]),
+                                                     ("apply after unblinding", True))[1])
+
+import workflow as W                                            # noqa: E402
+import screens as SC                                            # noqa: E402
+
+results = SC.StageListScreen(W.SCREENS["results"])
+applied = []
+results.cut_k_applied.connect(applied.append)
+
+project = LP.Project.open(STUDY.path)
+results.show_cut_check(out_root("o_none", suggest=False), project)
+chk("no_suggestion_no_button: the button is disabled", results.cut_btn.isEnabled(), False)
+chk("...its label", results.cut_btn.text(), "Use the suggested multiplier…")
+chk("...and says why", "fewer than the minimum" in results.cut_why.text(), True)
+chk("...the panel is provisional", "provisional" in results.cut_text.text(), True)
+
+results.show_cut_check(os.path.join(STUDY.root, "o_nothing"), project)
+chk("no check file: the panel is hidden", results.cut_box.isHidden(), True)
+
+results.show_cut_check(ROOT, project)
+chk("a suggestion: the panel shows", results.cut_box.isHidden(), False)
+chk("...suggested k against the k in force",
+    "3.5" in results.cut_text.text() and "3" in results.cut_text.text(), True)
+chk("...the button is enabled", results.cut_btn.isEnabled(), True)
+results.cut_btn.click()
+chk("...clicking asks first", len(asked), 1)
+chk("...and applies", (project.get("positivity.cut_k") or {}).get("pERK"), 3.5)
+chk("...signals the window", len(applied), 1)
+results.show_cut_check(ROOT, project)
+chk("...now in force: the button is disabled", results.cut_btn.isEnabled(), False)
+chk("...and says so", "in force" in results.cut_why.text(), True)
+
+project = LP.Project.open(STUDY.path)
+results.show_cut_check(ROOT_B, project)
+asked.clear()
+results.cut_btn.click()
+chk("after 06b: the operator types the confirmation", len(typed), 1)
+chk("...the prompt says the study is unblinded", "unblind" in typed[0], True)
+chk("...and the typed text applies it", (project.get("positivity.cut_k") or {}).get("pERK"),
+    3.5)
+
+
+def teardown():
+    """Take every Qt object down while the application still exists."""
+    for w in QApplication.topLevelWidgets():
+        w.close()
+        w.deleteLater()
+    results.deleteLater()
+    for _ in range(3):
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        app.processEvents()
+    gc.collect()
+    app.processEvents()
+
+
+teardown()
+print("\n%s" % ("FAILED: %s" % failures if failures else "all passed"))
+sys.stdout.flush()
+sys.exit(1 if failures else 0)

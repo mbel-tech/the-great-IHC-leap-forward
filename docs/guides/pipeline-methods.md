@@ -700,7 +700,7 @@ before the unblinding step read it.
 *What is reported.* Stage 06a writes `results/reagent_controls.csv`, one row per control section,
 marker and region, from the same nuclei and the same cut machinery as the stained sections, and the
 control's own cuts to `results/reagent_control_cuts.csv`. Part A is the share of the control's nuclei
-that its own per-section cut (median + 3 × 1.4826 × MAD of its own background-disc nuclei) calls
+that its own per-section cut (median + k × 1.4826 × MAD of its own background-disc nuclei, k the marker's `positivity.cut_k`, 3 by default) calls
 positive: the false-positive rate of the positivity rule where there is no specific signal, including
 autofluorescence and non-specific secondary binding that is not uniform. It is shown beside the
 paired stained sections' rate in the same region and their difference, as a margin (a density per mm²
@@ -713,6 +713,23 @@ that last, study-wide pairing, Part B is left empty with a note, because across 
 measures the batch and not the reagent. The 06c workbook carries the table as a "Reagent controls"
 sheet; with a no-primary control reported, its limitation text points there instead of saying that
 absolute rates are not defensible.
+
+*Corrected positive rate (provisional).* With a no-primary control measured, stage 06a also writes
+`results/roi_corrected.csv`: for each stained section, marker and region, the raw positive rate pooled
+over the section's ROIs, beside a corrected rate. The correction is Rogan–Gladen,
+p_corr = (p_obs − f) / (1 − f), where f is the false-positive rate of the no-primary controls paired with
+that section (the operator's pairing, else the same slide file, else the same animal; never all sections
+of the study, so a batch difference cannot enter), each control's nuclei counted against its own cut, in
+the same region, or over all its regions when that region has fewer than `positivity.fp_min_nuclei`
+control nuclei. It assumes sensitivity 1, that every truly positive nucleus is called positive: it removes
+the control's false positives and adds back nothing missed, so it is a lower-bound adjustment. The 95%
+interval is the 2.5–97.5 percentiles of 4000 Monte-Carlo draws from Jeffreys posteriors of p_obs and f
+(fixed seed), clipped to [0, 1]. The corrected rate is blank, with the reason, when p_obs ≤ f, when no
+control is paired, or when too few control nuclei exist; for a marker segmented on its own channel the
+positive density less the controls' is given instead, with a Poisson interval and no minimum object
+count (a good control has few objects). A control the operator pairs is used only for the sections it
+is paired with. The raw values are not changed. The 06c workbook
+shows it on a "corrected_rate" sheet.
 
 # 13. Blinding
 

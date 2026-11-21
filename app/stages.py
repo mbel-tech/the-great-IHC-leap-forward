@@ -787,9 +787,11 @@ STAGES = [
           settings=["pixel_size_um", "section_thickness_um",
                     "acquisition.marker_segmentation", "detection.abercrombie.enabled",
                     "reagent_controls.files", "reagent_controls.scenes",
-                    "reagent_controls.paired_with"],
+                    "reagent_controls.paired_with", "positivity.cut_k",
+                    "positivity.fp_target", "positivity.fp_min_nuclei"],
           blurb="Positivity cut from each section's own background discs "
-                "(median + 3 x 1.4826 x MAD), the detector's false-positive "
+                "(median + k x 1.4826 x MAD, k = positivity.cut_k, 3 by default), "
+                "the detector's false-positive "
                 "rate, two densities, Abercrombie. Still keyed by animal only."),
 
     # ---- Beyond blinding ----------------------------------------------------
@@ -845,7 +847,8 @@ STAGES = [
                     "acquisition.marker_segmentation", "detection.abercrombie.enabled",
                     "groups.order", "groups.by_animal",
                     "reagent_controls.files", "reagent_controls.scenes",
-                    "reagent_controls.paired_with"],
+                    "reagent_controls.paired_with", "positivity.cut_k",
+                    "positivity.fp_target", "positivity.fp_min_nuclei"],
           blurb="06a, 06c and 06d in one run, then the figures for every "
                 "measured marker - the same pass the hourly loop makes, made "
                 "once. 06b, the unblinding join, stays its own step. The R "
@@ -868,6 +871,9 @@ STAGES = [
           outputs=["detection_overlays/index.csv"],
           needs=["roi_dataset"],
           made_from=["detect", "roi_dataset"],
+          # Its colours are 06a's cuts. A new multiplier puts it out of date at
+          # once, not only after 06a has run again with it.
+          settings=["positivity.cut_k"],
           blurb="Pictures of every nucleus 05c found, over the marker channel in "
                 "grey: positives filled magenta, negatives outlined cyan, nuclei "
                 "outside the ROI yellow, artifact orange, off tissue blue, censored "

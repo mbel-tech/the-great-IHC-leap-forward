@@ -868,6 +868,16 @@ def forget_outlines(marker, uids):
 
 #: The overlay pictures' folder, shared with 06i.
 OVERLAY_DIR = os.path.join(OUT_ROOT, "detection_overlays")
+
+
+def crop_cut(rows, marker):
+    """The cut a section's crops are coloured by: 06a's rule on its own rows,
+    at the marker's positivity.cut_k (ls_overlay.cut_k).
+
+    Only the crops' colours depend on it, so this stage does not track the key
+    (workflow.NOT_TRACKED): a new cut_k changes 06a's cuts, and 06i redraws
+    every crop whose cut no longer equals 06a's."""
+    return LO.section_cut(LO.section_values(rows), LO.cut_k(CONFIG, marker))
 #: This stage's own list of the crops it drew: 06i's index.csv columns plus the
 #: data fingerprint and an error note. 06i reads it and never writes it; this
 #: stage never writes index.csv or failures.csv.
@@ -1122,7 +1132,7 @@ class CropDrawer:
         recs, why = {}, ""
         try:
             rows = [dict(zip(COLUMNS, r)) for r in text]
-            cut = LO.section_cut(LO.section_values(rows))
+            cut = crop_cut(rows, marker)
             ident["cut"] = "" if cut is None else str(round(cut, 1))
             rows_by_roi = {}
             for r in rows:

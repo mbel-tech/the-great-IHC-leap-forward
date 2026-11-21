@@ -15,7 +15,7 @@ its own scene - measured on an area the scanner never visited.
 
 **Background discs are where this costs something.** `06a_roi_dataset.py` sets
 each section's positivity cut from its own background discs, as
-`median + 3 * 1.4826 * MAD`. Objects found on glass are dim, so they pull the
+`median + k * 1.4826 * MAD` (k = positivity.cut_k, 3 by default). Objects found on glass are dim, so they pull the
 median and the cut DOWN, and a lower cut makes that section look more positive.
 In `LS37_s05a_sc06` the off-scan disc is 429 of that section's 4,813 background
 nuclei - 8.9% of the population setting its cut.

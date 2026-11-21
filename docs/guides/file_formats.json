@@ -5992,6 +5992,209 @@
    ]
   },
   {
+   "path": "results/reagent_cut_check.csv",
+   "names": [
+    "reagent_cut_check.csv"
+   ],
+   "writer": "06a_roi_dataset.py",
+   "what": "The k check, provisional until validated on a study with known controls: the positivity cut's multiplier k tested against the no-primary reagent controls, per marker and k on the grid 2.0-5.0. Each control's ROI nuclei are counted against its own cut at k (median + k x 1.4826 x MAD of its own background-disc nuclei), beside the stained sections' leave-one-disc-out rate at the same k. isotype, preadsorbed and unstained controls are not used. Written only when a no_primary control is measured; otherwise a previous file is removed. It never changes positivity.cut_k: a suggested k is applied only by the operator, with the Results page's \"Use the suggested multiplier\" button (app/cut_apply.py), which records the file's sha256 in positivity.cut_k_source and asks for a typed confirmation once 06b has unblinded the study. 06c adds it to the \"Reagent controls\" sheet as a provisional \"Cut check\" block.",
+   "readers": [
+    "06c_excel_dataset.py",
+    "the app"
+   ],
+   "columns_from": "ls_reagent_report.py:CUT_CHECK_COLUMNS",
+   "columns": [
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye name, as declared in the study."
+    },
+    {
+     "name": "k",
+     "type": "float",
+     "units": "",
+     "meaning": "The multiplier the cut is formed at for this row."
+    },
+    {
+     "name": "n_control_sections",
+     "type": "int",
+     "units": "",
+     "meaning": "no_primary control sections with a cut of their own (at least 5 usable background nuclei) counted at this k."
+    },
+    {
+     "name": "n_control_nuclei",
+     "type": "int",
+     "units": "",
+     "meaning": "Their ROI nuclei, censored included: the rate's denominator."
+    },
+    {
+     "name": "control_fp",
+     "type": "float",
+     "units": "fraction",
+     "meaning": "Control ROI nuclei called positive (above their own section's cut at k, or censored) over n_control_nuclei, pooled over control sections. Blank when there are fewer than positivity.fp_min_nuclei such nuclei (the note gives the count), or for a marker segmented on its own channel."
+    },
+    {
+     "name": "control_fp_lo",
+     "type": "float",
+     "units": "fraction",
+     "meaning": "Lower end of the Wilson 95% interval on control_fp."
+    },
+    {
+     "name": "control_fp_hi",
+     "type": "float",
+     "units": "fraction",
+     "meaning": "Upper end of the Wilson 95% interval on control_fp."
+    },
+    {
+     "name": "disc_fp",
+     "type": "float",
+     "units": "fraction",
+     "meaning": "The stained sections' background discs, leave-one-disc-out at k (the rule of detector_specificity.csv's loo_ columns), pooled over sections. Blank under positivity.fp_min_nuclei nuclei, or with no section of two discs of 5 usable nuclei."
+    },
+    {
+     "name": "disc_fp_n",
+     "type": "int",
+     "units": "",
+     "meaning": "The nuclei disc_fp is over; blank with it."
+    },
+    {
+     "name": "meets_target",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when control_fp <= positivity.fp_target, else 0; blank when control_fp is."
+    },
+    {
+     "name": "suggested",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 on the smallest k that meets the target, 0 on the others; blank when there is no rate."
+    },
+    {
+     "name": "note",
+     "type": "text",
+     "units": "",
+     "meaning": "Why something is blank or left out: a control with too few background nuclei for a cut (named), no control rate, own-channel marker, no disc rate, or `no k on the grid meets the target`."
+    }
+   ]
+  },
+  {
+   "path": "results/roi_corrected.csv",
+   "names": [
+    "roi_corrected.csv"
+   ],
+   "writer": "06a_roi_dataset.py",
+   "what": "The corrected positive rate, provisional until validated on a study with known controls: one row per stained section, marker and region, the raw pooled rate beside a Rogan-Gladen correction for the paired no-primary reagent controls' false-positive rate, (p - f) / (1 - f), with a 95% interval (4000 Monte-Carlo draws of Jeffreys posteriors for p and f, seed 20261121). It assumes sensitivity 1 (every truly positive nucleus is called positive), so it is a lower-bound adjustment. The controls are reagent_controls.csv's pairing tiers turned round, from the stained section's side (ls_reagent_report.controls_for): no_primary controls the operator's paired_with pairs with the section, else those on its file, else those of its animal; never study-wide. A control whose operator pin takes effect for the marker (pairing_for gives it operator pairing) is used only for the sections it is paired with; a pin to another marker's section, or to a name not in the manifest, is ignored, as in reagent_controls.csv. isotype, preadsorbed and unstained controls are not used. A marker segmented on its own channel gets its positive density corrected instead (positive_density_*), with no minimum object count. roi_measurements.csv is unchanged. Written only when a no_primary control is measured; otherwise a previous file is removed. 06c shows it as the \"corrected_rate\" sheet.",
+   "readers": [
+    "06c_excel_dataset.py"
+   ],
+   "columns_from": "ls_reagent_report.py:ROI_CORRECTED_COLUMNS",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye name, as declared in the study."
+    },
+    {
+     "name": "region",
+     "type": "text",
+     "units": "",
+     "meaning": "The atlas region the section's ROIs are pooled over."
+    },
+    {
+     "name": "n_nuclei",
+     "type": "int",
+     "units": "",
+     "meaning": "ROI nuclei of the section in the region, summed over its ROIs, as roi_measurements.csv counts them."
+    },
+    {
+     "name": "n_positive",
+     "type": "int",
+     "units": "",
+     "meaning": "Of those, positive under the section's own cut; blank when any of its ROIs had no cut."
+    },
+    {
+     "name": "frac_positive",
+     "type": "float",
+     "units": "fraction",
+     "meaning": "The raw pooled rate, n_positive / n_nuclei; blank with no cut, no nuclei, or for a marker segmented on its own channel."
+    },
+    {
+     "name": "frac_positive_corrected",
+     "type": "float",
+     "units": "fraction",
+     "meaning": "(frac_positive - fp_rate) / (1 - fp_rate). Blank, never 0, when it cannot be given: at or below the control's rate, no pairable control, no control with a cut, fewer than positivity.fp_min_nuclei control nuclei, or a marker segmented on its own channel (positive_density_corrected then carries the correction)."
+    },
+    {
+     "name": "frac_positive_corrected_lo",
+     "type": "float",
+     "units": "fraction",
+     "meaning": "Lower end of the 95% interval: the 2.5th percentile of the Monte-Carlo corrected draws, clipped to [0, 1]."
+    },
+    {
+     "name": "frac_positive_corrected_hi",
+     "type": "float",
+     "units": "fraction",
+     "meaning": "Upper end: the 97.5th percentile, clipped to [0, 1]; 1 where every stained nucleus is positive."
+    },
+    {
+     "name": "positive_density_per_mm2",
+     "type": "float",
+     "units": "per mm2",
+     "meaning": "For a marker segmented on its own channel only: positive objects per mm2 of usable ROI area, Abercrombie-corrected, pooled as sum(n_positive x each ROI row's factor) / total area, as roi_measurements.csv's positive_density_per_mm2. Blank for other markers or with no cut."
+    },
+    {
+     "name": "positive_density_corrected",
+     "type": "float",
+     "units": "per mm2",
+     "meaning": "positive_density_per_mm2 less the paired no_primary controls' positive density (each control's objects above its own cut, by the factor reagent_controls.csv's positive_per_mm2 uses, over their usable ROI area in the region, or all their regions when the region has none). No minimum object count. Blank, never 0, when at or below the control's, with no paired control or control area, or for other markers."
+    },
+    {
+     "name": "positive_density_corrected_lo",
+     "type": "float",
+     "units": "per mm2",
+     "meaning": "Lower end of the 95% interval from Poisson rates (Gamma(k + 0.5) Monte-Carlo draws for both counts), clipped at 0."
+    },
+    {
+     "name": "positive_density_corrected_hi",
+     "type": "float",
+     "units": "per mm2",
+     "meaning": "Upper end of that interval."
+    },
+    {
+     "name": "fp_rate",
+     "type": "float",
+     "units": "fraction",
+     "meaning": "f: the paired no_primary controls' ROI nuclei above each control's own cut, pooled, in the same region (or all regions, see fp_rate_source). Blank under positivity.fp_min_nuclei nuclei, or for a marker segmented on its own channel."
+    },
+    {
+     "name": "fp_rate_n",
+     "type": "int",
+     "units": "",
+     "meaning": "The control nuclei (own-channel markers: objects) f or the control density is over."
+    },
+    {
+     "name": "fp_rate_source",
+     "type": "text",
+     "units": "",
+     "meaning": "The pairing tier (operator, same_file, same_animal) and the controls used, then the region, or `all regions` when the region had fewer than positivity.fp_min_nuclei control nuclei (own-channel markers: no control ROI area in the region); a paired control with no cut of its own is named as left out. `none: no same-slide or same-animal control` when there is none."
+    },
+    {
+     "name": "correction_note",
+     "type": "text",
+     "units": "",
+     "meaning": "Why a value is blank; for a marker segmented on its own channel, that its density is corrected instead and the controls' positive density."
+    }
+   ]
+  },
+  {
    "path": "results/roi_geometry_changed.csv",
    "names": [
     "roi_geometry_changed.csv"

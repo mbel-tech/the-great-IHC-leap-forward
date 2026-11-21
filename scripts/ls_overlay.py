@@ -85,12 +85,13 @@ def kind_of(row, cut):
 # ---- the per-section cut ----------------------------------------------------
 #
 # 06a counts by it and 05c draws by it, so it is written once, here. The
-# arithmetic is 06a's to the operation (spread first, then times 3): a cut
+# arithmetic is 06a's to the operation (spread first, then times k): a cut
 # that differed in its last bit would call a nucleus sitting on it differently.
 
 #: Fewest background nuclei a section needs for a cut; with fewer it has none.
 CUT_MIN_NUCLEI = 5
-#: The cut is this many spreads above the background median...
+#: The cut is this many spreads above the background median, unless the study
+#: says otherwise in positivity.cut_k (see cut_k)...
 CUT_K = 3.0
 #: ...and a spread is the MAD scaled to a normal SD.
 MAD_SCALE = 1.4826
@@ -109,13 +110,61 @@ def background_stats(values):
     return statistics.median(values), mad(values) * MAD_SCALE, len(values)
 
 
-def section_cut(values):
-    """median + 3 * 1.4826 * MAD of `values` (background_stats), or None."""
+def cut_k(config, marker):
+    """The multiplier `marker`'s cut is formed at: positivity.cut_k[marker],
+    else positivity.cut_k["*"], else CUT_K.
+
+    ls_config validates the map (every value 1-10, keys a marker or "*"); a
+    config with no `positivity` block - every study before the key - gets
+    CUT_K, so its cuts are the ones it always had.
+    """
+    table = ((config or {}).get("positivity") or {}).get("cut_k") or {}
+    if not isinstance(table, dict):
+        return CUT_K
+    for key in (marker, "*"):
+        if key is not None and key in table:
+            return float(table[key])
+    return CUT_K
+
+
+def section_cut(values, k=CUT_K):
+    """median + k * 1.4826 * MAD of `values` (background_stats), or None.
+
+    `k` is the marker's multiplier (cut_k); left out it is CUT_K, and the
+    arithmetic is unchanged to the bit: spread first, then times k."""
     got = background_stats(values)
     if got is None:
         return None
     m, s, _ = got
-    return m + CUT_K * s
+    return m + k * s
+
+
+def leave_one_disc_out(discs, k=CUT_K):
+    """(false positives, nuclei) counted out of sample over one section's
+    background discs for one marker, or None.
+
+    `discs`: one entry per disc, each a list of (median, censored) pairs - a
+    bare number is (number, False) - or None/empty for a disc with no kept
+    nuclei. Each disc with CUT_MIN_NUCLEI usable (uncensored) values is left
+    out in turn, the cut is formed at `k` from the usable values of every
+    OTHER disc (section_cut), and the left-out disc's nuclei are counted
+    against it by is_positive - a censored one is positive and still a
+    nucleus. Needs two such discs. 06a's leave_one_disc_out and the reagent
+    k check (ls_reagent_report.cut_check_rows) both count by this one rule.
+    """
+    pairs = [[(x, False) if not isinstance(x, (tuple, list)) else (x[0], bool(x[1]))
+              for x in d] if d else [] for d in discs]
+    usable = [[v for v, c in d if not c] for d in pairs]
+    qual = [i for i, u in enumerate(usable) if len(u) >= CUT_MIN_NUCLEI]
+    if len(qual) < 2:
+        return None
+    fp = n = 0
+    for i in qual:
+        cut = section_cut([v for j, u in enumerate(usable) if j != i
+                           for v in u], k)
+        fp += sum(1 for v, c in pairs[i] if is_positive(v, c, cut))
+        n += len(pairs[i])
+    return fp, n
 
 
 def section_values(rows):

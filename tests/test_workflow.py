@@ -568,6 +568,18 @@ for st in S.STAGES:
             and k.path not in st.settings and k.path not in W.NOT_TRACKED]
     chk(f"{st.sid}: every setting it reads is tracked, or says why not", left, [])
 
+print("--- a default written out hashes as unset ---")
+for _k, _hi in (("positivity.fp_target", 0.02), ("positivity.fp_min_nuclei", 80)):
+    _leaf = _k.split(".")[1]
+    chk(f"{_k}: the hashed default is ls_config's", W.SETTING_DEFAULTS[_k],
+        _spec[_k].default)
+    chk(f"{_k}: written out at the default, it reads as unset",
+        W._setting({"positivity": {_leaf: _spec[_k].default}}, _k), None)
+    chk(f"{_k}: ...at another value it is that value",
+        W._setting({"positivity": {_leaf: _hi}}, _k), _hi)
+    chk(f"{_k}: tracked by 06a and the results build",
+        [_k in S.BY_ID[s].settings for s in ("roi_dataset", "build_results")], [True, True])
+
 print("--- outputs and inputs the screens offer ---")
 chk("overviews open their folder", W.output_folder("overviews", {"out_root": "/s"}),
     ("Open pictures", os.path.join("/s", "overviews")))
@@ -1121,6 +1133,12 @@ if MW:
     w.setup.advanced.setChecked(True)
     chk("Show advanced settings brings every card back",
         w.setup.tabs.count(), 1 + len(W.setting_sections(LC.dialog_fields())))
+    from PySide6.QtWidgets import QTableWidget as _QTW
+    _ck = w.setup.findChild(_QTW, "cut_k_table")
+    chk("Nucleus detection shows the cut multiplier per marker, read-only",
+        (_ck is not None and _ck.item(0, 0).text(), _ck is not None and _ck.item(0, 1).text(),
+         _ck is not None and _ck.editTriggers() == _QTW.NoEditTriggers),
+        ("every marker (*)", "3", True))
     w.setup.advanced.setChecked(False)
     chk("Set up says where this study's slides come from",
         CFG["source_dir"] in w.setup.current.text(), True)

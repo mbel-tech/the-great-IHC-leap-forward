@@ -217,8 +217,8 @@ whatever you add. In the installed Windows app the same thing is `ihc --list stu
 from inside itself writes `ihc.cmd` on its next start, and typing `ihc` from any folder needs the
 installer's *Add the ihc command to PATH* task (or the install folder added to Path by hand).
 
-**If the slides or output drive drops.** The stages that read slides (and the ones that write to the
-output folder) wait instead of failing. After 10 seconds the window shows an amber banner and a
+**If the slides or output drive drops.** The stages that read slides wait instead of failing, and so
+do their writes to the output folder (and the run record in the study file). After 10 seconds the window shows an amber banner and a
 notification saying which folder is unreachable and which step is paused; on a terminal the same
 appears as one line, and another when the drive is back. When the drive reappears the run carries on by
 itself, redoing only the section or file it was on, so nothing needs pressing. To give up instead, press

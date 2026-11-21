@@ -658,7 +658,7 @@ python -m app --stage overviews D:\LS-analysis\study.json --opt limit=3
 
 ### If the drive drops
 
-The slides or output drive can vanish for a while, for example a USB lead or a network share. The steps that read slides or write results wait for it instead of failing. After 10 seconds an amber banner and a notification say which folder is unreachable and which step is paused. When the drive is back the run carries on by itself, redoing only the section or file it was on. To give up, press **Stop now** on the banner (Ctrl+C at a terminal); the run is recorded as stopped while the drive was disconnected, and running it again skips what is done. If the drive returns under a different letter it cannot be found: stop, correct the folder in Set up, and run again.
+The slides or output drive can vanish for a while, for example a USB lead or a network share. The steps that read slides wait for it instead of failing, and so do their writes to the output folder and the record of the run. After 10 seconds an amber banner and a notification say which folder is unreachable and which step is paused. When the drive is back the run carries on by itself, redoing only the section or file it was on. To give up, press **Stop now** on the banner (Ctrl+C at a terminal); the run is recorded as stopped while the drive was disconnected, and running it again skips what is done. If the drive returns under a different letter it cannot be found: stop, correct the folder in Set up, and run again.
 
 ### Common problems
 

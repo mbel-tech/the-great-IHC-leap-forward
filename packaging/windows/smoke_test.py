@@ -95,7 +95,7 @@ def console_launcher():
         study = os.path.join(d, "study.json")
         with open(study, "w", encoding="utf-8") as fh:
             json.dump({"out_root": os.path.join(d, "out"),
-                       "slides_root": os.path.join(d, "slides")}, fh)
+                       "source_dir": os.path.join(d, "slides")}, fh)
         try:
             out = subprocess.run(["cmd", "/c", cmd, "--list", study],
                                  capture_output=True, text=True, cwd=d, timeout=120)

@@ -814,7 +814,13 @@ death by a signal, while a watched folder is unreachable means the supervisor wa
 starts the stage again with the same argv, and its resumability skips what is done; a child that keeps dying without printing anything is restarted at most 5 times in a row. With the drive there, that death is an
 ordinary failure. `Runner.stop()` creates the stop file (`LS_STOP_FILE`) and ends the child; a stop
 during a pause is recorded as a failed run, "stopped while the drive was disconnected", with its pauses.
-Inside the child (`LS_CHILD=1`) the stage runs in-process as above.
+Inside the child (`LS_CHILD=1`) the stage runs in-process as above. A stage run in the app's own process
+can wait for the drive too (an `ls_io` write on `out_root`); its `@@drive` lines are read by the same
+parser, so its waits are recorded as `pauses` the same way. For every run the runner sets `LS_WATCH` to the
+study's `source_dir` and `out_root` (unless it is already set), because the study file usually lives in
+`out_root` and cannot be read while the drive is gone; `ls_drive` also remembers the folders a study file
+named and keeps using them while it cannot be read. Ctrl+C during a wait for the drive is recorded as
+"stopped while the drive was disconnected", with exit status 130.
 
 Stages read the study file **at import** into module-level constants. The runner therefore hashes the
 study file (without its `project` and `curation` blocks, which change on every run and every curation
@@ -894,7 +900,10 @@ sets, overrides, ROI geometry, results tables and workbooks) are written to `<pa
 and swapped in with `os.replace`, which is atomic on Windows and POSIX when both are on one drive (`ls_io.py` for CSVs and
 text, `ls_jsonio.py` for JSON). `ls_io` makes five attempts with about 15 seconds of waiting between them (1, 2, 4 and 8 s), because the
 operator's USB drive has been seen to vanish for seconds at a time; after that the error is raised, not
-swallowed. Some older writers still open their file directly: `00c`, `01b`, `01e`, `01g`, `04a3b`,
+swallowed, unless a watched folder is gone: then it waits for the drive with no time limit (`ls_drive.py`;
+Stop or Ctrl+C ends the wait), and a wait does not use up an attempt. 05c's tables, which it appends to,
+are opened, written, fsynced and closed again for each section through the same wait, and the run record
+in the study file waits for the folder the file is in. Some older writers still open their file directly: `00c`, `01b`, `01e`, `01g`, `04a3b`,
 `04a_atlas_extract`, `04a_reformat`'s lost-sections list, `05b`, `04k`, `04l`, `04q` and `04x`; 05c appends
 to its tables rather than replacing them.
 `tests/test_atomic_stage_writes.py` checks that a failure at the swap leaves the previous manifest,

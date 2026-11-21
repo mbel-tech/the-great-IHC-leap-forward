@@ -14,8 +14,9 @@ where things landed, not which plausible-looking route was tried and abandoned, 
 **Changed:** `python -m app --stage <id> <study.json>` runs one stage as the window's Run button does (saved
 options, Redo when out of date, run recorded) and refuses, with the window's reason and exit 2, what the
 window would hold unless `--force`; `--list` prints every stage's state. The stages that read slides
-(00, 00b, 01, 01l, 05b, 05c, 06i and others) and the writes to the output folder pause when a drive drops and carry on when it
-is back, redoing only the unit they were on; stages that read CZI pixels run in a supervised child process so
+(00, 00b, 01, 01l, 05b, 05c, 06i and others) pause when a drive drops and carry on when it is back, redoing
+only the unit they were on; so do the writes to the output folder that go through `ls_io` (the atomic CSV,
+JSON and image writes), 05c's tables and the run record in the study file; stages that read CZI pixels run in a supervised child process so
 a native crash on a lost drive cannot close the window. The window shows an amber banner and a notification
 after 10 s, with Stop now; a terminal prints a line when it pauses and when it resumes. The Windows bundle
 gains `ihc.cmd` (console Python, so exit codes reach the prompt) and an optional, unticked installer task

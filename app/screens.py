@@ -111,16 +111,9 @@ def stage_status(st, study, running, held=None):
 
 
 def waiting_words(need, study):
-    """What a held stage says it is waiting on: your export, or a stage to finish."""
-    n = S.BY_ID.get(need)
-    if n is not None and n.operator:
-        if need == "roi_curator":
-            return "Waiting for your ROI export"
-        return f"Waiting for your export from {W.display_title(n, study)}"
-    if need == "detect":
-        return "Needs detection to finish first"
-    return (f"Needs {W.display_title(n, study)} to finish first" if n is not None
-            else "Waiting for an earlier stage")
+    """What a held stage says it is waiting on (workflow.waiting_words, which the
+    command line shares)."""
+    return W.waiting_words(need, study)
 
 
 def row_action(st, state, held):

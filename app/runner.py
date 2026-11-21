@@ -48,8 +48,17 @@ import supervise as SV
 CHILD_READERS = ("pylibCZIrw", "czifile")
 
 
+def _is_stopped(exc):
+    """Whether `exc` is ls_drive.Stopped (the one module ls_io keeps)."""
+    try:
+        return isinstance(exc, SV._drive_module().Stopped)
+    except Exception:                                       # noqa: BLE001
+        return False
+
+
 class StageResult:
-    def __init__(self, sid, ok, seconds, output, error=None, pauses=None):
+    def __init__(self, sid, ok, seconds, output, error=None, pauses=None,
+                 stopped=False, interrupted=False):
         self.sid = sid
         self.ok = ok
         self.seconds = seconds
@@ -57,10 +66,17 @@ class StageResult:
         self.error = error
         # Waits for a dropped drive: [{at, seconds, folder, label}].
         self.pauses = list(pauses or [])
+        # Stopped while waiting for the drive (ls_drive.Stopped); ended by Ctrl+C.
+        self.stopped = bool(stopped)
+        self.interrupted = bool(interrupted)
 
     def record_error(self):
         """What the run history keeps of a failure: its first line, short. None if ok."""
-        if self.ok or not self.error:
+        if self.ok:
+            return None
+        if self.stopped:
+            return SV.STOPPED_IN_PAUSE
+        if not self.error:
             return None
         first = str(self.error).strip().splitlines()
         return first[0][:300] if first else None
@@ -348,7 +364,9 @@ class Runner:
                 tee.flush()
                 detail = "".join(traceback.format_exception(type(e), e, e.__traceback__))
                 return StageResult(stage.sid, False, time.time() - t0,
-                                   tee.text(), f"{type(e).__name__}: {e}\n\n{detail}")
+                                   tee.text(), f"{type(e).__name__}: {e}\n\n{detail}",
+                                   stopped=_is_stopped(e),
+                                   interrupted=isinstance(e, KeyboardInterrupt))
 
             finally:
                 sys.argv = old_argv
@@ -400,7 +418,8 @@ class Runner:
             except BaseException as e:                      # noqa: BLE001
                 detail = "".join(traceback.format_exception(type(e), e, e.__traceback__))
                 return StageResult(stage.sid, False, time.time() - t0, "".join(out),
-                                   f"{type(e).__name__}: {e}\n\n{detail}")
+                                   f"{type(e).__name__}: {e}\n\n{detail}",
+                                   interrupted=isinstance(e, KeyboardInterrupt))
             finally:
                 self._proc = None
                 with self._stop_lock:
@@ -409,8 +428,13 @@ class Runner:
                     os.remove(stop_file)
                 except OSError:
                     pass
+            # A stop during a wait for the drive is the supervisor's own verdict
+            # (the stop file was there and the drive was out): it says so with
+            # STOPPED_IN_PAUSE, never from the child's text alone.
             return StageResult(stage.sid, rc == 0, time.time() - t0, "".join(out),
-                               None if rc == 0 else tail, pauses)
+                               None if rc == 0 else tail, pauses,
+                               stopped=(rc == 1 and tail == SV.STOPPED_IN_PAUSE),
+                               interrupted=(rc == 130))
 
     def stop(self):
         """Ask a stage running as a child to stop now.

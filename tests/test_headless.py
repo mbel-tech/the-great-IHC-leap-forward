@@ -183,20 +183,25 @@ chk("--opt takes the flag with its dashes too", r.argv, ["--pixels", "2"])
 
 
 class Says(StandIn):
-    def __init__(self, error):
+    def __init__(self, error, **flags):
         StandIn.__init__(self)
-        self.error = error
+        self.error, self.flags = error, flags
 
     def run(self, stage, on_line=None, extra_argv=()):
         self.ran.append(stage.sid)
-        return StageResult(stage.sid, False, 0.1, "", self.error)
+        return StageResult(stage.sid, False, 0.1, "", self.error, **self.flags)
 
 
-ok, rc, said, _r = stage(fresh("ctrlc"), "manifest", runner=Says("KeyboardInterrupt: \n\ntb"))
+ok, rc, said, _r = stage(fresh("ctrlc"), "manifest",
+                         runner=Says("KeyboardInterrupt: \n\ntb", interrupted=True))
 chk("Ctrl+C during the stage: exit 130", rc, 130)
+ok, rc, said, _r = stage(fresh("ctrlc_text"), "manifest",
+                         runner=Says("KeyboardInterrupt: only in the text"))
+chk("...read from the result's flag, not its error text", rc, 1)
 PST = fresh("stopped")
 ok, rc, said, _r = stage(PST, "manifest",
-                         runner=Says("Stopped: stopped while waiting for E:\\\n\ntb"))
+                         runner=Says("Stopped: stopped while waiting for E:\\\n\ntb",
+                                     stopped=True))
 chk("stopped while the drive was gone: exit 1", rc, 1)
 chk("...saying so", "stopped while the drive was disconnected" in said)
 chk("...and recorded with that error", runs_of(PST)[-1].get("error"),
@@ -215,7 +220,8 @@ ok, rc, said, _r = stage(PC, "manifest", runner=Says("SystemExit-like refusal\nm
 chk("a failing child exits 1", rc, 1)
 chk("...with its error as its last line (the parent's record)",
     said.strip().splitlines()[-1], "SystemExit-like refusal")
-ok, rc, said, _r = stage(PC, "manifest", runner=Says("Stopped: x\n\ntb"), child=True, argv=[])
+ok, rc, said, _r = stage(PC, "manifest", runner=Says("Stopped: x\n\ntb", stopped=True),
+                         child=True, argv=[])
 chk("a child stopped in a pause says so last", (rc, said.strip().splitlines()[-1]),
     (1, "stopped while the drive was disconnected"))
 chk("an unknown stage in a child: exit 2", stage(PC, "nope", child=True, argv=[])[1], 2)
@@ -229,10 +235,129 @@ now = H.study(PL, StandIn())
 want = [s.sid for s in H.S.STAGES if W.applies(s, now)[0]]
 chk("every stage that applies is listed", [s for s in want if s not in rows], [])
 chk("a stage not run yet", rows["manifest"].rstrip().endswith("not run"))
-chk("a blocked stage names what it waits for", rows["verify"].rstrip().endswith("blocked: manifest"))
+chk("a blocked stage names what it waits for", "blocked: manifest - " in rows["verify"])
+chk("...and the group is shown", "Ingest and QC" in rows["verify"])
 chk("a stage for another layout", rows["pair"].rstrip().endswith("not for this study"))
 chk("a stage the app does not run", "cli only: needs Fiji" in rows["fiji_export"])
 chk("the title is shown", H.S.BY_ID["manifest"].title in rows["manifest"])
+
+print("--- the window's hold: a curator page built, nothing exported ---")
+PW = fresh("waiting")
+with open(PW, encoding="utf-8") as fh:
+    OUT_W = json.load(fh)["out_root"]
+os.makedirs(os.path.join(OUT_W, "reformatted"), exist_ok=True)
+open(os.path.join(OUT_W, "reformatted", "roi_curator.html"), "w").close()
+ok, rc, said, r = stage(PW, "roi_geometry")
+chk("--stage after a curator not exported yet is refused", (rc, r.ran), (2, []))
+chk("...with the window's words", "Waiting for your ROI export" in said)
+chk("...and nothing recorded", runs_of(PW), [])
+out = io.StringIO()
+H.list_stages(PW, out=out)
+rows = {ln.split()[0]: ln for ln in out.getvalue().splitlines() if ln.strip()}
+chk("--list shows it held, with the window's words",
+    "blocked: roi_curator - Waiting for your ROI export" in rows["roi_geometry"])
+chk("...and the curator as waiting for your export",
+    "waiting for your export" in rows["roi_curator"])
+ok, rc, said, r = stage(PW, "roi_geometry", force=True)
+chk("--force still runs it", (rc, r.ran), (0, ["roi_geometry"]))
+
+print("--- the terminal sees words, not the app's marker lines ---")
+MARKS = ["@@progress 3/10 sections", "@@drive lost E:\\Slides | LS53_1a scene 3",
+         "@@drive back 134", "section 2/5 written"]
+
+
+class Marks(StandIn):
+    def run(self, stage, on_line=None, extra_argv=()):
+        self.ran.append(stage.sid)
+        for m in MARKS:
+            on_line(m)
+        return StageResult(stage.sid, True, 0.1, "")
+
+
+ok, rc, said, _r = stage(fresh("marks"), "manifest", runner=Marks())
+chk("@@progress lines are dropped", "@@progress" in said, False)
+chk("a lost drive reads as a sentence",
+    "slides drive unreachable (E:\\Slides), paused at LS53_1a scene 3; waiting, Ctrl+C to stop"
+    in said)
+chk("...and its return", "drive back after 134 s, carrying on" in said)
+chk("...no raw @@drive line", "@@drive" in said, False)
+chk("an ordinary count line is kept", "section 2/5 written" in said)
+out = io.StringIO()
+H.run_screen(fresh("marks_run"), "prepare", runner=Marks(), out=out)
+chk("--run filters the same way",
+    ("@@" in out.getvalue(), "drive back after 134 s, carrying on" in out.getvalue()),
+    (False, True))
+ok, rc, said, _r = stage(fresh("marks_child"), "manifest", runner=Marks(), child=True, argv=[])
+chk("--child passes the markers through raw, for its parent",
+    all(m in said for m in MARKS))
+
+print("--- Ctrl+C in --run ---")
+
+
+class CtrlC(StandIn):
+    def run(self, stage, on_line=None, extra_argv=()):
+        self.ran.append(stage.sid)
+        return StageResult(stage.sid, False, 0.1, "", "KeyboardInterrupt: ", interrupted=True)
+
+
+PK = fresh("run_ctrlc")
+try:
+    H.run_screen(PK, "prepare", runner=CtrlC(), out=io.StringIO())
+    raised = False
+except KeyboardInterrupt:
+    raised = True
+chk("a Ctrl+C inside a stage stops --run", raised)
+chk("...after recording the run as failed", [x["ok"] for x in runs_of(PK)], [False])
+real = H.run_screen
+H.run_screen = lambda *a, **k: (_ for _ in ()).throw(KeyboardInterrupt())
+try:
+    chk("...and --run exits 130", H.main(["app", "--run", "prepare", PK]), 130)
+finally:
+    H.run_screen = real
+
+print("--- Runner sets stopped / interrupted from what was raised ---")
+SDIR2 = os.path.join(TMP, "flag_scripts")
+os.makedirs(SDIR2, exist_ok=True)
+with open(os.path.join(SDIR2, "ki.py"), "w", encoding="utf-8") as fh:
+    fh.write("def main():\n    raise KeyboardInterrupt\n")
+with open(os.path.join(SDIR2, "stop.py"), "w", encoding="utf-8") as fh:
+    fh.write("import sys\nsys.path.insert(0, %r)\nimport ls_io\n"
+             "def main():\n    raise ls_io.drive_module().Stopped('stopped while waiting')\n"
+             % H.SCRIPTS)
+import copy                                                     # noqa: E402
+import runner as RN                                             # noqa: E402
+PR_ = fresh("flags")
+rr = H.Runner(SDIR2, PR_)
+
+
+def fake(script):
+    st = copy.copy(H.S.BY_ID["manifest"])
+    st.script, st.argv = script, []
+    return st
+
+
+res = rr.run(fake("ki.py"))
+chk("in process: KeyboardInterrupt -> interrupted", (res.ok, res.interrupted, res.stopped),
+    (False, True, False))
+res = rr.run(fake("stop.py"))
+chk("in process: ls_drive.Stopped -> stopped", (res.ok, res.stopped, res.interrupted),
+    (False, True, False))
+chk("...recorded as the stopped error", res.record_error(),
+    "stopped while the drive was disconnected")
+real = RN.SV.run_child
+try:
+    RN.SV.run_child = lambda *a, **k: (130, [], "KeyboardInterrupt:")
+    res = rr.run(H.S.BY_ID["czi_selftest"])
+    chk("a child's exit 130 -> interrupted", (res.interrupted, res.stopped), (True, False))
+    RN.SV.run_child = lambda *a, **k: (1, [], RN.SV.STOPPED_IN_PAUSE)
+    res = rr.run(H.S.BY_ID["czi_selftest"])
+    chk("the supervisor's stopped-in-a-pause -> stopped", (res.stopped, res.interrupted),
+        (True, False))
+    RN.SV.run_child = lambda *a, **k: (1, [], "some other failure")
+    res = rr.run(H.S.BY_ID["czi_selftest"])
+    chk("...any other failure is neither", (res.stopped, res.interrupted), (False, False))
+finally:
+    RN.SV.run_child = real
 
 print("--- a reader stage through the real supervised child ---")
 STANDIN = r"""
@@ -242,6 +367,8 @@ def main():
     print("stand-in pid %d child %s" % (os.getpid(), os.environ.get("LS_CHILD")))
     if "99" in sys.argv:
         raise SystemExit("stand-in refuses 99")
+    if "130" in sys.argv:
+        raise KeyboardInterrupt
     return 0
 """
 SDIR = os.path.join(TMP, "standin_scripts")
@@ -264,6 +391,9 @@ ok, rc, said, _r = stage(PB, "czi_selftest", runner=H.Runner(SDIR, PB), opts={"p
 chk("a refusal in the child fails the stage", (ok, rc), (False, 1))
 chk("...and its message is what the parent records", runs_of(PB)[-1].get("error"),
     "stand-in refuses 99")
+ok, rc, said, _r = stage(PB, "czi_selftest", runner=H.Runner(SDIR, PB), opts={"pixels": "130"})
+chk("Ctrl+C in the real child: exit 130, recorded as failed",
+    (rc, runs_of(PB)[-1]["ok"], len(runs_of(PB))), (130, False, 3))
 
 print("--- the command line ---")
 env = dict(os.environ, PYTHONIOENCODING="utf-8")

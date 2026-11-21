@@ -49,6 +49,7 @@ for p in (HERE, SCRIPTS):
         sys.path.insert(0, p)
 
 import ls_project as LP                     # noqa: E402
+import progress as PR                       # noqa: E402
 import stages as S                          # noqa: E402
 import workflow as W                        # noqa: E402
 from runner import Runner                   # noqa: E402
@@ -81,14 +82,43 @@ def study(path, runner):
     return W.Study(cfg.get("out_root", ""), runner.names(), cfg)
 
 
+def for_terminal(say):
+    """`on_line` for a person at a terminal: the app's marker lines made readable.
+
+    The runner asks the stages for `@@progress` counts (the window's bar) and a
+    supervised child always prints them; here they are dropped. `@@drive`
+    lines become the sentence a person reads. Never used for `--child`: its
+    parent needs the markers as they are.
+    """
+    def line(text):
+        drive = PR.parse_drive(text)
+        if drive is not None:
+            if drive[0] == "lost":
+                say(f"slides drive unreachable ({drive[1]}), paused at {drive[2]}; "
+                    "waiting, Ctrl+C to stop")
+            else:
+                say(f"drive back after {drive[1]:.0f} s, carrying on")
+            return
+        prog = PR.parse(text)
+        if prog is not None and prog.hidden:
+            return
+        say(text)
+    return line
+
+
 def run_screen(path, screen, runner=None, out=None):
-    """Run `screen`'s plan for the study at `path`. [(sid, ok, seconds, error)]."""
+    """Run `screen`'s plan for the study at `path`. [(sid, ok, seconds, error)].
+
+    A Ctrl+C inside a stage is recorded like any failed run and then raised
+    again as KeyboardInterrupt, so the command line exits 130.
+    """
     out = out or sys.stdout
     path = os.path.abspath(path)
     os.environ["LS_CONFIG"] = path
     runner = runner or Runner(SCRIPTS, path)
     plan, held = W.run_plan(screen, study(path, runner))
     say = lambda text: (out.write(text + "\n"), out.flush())     # noqa: E731
+    shown = for_terminal(say)
     say(f"{len(plan)} stage(s) to run: {', '.join(plan) or 'none'}")
     for sid, waits in held.items():
         say(f"  held: {sid} waits for {waits}")
@@ -101,7 +131,7 @@ def run_screen(path, screen, runner=None, out=None):
         inputs = W.run_inputs(sid, values, now)
         say(f"=== [{n}/{len(plan)}] {base.title}" + (f"  options: {values}" if values else ""))
         started = now_iso()
-        res = runner.run(W.with_options(base, values), on_line=say)
+        res = runner.run(W.with_options(base, values), on_line=shown)
         try:
             LP.Project.open(path).record_run(sid, res.ok, started, now_iso(),
                                              options=values, inputs=inputs,
@@ -109,6 +139,9 @@ def run_screen(path, screen, runner=None, out=None):
         except LP.ProjectError as exc:
             say(f"could not record the run in the study: {exc}")
         results.append((sid, bool(res.ok), res.seconds, res.error))
+        if getattr(res, "interrupted", False):
+            say(f"--- {base.title}: stopped by Ctrl+C")
+            raise KeyboardInterrupt
         if not res.ok:
             say(f"--- {base.title}: FAILED after {res.seconds:.0f}s\n{res.error}")
             break
@@ -122,26 +155,28 @@ def run_screen(path, screen, runner=None, out=None):
 
 
 def _outcome(res):
-    """(exit status, error to record) for a StageResult.
+    """(exit status, error to record) for a StageResult, from its flags.
 
     Runner.run never raises: a Ctrl+C or a stop during a wait for the drive
-    inside the stage comes back as a failed result whose error starts with the
-    exception's name.
+    comes back as a failed result marked `interrupted` or `stopped`.
     """
     if res.ok:
         return 0, None
-    first = (str(res.error or "").strip().splitlines() or [""])[0]
-    if first.startswith("KeyboardInterrupt"):
+    if getattr(res, "interrupted", False):
         return 130, res.record_error()
-    if first.startswith("Stopped:") or first == STOPPED_IN_PAUSE:
+    if getattr(res, "stopped", False):
         return 1, STOPPED_IN_PAUSE
     return 1, res.record_error()
 
 
 def _waits(stage, now):
-    """The needs of `stage` this study uses that are not done yet."""
-    return [n for n in S.blocked_by(stage, now.out_root, now.names)
-            if W.applies(S.BY_ID[n], now)[0]]
+    """(stage id it waits for, the window's words for it), or None.
+
+    The window's hold (workflow.waits_for, as Run all remaining holds a stage):
+    a need not done, out of date or partly done, or a curator not exported.
+    """
+    need = W.waits_for(stage, now)
+    return (need, W.waiting_words(need, now)) if need else None
 
 
 def _options(sid, given):
@@ -179,8 +214,7 @@ def _refusal(base, now, force, unblind):
         return f"{base.title} has no script to run"
     waits = _waits(base, now)
     if waits and not force:
-        return (f"{base.title} needs {', '.join(waits)} first, which "
-                f"{'is' if len(waits) == 1 else 'are'} not done. "
+        return (f"{base.title} is waiting for {waits[0]}: {waits[1]}. "
                 "Add --force to run it anyway.")
     return None
 
@@ -229,7 +263,7 @@ def run_stage(path, sid, runner=None, out=None, force=False, unblind=False, opts
     inputs = W.run_inputs(sid, values, now)
     say(f"=== {base.title}" + (f"  options: {values}" if values else ""))
     started = now_iso()
-    res = runner.run(W.with_options(base, values), on_line=say)
+    res = runner.run(W.with_options(base, values), on_line=for_terminal(say))
     rc, error = _outcome(res)
     try:
         LP.Project.open(path).record_run(sid, res.ok, started, now_iso(),
@@ -266,7 +300,7 @@ def _run_child_side(path, base, runner, say, argv):
 
 
 def list_stages(path, out=None):
-    """Print `id  title  state` for every stage, as the window sees it. Exit status 0."""
+    """Print `id  group  title  state` for every stage, as the window sees it. Exit status 0."""
     out = out or sys.stdout
     path = os.path.abspath(path)
     os.environ["LS_CONFIG"] = path
@@ -284,12 +318,14 @@ def list_stages(path, out=None):
             word = "done"
         else:
             waits = _waits(st, now)
-            word = f"blocked: {', '.join(waits)}" if waits else "not run"
-        rows.append((st.sid, st.title, word))
-    wid = max(len(r[0]) for r in rows)
-    wt = max(len(r[1]) for r in rows)
-    for sid, title, word in rows:
-        out.write(f"{sid:<{wid}}  {title:<{wt}}  {word}\n")
+            word = f"blocked: {waits[0]} - {waits[1]}" if waits else "not run"
+        if state == "done" and st.operator and not W.decided(st.sid, now):
+            # As the window says it: the page is there, your export is not.
+            word = "blocked: your export - page built; waiting for your export"
+        rows.append((st.sid, st.group, st.title, word))
+    wid, wg, wt = (max(len(r[i]) for r in rows) for i in range(3))
+    for sid, group, title, word in rows:
+        out.write(f"{sid:<{wid}}  {group:<{wg}}  {title:<{wt}}  {word}\n")
     out.flush()
     return 0
 

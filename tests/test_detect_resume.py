@@ -1109,6 +1109,323 @@ print("--- multiplex: the second marker is measured, not inherited ---")
 multiplex_second_marker_check()
 
 
+def drive_drop_check():
+    """The drive drops while a section is being measured: wait, redo it.
+
+    The slides are on a USB drive that goes away rather than failing a read.
+    05c's unit is one section's ROIs: a read that fails while the slides
+    folder is unreachable waits for it, the section is measured again from
+    its first ROI - the CZI opened afresh - and committed once, by the
+    section's own checkpoint. What reaches the disk must be exactly what an
+    uninterrupted run writes: these are the paper's counts. A read that fails
+    with the folder there is an ordinary failure, and stops the run as it
+    always did, with the sections before it on disk and logged.
+
+    The drop is real as far as the stage can tell: the stand-in reader renames
+    the slides folder away and raises OSError, and a thread puts it back.
+    Handles opened before a wait refuse to read after it, as a vanished
+    volume's do. A model that finds objects, and pixels keyed by what is read
+    (never by how often), so a redo that read anything twice, or a row added
+    twice, shows.
+    """
+    try:
+        import pylibCZIrw.czi as _real_pyczi
+        import csbdeep.utils  # noqa: F401
+    except ImportError as exc:                                   # noqa: BLE001
+        print(f"   ({exc} - the detection loop cannot be driven here)")
+        return
+    import contextlib
+    import glob
+    import io
+    import threading
+    import time
+    from _fixture import temp_study, load_stage
+
+    W, H = 24, 20
+    paired = {"layout": "paired", "markers": ["AF568", "AF488"], "channels": []}
+    with temp_study(acquisition=paired) as study:
+        M = load_stage("05c_detect_rois.py", name="lsstage_05c_drop")
+        DR = M.IO.drive_module()
+        chk("ls_drive loads", DR is not None, True)
+        saved_env = {k: os.environ.get(k) for k in ("LS_WATCH", "LS_PROGRESS")}
+        saved_poll = DR.POLL
+        os.environ["LS_WATCH"] = study.source_dir
+        os.environ["LS_PROGRESS"] = "1"
+        DR.POLL = 0.05
+        marker = "AF568"
+        M.G5.use_marker(marker)
+        src = study.source_dir
+        secs = {"AB12_1a-s0": ("AB12_1a.czi", (100, 130)),
+                "AB12_2a-s0": ("AB12_2a.czi", (400, 430))}
+        for fname, _ in secs.values():
+            open(os.path.join(src, fname), "wb").close()
+
+        geoms = [{"scene_uid": u, "animal": "AB12", "marker": marker,
+                  "czi_file": f, "scene_index": "0",
+                  "m00": "1", "m01": "0", "m02": "0",
+                  "m10": "0", "m11": "1", "m12": "0"} for u, (f, _) in secs.items()]
+        os.makedirs(os.path.dirname(M.G5.GEOM_CSV), exist_ok=True)
+        os.makedirs(M.RESULTS, exist_ok=True)
+        write(M.G5.GEOM_CSV, list(geoms[0]), [list(g.values()) for g in geoms])
+        boxes = [{"scene_uid": u, "animal": "AB12", "marker": marker,
+                  "roi_kind": "roi", "region": "Dm", "seed_n": str(i),
+                  "czi_x0": str(x), "czi_y0": "100", "czi_w": str(W),
+                  "czi_h": str(H), "sec_x": str(x + 5.0), "sec_y": "105.0",
+                  "sec_r": "4", "sec_poly": ""}
+                 for u, (_, xs) in secs.items() for i, x in enumerate(xs, 1)]
+        write(M.G5.BOX_CSV, list(boxes[0]), [list(b.values()) for b in boxes])
+        mask_dir = os.path.join(M.REFORMAT_DIR, "sections")
+        os.makedirs(mask_dir, exist_ok=True)
+        for u in secs:
+            np.save(os.path.join(mask_dir, f"{u}_mask.npy"),
+                    np.ones((256, 256), dtype=bool))
+
+        drop = {"at": None, "thread": None}
+        brk = {"at": None}
+        reads = []
+
+        def vanish_for(seconds):
+            gone = src + ".gone"
+            os.rename(src, gone)
+
+            def back():
+                time.sleep(seconds)
+                os.rename(gone, src)
+            t = threading.Thread(target=back, daemon=True)
+            t.start()
+            return t
+
+        class Doc:
+            def __init__(self, path):
+                if not os.path.exists(path):
+                    raise FileNotFoundError(path)
+                self.path, self.gen = path, len(DR.PAUSES)
+
+            def read(self, **kw):
+                key = (int(kw["plane"]["C"]), int(kw["roi"][0]))
+                if len(DR.PAUSES) > self.gen:
+                    raise OSError(116, "Stale file handle", self.path)
+                if brk["at"] == key:
+                    raise RuntimeError("corrupt subblock")
+                if drop["at"] == key:
+                    drop["at"] = None
+                    drop["thread"] = vanish_for(0.3)
+                    raise OSError(5, "Input/output error", self.path)
+                reads.append(key)
+                rng = np.random.default_rng(1000 * key[0] + key[1])
+                a = rng.normal(250, 5, (H, W))
+                if key[0] == 0:
+                    a[:8, :] = 900
+                return a
+
+        class Opener:
+            def __call__(self, path, *a, **kw):
+                self.doc = Doc(path)
+                return self
+
+            def __enter__(self):
+                return self.doc
+
+            def __exit__(self, *exc):
+                return False
+
+        class Model:
+            def predict_instances(self, img, **kw):
+                lab = np.zeros(np.asarray(img).shape, dtype=np.int32)
+                if np.ptp(img) > 0:
+                    lab[2:8, 2:8] = 1
+                    lab[12:18, 14:20] = 2
+                return lab, {}
+
+        def run05c(*flags):
+            saved = (_real_pyczi.open_czi, M.load_model, sys.argv)
+            _real_pyczi.open_czi = Opener()
+            M.load_model = lambda: Model()
+            sys.argv = ["05c_detect_rois.py", "--marker", marker,
+                        "--order", "uid", "--no-overlays", *flags]
+            out = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(out):
+                    try:
+                        rc = M.main()
+                    except Exception as exc:            # noqa: BLE001
+                        rc = exc
+            finally:
+                _real_pyczi.open_czi, M.load_model, sys.argv = saved
+                if drop["thread"] is not None:
+                    drop["thread"].join(5)
+                    drop["thread"] = None
+            return rc, out.getvalue()
+
+        out_root = study.out_root
+        tables = [M.NUCLEI_CSV, M.GEOMETRY_CSV, M.STATUS_CSV, M.DONE_LOG,
+                  M.NORM_CSV, M.BACKGROUND_CSV, M.NO_ARTIFACT_CSV,
+                  M.SETTINGS_JSON, M.COLOC_CSV]
+
+        def clear():
+            for p in tables:
+                if os.path.exists(p):
+                    os.remove(p)
+            shutil.rmtree(M.OUTLINE_DIR, ignore_errors=True)
+
+        def snap():
+            got = {}
+            for p in tables:
+                if os.path.exists(p):
+                    with open(p, "rb") as fh:
+                        got[os.path.relpath(p, out_root)] = fh.read()
+            # Outlines by content: an npz is a zip, whose members carry times.
+            for p in sorted(glob.glob(os.path.join(M.OUTLINE_DIR, "**", "*.npz"),
+                                      recursive=True)):
+                with np.load(p) as z:
+                    got[os.path.relpath(p, out_root)] = {
+                        k: z[k].tobytes() + str(z[k].dtype).encode()
+                        for k in z.files}
+            return got
+
+        def tmp_left():
+            return sorted(glob.glob(os.path.join(out_root, "**", "*.tmp"), recursive=True)
+                          + glob.glob(os.path.join(out_root, "**", "*.part"),
+                                      recursive=True))
+
+        def dups(path, *cols):
+            keys = [tuple(r[c] for c in cols) for r in read(path)]
+            return len(keys) - len(set(keys))
+
+        try:
+            print("--- 05c: the drive drops mid-section ---")
+            clear()
+            rc, text = run05c()
+            chk("uninterrupted 05c exits zero", rc, 0)
+            base = snap()
+            n_rows = len(read(M.NUCLEI_CSV))
+            chk("...and counted nuclei in both sections",
+                sorted({r["scene_uid"] for r in read(M.NUCLEI_CSV)}), sorted(secs))
+            n_reads = len(reads)
+
+            clear()
+            reads.clear()
+            drop["at"] = (1, 430)         # the second ROI of the second section
+            rc, text = run05c()
+            chk("the drop fired", drop["at"], None)
+            chk("05c with the drive dropped exits zero", rc, 0)
+            chk("...says the drive came back", "@@drive back" in text, True)
+            got = snap()
+            chk("...writes the same files", sorted(got), sorted(base))
+            chk("...byte for byte", [k for k in base if got.get(k) != base[k]], [])
+            chk("...the same number of nucleus rows", len(read(M.NUCLEI_CSV)), n_rows)
+            chk("...no duplicate (scene_uid, roi) rows in the box status",
+                dups(M.STATUS_CSV, "scene_uid", "marker", "roi_index"), 0)
+            chk("...nor in the measured geometry",
+                dups(M.GEOMETRY_CSV, "scene_uid", "marker", "roi_index"), 0)
+            chk("...nor a nucleus twice",
+                dups(M.NUCLEI_CSV, "scene_uid", "roi_index", "nucleus_id"), 0)
+            chk("...the dropped section read again from its first ROI",
+                len(reads) > n_reads, True)
+            chk("...no .tmp or .part left", tmp_left(), [])
+
+            print()
+            print("--- 05c: the folder is gone before a section is read ---")
+            clear()
+            t = vanish_for(0.3)
+            rc, text = run05c()
+            t.join(5)
+            chk("exits zero", rc, 0)
+            chk("...after waiting for the drive", "@@drive back" in text, True)
+            got = snap()
+            chk("...byte for byte as uninterrupted",
+                [k for k in base if got.get(k) != base[k]], [])
+
+            print()
+            print("--- 05c: a read that fails with the folder there: as before ---")
+            clear()
+            brk["at"] = (1, 430)
+            rc, text = run05c()
+            brk["at"] = None
+            chk("the failure stops the run, as it always did",
+                type(rc).__name__ + ": " + str(rc), "RuntimeError: corrupt subblock")
+            chk("...without waiting for a drive that never left", "@@drive" in text, False)
+            chk("...the section before it is on disk",
+                sorted({r["scene_uid"] for r in read(M.NUCLEI_CSV)}), ["AB12_1a-s0"])
+            chk("...and logged done, the failed one not",
+                sorted(M.read_done_log(M.DONE_LOG, marker) or set()), ["AB12_1a-s0"])
+            rc, text = run05c()
+            chk("the resume completes", rc, 0)
+            with open(M.NUCLEI_CSV, "rb") as fh:
+                chk("...and the counts are as uninterrupted",
+                    fh.read() == base[os.path.relpath(M.NUCLEI_CSV, out_root)], True)
+
+            print()
+            print("--- 05c: Stopped is not swallowed ---")
+            clear()
+            stop = os.path.join(study.root, "STOP")
+            open(stop, "wb").close()
+            os.environ["LS_STOP_FILE"] = stop
+            drop["at"] = (1, 430)
+            try:
+                rc, text = run05c()
+            finally:
+                os.environ.pop("LS_STOP_FILE", None)
+                os.remove(stop)
+            chk("the stop file stops the stage", type(rc).__name__, "Stopped")
+            chk("...the stopped section is not logged done",
+                sorted(M.read_done_log(M.DONE_LOG, marker) or set()), ["AB12_1a-s0"])
+
+            print()
+            print("--- 05c: a mask looked for as the drive blips is not 'absent' ---")
+            # The race ls_drive.present closes: the folder is away for the one
+            # look at the artifact mask and back before anything polls. Read
+            # as absent, every nucleus of the section would say artifact=0 -
+            # wrong counts, and nothing anywhere to say so.
+            for u in secs:
+                np.save(os.path.join(mask_dir, f"{u}_artifact.npy"),
+                        np.ones((256, 256), dtype=bool))
+            clear()
+            rc, text = run05c()
+            chk("with artifact masks: exits zero", rc, 0)
+            base_art = snap()
+            # Section 1's boxes lie on the 256 grid (identity map), so the
+            # mask flags its nuclei; section 2's lie off it.
+            chk("...every nucleus of section 1 is on an artifact",
+                sorted({r["artifact"] for r in read(M.NUCLEI_CSV)
+                        if r["scene_uid"] == "AB12_1a-s0"}), ["1"])
+            target = os.path.join(mask_dir, "AB12_1a-s0_artifact.npy")
+            real_exists = os.path.exists
+            looks = []
+
+            def blip(p):
+                if p == target:
+                    looks.append(p)
+                    if len(looks) == 2:      # 1: the no-artifact warning; 2: the read
+                        return False
+                return real_exists(p)
+            clear()
+            os.path.exists = blip
+            try:
+                rc, text = run05c()
+            finally:
+                os.path.exists = real_exists
+            chk("the blip happened", len(looks) >= 2, True)
+            chk("...exits zero", rc, 0)
+            got = snap()
+            chk("...the counts are as uninterrupted, artifact flags and all",
+                [k for k in base_art if got.get(k) != base_art[k]], [])
+            for u in secs:
+                os.remove(os.path.join(mask_dir, f"{u}_artifact.npy"))
+        finally:
+            DR.POLL = saved_poll
+            for k, v in saved_env.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
+
+print()
+print("--- the drive drops while 05c measures ---")
+drive_drop_check()
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="ls5c_")
     try:

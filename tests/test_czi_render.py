@@ -285,8 +285,22 @@ class _R:
         self.x, self.y, self.w, self.h = x, y, w, h
 
 
+# The drive-dropout checks below: DROP["at"] names the (plane, nth read) read
+# that raises once, with the slides folder renamed away for 0.3 s; BREAK["at"]
+# one that raises with the folder there. A drop also ends every handle opened
+# before it (GEN), as a vanished volume does, so a redo that kept using an old
+# handle fails instead of passing by luck.
+DROP = {"at": None, "thread": None}
+BREAK = {"at": None}
+GEN = {"n": 0}
+COUNT = {}
+
+
 class _Doc:
     scenes_bounding_rectangle = {0: _R(RX, RY, RW, RH)}
+
+    def __init__(self):
+        self.gen = GEN["n"]
 
     def __enter__(self):
         return self
@@ -297,7 +311,33 @@ class _Doc:
     def read(self, roi, plane, scene, zoom):
         assert scene == 0 and zoom == 1.0, (scene, zoom)
         x, y, w, h = roi
+        COUNT[plane["C"]] = COUNT.get(plane["C"], 0) + 1
+        key = (plane["C"], COUNT[plane["C"]])
+        if BREAK["at"] == key:
+            raise RuntimeError("corrupt subblock")
+        if self.gen != GEN["n"]:
+            raise OSError(5, "Input/output error (a handle from before the drop)")
+        if DROP["at"] == key:
+            DROP["at"] = None
+            GEN["n"] += 1
+            DROP["thread"] = vanish_for(0.3)
+            raise OSError(5, "Input/output error")
         return PLANES[plane["C"]][y - RY:y - RY + h, x - RX:x - RX + w][:, :, None]
+
+
+def vanish_for(seconds):
+    """Rename the slides folder away; a thread puts it back after `seconds`."""
+    import threading
+    import time
+    gone = STUDY.source_dir + ".gone"
+    os.rename(STUDY.source_dir, gone)
+
+    def back():
+        time.sleep(seconds)
+        os.rename(gone, STUDY.source_dir)
+    t = threading.Thread(target=back, daemon=True)
+    t.start()
+    return t
 
 
 # pylibCZIrw's open_czi is a generator-based context manager: the DOCUMENT is
@@ -388,6 +428,166 @@ except SystemExit as e:
     refused = "1.3" in str(e)
 chk("a whole-section render finer than 1.3 um/px is refused, with the reason",
     refused)
+
+print()
+print("--- the drive drops while a section is drawn: redone, same bytes ---")
+import glob  # noqa: E402
+import io  # noqa: E402
+
+DR = O.IO.drive_module()
+chk("ls_drive loads", DR is not None)
+DR.POLL = 0.05
+os.environ["LS_WATCH"] = STUDY.source_dir
+os.environ["LS_PROGRESS"] = "1"
+DROP_ARGV = ["04o", "--marker", "AF568", "--include-excluded", "--force",
+             "--um-px", "2.6"]
+th = os.path.join(paths["sections"] + "_rgb_thumb", UID + ".png")
+
+
+def run_o(argv):
+    """(main()'s return, what it printed), with the render log started afresh
+    (it appends, so a second run would otherwise differ by its rows)."""
+    if os.path.exists(log):
+        os.remove(log)
+    COUNT.clear()
+    saved = sys.argv
+    sys.argv = list(argv)
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            rc = O.main()
+    finally:
+        sys.argv = saved
+    return rc, buf.getvalue()
+
+
+def o_snapshot():
+    got = {}
+    for p in (out, th, log):
+        if os.path.exists(p):
+            with open(p, "rb") as fh:
+                got[os.path.basename(os.path.dirname(p)) + "/" + os.path.basename(p)] = fh.read()
+    return got
+
+
+def settle():
+    if DROP["thread"] is not None:
+        DROP["thread"].join(5)
+        DROP["thread"] = None
+
+
+rc, text = run_o(DROP_ARGV)
+chk("uninterrupted render", rc is None and "@@drive" not in text, (rc, text[-200:]))
+base_o = o_snapshot()
+chk("...wrote the composite, its thumbnail and the log", len(base_o), 3)
+# The marker plane's last band: part way through the section, the counterstain
+# already read through the same handles.
+chk("...in more than one band", COUNT.get(1, 0) > 1, dict(COUNT))
+DROP["at"] = (1, COUNT.get(1, 1))
+for p in (out, th):
+    os.remove(p)
+rc, text = run_o(DROP_ARGV)
+settle()
+chk("the drop fired", DROP["at"] is None, DROP["at"])
+chk("04o with the drive dropped finishes", rc is None, (rc, text[-300:]))
+chk("...says the drive came back, once", text.count("@@drive back") == 1,
+    text.count("@@drive back"))
+got = o_snapshot()
+chk("...writes the same files", sorted(got) == sorted(base_o), sorted(got))
+chk("...byte for byte (the file was reopened, not the old handle reused)",
+    [k for k in base_o if got.get(k) != base_o[k]] == [],
+    [k for k in base_o if got.get(k) != base_o[k]])
+rows = list(csv.DictReader(open(log, encoding="utf-8"))) if os.path.exists(log) else []
+chk("...one render log row, not one per attempt", len(rows) == 1, len(rows))
+left = glob.glob(os.path.join(STUDY.out_root, "**", "*.tmp"), recursive=True)
+chk("...no .tmp left", left == [], left)
+
+print()
+print("--- the slides folder is gone when the CZI is looked for ---")
+os.remove(out)
+t = vanish_for(0.3)
+GEN["n"] += 1
+rc, text = run_o(DROP_ARGV)
+t.join(5)
+chk("waits, then renders", rc is None, (rc, text[-300:]))
+chk("...says the drive came back, once", text.count("@@drive back") == 1,
+    text.count("@@drive back"))
+got = o_snapshot()
+chk("...byte for byte", [k for k in base_o if got.get(k) != base_o[k]] == [],
+    [k for k in base_o if got.get(k) != base_o[k]])
+
+print()
+print("--- a wait between two sections of one CZI: the next opens it again ---")
+# An ls_io write waits for a dropped drive by itself and then succeeds, so no
+# render fails - but the CZI handles kept open for the next section of the same
+# file are to the volume that went away (GEN), and must not be reused.
+czi_src = O.CziSource("AF568")
+frow = {"scene_uid": UID, "animal": "LS1", "marker_channel": "AF568", "um_px": "5.20"}
+first = czi_src.render(UID, frow, DAPI_PNG, 0.0, False, None, None, None, 2.6)
+t = vanish_for(0.3)
+GEN["n"] += 1
+with contextlib.redirect_stdout(io.StringIO()):
+    DR.wait_for_drive("an atomic write")
+t.join(5)
+try:
+    again = czi_src.render(UID, frow, DAPI_PNG, 0.0, False, None, None, None, 2.6)
+    err = None
+except OSError as exc:
+    again, err = None, exc
+czi_src.close(os.path.join(STUDY.out_root, "scratch_rgb"))
+chk("the section after the wait renders, from the file opened again", err is None, err)
+chk("...the same pixels", again is not None and all(
+    np.array_equal(x, y) for x, y in zip(first, again)))
+
+print()
+print("--- a wait absorbed by the composite's write: the section is redone ---")
+real_thumb = O.refresh_thumb
+ABSORB = {"on": True}
+
+
+def absorbing_thumb(rgb_dir, uid, size):
+    # The composite is written; its thumbnail's write waits out a drop and then
+    # succeeds. Nothing fails here, so only "the drive was lost during this
+    # render" says the render must be done again.
+    if ABSORB["on"]:
+        ABSORB["on"] = False
+        tt = vanish_for(0.3)
+        GEN["n"] += 1
+        DR.wait_for_drive("a thumbnail write")
+        tt.join(5)
+    real_thumb(rgb_dir, uid, size)
+
+
+O.refresh_thumb = absorbing_thumb
+calls_before = dict(COUNT)
+rc, text = run_o(DROP_ARGV)
+O.refresh_thumb = real_thumb
+chk("the absorbed wait happened", ABSORB["on"] is False)
+chk("finishes", rc is None, (rc, text[-300:]))
+chk("...rendered twice: the section was redone", COUNT.get(1, 0) == 4, dict(COUNT))
+got = o_snapshot()
+chk("...byte for byte", [k for k in base_o if got.get(k) != base_o[k]] == [],
+    [k for k in base_o if got.get(k) != base_o[k]])
+
+print()
+print("--- a read that fails with the folder there: as before ---")
+BREAK["at"] = (1, 1)
+raised = None
+try:
+    run_o(DROP_ARGV)
+except RuntimeError as exc:
+    raised = exc
+BREAK["at"] = None
+chk("the error stops the stage, as it always has", isinstance(raised, RuntimeError), raised)
+czi_path = os.path.join(STUDY.source_dir, "LS1_1a.czi")
+os.rename(czi_path, czi_path + ".away")
+rc, text = run_o(DROP_ARGV)
+os.rename(czi_path + ".away", czi_path)
+# An excluded section here, so not built is said, not failed - as before.
+chk("a CZI missing with the folder there is not built, at once",
+    rc is None and "CZI not found" in text and "@@drive" not in text, (rc, text[-300:]))
+os.environ.pop("LS_WATCH")
+os.environ.pop("LS_PROGRESS")
 
 print()
 print("FAILED: %d" % fails if fails else "all passed")

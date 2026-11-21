@@ -72,7 +72,8 @@ def run_screen(path, screen, runner=None, out=None):
         res = runner.run(W.with_options(base, values), on_line=say)
         try:
             LP.Project.open(path).record_run(sid, res.ok, started, now_iso(),
-                                             options=values, inputs=inputs)
+                                             options=values, inputs=inputs,
+                                             pauses=res.pauses, error=res.record_error())
         except LP.ProjectError as exc:
             say(f"could not record the run in the study: {exc}")
         results.append((sid, bool(res.ok), res.seconds, res.error))

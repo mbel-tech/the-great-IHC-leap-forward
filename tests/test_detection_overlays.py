@@ -734,6 +734,109 @@ with temp_study(acquisition=PAIRED) as study:
     chk("reachable again: nothing failed", "not drawn:" in out, False)
 
     print()
+    print("--- the drive drops while 06i reads: waited for, redone, same pictures ---")
+    # The slides are on a USB drive that goes away rather than failing a read.
+    # A read that fails while the slides folder is unreachable is not the
+    # section's fault: 06i waits for the folder and reads the section again,
+    # the CZI opened afresh, and draws exactly what an uninterrupted run
+    # draws, nothing listed as not drawn. The drop is real as far as 06i can
+    # tell: the folder is renamed away for 0.3 s, and handles opened before a
+    # wait refuse to read after it, as a vanished volume's do. (A read that
+    # fails with the folder there is the transient error above, as before.)
+    import glob  # noqa: E402
+    import threading  # noqa: E402
+    import time  # noqa: E402
+    DR = OV.IO.drive_module()
+    saved_env = {k: os.environ.get(k) for k in ("LS_WATCH", "LS_PROGRESS")}
+    saved_poll = DR.POLL
+    os.environ["LS_WATCH"] = study.source_dir
+    os.environ["LS_PROGRESS"] = "1"
+    DR.POLL = 0.05
+    drop = {"at": None, "t": None}
+
+    def vanish_for(seconds):
+        gone = study.source_dir + ".gone"
+        os.rename(study.source_dir, gone)
+
+        def back():
+            time.sleep(seconds)
+            os.rename(gone, study.source_dir)
+        t = threading.Thread(target=back, daemon=True)
+        t.start()
+        return t
+
+    class DropCzi(FakeCzi):
+        def __init__(self, planes):
+            super().__init__(planes)
+            self.gen = len(DR.PAUSES)
+
+        def read(self, **kw):
+            if len(DR.PAUSES) > self.gen:
+                raise OSError(116, "Stale file handle")
+            key = (int(kw["scene"]), int(kw["plane"]["C"]), int(kw["roi"][0]))
+            if drop["at"] == key:
+                drop["at"] = None
+                drop["t"] = vanish_for(0.3)
+                raise OSError(5, "Input/output error")
+            return super().read(**kw)
+
+    class DropOpen:
+        def __call__(self, path, *a, **kw):
+            self.doc = DropCzi(PLANES)
+            return self
+
+        def __enter__(self):
+            return self.doc
+
+        def __exit__(self, *exc):
+            return False
+
+    def overlay_snapshot():
+        got = {}
+        for p in sorted(glob.glob(os.path.join(out_dir, MARKER, "**", "*.png"),
+                                  recursive=True)):
+            with open(p, "rb") as fh:
+                got[os.path.relpath(p, out_dir)] = fh.read()
+        # drawn_at is the clock, not the picture.
+        got["index.csv"] = sorted(
+            tuple(sorted((k, v) for k, v in r.items() if k != "drawn_at"))
+            for r in read_rows(OV.INDEX_CSV))
+        got["failures.csv"] = read_rows(OV.FAILURES_CSV)
+        return got
+
+    def leftovers():
+        return sorted(glob.glob(os.path.join(out_dir, "**", "*.tmp"), recursive=True)
+                      + glob.glob(os.path.join(out_dir, "**", "*.part"), recursive=True))
+
+    try:
+        rc, out = run_06i(OV, "--force")
+        chk("undisturbed --force: exit 0", rc, 0)
+        base06i = overlay_snapshot()
+        chk("...nothing listed not drawn", base06i["failures.csv"], [])
+        for where, key in (("a box plane, read on the main thread", (7, 1, 10)),
+                           ("a band of the scene picture, on a worker", (7, 1, SCENE_RECT[0]))):
+            drop["at"] = key
+            rc, out = run_06i(OV, "--force", opener=DropOpen())
+            if drop["t"] is not None:
+                drop["t"].join(5)
+                drop["t"] = None
+            chk(f"drop on {where}: it fired", drop["at"], None)
+            chk("...exit 0", rc, 0)
+            chk("...the drive came back", "@@drive back" in out, True)
+            chk("...no section not drawn", "NOT DRAWN" in out or "not drawn:" in out, False)
+            got = overlay_snapshot()
+            chk("...the same pictures and index, byte for byte",
+                [k for k in base06i if got.get(k) != base06i[k]], [])
+            chk("...no .tmp or .part left", leftovers(), [])
+    finally:
+        DR.POLL = saved_poll
+        for k, v in saved_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    print()
     print("--- the fingerprint covers the strip's identity ---")
     write_rows(os.path.join(study.out_root, "manifest", "manifest_scenes.csv"),
                [{"scene_uid": A, "animal": "AB12", "slide": "2"},

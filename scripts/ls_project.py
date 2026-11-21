@@ -958,7 +958,8 @@ class Project:
 
     # ---- the run history ------------------------------------------------------
 
-    def record_run(self, stage, ok, started, ended, options=None, inputs=None):
+    def record_run(self, stage, ok, started, ended, options=None, inputs=None,
+                   pauses=None, error=None):
         """Append a run to `project.runs` on disk and in memory, saving nothing else.
 
         Stages read the file from disk, so a run is always of what is on disk; the
@@ -967,6 +968,10 @@ class Project:
 
         `inputs` is what the stage read when it started (app/workflow.fingerprint),
         which is how the app later tells that it is out of date.
+
+        `pauses` are the waits for a dropped drive during the run (`[{at, seconds,
+        folder, label}]`, app/supervise.py); `error` is why a run failed, when that
+        is worth keeping (a stop while the drive was disconnected).
         """
         rec = {"stage": stage, "started": started, "ended": ended, "ok": bool(ok),
                "config_sha": None, "code": code_version()}
@@ -974,6 +979,10 @@ class Project:
             rec["options"] = dict(options)
         if inputs:
             rec["inputs"] = inputs
+        if pauses:
+            rec["pauses"] = [dict(p) for p in pauses]
+        if error:
+            rec["error"] = str(error)
         if not self.path or not os.path.exists(self.path):
             rec["config_sha"] = self.config_sha()
             self.block.setdefault("runs", []).append(rec)

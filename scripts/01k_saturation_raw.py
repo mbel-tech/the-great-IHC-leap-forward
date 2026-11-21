@@ -168,34 +168,42 @@ def native_sample(scenes, n, ceilings, seed=20260901):
         if len(rows) >= n:
             break
         path = os.path.join(SOURCE_DIR, fname)
-        if not os.path.exists(path):
+        if not OV.present(path, fname):
             continue
         ceiling = OV.ceiling_for(ceilings, fname)
-        with pyczi.open_czi(path) as czidoc:
-            rects = czidoc.scenes_bounding_rectangle
-            for r in rs:
-                if len(rows) >= n:
-                    break
-                s = int(r["scene_index"])
-                if s not in rects:
-                    continue
-                # This function's whole purpose is measuring how much the
-                # dilution ratio understates clipping at low zoom, so a
-                # rectangle that composites a neighbouring section's tissue
-                # corrupts the measurement itself, not merely a pixel count.
-                low = OV.read_scene(czidoc, rects[s], 1, 0.125, scene=s)
-                f_low = float((low >= ceiling).mean())
-                if f_low <= 0:
-                    continue
-                hi = OV.read_scene(czidoc, rects[s], 1, 1.0, scene=s)
-                f_hi = float((hi >= ceiling).mean())
-                rows.append({
-                    "scene_uid": r["scene_uid"], "file": fname,
-                    "frac_at_5_20um": round(f_low, 6),
-                    "frac_at_0_65um": round(f_hi, 6),
-                    "native_over_overview": round(f_hi / f_low, 4),
-                })
-                print("\r  native sample %d/%d" % (len(rows), n), end="")
+
+        def unit(path=path, rs=rs, fname=fname, ceiling=ceiling):
+            # Self-contained: a redo after a dropped drive reads the file over
+            # and its rows are added once, when the whole file has been read.
+            got = []
+            with pyczi.open_czi(path) as czidoc:
+                rects = czidoc.scenes_bounding_rectangle
+                for r in rs:
+                    if len(rows) + len(got) >= n:
+                        break
+                    s = int(r["scene_index"])
+                    if s not in rects:
+                        continue
+                    # This function's whole purpose is measuring how much the
+                    # dilution ratio understates clipping at low zoom, so a
+                    # rectangle that composites a neighbouring section's tissue
+                    # corrupts the measurement itself, not merely a pixel count.
+                    low = OV.read_scene(czidoc, rects[s], 1, 0.125, scene=s)
+                    f_low = float((low >= ceiling).mean())
+                    if f_low <= 0:
+                        continue
+                    hi = OV.read_scene(czidoc, rects[s], 1, 1.0, scene=s)
+                    f_hi = float((hi >= ceiling).mean())
+                    got.append({
+                        "scene_uid": r["scene_uid"], "file": fname,
+                        "frac_at_5_20um": round(f_low, 6),
+                        "frac_at_0_65um": round(f_hi, 6),
+                        "native_over_overview": round(f_hi / f_low, 4),
+                    })
+            return got
+
+        rows.extend(OV.per_slide(unit, label=f"{fname} (native sample)"))
+        print("\r  native sample %d/%d" % (len(rows), n), end="")
     print()
     IO.atomic_write_csv(NATIVE_CSV, rows, ["scene_uid", "file", "frac_at_5_20um",
                                     "frac_at_0_65um", "native_over_overview"])
@@ -355,33 +363,55 @@ def main():
         if args.limit and measured >= args.limit:
             break
         path = os.path.join(SOURCE_DIR, fname)
-        if not os.path.exists(path):
+        # A CZI on a drive that has just dropped is waited for, not recorded
+        # as missing.
+        if not OV.present(path, fname):
             failed += len(rs)
             lose(rs)
             continue
-        measured_here = set()
-        try:
+        # One file is the unit a dropped drive redoes (see 01_overviews'
+        # export): each attempt starts `acc` afresh, and nothing reaches by_uid
+        # or the lost list until the attempt is over, so a redo cannot
+        # duplicate a row and an ordinary failure part way still keeps the
+        # sections measured before it. Masks are overwritten atomically.
+        acc = {}
+
+        def unit(path=path, rs=rs, fname=fname):
+            acc.clear()
+            acc.update(rows={}, missing=[])
             with pyczi.open_czi(path) as czidoc:
                 rects = czidoc.scenes_bounding_rectangle
                 for r in rs:
-                    if args.limit and measured >= args.limit:
+                    if args.limit and measured + len(acc["rows"]) >= args.limit:
                         break
                     s = int(r["scene_index"])
                     if s not in rects:
-                        failed += 1
-                        lose([r])
+                        acc["missing"].append(r)
                         continue
                     ceiling = OV.ceiling_for(ceilings, fname)
                     dapi_raw, mark_raw, corrected = measure(
                         czidoc, rects[s], fields, zoom, scene=s)
-                    by_uid[r["scene_uid"]] = OV.raw_clip_record(
+                    acc["rows"][r["scene_uid"]] = OV.raw_clip_record(
                         r, fname, rects[s], s, zoom, dapi_raw, mark_raw,
                         corrected, ceiling)
-                    measured += 1
-                    measured_here.add(r["scene_uid"])
+
+        error = None
+        try:
+            OV.per_slide(unit, label=fname)
         except Exception as exc:  # noqa: BLE001 - one bad file must not kill the run
-            print("\n  !! %s: %s" % (fname, exc))
+            if OV.is_stop(exc):
+                raise
+            error = exc
+        # In scene order, as when this was measured in place.
+        for r in acc.get("missing", []):
+            failed += 1
+            lose([r])
+        by_uid.update(acc.get("rows", {}))
+        measured += len(acc.get("rows", {}))
+        if error is not None:
+            print("\n  !! %s: %s" % (fname, error))
             failed += len(rs)
+            measured_here = set(acc.get("rows", {}))
             lose([r for r in rs if r["scene_uid"] not in measured_here])
 
         # Checkpoint per file, like 01_overviews.py, for the same reason.

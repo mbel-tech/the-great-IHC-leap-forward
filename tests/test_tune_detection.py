@@ -386,5 +386,126 @@ for marker, how in (("AF568", "its own percentiles (nuclear plane)"),
         and bool(np.allclose(seen_b[0], want, rtol=0, atol=1e-6)))
 
 print()
+print("--- the drive drops while 05b reads its crops ---")
+# A read that fails while the slides folder is unreachable waits for it, and
+# the section is read again from its first box with the CZI opened afresh:
+# the crops are what an uninterrupted read gives, none twice. One that fails
+# with the folder there stops the run, as it always did.
+import contextlib  # noqa: E402
+import io  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
+
+with temp_study(acquisition=PAIRED) as study:
+    B = load_stage("05b_tune_detection.py")
+    lay_out(B.D5, "AF568", UIDS)
+    DR = B.IO.drive_module()
+    saved_env = {k: os.environ.get(k) for k in ("LS_WATCH", "LS_PROGRESS")}
+    saved_poll = DR.POLL
+    os.environ["LS_WATCH"] = study.source_dir
+    os.environ["LS_PROGRESS"] = "1"
+    DR.POLL = 0.05
+    for u in UIDS:
+        open(os.path.join(study.source_dir, u + ".czi"), "wb").close()
+    drop, brk = {"at": None, "t": None}, {"at": None}
+
+    def vanish_for(seconds):
+        gone = study.source_dir + ".gone"
+        os.rename(study.source_dir, gone)
+
+        def back():
+            time.sleep(seconds)
+            os.rename(gone, study.source_dir)
+        t = threading.Thread(target=back, daemon=True)
+        t.start()
+        return t
+
+    class DropDoc:
+        def __init__(self, path):
+            if not os.path.exists(path):
+                raise FileNotFoundError(path)
+            self.name, self.gen = os.path.basename(path), len(DR.PAUSES)
+
+        def read(self, **kw):
+            if len(DR.PAUSES) > self.gen:
+                raise OSError(116, "Stale file handle", self.name)
+            key = (self.name, int(kw["roi"][0]), int(kw["plane"]["C"]))
+            if brk["at"] == self.name:
+                raise RuntimeError("corrupt subblock")
+            if drop["at"] == self.name:
+                drop["at"] = None
+                drop["t"] = vanish_for(0.3)
+                raise OSError(5, "Input/output error", self.name)
+            return nuclei(sum(map(ord, key[0])) + key[2])
+
+    class DropOpen:
+        def __call__(self, path, *a, **k):
+            self.doc = DropDoc(path)
+            return self
+
+        def __enter__(self):
+            return self.doc
+
+        def __exit__(self, *e):
+            return False
+
+    G5 = B.G5
+    G5.use_marker("AF568")
+    boxes = G5.load_csv(G5.BOX_CSV)
+    geom = {g["scene_uid"]: g for g in G5.load_csv(G5.GEOM_CSV)}
+    by_sec = {}
+    for b in boxes:
+        by_sec.setdefault(b["scene_uid"], []).append(b)
+
+    def crops():
+        saved = pyczi.open_czi
+        pyczi.open_czi = DropOpen()
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out):
+                try:
+                    got = B.read_crops("AF568", UIDS, by_sec, geom, 4, 64,
+                                       model_input=True)
+                except Exception as exc:          # noqa: BLE001
+                    got = exc
+        finally:
+            pyczi.open_czi = saved
+            if drop["t"] is not None:
+                drop["t"].join(5)
+                drop["t"] = None
+        if isinstance(got, Exception):
+            return got, out.getvalue()
+        return [(u, bi, c.tobytes(), None if x is None else x.tobytes())
+                for u, bi, _, c, x in got], out.getvalue()
+
+    try:
+        base, _ = crops()
+        chk("05b reads a crop of every section undisturbed",
+            sorted({c[0] for c in base}), sorted(UIDS))
+        drop["at"] = UIDS[1] + ".czi"
+        got, text = crops()
+        chk("the drop fired", drop["at"], None)
+        chk("...the drive came back", "@@drive back" in text)
+        chk("...the same crops, in the same order, none twice",
+            got == base)
+        t = vanish_for(0.3)
+        got, text = crops()
+        t.join(5)
+        chk("the folder gone before a section: waited for, same crops", got == base)
+        brk["at"] = UIDS[1] + ".czi"
+        got, text = crops()
+        brk["at"] = None
+        chk("a read failing with the folder there stops the run, as before",
+            repr(got), repr(RuntimeError("corrupt subblock")))
+        chk("...without waiting for a drive that never left", "@@drive" in text, False)
+    finally:
+        DR.POLL = saved_poll
+        for k, v in saved_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+print()
 print("ALL PASS" if not failures else f"{len(failures)} FAILED")
 sys.exit(1 if failures else 0)

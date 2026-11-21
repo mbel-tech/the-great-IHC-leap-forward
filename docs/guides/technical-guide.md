@@ -601,7 +601,9 @@ with the app (it is in `requirements.txt` and in the installer's smoke test), bu
 - **How it works:** Qt draws the window and dispatches every click and key to the code that handles it;
   PySide6 is the official binding of Qt for Python. Stages run inside the app's own Python, each on a
   worker thread (`app/runner.py`), because the installed app has no separate Python to start; a stage
-  that stops with an error is logged as a failed stage rather than taking the window down.
+  that stops with an error is logged as a failed stage rather than taking the window down. A stage that
+  reads CZI pixels runs instead as a child process of that same Python (section 5.3), so a native crash
+  when the slides drive drops cannot take the window down either.
 - **Version and citation:** PySide6 6.11.2 on Windows (the Mac app holds it at 6.9). The Qt Company,
   *Qt for Python*, <https://doc.qt.io/qtforpython-6/>.
 
@@ -782,7 +784,7 @@ second list, and `bash run_all.sh from 5` resumes at step 5.
 ### 5.3 The runner: stages in-process
 
 `app/runner.py` runs a stage **inside the app's own Python process**, on a worker thread, not as a
-subprocess. The installed app has no separate Python to start, so importing the stage and calling its
+subprocess (the exception, stages that read CZI pixels, is below). The installed app has no separate Python to start, so importing the stage and calling its
 `main()` is what lets one bundled interpreter be the whole application.
 
 `Runner.run(stage)`:
@@ -800,6 +802,19 @@ subprocess. The installed app has no separate Python to start, so importing the 
      is a failure with that message;
    - any other exception is a failure with its traceback.
 5. Restores `sys.argv` and the working directory.
+
+**Stages that read CZI pixels run in a child process.** A stage whose `reader` is `pylibCZIrw` or
+`czifile` is started as `python -m app --stage <id> <study.json> --child --argv-json <argv>` (the stage's argv with its options, which the child runs as given, recording nothing itself) with the app's own interpreter
+(the console `python.exe` beside a `pythonw.exe`), because a crash inside native libCZI as the slides
+drive drops would otherwise close the window. `app/supervise.py` watches it: its output reaches the log
+pane line by line as before, and its `@@drive lost` / `@@drive back` lines (`ls_drive.py`)
+become the run's `pauses`, recorded with the run in the study file and shown in the run history as
+"ok, paused 2x (3 min)". Exit status 0, 1, 2 and 130 are the stage's own answers; any other status, or
+death by a signal, while a watched folder is unreachable means the supervisor waits for the drive and
+starts the stage again with the same argv, and its resumability skips what is done; a child that keeps dying without printing anything is restarted at most 5 times in a row. With the drive there, that death is an
+ordinary failure. `Runner.stop()` creates the stop file (`LS_STOP_FILE`) and ends the child; a stop
+during a pause is recorded as a failed run, "stopped while the drive was disconnected", with its pauses.
+Inside the child (`LS_CHILD=1`) the stage runs in-process as above.
 
 Stages read the study file **at import** into module-level constants. The runner therefore hashes the
 study file (without its `project` and `curation` blocks, which change on every run and every curation
@@ -936,7 +951,10 @@ alike, without decoding a pixel, and builds the tables every later stage keys on
   without one, as ZEN writes for a single scene, is not compared), an archive that will not
   open, or a `source_files` name found nowhere. A QC table with no rows is written header-only. A paired
   study whose `acquisition.markers` do not name the scans' channels stops after the tables are written.
-  `--accept-suggestions` writes the suggested row counts into `layout_overrides.csv`.
+  `--accept-suggestions` writes the suggested row counts into `layout_overrides.csv`. If the drive drops
+  while the folder is listed, an archive opened or a header read, it waits for the drive (`ls_drive`)
+  and does that again, the archive opened afresh; a read that fails with the drive there is a failure as
+  above.
 
 ### `00b_verify_extraction.py`
 
@@ -951,7 +969,9 @@ came from.
 - **Failure and re-run:** a mismatch is a row with its status, not an exception, but any corrupt, missing
   or still-extracting file, or an unreadable archive, makes the run exit 1 with the counts as its last
   line. No zips at all is nothing to verify, and exits 0. With `source_files`, only the named zips and
-  the named CZIs inside zips are checked, as in 00. Re-running rechecks everything.
+  the named CZIs inside zips are checked, as in 00. Re-running rechecks everything. If the drive drops
+  while the folder is listed, an archive read or a CZI checked, it waits for the drive (`ls_drive`) and
+  does that again, so a dropped drive is never reported as missing files.
 
 ### `00c_channel_identity.py`
 
@@ -1198,7 +1218,9 @@ Nothing reads them.
 - **Settings:** `scene_render.*`, `display`, `acquisition`, `pixel_size_um`.
 - **Failure and re-run:** resumable per picture; `--force` redraws. Before each scene it checks free
   memory (RAM plus page file) and skips a scene that will not fit, with a reason, rather than crashing. `--workers` runs scenes in
-  parallel; `--limit` counts scenes tried.
+  parallel; `--limit` counts scenes tried. If the drive drops while a CZI is drawn, it waits for the drive
+  (`ls_drive`) and draws that CZI again from its first scene; a scene that fails with the drive there is
+  listed as before.
 
 ### `01m_reagent_screen.py`
 
@@ -1238,6 +1260,9 @@ the operator to confirm or reject in Set up. It never assigns one.
   modification time, scene, planes, clip ceiling, zoom, feature constants), and a run reads only
   sections whose key is missing or changed. Scoring and the strip are always redone from the checkpoint
   and the stored thumbnails, so confirming or rejecting in Set up re-scores without reading a pixel.
+  If the drive drops while a file is read, it waits for the drive (`ls_drive`) and reads that file again
+  from its first section (each section's tiles are seeded by its uid, so the same ones); a section that
+  fails with the drive there is listed unscreened as before.
   `--force` only overrides the run gate and still resumes. `--reread` reads every section again, and is
   resumable too: rows carry the reread's id, kept in `qc/reagent_screen_reread.json` until it finishes,
   and any run while it is pending continues it. `--limit N` reads at most N and leaves
@@ -1592,7 +1617,9 @@ frame.
   last line, as does a marker with no `display.colours` entry; what was built is kept, and a re-run builds
   only what is missing. An excluded section (`--include-excluded`) with no composite is listed apart and
   does not fail the run, as with `04a --render-excluded`. Under `multiplex` the sections are taken from
-  `focus.csv` as 04a takes them (one row per scan), so every marker finds them.
+  `focus.csv` as 04a takes them (one row per scan), so every marker finds them. If the drive drops while
+  a section is rendered from the CZI, it waits for the drive (`ls_drive`), opens the CZI again and
+  renders that section from the start.
 
 ### `04p_section_provenance.py`
 
@@ -1696,6 +1723,8 @@ real slide pixels.
   placed and written, and the run exits 1 with `!! N <marker> polygon ROI(s) REFUSED ...` as its last
   line (`not_placed`). A ROI row with no shape at all (neither `sec_r` nor `sec_poly`; only a damaged
   or legacy export has one) is refused the same way, with `!! N <marker> ROI row(s) REFUSED (no shape ...`.
+  A scene rectangle (or `--verify`'s CZI read) that fails because the drive dropped is waited for
+  (`ls_drive`) and read again, not listed as missing.
 
 ### `05b_tune_detection.py`
 
@@ -1713,7 +1742,9 @@ the whole study.
   Reagent controls of the marker (`reagent_controls`, through `ls_reagent_controls.expand`) are left out of
   the sample. While `reagent_controls.declared` is `unsure` and `qc/reagent_screen.csv` has candidates
   neither confirmed nor rejected, it prints a warning and carries on.
-- **Failure and re-run:** `--no-model` measures quality only, without StarDist.
+- **Failure and re-run:** `--no-model` measures quality only, without StarDist. If the drive drops while
+  a section's crops are read, it waits for the drive (`ls_drive`) and reads that section again, the CZI
+  opened afresh, so the sample is the one an uninterrupted run takes.
 
 ### `05c_detect_rois.py`
 
@@ -1750,7 +1781,11 @@ The longest-running stage (hours).
   tissue mask (`<uid>_mask.npy` from 04a) or no intensity range to share is skipped, not measured and
   not logged done; the run then exits 1 with the number skipped on its last line, after writing and
   logging every section it did measure, so a resume measures only those. ROIs not segmented inside a
-  measured section (`results/roi_box_status.csv`) do not fail the run.
+  measured section (`results/roi_box_status.csv`) do not fail the run. If the drive drops while a
+  section is measured, it waits for the drive (`ls_drive`) and measures that section again from its first
+  ROI, masks and CZI read afresh; nothing of it is written until it is whole, so the rows are those of an
+  uninterrupted run and none is written twice. A read that fails with the drive there stops the run as
+  before, with every earlier section on disk and logged.
 
 ### `06a_roi_dataset.py`
 
@@ -1893,7 +1928,9 @@ counts by eye.
   written in bands.
 - **Failure and re-run:** resumable per picture; `--force` redraws. Exit 2 before drawing anything when
   `roi_measurements.csv` or `positivity_cuts.csv` is missing or older than `roi_nuclei.csv`: a picture
-  that disagrees with the numbers is worse than none, so 06a must run first.
+  that disagrees with the numbers is worse than none, so 06a must run first. If the drive drops while a
+  section's boxes or its scene picture are read, it waits for the drive (`ls_drive`) and reads them again,
+  the CZI opened afresh; a read that fails with the drive there lists the section not drawn, as before.
 
 ### `atlas_pdf.py`
 
@@ -2028,9 +2065,13 @@ shares one storage, and two studies can share scene uids, so the value of each k
 recognised by its mark, `<out_root>/curation/study_id.txt` (a random id made once, moving with the folder),
 and its entry is carried over, never taken from another study. Used by 04k, 04l, 04q and the app's import.
 
+### `ls_drive.py`
+
+Shared module, standard library only: what a stage does when the slides or output drive goes away. `reachable()` checks the watched folders (`source_dir` and `out_root`, or `LS_WATCH`), `wait_for_drive` waits for them with no time limit (polling every 2 s, ended by the `LS_STOP_FILE` file or Ctrl+C), and `per_slide` reruns one slide's work from its start once the drive is back. `per_slide_settled` also reruns an attempt the drive went away during without it failing (an `ls_io` write that waited for the drive and then succeeded leaves the attempt's CZI handles pointing at a volume that went), judged by `disturbed_since(mark())`, which a stage's per-item `except` inside the unit also uses to re-raise rather than record the drive's failure as the item's. `present(path, label)` is `os.path.exists` for a file on the drive: a file absent because the drive has dropped is waited for and looked for again, never reported missing, even when the drive drops just as it is looked for. It prints `@@drive lost <folder> | <label>` and `@@drive back <seconds>`, each on a line of its own, when `LS_PROGRESS=1`, which the app turns into its banner; a watchdog thread prints the first even while a read is stuck. Stages reach the one shared instance through `ls_io.drive_module()`.
+
 ### `ls_io.py`
 
-Shared module: `atomic_write_csv`, `atomic_save` (a context manager for any file), a retry for a vanishing drive (five attempts, about 15 seconds of waiting), `pick_column` (a column by any of its accepted names),
+Shared module: `atomic_write_csv`, `atomic_save` (a context manager for any file), `save_image` (an image written the same way), a retry for a vanishing drive (five attempts, about 15 seconds of waiting; while a watched folder is gone it waits for the drive instead, without using up an attempt), `pick_column` (a column by any of its accepted names),
 and `embed`/`fill`, which put JSON into an HTML template safely for a `<script>` block in one pass. Section
 5.6.
 
@@ -2427,6 +2468,7 @@ straight from `sys.argv`) without running it. A script with no options says "(no
 | `ls_coloc.py` | (none) |  |  |
 | `ls_config.py` | (none) |  |  |
 | `ls_curation.py` | (none) |  |  |
+| `ls_drive.py` | (none) |  |  |
 | `ls_io.py` | (none) |  |  |
 | `ls_jsonio.py` | (none) |  |  |
 | `ls_layouts.py` | (none) |  |  |

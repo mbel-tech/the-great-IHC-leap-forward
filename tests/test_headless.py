@@ -81,6 +81,29 @@ chk("it stops at the first failure", r.ran, plan[:2])
 chk("...which is reported with its message", results[-1][1:], (False, 0.1, "refused"))
 chk("...and recorded as failed", (LP.Project.open(PATH2).block.get("runs") or [])[-1]["ok"], False)
 
+print("--- pauses for a dropped drive reach the run record ---")
+PZ = [{"at": "2026-11-21T10:00:00+00:00", "seconds": 134.2, "folder": "E:\\Slides",
+       "label": "LS53_1a scene 3"}]
+
+
+class Paused(StandIn):
+    def run(self, stage, on_line=None, extra_argv=()):
+        self.ran.append(stage.sid)
+        if stage.sid == plan[0]:
+            return StageResult(stage.sid, True, 0.1, "", pauses=PZ)
+        return StageResult(stage.sid, False, 0.1, "",
+                           "stopped while the drive was disconnected\nmore", pauses=PZ)
+
+
+PATH3 = write_study(os.path.join(TMP, "s3"))
+H.run_screen(PATH3, "prepare", runner=Paused(), out=io.StringIO())
+runs = (LP.Project.open(PATH3).block.get("runs") or [])[-2:]
+chk("an ok run keeps its pauses", (runs[0]["ok"], runs[0].get("pauses")), (True, PZ))
+chk("...and no error", "error" in runs[0], False)
+chk("a failed run keeps its pauses", runs[1].get("pauses"), PZ)
+chk("...and the first line of its error", runs[1].get("error"),
+    "stopped while the drive was disconnected")
+
 print("--- the command line ---")
 env = dict(os.environ, PYTHONIOENCODING="utf-8")
 p = subprocess.run([sys.executable, "-m", "app", "--run", "nowhere", PATH], cwd=REPO,

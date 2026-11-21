@@ -72,6 +72,27 @@ _spec = importlib.util.spec_from_file_location("_ov_01m", os.path.join(_HERE, "0
 OV = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(OV)
 
+
+def per_slide(fn, *, label):
+    """Run one self-contained unit, redoing it after a dropped drive - also
+    when the drive went during it without the unit failing (ls_drive's
+    per_slide_settled)."""
+    return OV.DR.per_slide_settled(fn, label=label) if OV.DR is not None else fn()
+
+
+def mark():
+    """A token for `disturbed_since`, taken when a unit's attempt starts."""
+    return OV.DR.mark() if OV.DR is not None else 0
+
+
+def disturbed_since(token):
+    """True if the drive may have gone since `token` (ls_drive). A per-section
+    `except Exception` inside a file's unit re-raises then, so the file is
+    redone once the drive is back instead of the section being listed
+    unscreened for a reason that was never the section's - including a read
+    through a handle that outlived a write that waited for the drive."""
+    return OV.DR is not None and OV.DR.disturbed_since(token)
+
 SOURCE_DIR = CONFIG["source_dir"]
 OUT_ROOT = CONFIG["out_root"]
 QC_DIR = os.path.join(OUT_ROOT, "qc")
@@ -300,8 +321,7 @@ def thumb_path(uid, marker):
 
 def save_thumb(uid, marker, a):
     os.makedirs(THUMB_DIR, exist_ok=True)
-    with IO.atomic_save(thumb_path(uid, marker)) as tmp:
-        Image.fromarray(a.astype(np.uint16)).save(tmp, format="PNG")
+    IO.save_image(a.astype(np.uint16), thumb_path(uid, marker), format="PNG")
 
 
 def load_thumb(uid, marker):
@@ -375,11 +395,18 @@ def strip_picture(uid, marker, row, where, plan, say):
     s = int(row["scene_index"])
     try:
         from pylibCZIrw import czi as pyczi
-        with CR.open_czi(path, None, pyczi=pyczi) as doc:
-            rect = doc.scenes_bounding_rectangle[s]
-            x0, y0 = where[uid]
-            t = read_tile(doc, rect, x0, y0, {"m": plan[marker][0]}, s)["m"]
+
+        def unit():
+            # Self-contained: a redo after a dropped drive opens the file again.
+            with CR.open_czi(path, None, pyczi=pyczi) as doc:
+                rect = doc.scenes_bounding_rectangle[s]
+                x0, y0 = where[uid]
+                return read_tile(doc, rect, x0, y0, {"m": plan[marker][0]}, s)["m"]
+
+        t = per_slide(unit, label=f"{row['file']} (strip tile {uid})")
     except Exception as exc:  # noqa: BLE001 - the CSV is written; the picture is extra
+        if OV.is_stop(exc):
+            raise
         say(f"  !! strip: {uid} not re-read ({type(exc).__name__}: {exc})")
         return None
     return shrink(t).astype(np.float64)
@@ -522,7 +549,9 @@ def main():
     for r in scenes:
         uid, fname = r["scene_uid"], r["file"]
         path = os.path.join(SOURCE_DIR, fname)
-        if not os.path.exists(path):
+        # A CZI on a drive that has just dropped is waited for, not listed
+        # missing.
+        if not OV.present(path, fname):
             problems[uid] = "not screened: the CZI is missing"
             continue
         fps[uid] = fingerprint(path, r, section_markers(r, multiplex, plan), nuc_c, plan,
@@ -544,31 +573,46 @@ def main():
             stopped = True
             break
         path = os.path.join(SOURCE_DIR, fname)
-        try:
+        # One file is the unit a dropped drive redoes (see 01_overviews'
+        # export): each attempt starts `acc` afresh, and nothing reaches the
+        # checkpoint, the problems or the count until the attempt is over, so
+        # a redo cannot add a row twice and an ordinary failure part way still
+        # keeps the sections screened before it. Each section's tiles are
+        # drawn from its own seed (seed_for), so a redo picks the same tiles;
+        # thumbnails are written atomically and simply overwritten.
+        acc = {}
+
+        def unit(path=path, frows=frows, fname=fname):
+            acc.clear()
+            acc.update(ck={}, problems={}, read=0, stopped=False, since=mark())
             from pylibCZIrw import czi as pyczi
             with CR.open_czi(path, None, pyczi=pyczi) as doc:
                 rects = doc.scenes_bounding_rectangle
                 for r in frows:
-                    if args.limit and read >= args.limit:
-                        stopped = True
+                    if args.limit and read + acc["read"] >= args.limit:
+                        acc["stopped"] = True
                         break
                     uid, s = r["scene_uid"], int(r["scene_index"])
                     markers = section_markers(r, multiplex, plan)
                     if s not in rects:
-                        problems[uid] = f"not screened: scene {s} not in the CZI"
+                        acc["problems"][uid] = f"not screened: scene {s} not in the CZI"
                         continue
                     try:
                         feats, used, first, thumbs = screen_section(
                             doc, rects[s], s, uid, markers, nuc_c, plan, zoom,
                             OV.ceiling_for(ceilings, fname))
                     except Exception as exc:  # noqa: BLE001 - one bad section must not stop it
-                        problems[uid] = f"not screened: {type(exc).__name__}: {exc}"
+                        # Not the section's fault if the drive went: the whole
+                        # file is redone once it is back.
+                        if OV.is_stop(exc) or disturbed_since(acc["since"]):
+                            raise
+                        acc["problems"][uid] = f"not screened: {type(exc).__name__}: {exc}"
                         continue
                     finally:
-                        read += 1
+                        acc["read"] += 1
                     for m in markers:
                         f = feats.get(m) or {}
-                        ck[(uid, m)] = {
+                        acc["ck"][(uid, m)] = {
                             "scene_uid": uid, "file": fname, "marker": m,
                             "f1": _fmt(f.get("f1"), 6), "f2": _fmt(f.get("f2"), 6),
                             "f3": _fmt(f.get("f3"), 6), "tiles": used,
@@ -579,10 +623,27 @@ def main():
                             try:
                                 save_thumb(uid, m, thumbs[m])
                             except Exception as exc:  # noqa: BLE001 - the strip re-reads it
+                                if OV.is_stop(exc) or disturbed_since(acc["since"]):
+                                    raise
                                 say(f"  !! {uid}: thumbnail not saved ({type(exc).__name__}: "
                                     f"{exc}); the strip will read the tile again")
-                    say.progress(f"  read {read}/{n_todo}")
+                    say.progress(f"  read {read + acc['read']}/{n_todo}")
+
+        error = None
+        try:
+            per_slide(unit, label=fname)
         except Exception as exc:  # noqa: BLE001 - one bad file must not stop the screen
+            if OV.is_stop(exc):
+                raise
+            error = exc
+        # The attempt's results, in the order they were screened - all of
+        # them on success, the sections before the failure otherwise.
+        ck.update(acc.get("ck", {}))
+        problems.update(acc.get("problems", {}))
+        read += acc.get("read", 0)
+        stopped = stopped or acc.get("stopped", False)
+        if error is not None:
+            exc = error
             say(f"  !! {fname}: {type(exc).__name__}: {exc}")
             for r in frows:
                 if not is_current(ck, r["scene_uid"], section_markers(r, multiplex, plan),

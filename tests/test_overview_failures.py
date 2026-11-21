@@ -198,6 +198,8 @@ for f in (FA, FB):
 drop_scenes = scene_rows(FA, "1") + scene_rows(FB, "2")
 # One drop: (file, scene) whose read raises the first time, with the folder gone.
 DROP = {"at": None}
+# An ordinary failure: (file, scene) whose read raises with the folder there.
+BREAK = {"at": None}
 
 
 def _vanish_for(seconds):
@@ -232,6 +234,8 @@ class _BigDoc:
 
     def read(self, roi, plane, scene, zoom):
         name = os.path.basename(self.path)
+        if BREAK["at"] == (name, scene):
+            raise RuntimeError("corrupt subblock")
         if DROP["at"] == (name, scene):
             DROP["at"] = None
             DROP["thread"] = _vanish_for(0.3)
@@ -333,6 +337,25 @@ chk("exits zero", rc, 0)
 chk("...after waiting for the drive", "@@drive back" in text)
 got = snapshot()
 chk("...byte for byte as uninterrupted", [k for k in base if got.get(k) != base[k]], [])
+
+print()
+print("--- a file that fails part way with the folder there: as before ---")
+clear_outputs()
+BREAK["at"] = (FA, 1)
+rc, text = run_main()
+BREAK["at"] = None
+chk("main() exits non-zero", rc != 0)
+chk("...without waiting for a drive that never left", "@@drive" in text, False)
+keys, rows = read_failures()
+chk("...only the failed scene is listed", [r["scene_uid"] for r in rows or []], ["LS02_s01a_sc01"])
+chk("...with its error", "corrupt subblock" in (rows or [{}])[0].get("reason", ""))
+with open(OV.QC_CSV, newline="", encoding="utf-8") as fh:
+    chk("...the scene before it is still exported",
+        sorted(r["scene_uid"] for r in csv.DictReader(fh)),
+        ["LS02_s01a_sc00", "LS02_s02a_sc00", "LS02_s02a_sc01"])
+got = snapshot()
+chk("...and its outputs are as uninterrupted",
+    [k for k in base if "s01a_sc00" in k and got.get(k) != base[k]], [])
 
 print()
 print("--- --force: the drop lands while the display ranges are sampled ---")

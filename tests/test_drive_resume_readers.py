@@ -51,6 +51,8 @@ def chk(label, got, want=True):
 # One drop at a time: DROP["at"] names the read that raises (once), with the
 # slides folder renamed away for 0.3 s.
 DROP = {"at": None, "thread": None}
+# An ordinary failure: the read named here raises with the folder there.
+BREAK = {"at": None}
 
 
 def vanish_for(seconds):
@@ -66,6 +68,8 @@ def vanish_for(seconds):
 
 
 def maybe_drop(key, path):
+    if BREAK["at"] == key:
+        raise RuntimeError("corrupt subblock")
     if DROP["at"] == key:
         DROP["at"] = None
         DROP["thread"] = vanish_for(0.3)
@@ -239,6 +243,26 @@ got = k_snapshot()
 chk("...the dropped file measured as uninterrupted",
     [k for k in base_k if k != os.path.relpath(K.OUT_CSV, STUDY.out_root)
      and got.get(k) != base_k[k]], [])
+
+print()
+print("--- 01k: a file that fails part way with the folder there: as before ---")
+write_csv(MANIFEST_SCENES, SCENES_K)
+k_clear()
+BREAK["at"] = (FA, 1, LOW)
+rc, text = run(K, K_ARGV)
+BREAK["at"] = None
+chk("01k exits 1", rc, 1)
+chk("...without waiting for a drive that never left", "@@drive" in text, False)
+last = [ln for ln in text.splitlines() if ln.strip()][-1]
+chk("...naming only the failed scene",
+    [r["scene_uid"] for r in SCENES_K if r["scene_uid"] in last], ["LS05_s01a_sc01"])
+with open(K.OUT_CSV, newline="", encoding="utf-8") as fh:
+    chk("...the scene before it is still measured",
+        sorted(r["scene_uid"] for r in csv.DictReader(fh)),
+        ["LS05_s01a_sc00", "LS05_s02a_sc00", "LS05_s02a_sc01"])
+got = k_snapshot()
+chk("...its mask as uninterrupted",
+    [k for k in base_k if "s01a_sc00" in k and got.get(k) != base_k[k]], [])
 
 print()
 print("--- 01k: the folder is gone before a CZI is looked for ---")
@@ -436,6 +460,20 @@ write_csv(MANIFEST_FILES, [{"file": f, "marker_channel": marker, "is_redundant_c
                            for f in (HA, HB)])
 
 print()
+print("--- 01h: a file that fails part way keeps the tiles it gave ---")
+import random  # noqa: E402
+h_clear()
+BREAK["at"] = ("asarray", 10)
+failed_h = []
+with contextlib.redirect_stdout(io.StringIO()) as said:
+    st = H.collect_tiles([(os.path.join(STUDY.source_dir, HA), marker)], 30,
+                         random.Random(H.SEED), failed_h)
+BREAK["at"] = None
+chk("one failed entry", [f for f, _ in failed_h], [HA])
+chk("...the 9 tiles read before it are kept", sum(len(v) for v in st.values()), 9)
+chk("...without waiting for a drive that never left", "@@drive" in said.getvalue(), False)
+
+print()
 print("--- 01h: Stopped is not swallowed as a per-file failure ---")
 h_clear()
 open(stop, "wb").close()
@@ -446,7 +484,6 @@ stopped = False
 # that follows would raise Stopped too and hide a per-file handler that
 # swallowed it.
 try:
-    import random
     with contextlib.redirect_stdout(io.StringIO()):
         H.collect_tiles([(os.path.join(STUDY.source_dir, HA), marker)], 30,
                         random.Random(H.SEED), [])

@@ -241,7 +241,10 @@ def check(outlines, keys, boxes):
                 raise NotDone(f"roi{ri:02d}: nucleus {nid} of the saved outlines is "
                               f"{d:.2f} px from its roi_nuclei.csv centroid - the "
                               f"outlines are not the ones these rows were measured "
-                              f"on (re-run 05c for this section)")
+                              f"on. Re-measure the marker with 05c_detect_rois.py "
+                              f"--marker {b['marker']} --force, which writes the rows "
+                              f"and the outlines together (a plain 05c run skips a "
+                              f"finished section, and 06i only re-saves outlines)")
     return want
 
 
@@ -389,7 +392,11 @@ def plan(args):
     markers = [args.marker] if args.marker else list(G5.MARKERS)
     for marker in markers:
         G5.use_marker(marker)
-        if not os.path.exists(G5.BOX_CSV) or not os.path.exists(G5.GEOM_CSV):
+        # Drive-aware (ls_drive.present): a file missing only because the drive
+        # has dropped is waited for and looked for again. Read as absent, the
+        # marker would count as gone and every one of its features be dropped.
+        if not (D5.present(G5.BOX_CSV, os.path.basename(G5.BOX_CSV))
+                and D5.present(G5.GEOM_CSV, os.path.basename(G5.GEOM_CSV))):
             print(f"marker: {marker}  skipped (no {os.path.basename(G5.BOX_CSV)} "
                   f"or {os.path.basename(G5.GEOM_CSV)}; run 05a --marker {marker})")
             gone.append(marker)

@@ -398,6 +398,28 @@ run()
 chk("...and they come back once its boxes do",
     len(features_rows()), len(nuclei) - 4)          # UIDS[0] has no outlines
 
+print("--- the drive drops while the box file is looked for: waited for, nothing dropped ---")
+before = sorted(map(tuple, (r.values() for r in features_rows())))
+done_before = digest(M.DONE_CSV)
+gone = STUDY.source_dir + ".gone"
+os.rename(STUDY.source_dir, gone)               # a watched folder unreachable...
+os.rename(box_csv, box_csv + ".aside")          # ...and the box file not seen
+
+
+def _back():
+    os.rename(box_csv + ".aside", box_csv)
+    os.rename(gone, STUDY.source_dir)
+
+
+t = threading.Timer(0.3, _back)
+t.start()
+chk("exits 0", run(), 0)
+t.join()
+chk("...the drop was waited out", "drive back" in LAST[0])
+chk("...the marker was not taken for gone", "boxes are gone" in LAST[0], False)
+chk("...no row dropped", sorted(map(tuple, (r.values() for r in features_rows()))), before)
+chk("...the done log as it was", digest(M.DONE_CSV), done_before)
+
 print("--- roi_nuclei_untouched ---")
 chk("roi_nuclei.csv is byte-identical after every run", digest(D5.NUCLEI_CSV), NUCLEI_SHA)
 

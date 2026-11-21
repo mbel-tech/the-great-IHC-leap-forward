@@ -1715,6 +1715,18 @@ the whole study.
   Reagent controls of the marker (`reagent_controls`, through `ls_reagent_controls.expand`) are left out of
   the sample. While `reagent_controls.declared` is `unsure` and `qc/reagent_screen.csv` has candidates
   neither confirmed nor rejected, it prints a warning and carries on.
+- **Reagent-control constraint (provisional):** for a marker segmented on its own channel (`segment: own`,
+  StarDist: PCNA) with at least one `no_primary` reagent control paired (operator `paired_with`, same file
+  or same animal; never study-wide) with a stained section that has boxes, the model is also run over the
+  controls' ROI central windows, each stretched by its stained pair's `section_range` (05c's
+  `borrowed_from`), at the same grid. `ls_tune.constrain` calls a cut admissible when the control's
+  objects per mm² are at most `positivity.fp_target` × the stained sample's; an inadmissible choice moves to
+  the lowest admissible grid point above it, and with none it is kept and the report says so. The record
+  is `detection.auto.<marker>.constraint`, the four last columns of `qc/detection_tuning.csv` (written only
+  then) and a table in the report. With no usable control none of this runs: `detection.auto` and the
+  table are byte-identical to before, and the report says the constraint was not applied. The stage
+  records no inputs, so the app does not mark it stale when `fp_target` or the pairing changes; re-run it,
+  and a moved cut reaches 05c through `detection.auto`.
 - **Failure and re-run:** `--no-model` measures quality only, without StarDist.
 
 ### `05c_detect_rois.py`
@@ -1733,7 +1745,11 @@ The longest-running stage (hours).
   counterstain with StarDist (`2D_versatile_fluo`, 1 to 99.8 percentile stretch, the cut from 05b), keeps
   objects whose centroid maps inside the drawn shape, and measures the marker inside each nuclear mask.
   A marker declared `segment: own` (PCNA on the LS slides) is segmented on its own channel instead, with
-  one intensity range per section. A nucleus is `censored` when any of its native pixels is at the clip
+  one intensity range per section. A `no_primary` reagent control of such a marker is detected at its
+  paired stained section's range (operator, same file or same animal; the first in name order with
+  boxes), not its own, which would stretch its noise to full scale; with no such pair it takes its own,
+  and `roi_normalisation.csv`'s `range_from` says which. A resume re-detects only a control whose range
+  source changed. A nucleus is `censored` when any of its native pixels is at the clip
   ceiling, and `off_tissue` when it falls outside the tissue mask. Each row records `segmented_on`,
   `backend` and `nucleus_shaped`. The `ls_segment` threshold backend serves markers that are not
   nucleus-shaped.
@@ -4044,7 +4060,7 @@ A copy of the curator export 05a read, kept beside its output so the boxes can a
 
 #### `qc/detection_tuning.csv`
 
-One row per sampled crop: the signal statistics 05b's verdict is made from (summary and chosen cut in `qc/detection_tuning.md`).
+One row per sampled crop: the signal statistics 05b's verdict is made from (summary and chosen cut in `qc/detection_tuning.md`). The last four columns are written only when the PCNA reagent-control constraint ran.
 
 - **Written by:** 05b_tune_detection.py
 - **Read by:** a person
@@ -4065,6 +4081,10 @@ One row per sampled crop: the signal statistics 05b's verdict is made from (summ
 | `contrast` | float |  | (foreground - background) / (foreground + background). |
 | `coverage` | float |  | Share of the crop above the Otsu cut. |
 | `saturated` | float |  | Share of the crop at the clip ceiling. |
+| `control_density` | float | objects/mm² | Only when the PCNA reagent-control constraint ran for some marker (else the column is absent). StarDist objects per mm² on the paired no-primary controls' ROI central windows, each at its stained pair's intensity range, at the marker's final cut; the same on every row of the marker, blank for a marker it did not run for. Provisional. |
+| `stained_density` | float | objects/mm² | Only with control_density. Objects per mm² on the stained sample's windows at the same cut. |
+| `admissible` | text |  | Only with control_density. `yes` when control_density ≤ positivity.fp_target × stained_density at the final cut, else `no` (no grid point was admissible and the cut was kept). |
+| `constraint_moved_from` | float |  | Only with control_density. The cut the plateau rule chose (0.479 = the model default) when the constraint moved it to the lowest admissible grid point above; blank when it did not move. |
 
 #### `results/roi_nuclei.csv`
 
@@ -4131,6 +4151,7 @@ For a marker counted on its own channel: the one intensity range every box of a 
 | `norm_lo` | float | grey value | Bottom of the stretch (the 1st percentile over the section's boxes). |
 | `norm_hi` | float | grey value | Top (the 99.8th percentile). |
 | `n_crops` | int |  | Boxes the range was taken over. |
+| `range_from` | text |  | Whose range it is: `own` (the section's own boxes), or, for a no-primary reagent control of the marker, the stained scene_uid it is paired with (operator, same file or same animal; never study-wide), whose range it borrows. A file from before the column is backfilled `own`. |
 
 #### `results/roi_measured_geometry.csv`
 

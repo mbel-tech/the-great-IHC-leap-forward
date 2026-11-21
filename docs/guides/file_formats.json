@@ -4692,8 +4692,8 @@
     "detection_tuning.csv"
    ],
    "writer": "05b_tune_detection.py",
-   "what": "One row per sampled crop: the signal statistics 05b's verdict is made from (summary and chosen cut in `qc/detection_tuning.md`).",
-   "columns_from": "05b_tune_detection.py:COLUMNS",
+   "what": "One row per sampled crop: the signal statistics 05b's verdict is made from (summary and chosen cut in `qc/detection_tuning.md`). The last four columns are written only when the PCNA reagent-control constraint ran.",
+   "columns_from": "05b_tune_detection.py:ALL_COLUMNS",
    "columns": [
     {
      "name": "marker",
@@ -4778,6 +4778,30 @@
      "type": "float",
      "units": "",
      "meaning": "Share of the crop at the clip ceiling."
+    },
+    {
+     "name": "control_density",
+     "type": "float",
+     "units": "objects/mm²",
+     "meaning": "Only when the PCNA reagent-control constraint ran for some marker (else the column is absent). StarDist objects per mm² on the paired no-primary controls' ROI central windows, each at its stained pair's intensity range, at the marker's final cut; the same on every row of the marker, blank for a marker it did not run for. Provisional."
+    },
+    {
+     "name": "stained_density",
+     "type": "float",
+     "units": "objects/mm²",
+     "meaning": "Only with control_density. Objects per mm² on the stained sample's windows at the same cut."
+    },
+    {
+     "name": "admissible",
+     "type": "text",
+     "units": "",
+     "meaning": "Only with control_density. `yes` when control_density ≤ positivity.fp_target × stained_density at the final cut, else `no` (no grid point was admissible and the cut was kept)."
+    },
+    {
+     "name": "constraint_moved_from",
+     "type": "float",
+     "units": "",
+     "meaning": "Only with control_density. The cut the plateau rule chose (0.479 = the model default) when the constraint moved it to the lowest admissible grid point above; blank when it did not move."
     }
    ]
   },
@@ -5000,6 +5024,12 @@
      "type": "int",
      "units": "",
      "meaning": "Boxes the range was taken over."
+    },
+    {
+     "name": "range_from",
+     "type": "text",
+     "units": "",
+     "meaning": "Whose range it is: `own` (the section's own boxes), or, for a no-primary reagent control of the marker, the stained scene_uid it is paired with (operator, same file or same animal; never study-wide), whose range it borrows. A file from before the column is backfilled `own`."
     }
    ]
   },

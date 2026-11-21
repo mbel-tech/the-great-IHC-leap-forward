@@ -1725,6 +1725,12 @@ NOT_TRACKED = {
                   "compared",
     "groups.by_animal": "05c reads it only for the order it measures sections in, "
                         "and the finished file is the same either way",
+    "reagent_controls.paired_with": "05c reads it only to pick the stained section "
+                                    "a no-primary control of an own-channel marker "
+                                    "borrows its range from, and on a resume "
+                                    "re-detects just the controls whose range "
+                                    "source changed (roi_normalisation.csv's "
+                                    "range_from), never every section",
     "positivity.cut_k": "05c reads it only to colour its overlay crops; 06a's cuts "
                         "are what count, and 06i redraws every crop whose cut "
                         "differs from 06a's",

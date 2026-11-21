@@ -282,7 +282,8 @@ def load_outlines(marker, uid, boxes, doc, model, scene=None):
         raise ValueError("re-segmenting needs the scene index")
     section_norm = {}
     if D5.needs_shared_norm(marker):
-        lo, hi, _ = D5.section_range(doc, boxes, marker, scene)
+        # A reagent control's range is its stained pair's, as 05c took it.
+        lo, hi, _ = D5.section_range_for(uid, marker, doc, boxes, scene)
         section_norm[marker] = (lo, hi)
     out = {}
     for bi, b in enumerate(boxes, 1):

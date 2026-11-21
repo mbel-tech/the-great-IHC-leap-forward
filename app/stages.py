@@ -348,6 +348,10 @@ STAGES = [
           # No settings: this stage records no inputs (made_from None), so a
           # list here would track nothing. When the confirmed reagent controls
           # change, the confirm list says to run it again (reagent_dialog).
+          # positivity.fp_target and reagent_controls.paired_with change its
+          # output only for an own-channel marker with a usable no-primary
+          # control (the PCNA constraint); a changed cut then reaches 05c
+          # through detection.auto, which 05c tracks.
           blurb="Every section at exactly 5.2 um/px with a frozen display "
                 "range, plus per-section QC including clipping measured on the "
                 "raw plane. Writes the raw clipping masks 04j censors from in "
@@ -769,9 +773,11 @@ STAGES = [
                     "detection.stardist.prob_thresh", "detection.stardist.nms_thresh",
                     "detection.stardist.use_auto", "detection.auto",
                     # Which sections are reagent controls: 05c measures them
-                    # first. Only these two - the pairing, the rejected names,
-                    # the patterns and the declared answer change nothing it
-                    # measures, and each would put hours of detection out of date.
+                    # first. Only these two - the rejected names, the patterns
+                    # and the declared answer change nothing it measures, and
+                    # each would put hours of detection out of date. The
+                    # pairing picks a control's borrowed range, and a resume
+                    # re-detects just those controls (workflow.NOT_TRACKED).
                     "reagent_controls.files", "reagent_controls.scenes"],
           cli_only=detect_cli_reason,
           blurb="Reads each box at 0.65 um/px, segments nuclei on DAPI with "

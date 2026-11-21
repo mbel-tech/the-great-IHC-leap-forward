@@ -871,8 +871,11 @@ note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
              "reagent-control check of the cut (results/reagent_cut_check.csv) "
              "reads it, and it never changes the cut by itself: a suggested "
              "multiplier is applied only by the operator (positivity.cut_k). "
-             "Between 0.001 and 0.2.",
-        consumers=["06a", "app"]),
+             "05b holds a marker segmented on its own channel (PCNA) to it: a "
+             "StarDist cut is inadmissible where paired no-primary controls "
+             "give more than fp_target x the stained sample's detections per "
+             "mm2. Between 0.001 and 0.2.",
+        consumers=["05b", "06a", "app"]),
 
     Key("positivity.cut_k", "raw",
         "How many spreads above a section's own background median a nucleus "
@@ -940,8 +943,12 @@ note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
     Key("reagent_controls.paired_with", "raw",
         "Which stained scenes or files each reagent control is compared with.",
         default={}, ui=False, in_example=False,
-        note="{<scene_uid or file>: [<stained scene_uid or file>, ...]}.",
-        consumers=["06a", "app"]),
+        note="{<scene_uid or file>: [<stained scene_uid or file>, ...]}. For a "
+             "marker segmented on its own channel, 05b and 05c also read it to "
+             "pick the stained section whose intensity range a no-primary "
+             "control is detected at; 05c re-detects only a control whose range "
+             "source changed.",
+        consumers=["05b", "05c", "06a", "app"]),
 
     Key("reagent_controls.rejected", "list_str",
         "Scenes or files the operator said are NOT reagent controls.",

@@ -203,7 +203,7 @@ NO_ARTIFACT_COLUMNS = ["scene_uid", "marker"]
 #: with the measurements it describes.
 NORM_CSV = os.path.join(RESULTS, "roi_normalisation.csv")
 NORM_COLUMNS = ["scene_uid", "marker", "segmented_on", "norm_lo", "norm_hi",
-                "n_crops"]
+                "n_crops", "range_from"]
 
 #: The shape each ROI was MEASURED ON, one row per (section, marker, ROI),
 #: copied from the roi_boxes row 05c read. 06a joins nuclei to the CURRENT
@@ -707,6 +707,120 @@ def section_range(doc, boxes, marker, scene):
             plane_index_for(marker), scene=scene).astype(np.float32))
     lo, hi = SG.percentile_range(crops)
     return lo, hi, len(crops)
+
+
+#: The pairing tiers a reagent control may borrow a stained section's range
+#: under: never study-wide, which crosses batches (ls_reagent_report).
+BORROW_TIERS = ("operator", "same_file", "same_animal")
+
+#: What `range_from` says for a section stretched by its own range.
+OWN_RANGE = "own"
+
+
+def borrowed_from(uid, marker, by_sec, geom, lookup, cache=None):
+    """(stained uid, pairing tier) a reagent control is detected at, or
+    (None, tier or None) when it is detected at its own range.
+
+    Only a `no_primary` control of a marker that shares one range per section
+    (needs_shared_norm), and only under ls_reagent_report.pairing_for's
+    operator / same_file / same_animal tiers. Of several paired stained
+    sections the first in name order with boxes and geometry for this marker
+    is taken, so the choice does not move between runs.
+
+    WHY BORROW: stretched to its own range, a control's noise fills the scale
+    and the model finds "nuclei" in it - the false detections it is there to
+    measure would be overstated by the stretch. At its stained pair's range it
+    is seen as the stained section would be seen without the primary. 05b
+    measures the PCNA tuning constraint on the same footing.
+
+    `lookup` empty (no confirmed controls) returns at once; `cache` is a dict
+    kept across calls for the manifest rows and boxed sections.
+    """
+    if not lookup or not needs_shared_norm(marker):
+        return None, None
+    e = lookup.get((uid, marker))
+    if not e or e.get("kind") != "no_primary":
+        return None, None
+    import ls_reagent_report as RR
+    cache = {} if cache is None else cache
+    if "rows" not in cache:
+        cache["rows"] = RR.study_rows(CONFIG)
+        cache["boxed"] = RR.boxed_sections(CONFIG)
+    tier, stained = RR.pairing_for(uid, marker, lookup, cache["rows"], CONFIG,
+                                   cache["boxed"])
+    if tier not in BORROW_TIERS:
+        return None, tier
+    for s in stained:
+        if s in by_sec and s in geom:
+            return s, tier
+    return None, tier
+
+
+def borrowed_range(src, marker, by_sec, geom):
+    """section_range of the stained section `src`, read off its own file."""
+    from pylibCZIrw import czi as pyczi
+    g = geom[src]
+    path = os.path.join(CONFIG["source_dir"], g["czi_file"])
+    with CR.open_czi(path, int(float(g.get("scene_w") or 0)) or None,
+                     pyczi=pyczi) as sdoc:
+        return section_range(sdoc, by_sec[src], marker, int(g["scene_index"]))
+
+
+def range_sources(uids, marker, by_sec, geom, lookup):
+    """{uid: stained uid} for the sections among `uids` that borrow a range.
+    Empty, without reading anything, when no control is confirmed."""
+    if not lookup or not needs_shared_norm(marker):
+        return {}
+    cache, out = {}, {}
+    for uid in uids:
+        if (uid, marker) in lookup:
+            src, _tier = borrowed_from(uid, marker, by_sec, geom, lookup, cache)
+            if src is not None:
+                out[uid] = src
+    return out
+
+
+def section_range_for(uid, marker, doc, boxes, scene):
+    """section_range as this stage takes it for section `uid`: a reagent
+    control's borrowed from its stained pair (borrowed_from), every other
+    section's from its own `boxes`. For a caller outside the measurement loop
+    (06i re-segmenting a box), which has no box table of every section."""
+    lookup = reagent_lookup()
+    if (uid, marker) in lookup and needs_shared_norm(marker):
+        G5.use_marker(marker)
+        by_sec = {}
+        for b in G5.load_csv(G5.BOX_CSV):
+            by_sec.setdefault(b["scene_uid"], []).append(b)
+        geom = ({g["scene_uid"]: g for g in G5.load_csv(G5.GEOM_CSV)}
+                if os.path.exists(G5.GEOM_CSV) else {})
+        src, _tier = borrowed_from(uid, marker, by_sec, geom, lookup)
+        if src is not None:
+            return borrowed_range(src, marker, by_sec, geom)
+    return section_range(doc, boxes, marker, scene)
+
+
+def recorded_range_from(marker):
+    """{scene_uid: range_from} from roi_normalisation.csv for `marker`; a row
+    written before the column existed was stretched by its own range."""
+    if not os.path.exists(NORM_CSV):
+        return {}
+    with open(NORM_CSV, newline="", encoding="utf-8") as fh:
+        return {r["scene_uid"]: (r.get("range_from") or OWN_RANGE)
+                for r in csv.DictReader(fh) if r.get("marker") == marker}
+
+
+def check_norm_header():
+    """roi_normalisation.csv written before `range_from` is rewritten with
+    range_from = own, which is what every such row was: before the column a
+    section was only ever stretched by its own range."""
+    header = header_of(NORM_CSV)
+    old = [c for c in NORM_COLUMNS if c != "range_from"]
+    if header == old:
+        n = backfill_header(NORM_CSV, NORM_COLUMNS, {"range_from": OWN_RANGE})
+        print(f"  {os.path.basename(NORM_CSV)} predates range_from - {n} rows "
+              f"backfilled with range_from={OWN_RANGE!r}, the only range there was")
+        return
+    check_header(NORM_CSV, NORM_COLUMNS)
 
 
 def segment_box(doc, b, scene, model, min_area_px, section_norm, partners=(),
@@ -2139,6 +2253,27 @@ def main():
                   f"before this stage recorded what they were measured on, so "
                   f"a box changed since cannot be seen - kept as they are. "
                   f"--force re-measures them.")
+    # A REAGENT CONTROL WHOSE RANGE SOURCE CHANGED is measured again, and only
+    # it: a control of a shared-range marker is detected at its stained pair's
+    # range (borrowed_from), so a new pairing - or a pair whose boxes changed -
+    # makes its rows ones made at another stretch. With no confirmed control
+    # the lookup is empty and nothing here reads a file.
+    lookup = reagent_lookup()
+    sources = range_sources(sorted(by_sec), args.marker, by_sec, geom, lookup)
+    if exists and not args.force and lookup \
+            and needs_shared_norm(args.marker):
+        rec_from = recorded_range_from(args.marker)
+        repaired = sorted(
+            (u for u in measured - changed
+             if (u, args.marker) in lookup and u in rec_from
+             and (rec_from[u] != sources.get(u, OWN_RANGE)
+                  or sources.get(u) in changed)), key=NM.natural_key)
+        if repaired:
+            changed |= set(repaired)
+            print(f"  {len(repaired)} {args.marker} reagent control section(s) "
+                  f"now take their intensity range from another section - "
+                  f"measured again: " + ", ".join(repaired[:5])
+                  + (" ..." if len(repaired) > 5 else ""))
     # SECTIONS TAKEN OUT OF THE CURATION lose their rows, so the dataset is
     # the sections the boxes name. Unless MOST of what was measured has gone:
     # 05a --limit writes a box file of its first N sections, and dropping the
@@ -2174,7 +2309,7 @@ def main():
             return 1
         return 0
     todo = measure_order([u for u in sorted(by_sec) if u not in done], done,
-                         reagent_lookup(), args.marker, args.order)
+                         lookup, args.marker, args.order)
     if args.limit:
         todo = todo[: args.limit]
     if not todo and not gone:
@@ -2334,7 +2469,7 @@ def main():
     # no row in roi_nuclei.csv, is not "done", and is segmented again here.
     norm_exists = os.path.exists(NORM_CSV)
     if norm_exists:
-        check_header(NORM_CSV, NORM_COLUMNS)
+        check_norm_header()
         drop_rows(NORM_CSV, args.marker, redo)
     nfh = nw = None
     no_norm = []
@@ -2458,9 +2593,15 @@ def main():
                 # is holding every crop in memory at once.
                 for mk in sorted({b["marker"] for b in by_sec[uid]
                                   if needs_shared_norm(b["marker"])}):
+                    # A reagent control borrows its stained pair's range
+                    # (borrowed_from); every other section takes its own.
+                    src = sources.get(uid) if mk == args.marker else None
                     try:
-                        lo, hi, n_crops = section_range(
-                            doc, by_sec[uid], mk, int(g["scene_index"]))
+                        if src is not None:
+                            lo, hi, n_crops = borrowed_range(src, mk, by_sec, geom)
+                        else:
+                            lo, hi, n_crops = section_range(
+                                doc, by_sec[uid], mk, int(g["scene_index"]))
                     except SG.SegmentError as exc:
                         # A section whose marker plane is flat or empty has no
                         # range to share. Skipped with the reason, never measured
@@ -2469,7 +2610,7 @@ def main():
                         continue
                     section_norm[mk] = (lo, hi)
                     norm_rows.append([uid, mk, segment_plane_for(mk), repr(lo),
-                                      repr(hi), n_crops])
+                                      repr(hi), n_crops, src or OWN_RANGE])
                 for bi, b in enumerate(by_sec[uid], 1):
                     marker = b["marker"]
                     partners = coloc_by_marker.get(marker, ())

@@ -265,6 +265,68 @@ def pick_prob_thresh(curve, default):
                   f"at the model's {default:.3f})")
 
 
+#: The model's own probability cut (2D_versatile_fluo), which a `chosen` of
+#: None stands for in `constrain`.
+MODEL_DEFAULT_PROB = 0.479071463157368
+
+#: How close two cuts must be to be the same grid point: the curve stores the
+#: model's default rounded to six places.
+_SAME_CUT = 1e-4
+
+
+def densities(curve_stained, curve_control, area_stained_mm2, area_control_mm2,
+              fp_target):
+    """{cut: {stained_density, control_density, admissible}} over the grid.
+
+    Densities are objects per mm2 of the crops counted. A cut is admissible
+    when the reagent control's false detections are at most `fp_target` x
+    the stained detections; with no stained detections (or no area to divide
+    by) nothing is, since there is nothing for a false detection to be a
+    fraction of.
+    """
+    ctrl = {round(float(p), 6): int(n) for p, n in curve_control}
+    out = {}
+    for p, n in sorted((float(p), int(n)) for p, n in curve_stained):
+        c = ctrl.get(round(p, 6))
+        if c is None:
+            c = next((m for q, m in ctrl.items() if abs(q - p) < _SAME_CUT), None)
+        if c is None or not area_stained_mm2 > 0 or not area_control_mm2 > 0:
+            continue
+        sd = n / float(area_stained_mm2)
+        cd = c / float(area_control_mm2)
+        out[p] = {"stained_density": sd, "control_density": cd,
+                  "admissible": sd > 0 and cd <= fp_target * sd}
+    return out
+
+
+def constrain(curve_stained, curve_control, area_stained_mm2, area_control_mm2,
+              chosen, fp_target, *, default=MODEL_DEFAULT_PROB):
+    """The cut `pick_prob_thresh` chose, held to the reagent controls.
+
+    A grid point p is admissible when control_density(p) <= fp_target x
+    stained_density(p) (see `densities`). `chosen` (None: the model's own
+    `default`) is returned unchanged when it is admissible. Otherwise the
+    lowest admissible grid point above it is, with the reason "moved from X:
+    control false detections above target"; with none, `chosen` is kept, with
+    the reason "no admissible threshold; kept".
+
+    Only ever moves UP: a higher cut keeps fewer objects on both, and the
+    plateau rule has already said where the count stops depending on the cut.
+    Returns (cut, reason).
+    """
+    table = densities(curve_stained, curve_control, area_stained_mm2,
+                      area_control_mm2, fp_target)
+    at = float(default if chosen is None else chosen)
+    here = next((v for p, v in table.items() if abs(p - at) < _SAME_CUT), None)
+    if here is not None and here["admissible"]:
+        return chosen, "admissible: control false detections within target"
+    above = [p for p, v in sorted(table.items())
+             if p > at + _SAME_CUT and v["admissible"]]
+    if not above:
+        return chosen, "no admissible threshold; kept"
+    return above[0], f"moved from {at:g}: control false detections above target"
+
+
 def count_curve(model, images, thresholds, nms_thresh=None, n_tiles_for=None):
     """[(prob_thresh, total objects)] over `images`, already normalised.
 

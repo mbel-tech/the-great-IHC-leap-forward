@@ -115,7 +115,7 @@ try:
     import numpy as np
     from PIL import Image
 
-    drv = IO._drive()
+    drv = IO.drive_module()
     old_poll, old_watch = drv.POLL, os.environ.get("LS_WATCH")
     drv.POLL = 0.05
     try:
@@ -172,6 +172,20 @@ try:
         finally:
             del os.environ["LS_STOP_FILE"]
         chk("Stopped propagates", got, "Stopped")
+        import sys
+        sys.path.insert(0, SCRIPTS)
+        import ls_drive
+        chk("one shared ls_drive instance", ls_drive is drv, True)
+        os.environ["LS_STOP_FILE"] = stop
+        try:
+            IO.retry(always, "x", 3)
+            got = "returned"
+        except ls_drive.Stopped:
+            got = "Stopped"
+        finally:
+            del os.environ["LS_STOP_FILE"]
+        chk("Stopped is the stage's ls_drive.Stopped", got, "Stopped")
+        os.remove(stop)
     finally:
         drv.POLL = old_poll
         if old_watch is None:
@@ -201,6 +215,29 @@ try:
     chk("a failing PIL save raises", got, "raised")
     chk("...old file untouched", open(ip, "rb").read(), before)
     chk("...no .tmp litter", os.path.exists(ip + ".tmp"), False)
+    # A drop during the encode itself waits, then succeeds.
+    drv.POLL = 0.05
+    os.environ["LS_WATCH"] = vol
+    os.rename(vol, gone)
+    threading.Timer(0.5, lambda: os.rename(gone, vol)).start()
+    real = Image.Image.save
+    first = {"n": 0}
+
+    def flaky_save(self, fp, *a, **k):
+        first["n"] += 1
+        if first["n"] == 1:
+            raise OSError("volume vanished")
+        return real(self, fp, *a, **k)
+
+    Image.Image.save = flaky_save
+    try:
+        IO.save_image(np.zeros((4, 4), np.uint8), os.path.join(vol, "w.png"))
+    finally:
+        Image.Image.save = real
+        os.environ.pop("LS_WATCH", None)
+    chk("save_image waits out a drop during encode",
+        (first["n"], os.path.exists(os.path.join(vol, "w.png")),
+         os.path.exists(os.path.join(vol, "w.png.tmp"))), (2, True, False))
     jp = os.path.join(tmp, "im.jpg")
     IO.save_image(Image.new("RGB", (4, 4)), jp, quality=80)
     with Image.open(jp) as im:

@@ -356,6 +356,69 @@ try:
     os.remove(stopfile)
     chk("settled passes Stopped through", got, "stopped")
     os.environ.pop("LS_PROGRESS", None)
+
+    # present(path, label): "is this file there?" asked of a drive that may
+    # have dropped. A file on the vanished folder is waited for, not missing.
+    setup()
+    D._ANNOUNCED = None
+    os.environ["LS_PROGRESS"] = "1"
+    f = os.path.join(b, "slide.czi")
+    open(f, "wb").close()
+    chk("present: a file that is there", D.present(f, "slide.czi"), True)
+    res, out = capture(lambda: D.present(os.path.join(b, "nope.czi"), "nope.czi"))
+    chk("present: missing with the folder there is missing", res, False)
+    chk("...said without waiting", "@@drive" in out, False)
+    drop()
+    t = later(0.3, restore)
+    res, out = capture(lambda: D.present(f, "slide.czi"))
+    t.join()
+    chk("present: on a dropped drive, waited for and found", res, True)
+    chk("...after one lost and one back",
+        (out.count("@@drive lost "), out.count("@@drive back ")), (1, 1))
+    drop()
+    t = later(0.3, restore)
+    res, out = capture(lambda: D.present(os.path.join(b, "nope.czi"), "nope.czi"))
+    t.join()
+    chk("present: on a dropped drive, waited for and still missing", res, False)
+    chk("...after the wait", "@@drive back " in out, True)
+
+    # The race this closes: the drive goes between the wait and the look.
+    # Here the first look misses (the folder is away), and the folder is back
+    # before the reachability check, so nothing waits - the file is looked for
+    # again rather than reported missing.
+    real_exists = os.path.exists
+    looks = []
+
+    def flappy(p):
+        looks.append(p)
+        if p == f and len(looks) == 1:
+            return False          # looked while the drive was away
+        return real_exists(p)
+    os.path.exists = flappy
+    try:
+        res, out = capture(lambda: D.present(f, "slide.czi"))
+    finally:
+        os.path.exists = real_exists
+    chk("present: a miss that healed before the wait is looked at again",
+        res, True)
+
+    # A folder that drops AFTER the wait but before the look: still waited for.
+    looks = []
+
+    def drop_on_first_look(p):
+        looks.append(p)
+        if p == f and len(looks) == 1:
+            drop()
+            later(0.3, restore)
+        return real_exists(p)
+    os.path.exists = drop_on_first_look
+    try:
+        res, out = capture(lambda: D.present(f, "slide.czi"))
+    finally:
+        os.path.exists = real_exists
+    time.sleep(0.4)
+    chk("present: a drop as the file is looked for is waited out", res, True)
+    os.environ.pop("LS_PROGRESS", None)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

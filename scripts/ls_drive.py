@@ -37,6 +37,11 @@ succeeded, so the CZI handles the attempt holds are to a volume that went.
 a unit uses it to re-raise rather than record the drive's failure as the
 item's.
 
+`present(path, label)` is `os.path.exists` for a file on the drive: a file
+that is absent because the drive has dropped is waited for and looked for
+again, never reported missing. It replaces `wait_if_gone(); os.path.exists()`,
+which reported a file missing when the drive dropped between the two.
+
 `Watchdog` covers the case where the read does not raise but BLOCKS on the
 vanished volume: a daemon thread polls `reachable()` and prints the `lost`
 line itself, once per loss, so the app can flag it while the stage looks hung.
@@ -168,6 +173,30 @@ def wait_for_drive(label, poll=None):
 def wait_if_gone(label):
     """Wait only when a watched folder is gone; 0.0 otherwise."""
     return 0.0 if reachable()[0] else wait_for_drive(label)
+
+
+def present(path, label):
+    """`os.path.exists(path)`, asked of a drive that may have dropped.
+
+    True if the file is there. If not, and a watched folder is gone, wait for
+    it (`wait_if_gone(label)`) and look again: a file on a vanished drive is
+    not missing. False only when the file is absent with every watched folder
+    reachable, before the look and after it - so a drive that drops between
+    a wait and the look (the race `wait_if_gone(); os.path.exists()` had) is
+    waited for too. With nothing watched, exactly `os.path.exists`.
+    """
+    while True:
+        if os.path.exists(path):
+            return True
+        if reachable()[0]:
+            # The miss may have been the drive going and coming back already:
+            # look once more, and believe "missing" only if the folders were
+            # reachable on both sides of that look.
+            if os.path.exists(path):
+                return True
+            if reachable()[0]:
+                return False
+        wait_if_gone(label)
 
 
 class Watchdog:

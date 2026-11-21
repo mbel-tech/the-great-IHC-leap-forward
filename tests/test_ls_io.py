@@ -110,6 +110,102 @@ try:
     with open(q, "rb") as fh:
         chk("...and leaves the previous file alone", fh.read(), b"abc")
     chk("...and cleans the temp up", os.path.exists(t), False)
+    # ---- the drive: wait it out, do not burn an attempt ---------------------
+    import threading
+    import numpy as np
+    from PIL import Image
+
+    drv = IO._drive()
+    old_poll, old_watch = drv.POLL, os.environ.get("LS_WATCH")
+    drv.POLL = 0.05
+    try:
+        vol = os.path.join(tmp, "vol")
+        gone = os.path.join(tmp, "vol_away")
+        os.mkdir(vol)
+        os.environ["LS_WATCH"] = vol
+        os.rename(vol, gone)
+        threading.Timer(0.5, lambda: os.rename(gone, vol)).start()
+        vp = os.path.join(vol, "d.csv")
+        IO.atomic_write_csv(vp, [{"a": 1, "b": 2}], ["a", "b"], attempts=1)
+        chk("csv written after the drive came back (attempts=1)", read(vp),
+            [{"a": "1", "b": "2"}])
+
+        # Reachable folder: a failure is an ordinary failure, backoff applies.
+        n, slept2 = {"n": 0}, []
+
+        def fail_twice():
+            n["n"] += 1
+            if n["n"] <= 2:
+                raise OSError("blip")
+            return "done"
+
+        IO.time.sleep = slept2.append
+        try:
+            got = IO.retry(fail_twice, "x", 3)
+        finally:
+            IO.time.sleep = real_sleep
+        chk("reachable failure keeps backoff", (got, slept2), ("done", [1, 2]))
+
+        def always():
+            raise OSError("bad")
+
+        IO.time.sleep = lambda s: None
+        try:
+            IO.retry(always, "x", 2)
+            got = "returned"
+        except OSError:
+            got = "raised"
+        finally:
+            IO.time.sleep = real_sleep
+        chk("reachable failure still exhausts attempts", got, "raised")
+
+        # Stopped propagates out of the wait.
+        stop = os.path.join(tmp, "stop")
+        open(stop, "w").close()
+        os.environ["LS_STOP_FILE"] = stop
+        os.environ["LS_WATCH"] = os.path.join(tmp, "nowhere")
+        try:
+            IO.retry(always, "x", 3)
+            got = "returned"
+        except drv.Stopped:
+            got = "Stopped"
+        finally:
+            del os.environ["LS_STOP_FILE"]
+        chk("Stopped propagates", got, "Stopped")
+    finally:
+        drv.POLL = old_poll
+        if old_watch is None:
+            os.environ.pop("LS_WATCH", None)
+        else:
+            os.environ["LS_WATCH"] = old_watch
+
+    # ---- save_image ----------------------------------------------------------
+    ip = os.path.join(tmp, "im.png")
+    IO.save_image(np.zeros((4, 4), np.uint8), ip)
+    with Image.open(ip) as im:
+        chk("save_image writes a valid PNG", (im.format, im.size), ("PNG", (4, 4)))
+    chk("...and leaves no .tmp", os.path.exists(ip + ".tmp"), False)
+    before = open(ip, "rb").read()
+
+    class Boom(Image.Image):
+        def save(self, *a, **k):
+            open(a[0], "wb").write(b"partial")
+            raise ValueError("encoder died")
+
+    bad = Boom()
+    got = "saved"
+    try:
+        IO.save_image(bad, ip)
+    except ValueError:
+        got = "raised"
+    chk("a failing PIL save raises", got, "raised")
+    chk("...old file untouched", open(ip, "rb").read(), before)
+    chk("...no .tmp litter", os.path.exists(ip + ".tmp"), False)
+    jp = os.path.join(tmp, "im.jpg")
+    IO.save_image(Image.new("RGB", (4, 4)), jp, quality=80)
+    with Image.open(jp) as im:
+        chk("format inferred from extension", im.format, "JPEG")
+
     # ---- pick_column: a moved column is a stop, never a blank -------------
     #
     # The failure this exists to prevent has no symptom. `04n`'s num(r, k) read

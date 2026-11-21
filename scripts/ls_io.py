@@ -25,10 +25,34 @@ import contextlib
 import csv
 import datetime
 import html
+import importlib.util
 import json
 import os
 import re
 import time
+
+
+_DRIVE = None
+
+
+def _drive():
+    """ls_drive, loaded by path on first use (None if it cannot be loaded).
+
+    Lazy so importing ls_io costs nothing and a checkout without ls_drive, or a
+    stage with no study configured, behaves exactly as before.
+    """
+    global _DRIVE
+    if _DRIVE is None:
+        try:
+            spec = importlib.util.spec_from_file_location(
+                "_lsdrive", os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                         "ls_drive.py"))
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            _DRIVE = mod
+        except Exception:
+            _DRIVE = False
+    return _DRIVE or None
 
 
 def retry(fn, path, attempts, what="write to"):
@@ -44,17 +68,28 @@ def retry(fn, path, attempts, what="write to"):
     Public because a sibling module needs it. It was `_retry`, and `ls_atlas`
     reached past the underscore to get at it - a private name with an outside
     caller is not private, it is only undocumented.
+
+    If the OSError comes while a watched folder (see ls_drive) is unreachable,
+    the drive is gone, not blipping: wait for it with no limit and try again
+    WITHOUT using up an attempt. `Stopped` and Ctrl+C propagate. A failure
+    while everything is reachable is backed off and counted as before.
     """
-    for attempt in range(attempts):
+    attempt = 0
+    while attempt < attempts:
         try:
             return fn()
         except OSError as exc:
+            drv = _drive()
+            if drv is not None and not drv.reachable()[0]:
+                drv.wait_for_drive(f"{what} {path}")
+                continue
             if attempt == attempts - 1:
                 raise
             wait = 2 ** attempt
             print("\n  !! %s %s failed (%s); retrying in %ds"
                   % (what, path, exc, wait))
             time.sleep(wait)
+            attempt += 1
 
 
 # The old private name, kept so an unseen caller does not break.
@@ -142,6 +177,25 @@ def atomic_save(path, attempts=5):
                 os.remove(tmp)
             except OSError:
                 pass
+
+
+def save_image(im, path, format=None, **kw):
+    """Save a PIL image (or an ndarray) to `path` atomically.
+
+    `format` is inferred from the extension when None, since the temp file's
+    own name has none to infer from. Extra keywords go to `Image.save`.
+    """
+    from PIL import Image
+    if not isinstance(im, Image.Image):
+        im = Image.fromarray(im)
+    if format is None:
+        ext = os.path.splitext(path)[1].lower()
+        Image.init()
+        format = Image.registered_extensions().get(ext)
+        if format is None:
+            raise ValueError(f"cannot infer an image format from {path!r}")
+    with atomic_save(path) as tmp:
+        im.save(tmp, format=format, **kw)
 
 
 def embed(obj):

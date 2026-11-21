@@ -73,12 +73,25 @@ OV = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(OV)
 
 
-def drive_gone():
-    """True while a watched folder (ls_drive) cannot be reached. A per-section
+def per_slide(fn, *, label):
+    """Run one self-contained unit, redoing it after a dropped drive - also
+    when the drive went during it without the unit failing (ls_drive's
+    per_slide_settled)."""
+    return OV.DR.per_slide_settled(fn, label=label) if OV.DR is not None else fn()
+
+
+def mark():
+    """A token for `disturbed_since`, taken when a unit's attempt starts."""
+    return OV.DR.mark() if OV.DR is not None else 0
+
+
+def disturbed_since(token):
+    """True if the drive may have gone since `token` (ls_drive). A per-section
     `except Exception` inside a file's unit re-raises then, so the file is
     redone once the drive is back instead of the section being listed
-    unscreened for a reason that was never the section's."""
-    return OV.DR is not None and not OV.DR.reachable()[0]
+    unscreened for a reason that was never the section's - including a read
+    through a handle that outlived a write that waited for the drive."""
+    return OV.DR is not None and OV.DR.disturbed_since(token)
 
 SOURCE_DIR = CONFIG["source_dir"]
 OUT_ROOT = CONFIG["out_root"]
@@ -390,7 +403,7 @@ def strip_picture(uid, marker, row, where, plan, say):
                 x0, y0 = where[uid]
                 return read_tile(doc, rect, x0, y0, {"m": plan[marker][0]}, s)["m"]
 
-        t = OV.per_slide(unit, label=f"{row['file']} (strip tile {uid})")
+        t = per_slide(unit, label=f"{row['file']} (strip tile {uid})")
     except Exception as exc:  # noqa: BLE001 - the CSV is written; the picture is extra
         if OV.is_stop(exc):
             raise
@@ -572,7 +585,7 @@ def main():
 
         def unit(path=path, frows=frows, fname=fname):
             acc.clear()
-            acc.update(ck={}, problems={}, read=0, stopped=False)
+            acc.update(ck={}, problems={}, read=0, stopped=False, since=mark())
             from pylibCZIrw import czi as pyczi
             with CR.open_czi(path, None, pyczi=pyczi) as doc:
                 rects = doc.scenes_bounding_rectangle
@@ -592,7 +605,7 @@ def main():
                     except Exception as exc:  # noqa: BLE001 - one bad section must not stop it
                         # Not the section's fault if the drive went: the whole
                         # file is redone once it is back.
-                        if OV.is_stop(exc) or drive_gone():
+                        if OV.is_stop(exc) or disturbed_since(acc["since"]):
                             raise
                         acc["problems"][uid] = f"not screened: {type(exc).__name__}: {exc}"
                         continue
@@ -611,7 +624,7 @@ def main():
                             try:
                                 save_thumb(uid, m, thumbs[m])
                             except Exception as exc:  # noqa: BLE001 - the strip re-reads it
-                                if OV.is_stop(exc) or drive_gone():
+                                if OV.is_stop(exc) or disturbed_since(acc["since"]):
                                     raise
                                 say(f"  !! {uid}: thumbnail not saved ({type(exc).__name__}: "
                                     f"{exc}); the strip will read the tile again")
@@ -619,7 +632,7 @@ def main():
 
         error = None
         try:
-            OV.per_slide(unit, label=fname)
+            per_slide(unit, label=fname)
         except Exception as exc:  # noqa: BLE001 - one bad file must not stop the screen
             if OV.is_stop(exc):
                 raise

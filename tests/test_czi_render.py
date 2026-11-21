@@ -517,6 +517,59 @@ chk("...byte for byte", [k for k in base_o if got.get(k) != base_o[k]] == [],
     [k for k in base_o if got.get(k) != base_o[k]])
 
 print()
+print("--- a wait between two sections of one CZI: the next opens it again ---")
+# An ls_io write waits for a dropped drive by itself and then succeeds, so no
+# render fails - but the CZI handles kept open for the next section of the same
+# file are to the volume that went away (GEN), and must not be reused.
+czi_src = O.CziSource("AF568")
+frow = {"scene_uid": UID, "animal": "LS1", "marker_channel": "AF568", "um_px": "5.20"}
+first = czi_src.render(UID, frow, DAPI_PNG, 0.0, False, None, None, None, 2.6)
+t = vanish_for(0.3)
+GEN["n"] += 1
+with contextlib.redirect_stdout(io.StringIO()):
+    DR.wait_for_drive("an atomic write")
+t.join(5)
+try:
+    again = czi_src.render(UID, frow, DAPI_PNG, 0.0, False, None, None, None, 2.6)
+    err = None
+except OSError as exc:
+    again, err = None, exc
+czi_src.close(os.path.join(STUDY.out_root, "scratch_rgb"))
+chk("the section after the wait renders, from the file opened again", err is None, err)
+chk("...the same pixels", again is not None and all(
+    np.array_equal(x, y) for x, y in zip(first, again)))
+
+print()
+print("--- a wait absorbed by the composite's write: the section is redone ---")
+real_thumb = O.refresh_thumb
+ABSORB = {"on": True}
+
+
+def absorbing_thumb(rgb_dir, uid, size):
+    # The composite is written; its thumbnail's write waits out a drop and then
+    # succeeds. Nothing fails here, so only "the drive was lost during this
+    # render" says the render must be done again.
+    if ABSORB["on"]:
+        ABSORB["on"] = False
+        tt = vanish_for(0.3)
+        GEN["n"] += 1
+        DR.wait_for_drive("a thumbnail write")
+        tt.join(5)
+    real_thumb(rgb_dir, uid, size)
+
+
+O.refresh_thumb = absorbing_thumb
+calls_before = dict(COUNT)
+rc, text = run_o(DROP_ARGV)
+O.refresh_thumb = real_thumb
+chk("the absorbed wait happened", ABSORB["on"] is False)
+chk("finishes", rc is None, (rc, text[-300:]))
+chk("...rendered twice: the section was redone", COUNT.get(1, 0) == 4, dict(COUNT))
+got = o_snapshot()
+chk("...byte for byte", [k for k in base_o if got.get(k) != base_o[k]] == [],
+    [k for k in base_o if got.get(k) != base_o[k]])
+
+print()
 print("--- a read that fails with the folder there: as before ---")
 BREAK["at"] = (1, 1)
 raised = None

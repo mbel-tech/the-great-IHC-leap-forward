@@ -93,8 +93,10 @@ DR = IO.drive_module()
 
 
 def per_slide(fn, *, label):
-    """Run one self-contained CZI read, redoing it after a dropped drive."""
-    return DR.per_slide(fn, label=label) if DR is not None else fn()
+    """Run one self-contained CZI read, redoing it after a dropped drive - also
+    when the drive went during it without the read failing (ls_drive's
+    per_slide_settled)."""
+    return DR.per_slide_settled(fn, label=label) if DR is not None else fn()
 
 
 def wait_if_gone(label):
@@ -715,6 +717,9 @@ def build(regions_csv, limit=None, plates_csv=None, require_background=True,
     rect_cache = {}
 
     for n, uid in enumerate(uids, 1):
+        # Before anything is looked for - the overview, the CZI: a drive that
+        # has dropped is waited for here, not reported as a file missing.
+        wait_if_gone(uid)
         f, m, ix = focus.get(uid), man.get(uid), index.get(uid)
         if not (f and m and ix):
             skipped.append((uid, "not in focus.csv / manifest / reformat_index"))

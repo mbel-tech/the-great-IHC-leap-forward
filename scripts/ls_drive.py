@@ -30,6 +30,13 @@ What the app sees. With env `LS_PROGRESS=1` the module prints exactly
 ls_progress's `@@progress` lines. Otherwise it prints a human line when the
 wait starts, one a minute while it lasts, and "back after N s".
 
+`per_slide_settled` also redoes an attempt the drive went away DURING without
+the attempt failing: an ls_io write inside it waited for the drive and then
+succeeded, so the CZI handles the attempt holds are to a volume that went.
+`disturbed_since(mark())` is the test, and a stage's per-item `except` inside
+a unit uses it to re-raise rather than record the drive's failure as the
+item's.
+
 `Watchdog` covers the case where the read does not raise but BLOCKS on the
 vanished volume: a daemon thread polls `reachable()` and prints the `lost`
 line itself, once per loss, so the app can flag it while the stage looks hung.
@@ -221,3 +228,53 @@ def per_slide(fn, *, label):
             # next `lost` and lend its start time to an unrelated wait.
             _ANNOUNCED = None
             raise
+
+
+def mark():
+    """A token for "now", for `disturbed_since`: how many waits have ended."""
+    return len(PAUSES)
+
+
+def disturbed_since(token):
+    """True if the drive may have gone since `mark()` gave `token`.
+
+    That is: a wait has ended since (an ls_io write waits for the drive by
+    itself and then succeeds, so a unit can see no error at all), a loss the
+    watchdog announced is still open, or a watched folder is gone now. A
+    stage's per-item `except` inside a unit re-raises when this is true: the
+    item did not fail, the drive did, and the whole unit is redone.
+    """
+    return len(PAUSES) > token or _ANNOUNCED is not None or not reachable()[0]
+
+
+def per_slide_settled(fn, *, label):
+    """`per_slide`, and also redo an attempt the drive went away during.
+
+    `per_slide` redoes an attempt that RAISED while the drive was gone. An
+    attempt can also be hit without that: an ls_io write inside it waits for
+    the drive and succeeds, and the CZI handles the attempt holds are then to
+    a volume that went away - the next read fails with everything reachable,
+    or, worse, a file looked for during the wait was "missing" and nothing
+    failed at all. So an attempt during which `disturbed_since` became true is
+    redone, whether it returned or raised; one that was not disturbed returns
+    or raises exactly as `per_slide` would. `Stopped` and Ctrl+C pass through.
+    """
+    while True:
+        tok = [None]
+
+        def attempt():
+            tok[0] = mark()
+            return fn()
+
+        try:
+            out = per_slide(attempt, label=label)
+        except (KeyboardInterrupt, Stopped):
+            raise
+        except Exception:
+            if tok[0] is None or not disturbed_since(tok[0]):
+                raise
+            wait_for_drive(label)
+            continue
+        if not disturbed_since(tok[0]):
+            return out
+        wait_for_drive(label)

@@ -278,6 +278,84 @@ try:
     _, out = capture(lambda: D.wait_for_drive("after", poll=0.1))
     t.join()
     chk("loss after Stopped announced", out.count("@@drive lost "), 1)
+
+    # mark / disturbed_since: a wait finished since the mark, a loss still
+    # announced, or a folder gone now.
+    setup()
+    D._ANNOUNCED = None
+    os.environ["LS_PROGRESS"] = "1"
+    m = D.mark()
+    chk("undisturbed since a fresh mark", D.disturbed_since(m), False)
+    drop()
+    chk("disturbed while a folder is gone", D.disturbed_since(m), True)
+    t = later(0.3, restore)
+    capture(lambda: D.wait_for_drive("absorbed", poll=0.1))
+    t.join()
+    chk("disturbed once a wait has finished since", D.disturbed_since(m), True)
+    chk("...and not since a newer mark", D.disturbed_since(D.mark()), False)
+
+    # per_slide_settled: a wait absorbed inside the unit (an ls_io write that
+    # waited for the drive and then succeeded), after which the unit fails
+    # with everything reachable - its handles were to the volume that went.
+    def absorbed_wait():
+        drop()
+        t = later(0.3, restore)
+        D.wait_for_drive("an atomic write", poll=0.1)
+        t.join()
+
+    calls = []
+
+    def fn8():
+        calls.append(1)
+        if len(calls) == 1:
+            absorbed_wait()
+            raise RuntimeError("stale handle")
+        return "again"
+    res, out = capture(lambda: D.per_slide_settled(fn8, label="absorbed"))
+    chk("settled: a failure after an absorbed wait is redone", (res, len(calls)), ("again", 2))
+    calls = []
+
+    def fn9():
+        calls.append(1)
+        if len(calls) == 1:
+            absorbed_wait()
+            return "first"
+        return "second"
+    res, out = capture(lambda: D.per_slide_settled(fn9, label="absorbed"))
+    chk("settled: a success with a wait inside it is redone", (res, len(calls)), ("second", 2))
+    calls = []
+
+    def fn10():
+        calls.append(1)
+        raise RuntimeError("corrupt")
+    try:
+        capture(lambda: D.per_slide_settled(fn10, label="bad"))
+        got = None
+    except RuntimeError:
+        got = "raised"
+    chk("settled: an undisturbed failure is raised at once", (got, len(calls)), ("raised", 1))
+    calls = []
+
+    def fn11():
+        calls.append(1)
+        if len(calls) == 1:
+            drop()
+            later(0.3, restore)
+            raise OSError("gone")
+        return "ok"
+    res, out = capture(lambda: D.per_slide_settled(fn11, label="plain drop"))
+    chk("settled: a plain drop is redone once, not twice", (res, len(calls)), ("ok", 2))
+    chk("...one lost, one back", (out.count("@@drive lost "), out.count("@@drive back ")), (1, 1))
+    open(stopfile, "w").close()
+    try:
+        capture(lambda: D.per_slide_settled(lambda: (_ for _ in ()).throw(D.Stopped("x")),
+                                            label="s"))
+        got = None
+    except D.Stopped:
+        got = "stopped"
+    os.remove(stopfile)
+    chk("settled passes Stopped through", got, "stopped")
+    os.environ.pop("LS_PROGRESS", None)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

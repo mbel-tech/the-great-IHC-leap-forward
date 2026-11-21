@@ -155,8 +155,10 @@ DR = IO.drive_module()
 
 
 def per_slide(fn, *, label):
-    """Run one self-contained slide unit, redoing it after a dropped drive."""
-    return DR.per_slide(fn, label=label) if DR is not None else fn()
+    """Run one self-contained slide unit, redoing it after a dropped drive -
+    also when the drive went during it without the unit failing (ls_drive's
+    per_slide_settled)."""
+    return DR.per_slide_settled(fn, label=label) if DR is not None else fn()
 
 
 def wait_if_gone(label):
@@ -170,10 +172,17 @@ def is_stop(exc):
     return DR is not None and isinstance(exc, DR.Stopped)
 
 
-def drive_gone():
-    """True while a watched folder cannot be reached: a per-scene failure then
-    is the drive's, not the scene's, and the whole file is redone."""
-    return DR is not None and not DR.reachable()[0]
+def mark():
+    """A token for `disturbed_since`, taken when a unit's attempt starts."""
+    return DR.mark() if DR is not None else 0
+
+
+def disturbed_since(token):
+    """True if the drive may have gone since `token` (ls_drive): a per-scene
+    failure then is the drive's, not the scene's - even with the drive back
+    and nothing failing until a later read, as when a picture's write waited
+    for it - and the whole file is redone."""
+    return DR is not None and DR.disturbed_since(token)
 
 
 OUT_ROOT = CONFIG["out_root"]
@@ -903,7 +912,7 @@ def main():
 
         def unit():
             acc.clear()
-            acc.update(rows={}, bad=[], drawn=set(), said=[])
+            acc.update(rows={}, bad=[], drawn=set(), said=[], since=mark())
             new_rows, bad, drawn = acc["rows"], acc["bad"], acc["drawn"]
             with pyczi.open_czi(path) as doc:
                 rects = CR.scene_rects(doc)
@@ -959,7 +968,7 @@ def main():
                     except Exception as exc:  # noqa: BLE001 - see above
                         # Not the scene's fault if the drive went: the whole
                         # file is redone once it is back.
-                        if is_stop(exc) or drive_gone():
+                        if is_stop(exc) or disturbed_since(acc["since"]):
                             raise
                         bad.append((uid, f"{type(exc).__name__}: {exc}"))
                         acc["said"].append(f"\n  !! {uid}: {type(exc).__name__}: {exc}")

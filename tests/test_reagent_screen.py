@@ -738,6 +738,34 @@ chk("...and no picture was given up", "not re-read" in LAST[0], False)
 with open(M.SCREEN_PNG, "rb") as fh:
     chk("...the strip is the same bytes", fh.read() == base_m[os.path.relpath(M.SCREEN_PNG, OUT)])
 
+print("--- a wait absorbed by a thumbnail's write: the file is redone ---")
+# The first section's thumbnail write waits out a drop by itself (as ls_io
+# does) and succeeds; the file's second section is then read through a handle
+# opened before the drop. Nothing may be listed unscreened for it.
+_real_thumb = M.save_thumb
+ABSORB = {"on": True}
+
+
+def _absorbing_thumb(uid, marker, a):
+    if ABSORB["on"] and uid == "LS05_s01a_sc00":
+        ABSORB["on"] = False
+        tt = vanish_for(0.3)
+        GEN["n"] += 1
+        DR.wait_for_drive("a thumbnail write")
+        tt.join(5)
+    _real_thumb(uid, marker, a)
+
+
+M.save_thumb = _absorbing_thumb
+m_clear()
+chk("exits 0", m_run(), 0)
+M.save_thumb = _real_thumb
+chk("the absorbed wait happened", ABSORB["on"], False)
+chk("...nothing listed unscreened", [r["scene_uid"] for r in read_screen()
+                                     if "not screened" in r["note"]], [])
+got_m = m_snapshot()
+chk("...byte for byte", [k for k in base_m if got_m.get(k) != base_m[k]], [])
+
 print("--- a section that fails with the folder there: as before ---")
 m_clear()
 BREAK["at"] = ("LS05_1a.czi", 0, 2)

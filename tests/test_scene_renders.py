@@ -547,6 +547,34 @@ chk("...byte for byte", [k for k in base_l if got.get(k) != base_l[k]] == [],
     [k for k in base_l if got.get(k) != base_l[k]])
 
 print()
+print("--- a wait absorbed by a picture's write: the file is redone ---")
+# The first scene's picture write waits out a drop by itself (as ls_io does)
+# and succeeds; the second scene's reads then go to handles opened before the
+# drop. That is the drive's doing, not the scene's: nothing may be listed.
+real_save = L.save_png
+ABSORB = {"on": True}
+
+
+def absorbing_save(img, path):
+    if ABSORB["on"] and os.path.basename(path) == UIDS[0] + ".png":
+        ABSORB["on"] = False
+        tt = vanish_for(0.3)
+        GEN["n"] += 1
+        DR.wait_for_drive("a picture write")
+        tt.join(5)
+    real_save(img, path)
+
+
+L.save_png = absorbing_save
+ended, text = run_l("--force")
+L.save_png = real_save
+chk("the absorbed wait happened", ABSORB["on"] is False)
+chk("01l finishes, no scene listed", ended == "", ended)
+got = l_snapshot()
+chk("...byte for byte", [k for k in base_l if got.get(k) != base_l[k]] == [],
+    [k for k in base_l if got.get(k) != base_l[k]])
+
+print()
 print("--- a scene whose read fails with the folder there: as before ---")
 BREAK["at"] = (0, 0, 1)
 ended, text = run_l("--force")

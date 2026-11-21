@@ -149,8 +149,10 @@ DR = IO.drive_module()
 
 
 def per_slide(fn, *, label):
-    """Run one self-contained render, redoing it after a dropped drive."""
-    return DR.per_slide(fn, label=label) if DR is not None else fn()
+    """Run one self-contained render, redoing it after a dropped drive - also
+    when the drive went during it without the render failing (ls_drive's
+    per_slide_settled)."""
+    return DR.per_slide_settled(fn, label=label) if DR is not None else fn()
 
 
 def wait_if_gone(label):
@@ -674,6 +676,7 @@ class CziSource:
         self._doc = None
         self._rects = None
         self._stack = self._plane_docs = None
+        self._opened_at = 0
         self.rows = []
 
     def file_of(self, uid):
@@ -681,9 +684,13 @@ class CziSource:
         return m["file"] if m else None
 
     def _open(self, fname):
-        if fname == self._path:
+        # The file is kept open from one section to the next - unless the
+        # drive went away since it was opened (a write that waited for it, say):
+        # those handles are to a volume that went, so it is opened again.
+        if fname == self._path and not (DR is not None
+                                        and DR.disturbed_since(self._opened_at)):
             return
-        self._close_doc()
+        self.reset()
         path = os.path.join(CONFIG["source_dir"], fname)
         if not os.path.exists(path):
             # Missing because the drive has just dropped is not "not found":
@@ -708,6 +715,7 @@ class CziSource:
         # Last: only a file whose every handle opened counts as open, so one
         # that failed part way is opened again rather than half reused.
         self._path = fname
+        self._opened_at = DR.mark() if DR is not None else 0
 
     def _close_doc(self):
         stack, cm, doc = self._stack, self._cm, self._doc
@@ -777,7 +785,7 @@ class CziSource:
 
     def close(self, out_dir):
         """Append this run's renders to `<out_dir>_render.csv`: which picture is which."""
-        self._close_doc()
+        self.reset()
         if not self.rows:
             return
         path = out_dir + "_render.csv"
@@ -976,6 +984,11 @@ def main():
 
     for n_done, uid in enumerate(uids):
         PG.report(n_done, len(uids), "sections")
+        # Before anything is looked for - the composite, the overviews, the
+        # CZI: a drive that has dropped is waited for here, not reported as a
+        # file missing.
+        if czi is not None:
+            wait_if_gone(czi.file_of(uid) or uid)
         out_path = os.path.join(out_dir, uid + ".png")
         if not args.verify and not args.force and os.path.exists(out_path):
             existing += 1
@@ -1027,9 +1040,6 @@ def main():
                 refresh_thumb(out_dir, uid, args.thumb_size)
                 return img.shape[0]
 
-            # Before the render looks for its CZI: a drive that has dropped is
-            # waited for here, not reported as a CZI not found.
-            wait_if_gone(czi.file_of(uid) or uid)
             try:
                 side = per_slide(unit, label=f"{uid} ({czi.file_of(uid) or 'no CZI'})")
             except CziUnavailable as exc:

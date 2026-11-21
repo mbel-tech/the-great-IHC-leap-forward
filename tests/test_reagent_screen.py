@@ -309,6 +309,31 @@ class _Rect:
         self.x, self.y, self.w, self.h = x, y, w, h
 
 
+# The drive-dropout checks: DROP["at"] names the (file, scene, nth tile read)
+# that raises once, with the slides folder renamed away for 0.3 s; BREAK["at"]
+# one that raises with the folder there. A drop also ends every handle opened
+# before it (GEN), as a vanished volume does.
+DROP = {"at": None, "thread": None}
+BREAK = {"at": None}
+GEN = {"n": 0}
+TILE_N = {}
+
+
+def vanish_for(seconds):
+    """Rename the slides folder away; a thread puts it back after `seconds`."""
+    import threading
+    import time
+    gone = STUDY.source_dir + ".gone"
+    os.rename(STUDY.source_dir, gone)
+
+    def back():
+        time.sleep(seconds)
+        os.rename(gone, STUDY.source_dir)
+    t = threading.Thread(target=back, daemon=True)
+    t.start()
+    return t
+
+
 class _Doc:
     """Every scene a 4096 x 3072 frame, tissue in its middle; tiles seeded by position."""
 
@@ -316,6 +341,7 @@ class _Doc:
 
     def __init__(self, path):
         self.name = os.path.basename(path)
+        self.gen = GEN["n"]
 
     def __enter__(self):
         return self
@@ -324,6 +350,18 @@ class _Doc:
         return False
 
     def read(self, roi, plane, scene, zoom):
+        if zoom >= 1:
+            n = TILE_N[(self.name, scene)] = TILE_N.get((self.name, scene), 0) + 1
+            key = (self.name, scene, n)
+            if BREAK["at"] == key:
+                raise RuntimeError("corrupt subblock")
+            if self.gen != GEN["n"]:
+                raise OSError(5, "Input/output error (a handle from before the drop)")
+            if DROP["at"] == key:
+                DROP["at"] = None
+                GEN["n"] += 1
+                DROP["thread"] = vanish_for(0.3)
+                raise OSError(5, "Input/output error")
         READS.append((self.name, scene, plane["C"], zoom))
         x, y, w, h = roi
         if zoom < 1:
@@ -610,6 +648,128 @@ chk("zero candidates on a study with no reagent controls",
     [r["scene_uid"] for r in got if r["status"] == "candidate"], [])
 chk("warn_unanswered has nothing to say", RC.warn_unanswered(cfg), None)
 NC_UIDS = {"LS09_s01a_sc01"}
+
+print("--- the drive drops mid-file: the file is redone, the same bytes ---")
+import glob                                                      # noqa: E402
+DR = M.IO.drive_module()
+chk("ls_drive loads", DR is not None)
+DR.POLL = 0.05
+os.environ["LS_WATCH"] = STUDY.source_dir
+os.environ["LS_PROGRESS"] = "1"
+OUTS = [M.FEATURES_CSV, M.SCREEN_CSV, M.SCREEN_PNG]
+
+
+def m_clear(thumbs=True):
+    for p_ in OUTS:
+        if os.path.exists(p_):
+            os.remove(p_)
+    if thumbs:
+        for p_ in glob.glob(os.path.join(M.THUMB_DIR, "*")):
+            os.remove(p_)
+
+
+def m_snapshot():
+    got = {}
+    for p_ in OUTS + sorted(glob.glob(os.path.join(M.THUMB_DIR, "*"))):
+        if os.path.exists(p_):
+            with open(p_, "rb") as fh:
+                got[os.path.relpath(p_, OUT)] = fh.read()
+    return got
+
+
+def m_run(*argv):
+    TILE_N.clear()
+    return run(*argv)
+
+
+def settle():
+    if DROP["thread"] is not None:
+        DROP["thread"].join(5)
+        DROP["thread"] = None
+
+
+m_clear()
+chk("uninterrupted screen exits 0", m_run(), 0)
+base_m = m_snapshot()
+chk("...wrote the checkpoint, the screen, the strip and the thumbnails",
+    len(base_m), 3 + len(scenes))
+m_clear()
+# Part way through the file's second section: its first section is already
+# screened, and its features must not reach the checkpoint twice.
+DROP["at"] = ("LS05_1a.czi", 1, 3)
+chk("01m with the drive dropped exits 0", m_run(), 0)
+settle()
+chk("the drop fired", DROP["at"], None)
+chk("...says the drive came back, once", LAST[0].count("@@drive back"), 1)
+got_m = m_snapshot()
+chk("...writes the same files", sorted(got_m), sorted(base_m))
+chk("...byte for byte", [k for k in base_m if got_m.get(k) != base_m[k]], [])
+with open(M.FEATURES_CSV, newline="", encoding="utf-8") as fh:
+    keys = [(r["scene_uid"], r["marker"]) for r in csv.DictReader(fh)]
+chk("...no duplicate checkpoint rows", len(keys), len(set(keys)))
+chk("...nothing listed unscreened", [r["scene_uid"] for r in read_screen()
+                                     if "not screened" in r["note"]], [])
+chk("...no .tmp left", glob.glob(os.path.join(OUT, "**", "*.tmp"), recursive=True), [])
+
+print("--- the slides folder is gone when the CZIs are looked for ---")
+m_clear()
+_t = vanish_for(0.3)
+GEN["n"] += 1
+chk("exits 0 after waiting", m_run(), 0)
+_t.join(5)
+chk("...says the drive came back", "@@drive back" in LAST[0])
+got_m = m_snapshot()
+chk("...byte for byte, no CZI listed missing",
+    [k for k in base_m if got_m.get(k) != base_m[k]], [])
+
+print("--- a drop while the contact strip re-reads a tile ---")
+# No stored thumbnails: the strip reads each shown section's first tile again.
+for p_ in glob.glob(os.path.join(M.THUMB_DIR, "*")):
+    os.remove(p_)
+os.remove(M.SCREEN_PNG)
+DROP["at"] = ("LS09_1a.czi", 1, 1)          # the candidate, always shown
+del READS[:]
+chk("exits 0", m_run(), 0)
+settle()
+chk("the drop fired", DROP["at"], None)
+chk("...only strip tiles were read", {z for _n, _s, _c, z in READS}, {1.0})
+chk("...says the drive came back", "@@drive back" in LAST[0])
+chk("...and no picture was given up", "not re-read" in LAST[0], False)
+with open(M.SCREEN_PNG, "rb") as fh:
+    chk("...the strip is the same bytes", fh.read() == base_m[os.path.relpath(M.SCREEN_PNG, OUT)])
+
+print("--- a section that fails with the folder there: as before ---")
+m_clear()
+BREAK["at"] = ("LS05_1a.czi", 0, 2)
+chk("exits 0", m_run(), 0)
+BREAK["at"] = None
+chk("...without waiting for a drive that never left", "@@drive" in LAST[0], False)
+got = {r["scene_uid"]: r for r in read_screen()}
+chk("...that section is listed unscreened, with why",
+    got["LS05_s01a_sc00"]["note"].startswith("not screened: RuntimeError: corrupt subblock"))
+chk("...and the file's other section is screened as uninterrupted",
+    "not screened" in got["LS05_s01a_sc01"]["note"], False)
+
+print("--- Stopped is not swallowed as a section's failure ---")
+m_clear()
+_stop = os.path.join(os.path.dirname(OUT), "STOP")
+open(_stop, "wb").close()
+os.environ["LS_STOP_FILE"] = _stop
+DROP["at"] = ("LS05_1a.czi", 0, 2)
+_stopped = False
+try:
+    m_run()
+except DR.Stopped:
+    _stopped = True
+settle()
+os.environ.pop("LS_STOP_FILE")
+os.remove(_stop)
+DROP["at"] = None
+chk("the stop file stops 01m", _stopped)
+m_clear()
+m_run()                             # put the outputs back for what follows
+os.environ.pop("LS_WATCH")
+os.environ.pop("LS_PROGRESS")
 
 print("--- a missing CZI is listed, not dropped ---")
 os.remove(os.path.join(STUDY.source_dir, "LS12_1a.czi"))

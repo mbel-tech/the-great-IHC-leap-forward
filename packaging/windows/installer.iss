@@ -37,6 +37,8 @@ Compression=lzma2/max
 SolidCompression=yes
 LZMANumBlockThreads=4
 WizardStyle=modern
+; So Explorer and new prompts see the Path change without logging off.
+ChangesEnvironment=yes
 UninstallDisplayName=The Great IHC Leap Forward {#AppVersion}
 ; The logo (app/assets/icon.ico) on the Setup .exe, in Apps & features and on
 ; the shortcuts.
@@ -73,7 +75,7 @@ Name: "addtopath"; Description: "Add the ihc command to PATH (run steps from a t
 [Registry]
 ; The user's own Path, so no administrator rights. Appended once; removed again
 ; on uninstall (CurUninstallStepChanged below).
-Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; Tasks: addtopath; Check: NeedsAddPath(ExpandConstant('{app}'))
+Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{code:AppendedPath}"; Tasks: addtopath; Check: NeedsAddPath(ExpandConstant('{app}'))
 
 [Run]
 Filename: "{app}\runtime\pythonw.exe"; Parameters: "-m app"; WorkingDir: "{app}"; Description: "Start The Great IHC Leap Forward"; Flags: nowait postinstall skipifsilent
@@ -102,6 +104,21 @@ begin
   Result := Pos(';' + Lowercase(Dir) + ';', ';' + Lowercase(Paths) + ';') = 0;
   if Result then
     Result := Pos(';' + Lowercase(Dir) + '\;', ';' + Lowercase(Paths) + ';') = 0;
+end;
+
+// The user's Path with the install folder added: no leading or doubled ';'.
+function AppendedPath(Param: string): string;
+var
+  Paths: string;
+begin
+  if not RegQueryStringValue(HKEY_CURRENT_USER, UserPathKey, 'Path', Paths) then
+    Paths := '';
+  while (Length(Paths) > 0) and (Paths[Length(Paths)] = ';') do
+    Delete(Paths, Length(Paths), 1);
+  if Paths = '' then
+    Result := ExpandConstant('{app}')
+  else
+    Result := Paths + ';' + ExpandConstant('{app}');
 end;
 
 // Takes the install folder out of the user's Path again.

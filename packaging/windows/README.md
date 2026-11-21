@@ -25,7 +25,9 @@ Exit status: 0 ran, 1 failed or stopped, 2 refused, 130 Ctrl+C. It is
 ihc command to PATH**, which appends the install folder to the user's own `Path`
 (no administrator rights, no duplicates) and takes it out again on uninstall;
 open a new terminal after installing. Without it, run `ihc.cmd` by its full
-path. If a slides or output drive drops, a step waits and carries on by itself
+path, or add the install folder to your Path by hand. A copy updated from
+inside the app has no installer run behind it: the app writes `ihc.cmd` on its
+next start, but putting it on PATH needs the installer task or the manual step. If a slides or output drive drops, a step waits and carries on by itself
 when it is back (Ctrl+C stops it).
 
 ## Updates from inside the app

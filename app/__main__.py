@@ -120,6 +120,13 @@ def main():
     if _recover_interrupted_update():
         return 0
 
+    if not FROZEN:
+        try:                    # an in-app update never ran the installer that carries ihc.cmd
+            import update_apply
+            update_apply.ensure_console_launcher(REPO)
+        except Exception:       # noqa: BLE001 - never blocks start
+            pass
+
     _mac_menu_name("The Great IHC Leap Forward")
     _windows_app_id()
     app = QApplication(sys.argv)

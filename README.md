@@ -210,9 +210,12 @@ python -m app --stage overviews D:\LS-analysis\study.json --opt limit=3
 ```
 
 `--list` prints each stage's id, group, title and state. `--stage` refuses (exit 2, with the window's
-reason) a stage the window would hold, such as one whose earlier stages are not done, unless you add
-`--force`. In the installed Windows app the same thing is `ihc --list study.json` once you have ticked
-*Add the ihc command to PATH* in the installer (or run `ihc.cmd` from the install folder).
+reason) a stage the window would hold, such as one whose earlier stages are not done; `--force` overrides
+only those waits. A stage the study does not use, one the app does not run, a curator stage (its page
+path is printed instead, to open in a browser) and an unblinding without `--unblind` are refused
+whatever you add. In the installed Windows app the same thing is `ihc --list study.json`: an app updated
+from inside itself writes `ihc.cmd` on its next start, and typing `ihc` from any folder needs the
+installer's *Add the ihc command to PATH* task (or the install folder added to Path by hand).
 
 **If the slides or output drive drops.** The stages that read slides (and the ones that write to the
 output folder) wait instead of failing. After 10 seconds the window shows an amber banner and a

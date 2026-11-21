@@ -10,8 +10,8 @@ which a window appearing says nothing about.
 """
 
 import importlib
-import os
 import json
+import os
 import socket
 import subprocess
 import sys
@@ -96,8 +96,11 @@ def console_launcher():
         with open(study, "w", encoding="utf-8") as fh:
             json.dump({"out_root": os.path.join(d, "out"),
                        "slides_root": os.path.join(d, "slides")}, fh)
-        out = subprocess.run(["cmd", "/c", cmd, "--list", study],
-                             capture_output=True, text=True, cwd=d)
+        try:
+            out = subprocess.run(["cmd", "/c", cmd, "--list", study],
+                                 capture_output=True, text=True, cwd=d, timeout=120)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("ihc.cmd --list did not finish in 120 s") from None
     if out.returncode:
         raise RuntimeError(f"exit {out.returncode}: {(out.stderr or out.stdout).strip()[-400:]}")
     if "manifest" not in out.stdout:

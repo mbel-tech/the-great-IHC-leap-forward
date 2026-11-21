@@ -25,9 +25,9 @@ that adds the install folder to the user's Path.
 closed window, and a single stage could only be run from the window.
 
 **Cost / limits:** a drive that returns under a different letter is not found; the run has to be stopped and
-the folder corrected. The in-app code-only updater does not carry `ihc.cmd` (it is written by the build, not
-part of the repository): a copy installed before this change gets it from the next installer, not from a code
-update. The Mac app has no launcher; the docs give the bundled Python's path.
+the folder corrected. The in-app updater does not carry `ihc.cmd` (it is written by the build, not part of the
+repository), so the app writes it itself at start-up on an installed Windows copy when it is missing or
+differs (`update_apply.ensure_console_launcher`); adding it to PATH still needs the installer task. The Mac app has no launcher; the docs give the bundled Python's path.
 
 ## 2026-11-20 - Reagent controls: final review fixes
 

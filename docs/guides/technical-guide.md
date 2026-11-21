@@ -837,14 +837,18 @@ hold stopped it, and 2 for an unknown screen or a missing study file. Unblinding
 
 `python -m app --stage <id> <study.json> [--opt key=value]... [--force] [--unblind]` runs one stage as
 the window's Run button does: the study's saved options, Redo when the stage is out of date, the run
-recorded. It refuses (exit 2, nothing run or recorded) what the window would hold (`workflow` gives the
-reason) unless `--force`, an unblinding without `--unblind`, and a stage the study does not use.
+recorded. It refuses (exit 2, nothing run or recorded) a stage whose needs are not done (the window's
+reason), unless `--force`; `--force` overrides only that. A stage the study does not use, one the app does
+not run, a curator page (its path is printed instead) and an unblinding without `--unblind` are refused
+regardless.
 `--list <study.json>` prints id, group, title and state. Exit status: 0 ran, 1 failed or stopped, 2
 refused, 130 Ctrl+C. On a terminal a drive loss prints one line naming the folder and the step, and one
 when it is back; the marker lines are hidden. The Windows bundle's `ihc.cmd` is
 `runtime\python.exe -m app %*`, the console interpreter, so the output and the exit status reach the
 prompt; the installer can put the install folder on the user's Path (task *Add the ihc command to
-PATH*). The Mac app has no launcher of its own; it is run as
+PATH*). An install updated in-app never ran the installer, so `update_apply.ensure_console_launcher`
+writes `ihc.cmd` at start-up (installed Windows copy only; atomic; an unwritable folder is logged and
+ignored). The Mac app has no launcher of its own; it is run as
 `<app>/Contents/Resources/runtime/bin/python3 -m app` from `Contents/Resources`.
 
 ### 5.5 The study file and settings

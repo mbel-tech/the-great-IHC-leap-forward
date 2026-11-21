@@ -233,6 +233,51 @@ try:
     chk("watchdog printed lost before fn returned", "@@drive lost " in seen.get("out", ""))
     chk("watchdog loss printed once", out.count("@@drive lost "), 1)
     restore()
+
+    # (a) watchdog-announced loss heals while fn blocks, then fn raises
+    setup()
+    D._ANNOUNCED = None
+    os.environ["LS_PROGRESS"] = "1"
+    calls = []
+
+    def fn6():
+        calls.append(1)
+        if len(calls) == 1:
+            threading.Timer(0.1, drop).start()
+            time.sleep(0.4)
+            restore()
+            time.sleep(0.05)
+            raise OSError("blip")
+        return "again"
+    res, out = capture(lambda: D.per_slide(fn6, label="blip"))
+    chk("healed blip retried", (res, len(calls)), ("again", 2))
+    chk("healed blip: one lost, one back", (out.count("@@drive lost "), out.count("@@drive back ")), (1, 1))
+    chk("healed blip: nothing pending", D._ANNOUNCED, None)
+    drop()
+    t = later(0.3, restore)
+    _, out = capture(lambda: D.wait_for_drive("next", poll=0.1))
+    t.join()
+    chk("later loss announced again", out.count("@@drive lost "), 1)
+
+    # (b) watchdog-announced loss, then Stopped: next loss still announced
+    setup()
+    D._ANNOUNCED = None
+
+    def fn7():
+        threading.Timer(0.1, drop).start()
+        time.sleep(0.4)
+        raise D.Stopped("x")
+    try:
+        capture(lambda: D.per_slide(fn7, label="stopme"))
+        got = None
+    except D.Stopped:
+        got = "stopped"
+    chk("Stopped passes through watchdog", got, "stopped")
+    chk("Stopped leaves nothing pending", D._ANNOUNCED, None)
+    t = later(0.3, restore)
+    _, out = capture(lambda: D.wait_for_drive("after", poll=0.1))
+    t.join()
+    chk("loss after Stopped announced", out.count("@@drive lost "), 1)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

@@ -104,13 +104,23 @@ def _say_lost(folder, label):
 
 def _say_back(seconds):
     if _progress():
-        print(f"@@drive back {seconds:.0f}", flush=True)
+        print(f"@@drive back {seconds:.1f}", flush=True)
     else:
-        print(f"  drive back after {seconds:.0f} s", flush=True)
+        print(f"  drive back after {seconds:.1f} s", flush=True)
 
 
 def _record(t0, seconds, folder, label):
     PAUSES.append({"at": t0, "seconds": seconds, "folder": folder, "label": label})
+
+
+def _close_announced():
+    """If a watchdog-printed loss is pending, end it with `back` and a PAUSES entry."""
+    global _ANNOUNCED
+    ann, _ANNOUNCED = _ANNOUNCED, None
+    if ann:
+        seconds = time.time() - ann["t0"]
+        _record(ann["t0"], seconds, ann["folder"], ann["label"])
+        _say_back(seconds)
 
 
 def wait_for_drive(label, poll=None):
@@ -123,6 +133,7 @@ def wait_for_drive(label, poll=None):
     poll = POLL if poll is None else poll
     ok, folder = reachable()
     if ok:
+        _close_announced()
         return 0.0
     ann, _ANNOUNCED = _ANNOUNCED, None
     t0 = ann["t0"] if ann else time.time()
@@ -173,11 +184,8 @@ class Watchdog:
                 self.lost = True
                 _ANNOUNCED = {"folder": folder, "label": self.label, "t0": time.time()}
                 _say_lost(folder, self.label)
-            elif ok and _ANNOUNCED is not None and _ANNOUNCED["label"] == self.label:
-                ann, _ANNOUNCED = _ANNOUNCED, None
-                seconds = time.time() - ann["t0"]
-                _record(ann["t0"], seconds, ann["folder"], self.label)
-                _say_back(seconds)
+            elif ok:
+                _close_announced()
 
     def __enter__(self):
         self._thread = threading.Thread(target=self._run, daemon=True)
@@ -186,19 +194,30 @@ class Watchdog:
 
     def __exit__(self, *exc):
         self._stop.set()
-        self._thread.join()
+        # A read blocked on a vanished volume can hang the thread's listdir;
+        # it is a daemon, so give up on it rather than hang the stage too.
+        self._thread.join(timeout=self.poll + 1)
+        if _ANNOUNCED is not None and reachable()[0]:
+            _close_announced()
         return False
 
 
 def per_slide(fn, *, label):
     """Run `fn`; if it fails because the drive went away, wait and run it again."""
+    global _ANNOUNCED
     while True:
-        with Watchdog(label) as wd:
-            try:
-                return fn()
-            except (KeyboardInterrupt, Stopped):
-                raise
-            except Exception:
-                if reachable()[0] and not wd.lost:
+        try:
+            with Watchdog(label) as wd:
+                try:
+                    return fn()
+                except (KeyboardInterrupt, Stopped):
                     raise
-        wait_for_drive(label)
+                except Exception:
+                    if reachable()[0] and not wd.lost:
+                        raise
+            wait_for_drive(label)
+        except (KeyboardInterrupt, Stopped):
+            # Leave nothing pending: a stale announcement would suppress the
+            # next `lost` and lend its start time to an unrelated wait.
+            _ANNOUNCED = None
+            raise

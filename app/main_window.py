@@ -206,6 +206,7 @@ class MainWindow(QMainWindow):
         # The open project: the study config plus the app's record of working on it.
         # Held in memory; stages read the saved file, so a run saves it first.
         self.session = ProjectSession(LP.Project.open(self.config_path), self)
+        self.session.log.connect(self._log)
         self.session.idle_for = self._idle_for     # Save As / a moved out_root wait for a running stage
         self._pending_log = []
         for key, _old, new in self.session.project.reanchored:
@@ -1240,7 +1241,8 @@ class MainWindow(QMainWindow):
         problem = self.session.record_run(st.sid, res.ok, getattr(self, "_run_started", None),
                                           now_iso(), options=getattr(self, "_run_values", None),
                                           inputs=getattr(self, "_run_inputs", None),
-                                          pauses=res.pauses, error=res.record_error())
+                                          pauses=res.pauses, error=res.record_error(),
+                                          title=st.title)
         if problem:
             self._log(f"could not record the run in the project: {problem}")
         self.stage_finished.emit(st.sid, bool(res.ok))
@@ -1329,5 +1331,32 @@ class MainWindow(QMainWindow):
         if not self.session.confirm_discard(self, "close"):
             e.ignore()
             return
+        if not self._pending_records_ok():
+            e.ignore()
+            return
         self.server.stop()
         super().closeEvent(e)
+
+    def _pending_records_ok(self):
+        """False if the window must stay open: run records are still waiting for the drive.
+
+        Closing loses them, and without a run's record its partial outputs can read as Done.
+        One try is made first (the drive may be back before the timer ticked).
+        """
+        if not self.session.pending_runs():
+            return True
+        self.session._record_pending()
+        n = self.session.pending_runs()
+        if not n:
+            return True
+        box = QMessageBox(
+            QMessageBox.Warning, "Run records not written",
+            "%d run record%s could not be written because the drive the study is on is "
+            "disconnected.\n\nClosing now loses %s, so the history of the steps would not show "
+            "%s." % (n, "" if n == 1 else "s", "it" if n == 1 else "them",
+                     "that run" if n == 1 else "those runs"), parent=self)
+        wait = box.addButton("Wait for the drive", QMessageBox.AcceptRole)
+        anyway = box.addButton("Close anyway", QMessageBox.DestructiveRole)
+        box.setDefaultButton(wait)
+        box.exec()
+        return box.clickedButton() is anyway

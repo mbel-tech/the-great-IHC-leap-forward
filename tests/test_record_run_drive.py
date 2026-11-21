@@ -185,7 +185,7 @@ if QApplication is not None:
     class Broken:
         def record_run(self, *a, **k):
             raise OSError(13, "Permission denied")
-    s._pending.append((Broken(), ("05c", True, "a", "b"), {}))
+    s._pending.append((Broken(), ("05c", True, "a", "b"), {}, "05c"))
     s._retry.start()
     end = time.time() + 5
     while s.pending_runs() and time.time() < end:

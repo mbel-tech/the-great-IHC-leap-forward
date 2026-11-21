@@ -622,7 +622,13 @@ def corrected_report(lookup, rc_nuc, rc_cuts, rows, st_areas, st_pab, rc_areas,
         s["n"] += r["n_nuclei"]
         s["pos"] = "" if (s["pos"] == "" or r["n_positive"] == "") else s["pos"] + r["n_positive"]
         s["own"] = s["own"] or bool(r["denominator_withheld_reason"])
-    sets = {(u, m): RR.controls_for(u, m, np_lookup, scene_rows, CONFIG, boxed)
+    # Every confirmed control stays in the lookup, so pairing_for never takes
+    # one for a stained section; a no_primary one not measured yet is left out,
+    # having nothing to give.
+    pair_lookup = {k: v for k, v in lookup.items()
+                   if k in np_lookup or (v or {}).get("kind") != "no_primary"}
+    cache = {}
+    sets = {(u, m): RR.controls_for(u, m, pair_lookup, scene_rows, CONFIG, boxed, cache)
             for u, m in {(k[0], k[1]) for k in stained}}
     return RR.corrected_rows(stained, rc_nuc, rc_cuts, sets, fp_min_nuclei=FP_MIN_NUCLEI,
                              control_areas={k: v for k, v in rc_areas.items()

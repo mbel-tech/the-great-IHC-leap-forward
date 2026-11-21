@@ -151,6 +151,41 @@ CFG_PW_A1 = {"reagent_controls": {"declared": "yes",
 chk("...a pinned same-file control gives way to the same-animal one",
     RR.controls_for("A1_s01_sc01", "pERK", LOOKUP, ROWS, CFG_PW_A1),
     ("same_animal", ["A1_s02_sc01"]))
+print("--- pins that do not take effect (round 2) ---")
+PROWS = [
+    {"scene_uid": "F1_s01_sc01", "file": "F1.czi", "animal": "A", "marker_channel": "PCNA"},
+    {"scene_uid": "F1_s01_sc02", "file": "F1.czi", "animal": "A", "marker_channel": "PCNA"},
+    {"scene_uid": "F2_s01_sc01", "file": "F2.czi", "animal": "B", "marker_channel": "pERK"},
+    {"scene_uid": "F3_s01_sc01", "file": "F3.czi", "animal": "C", "marker_channel": "PCNA"},
+]
+PLK = {("F1_s01_sc01", "PCNA"): {"kind": "no_primary"}}
+
+
+def pin(*targets, key="F1_s01_sc01"):
+    return {"reagent_controls": {"declared": "yes", "paired_with": {key: list(targets)}}}
+
+
+for label, cfg in (("a pin to another marker's section", pin("F2_s01_sc01")),
+                   ("a stale pin (not in the manifest)", pin("GONE_s01_sc01")),
+                   ("a stale pin by file", pin("GONE.czi", key="F1.czi"))):
+    rep = RR.pairing_for("F1_s01_sc01", "PCNA", PLK, PROWS, cfg)
+    got = RR.controls_for("F1_s01_sc02", "PCNA", PLK, PROWS, cfg)
+    chk(f"{label}: the control is still used on its file",
+        got, ("same_file", ["F1_s01_sc01"]))
+    chk("...and the report pairs it the same way",
+        rep, ("same_file", ["F1_s01_sc02"]))
+live = pin("F3_s01_sc01")
+chk("a pin that takes effect: operator, in the report",
+    RR.pairing_for("F1_s01_sc01", "PCNA", PLK, PROWS, live), ("operator", ["F3_s01_sc01"]))
+chk("...for the section it names",
+    RR.controls_for("F3_s01_sc01", "PCNA", PLK, PROWS, live), ("operator", ["F1_s01_sc01"]))
+chk("...and exclusive: not taken on its own file",
+    RR.controls_for("F1_s01_sc02", "PCNA", PLK, PROWS, live), ("none", []))
+chk("a pin written as one string is a one-item list, not its letters",
+    RR.controls_for("F3_s01_sc01", "PCNA", PLK, PROWS,
+                    {"reagent_controls": {"declared": "yes",
+                                          "paired_with": {"F1_s01_sc01": "F3_s01_sc01"}}}),
+    ("operator", ["F1_s01_sc01"]))
 chk("a control is never paired with itself",
     RR.controls_for("A1_s01_sc02", "pERK", LOOKUP, ROWS, CFG)[1].count("A1_s01_sc02"), 0)
 

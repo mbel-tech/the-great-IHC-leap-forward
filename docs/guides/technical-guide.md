@@ -1798,8 +1798,9 @@ Stage `roi_dataset`. Turns the per-nucleus rows into per-ROI numbers. Still blin
   (p − f) / (1 − f), assuming sensitivity 1, so a lower-bound adjustment, with a 95% interval from
   4000 Monte-Carlo draws of Jeffreys posteriors (seed 20261121). The controls are
   `controls_for`, the report's pairing tiers from the stained section's side (operator, same file,
-  same animal; never study-wide; a control the operator paired is used only for what it is paired
-  with). Blank, with a note, when it cannot be given. A marker segmented on its own channel gets
+  same animal; never study-wide; a control whose operator pin takes effect for the marker is used
+  only for what it is paired with; a pin that resolves to nothing for the marker is ignored, as in
+  `reagent_controls.csv`). Blank, with a note, when it cannot be given. A marker segmented on its own channel gets
   `positive_density_per_mm2` (pooled as sum(n_positive × each row's Abercrombie factor) / area) less the
   controls' instead, in the `positive_density_*` columns, with no minimum object count (only control ROI
   area, all regions when the region has none). With no measured no_primary
@@ -2168,9 +2169,10 @@ cut at k, pooled, with a `wilson` 95% interval; the stained sections' leave-one-
 `suggested` on the smallest k meeting `fp_target`, else `NO_K_MEETS` in the note. Blank, never 0, when a
 rate cannot be given, including under `fp_min_nuclei` nuclei; rates withheld for a marker segmented on its own channel. `agreement(row)` says
 whether the disc rate falls inside the controls' interval. **The corrected rate:**
-`controls_for(uid, marker, lookup, scene_rows, config, boxed=None)` is `pairing_for`'s tiers turned round, from a
-stained section's side (controls the operator pairs with it, else on its file, else of its animal; a control with an operator
-override is used only for what it lists), `(tier, control uids)` with tier operator, same_file, same_animal or none (never
+`controls_for(uid, marker, lookup, scene_rows, config, boxed=None, cache=None)` is `pairing_for`'s tiers turned round, from a
+stained section's side (controls the operator pairs with it, else on its file, else of its animal; a control whose operator pin takes
+effect for the marker, as `pairing_for` decides, is used only for what it lists; a pin to another marker's
+section or a stale one is ignored, as there), `(tier, control uids)` with tier operator, same_file, same_animal or none (never
 study-wide), no_primary controls only. `rogan_gladen(n_pos, n, f_pos, f_n)` gives (p − f) / (1 − f) and a
 Monte-Carlo interval from Jeffreys Beta(k + 0.5, n − k + 0.5) draws (4000, seed 20261121), blank with
 "at or below the reagent control's false-positive rate" when p ≤ f; `density_correction(pos, area_mm2,
@@ -4421,7 +4423,7 @@ The k check, provisional until validated on a study with known controls: the pos
 
 #### `results/roi_corrected.csv`
 
-The corrected positive rate, provisional until validated on a study with known controls: one row per stained section, marker and region, the raw pooled rate beside a Rogan-Gladen correction for the paired no-primary reagent controls' false-positive rate, (p - f) / (1 - f), with a 95% interval (4000 Monte-Carlo draws of Jeffreys posteriors for p and f, seed 20261121). It assumes sensitivity 1 (every truly positive nucleus is called positive), so it is a lower-bound adjustment. The controls are reagent_controls.csv's pairing tiers turned round, from the stained section's side (ls_reagent_report.controls_for): no_primary controls the operator's paired_with pairs with the section, else those on its file, else those of its animal; never study-wide. A control the operator paired is used only for the sections and files it is paired with. isotype, preadsorbed and unstained controls are not used. A marker segmented on its own channel gets its positive density corrected instead (positive_density_*), with no minimum object count. roi_measurements.csv is unchanged. Written only when a no_primary control is measured; otherwise a previous file is removed. 06c shows it as the "corrected_rate" sheet.
+The corrected positive rate, provisional until validated on a study with known controls: one row per stained section, marker and region, the raw pooled rate beside a Rogan-Gladen correction for the paired no-primary reagent controls' false-positive rate, (p - f) / (1 - f), with a 95% interval (4000 Monte-Carlo draws of Jeffreys posteriors for p and f, seed 20261121). It assumes sensitivity 1 (every truly positive nucleus is called positive), so it is a lower-bound adjustment. The controls are reagent_controls.csv's pairing tiers turned round, from the stained section's side (ls_reagent_report.controls_for): no_primary controls the operator's paired_with pairs with the section, else those on its file, else those of its animal; never study-wide. A control whose operator pin takes effect for the marker (pairing_for gives it operator pairing) is used only for the sections it is paired with; a pin to another marker's section, or to a name not in the manifest, is ignored, as in reagent_controls.csv. isotype, preadsorbed and unstained controls are not used. A marker segmented on its own channel gets its positive density corrected instead (positive_density_*), with no minimum object count. roi_measurements.csv is unchanged. Written only when a no_primary control is measured; otherwise a previous file is removed. 06c shows it as the "corrected_rate" sheet.
 
 - **Written by:** 06a_roi_dataset.py
 - **Read by:** 06c_excel_dataset.py

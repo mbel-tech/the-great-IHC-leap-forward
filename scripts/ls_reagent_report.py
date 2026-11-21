@@ -638,7 +638,7 @@ NO_STAINED_CUT = (f"no positivity cut on this section (fewer than {LO.CUT_MIN_NU
                   f"usable background-disc nuclei): no rate to correct")
 
 
-def controls_for(uid, marker, lookup, scene_rows, config, boxed=None):
+def controls_for(uid, marker, lookup, scene_rows, config, boxed=None, cache=None):
     """(tier, control uids): the no_primary reagent controls whose readings
     correct a stained section's rate, for one marker. pairing_for's tiers
     turned round, from the stained section's side, first that has any:
@@ -648,9 +648,15 @@ def controls_for(uid, marker, lookup, scene_rows, config, boxed=None):
       same_file    controls on this section's file;
       same_animal  controls of this section's animal.
 
-    A control with an operator override (`paired_with` under its uid or
-    file) is used ONLY for the sections and files it lists: it is dropped
-    from the same_file and same_animal tiers of every other section.
+    A control whose operator pin takes effect for this marker (pairing_for
+    gives it "operator": `paired_with` under its uid or file resolves to a
+    stained section of the marker) is used ONLY for those sections: it is
+    dropped from the same_file and same_animal tiers of every other section.
+    A pin that resolves to nothing for this marker (another marker's
+    section, a stale name) is ignored, as pairing_for ignores it, so the two
+    files always agree. `cache`: a dict the caller keeps across calls with
+    the same lookup, rows, config and boxed, holding each control's
+    pairing_for so it is worked out once.
 
     Study-wide pairing is never used: with none of these the answer is
     ("none", []). Only `no_primary` controls; isotype, preadsorbed and
@@ -665,16 +671,19 @@ def controls_for(uid, marker, lookup, scene_rows, config, boxed=None):
     cands = sorted({cu for (cu, mk), e in lookup.items()
                     if mk == marker and cu != uid and _no_primary(e or {})},
                    key=NM.natural_key)
-    pw = RC.entries(config)["paired_with"]
-
-    def override(cu):
-        return pw.get(cu) or pw.get(info.get(cu, ("", ""))[0]) or []
-
-    got = [cu for cu in cands if any(t in (uid, file) for t in override(cu))]
+    # The operator tier is pairing_for's own: a pin counts for this marker only
+    # when it resolves to a stained section of this marker there (a pin to
+    # another marker's section, or a stale one, falls through as it does).
+    cache = {} if cache is None else cache
+    for cu in cands:
+        if (cu, marker) not in cache:
+            cache[(cu, marker)] = pairing_for(cu, marker, lookup, scene_rows, config, boxed)
+    pf = {cu: cache[(cu, marker)] for cu in cands}
+    got = [cu for cu in cands if pf[cu][0] == "operator" and uid in pf[cu][1]]
     if got:
         return "operator", got
-    # The operator's pairing is exclusive: such a control pairs with nothing else.
-    cands = [cu for cu in cands if not override(cu)]
+    # A pin that takes effect is exclusive: such a control pairs with nothing else.
+    cands = [cu for cu in cands if pf[cu][0] != "operator"]
     if boxed and any(m == marker for _u, m in boxed):
         cands = [cu for cu in cands if (cu, marker) in boxed]
     if file:

@@ -191,7 +191,9 @@ def entries(config):
         "declared": rc.get("declared") or "no",
         "files": dict(rc.get("files") or {}),
         "scenes": dict(rc.get("scenes") or {}),
-        "paired_with": dict(rc.get("paired_with") or {}),
+        # A target written as one string is a one-item list, never its letters.
+        "paired_with": {k: ([v] if isinstance(v, str) else list(v or []))
+                        for k, v in dict(rc.get("paired_with") or {}).items()},
         "rejected": list(rc.get("rejected") or []),
         "extra_patterns": list(rc.get("extra_patterns") or []),
     }

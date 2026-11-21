@@ -1822,8 +1822,10 @@ Stage `excel_sample`. The analysis table as a workbook, one row per ROI per anim
   `by_section` and `coverage`, written with openpyxl (bold header, frozen first row, sized columns),
   and a `Reagent controls` sheet when 06a's `results/reagent_controls.csv` has rows: the same table
   under a plain-language header (what A and B mean, isotype rows test the antibody and no-primary rows
-  the secondary, a background disc is not a reagent control). `write_workbook` takes an optional third
-  item per sheet, the lines above the table.
+  the secondary, a background disc is not a reagent control). When 06a wrote
+  `results/reagent_cut_check.csv`, the same sheet carries it below as a `Cut check` block, labelled
+  provisional. `write_workbook` takes an optional third item per sheet, the lines above the table, and a
+  fourth, more tables below it (`[(lines, rows)]`).
 - **How:** groups 06a's rows. Withheld values (no cut, no denominator, Abercrombie not applied) are blank,
   with the reason carried from 06a. Reagent-control boxes are left out of `planned` and `coverage`. The
   limitation text (`ls_reagent_report.limitation_text`, printed and on the sheet) points to the
@@ -2644,6 +2646,17 @@ the options each stage row offers (`Opt`, `options_for`, `build_argv`), and deci
 layout skips, and `manual` for one the app cannot run here) and the plan for **Run all remaining**
 (`run_plan`). A stage row's buttons run that stage through the runner (section 5.3) on a worker thread;
 `app/progress.py` reads the progress lines. Nothing in `screens.py` starts a thread or writes a file.
+
+**Applying the reagent k check.** Results shows `results/reagent_cut_check.csv` as each marker's suggested
+multiplier against the one in force (`workflow.cut_check_view`, provisional), with a **Use the suggested
+multiplier…** button, disabled with the reason when no marker has a suggestion to apply.
+`app/cut_apply.py` (`apply_suggested_k(project, out_root, marker, confirm_text)`) sets
+`positivity.cut_k[marker]` to the suggested k and `positivity.cut_k_source[marker]` to
+`{"by": "controls", "check": <sha256 of the csv>, "at": <time>}`, the decision recorded as by
+`cut check`. Once any of 06b's outputs (`results/roi_dataset.csv`, `results/animal_metadata.csv`) exists
+the study is unblinded, and it refuses unless the operator types `apply after unblinding`. Every refusal
+comes before anything is written. The change puts 06a and the results out of date (they track
+`positivity.cut_k`), never detection.
 
 ### 8.2 Studies
 
@@ -4359,10 +4372,10 @@ Each measured reagent control's own cut (per section and marker, at full precisi
 
 #### `results/reagent_cut_check.csv`
 
-The k check, provisional until validated on a study with known controls: the positivity cut's multiplier k tested against the no-primary reagent controls, per marker and k on the grid 2.0-5.0. Each control's ROI nuclei are counted against its own cut at k (median + k x 1.4826 x MAD of its own background-disc nuclei), beside the stained sections' leave-one-disc-out rate at the same k. isotype, preadsorbed and unstained controls are not used. Written only when a no_primary control is measured; otherwise a previous file is removed. It never changes positivity.cut_k: a suggested k is applied only by the operator.
+The k check, provisional until validated on a study with known controls: the positivity cut's multiplier k tested against the no-primary reagent controls, per marker and k on the grid 2.0-5.0. Each control's ROI nuclei are counted against its own cut at k (median + k x 1.4826 x MAD of its own background-disc nuclei), beside the stained sections' leave-one-disc-out rate at the same k. isotype, preadsorbed and unstained controls are not used. Written only when a no_primary control is measured; otherwise a previous file is removed. It never changes positivity.cut_k: a suggested k is applied only by the operator, with the Results page's "Use the suggested multiplier" button (app/cut_apply.py), which records the file's sha256 in positivity.cut_k_source and asks for a typed confirmation once 06b has unblinded the study. 06c adds it to the "Reagent controls" sheet as a provisional "Cut check" block.
 
 - **Written by:** 06a_roi_dataset.py
-- **Read by:** a person
+- **Read by:** 06c_excel_dataset.py, the app
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|

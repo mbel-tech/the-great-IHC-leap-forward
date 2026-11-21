@@ -5997,9 +5997,10 @@
     "reagent_cut_check.csv"
    ],
    "writer": "06a_roi_dataset.py",
-   "what": "The k check, provisional until validated on a study with known controls: the positivity cut's multiplier k tested against the no-primary reagent controls, per marker and k on the grid 2.0-5.0. Each control's ROI nuclei are counted against its own cut at k (median + k x 1.4826 x MAD of its own background-disc nuclei), beside the stained sections' leave-one-disc-out rate at the same k. isotype, preadsorbed and unstained controls are not used. Written only when a no_primary control is measured; otherwise a previous file is removed. It never changes positivity.cut_k: a suggested k is applied only by the operator.",
+   "what": "The k check, provisional until validated on a study with known controls: the positivity cut's multiplier k tested against the no-primary reagent controls, per marker and k on the grid 2.0-5.0. Each control's ROI nuclei are counted against its own cut at k (median + k x 1.4826 x MAD of its own background-disc nuclei), beside the stained sections' leave-one-disc-out rate at the same k. isotype, preadsorbed and unstained controls are not used. Written only when a no_primary control is measured; otherwise a previous file is removed. It never changes positivity.cut_k: a suggested k is applied only by the operator, with the Results page's \"Use the suggested multiplier\" button (app/cut_apply.py), which records the file's sha256 in positivity.cut_k_source and asks for a typed confirmation once 06b has unblinded the study. 06c adds it to the \"Reagent controls\" sheet as a provisional \"Cut check\" block.",
    "readers": [
-    "a person"
+    "06c_excel_dataset.py",
+    "the app"
    ],
    "columns_from": "ls_reagent_report.py:CUT_CHECK_COLUMNS",
    "columns": [

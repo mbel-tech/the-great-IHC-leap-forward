@@ -2219,6 +2219,31 @@ def limitation_text(out_root):
     return LR.limitation_text(rows)
 
 
+def cut_check_view(out_root, cfg):
+    """What the Results page says about the reagent k check, or None without
+    results/reagent_cut_check.csv: {"lines": [one per marker, suggested k
+    against the k in force], "markers": [markers whose suggestion differs from
+    the k in force, which the button can apply], "why": why the button cannot
+    apply anything, or ""}. Provisional, as the check is."""
+    import cut_apply as CA                  # numpy, through ls_overlay: only when asked
+    rows = CA.summary(out_root, cfg)
+    if not rows:
+        return None
+    lines, markers, whys = [], [], []
+    for mk, k, now, why in rows:
+        if k is None:
+            lines.append(f"{mk}: no suggested k, k in force {now:g}")
+            whys.append(why)
+        elif k == now:
+            lines.append(f"{mk}: suggested k {k:g}, already in force")
+            whys.append(f"{mk}: the suggested k {k:g} is already in force")
+        else:
+            lines.append(f"{mk}: suggested k {k:g}, k in force {now:g}")
+            markers.append(mk)
+    return {"lines": lines, "markers": markers,
+            "why": "" if markers else "; ".join(whys)}
+
+
 def notices(screen_sid, study):
     """Warnings a screen shows above its stages.
 

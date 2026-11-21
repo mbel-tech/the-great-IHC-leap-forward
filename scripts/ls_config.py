@@ -893,9 +893,10 @@ note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
         "Where positivity.cut_k came from: the default, the operator, or the "
         "reagent-control check, and when.",
         default={"by": "default"}, ui=False, in_example=False,
-        note="{by: default | operator | controls, at, check}. `check` is the "
-             "sha of the results/reagent_cut_check.csv a suggestion was taken "
-             "from. A record the app writes; no stage reads it.",
+        note="{by: default} until a multiplier is applied, then one record per "
+             "marker: {<marker>: {by: operator | controls, at, check}}. `check` "
+             "is the sha256 of the results/reagent_cut_check.csv a suggestion "
+             "was taken from. A record the app writes; no stage reads it.",
         consumers=["app"]),
 
     Key("positivity.fp_min_nuclei", "int",
@@ -1178,9 +1179,10 @@ CUT_K_RANGE = (1.0, 10.0)
 def _check_cut_k(value):
     """Problems with positivity.cut_k - {marker or "*": k} - as a list of strings.
 
-    A key is not checked against the study's markers: a map written for a
-    marker the study has since renamed is still the operator's record, and
-    ls_overlay.cut_k simply never asks for it.
+    A key is not checked against the study's markers here: a map written for
+    a marker the study has since renamed is still the operator's record, and
+    ls_overlay.cut_k simply never asks for it. validate() warns about such a
+    key instead (_cut_k_strays), when the study declares its markers.
     """
     if not isinstance(value, dict):
         return [f"must be a table of marker -> multiplier, e.g. {{\"*\": 3.0}}, "
@@ -1195,6 +1197,20 @@ def _check_cut_k(value):
         elif not lo <= k <= hi:
             out.append(f"[{marker!r}] must be between {lo} and {hi}, got {k}")
     return out
+
+
+def _cut_k_strays(cfg):
+    """positivity.cut_k keys that are neither "*" nor one of the study's
+    markers, or [] when the study declares no markers (nothing to judge by)."""
+    pos = cfg.get("positivity")
+    table = pos.get("cut_k") if isinstance(pos, dict) else None
+    if not isinstance(table, dict) or ls_channels is None:
+        return []
+    names = list(ls_channels.marker_names(cfg))
+    if not names:
+        return []
+    return [m for m in table if isinstance(m, str) and m.strip() and m != "*"
+            and m not in names]
 
 
 def _check(key, value):
@@ -1434,6 +1450,13 @@ def validate(cfg, path="<config>", strict_paths=False):
             errors.append(f"{path}: {problem}")
         for problem in disp_warnings:
             warnings.append(f"{path}: {problem}")
+
+    # A multiplier for a marker the study does not have is never used (a
+    # rename, or a typo): said, not refused, because it is still the record.
+    if isinstance(cfg, dict):
+        for m in _cut_k_strays(cfg):
+            warnings.append(f"{path}: `positivity.cut_k` names {m!r}, which is not "
+                            f"one of this study's markers - it is never used")
 
     for key, value in missing_paths(cfg):
         line = f"{path}: `{key.path}` does not exist: {value}"

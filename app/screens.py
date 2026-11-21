@@ -208,11 +208,13 @@ class StageListScreen(QWidget):
     open_requested = Signal(str)            # a curator stage id
     options_changed = Signal(str, dict)     # stage id, {flag: value}
     goto = Signal(str)                      # a screen id
+    cut_k_applied = Signal(str)             # the message, once positivity.cut_k changed
 
     def __init__(self, screen, parent=None):
         super().__init__(parent)
         self.screen = screen
         self.rows = {}
+        self._project = None
         # The whole screen scrolls, header included: on a laptop at 614 px a
         # fixed header plus a separate list squeezes both until words overlap.
         page = QWidget()
@@ -282,6 +284,7 @@ class StageListScreen(QWidget):
             self.limitation.setTextFormat(Qt.RichText)
             self.limitation.setStyleSheet(QUIET)
             lay.addWidget(self.limitation)
+            self._add_cut_check(lay)
         self._plan = []
         # All stages spans the whole pipeline, unblinding included; running all of
         # it from one button is not something to offer.
@@ -339,6 +342,98 @@ class StageListScreen(QWidget):
         text = re.sub(r"`([^`]+)`", r"<code>\1</code>", text)
         self.limitation.setText("<b>What a positivity rate can claim.</b> " + text)
 
+    def _add_cut_check(self, layout):
+        """The reagent k check on Results: each marker's suggested multiplier
+        against the one in force, and the one way to apply it."""
+        from PySide6.QtWidgets import QComboBox
+        self.cut_box = QFrame()
+        bl = QVBoxLayout(self.cut_box)
+        bl.setContentsMargins(0, 4, 0, 4)
+        bl.setSpacing(4)
+        self.cut_text = QLabel("")
+        self.cut_text.setWordWrap(True)
+        self.cut_text.setTextFormat(Qt.RichText)
+        self.cut_text.setStyleSheet(QUIET)
+        bl.addWidget(self.cut_text)
+        row = QHBoxLayout()
+        self.cut_marker = QComboBox()
+        self.cut_marker.setObjectName("cut_marker")
+        row.addWidget(self.cut_marker)
+        self.cut_btn = QPushButton("Use the suggested multiplier…")
+        self.cut_btn.setObjectName("cut_apply")
+        self.cut_btn.clicked.connect(lambda _checked=False: self.apply_cut_k())
+        row.addWidget(self.cut_btn)
+        self.cut_why = QLabel("")
+        self.cut_why.setWordWrap(True)
+        self.cut_why.setStyleSheet(QUIET)
+        row.addWidget(self.cut_why, 1)
+        bl.addLayout(row)
+        self.cut_box.setVisible(False)
+        layout.addWidget(self.cut_box)
+        self._cut_root = None
+
+    def show_cut_check(self, out_root, project):
+        """The k check panel, from results/reagent_cut_check.csv and the k in
+        force in `project` (in memory, so an apply not yet saved shows)."""
+        if getattr(self, "cut_box", None) is None:
+            return
+        import html
+        self._project, self._cut_root = project, out_root
+        cfg = project.cfg if project is not None else {}
+        view = W.cut_check_view(out_root, cfg) if out_root else None
+        self.cut_box.setVisible(view is not None)
+        if view is None:
+            return
+        self.cut_text.setText(
+            "<b>Reagent k check (provisional).</b> The multiplier the no-primary reagent "
+            "controls suggest for each marker's positivity cut, against the one in force. "
+            "Nothing changes it by itself.<br>"
+            + "<br>".join(html.escape(ln) for ln in view["lines"]))
+        current = self.cut_marker.currentText()
+        self.cut_marker.clear()
+        self.cut_marker.addItems(view["markers"])
+        if current in view["markers"]:
+            self.cut_marker.setCurrentText(current)
+        self.cut_marker.setVisible(len(view["markers"]) > 1)
+        writable = project is not None and not project.read_only
+        self.cut_btn.setEnabled(bool(view["markers"]) and writable)
+        why = view["why"] or ("" if writable else "the project is open read-only")
+        self.cut_why.setText(why)
+        self.cut_btn.setToolTip(why or "Set positivity.cut_k for the marker to the "
+                                "suggested k; the dataset and results then run again.")
+
+    def apply_cut_k(self):
+        """Ask, then apply the chosen marker's suggested k (cut_apply)."""
+        import cut_apply as CA
+        from PySide6.QtWidgets import QInputDialog
+        marker = self.cut_marker.currentText()
+        if not marker or self._project is None:
+            return False
+        confirm = None
+        if CA.unblinded(self._cut_root):
+            text, ok = QInputDialog.getText(
+                self, "Already unblinded",
+                "This study is already unblinded: 06b has joined the groups. A cut "
+                "multiplier should be fixed before unblinding, and changing it now is "
+                f"recorded as such.\n\nTo apply the suggested k for {marker} anyway, "
+                f"type: {CA.CONFIRM_TEXT}")
+            if not ok:
+                return False
+            confirm = text
+        elif QMessageBox.question(
+                self, "Use the suggested multiplier",
+                f"Set the positivity cut multiplier for {marker} to the reagent k check's "
+                "suggestion? The dataset and the results will be out of date and need "
+                "running again.") != QMessageBox.Yes:
+            return False
+        ok, msg = CA.apply_suggested_k(self._project, self._cut_root, marker, confirm)
+        if not ok:
+            QMessageBox.warning(self, "Multiplier not changed", msg)
+            return False
+        self.cut_k_applied.emit(msg)
+        self.show_cut_check(self._cut_root, self._project)
+        return True
+
     def _run_all(self):
         if self._plan:
             self.run_requested.emit(list(self._plan))
@@ -351,6 +446,7 @@ class StageListScreen(QWidget):
         block = project.block if project is not None else {}
         self._study = study
         self.show_limitation(getattr(study, "out_root", None))
+        self.show_cut_check(getattr(study, "out_root", None), project)
         self._plan, held = W.run_plan(self.screen.sid, study)
         for sid, row in self.rows.items():
             st = S.BY_ID[sid]

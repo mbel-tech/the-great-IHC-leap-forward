@@ -68,6 +68,12 @@ Name: "{userdesktop}\The Great IHC Leap Forward"; Filename: "{app}\runtime\pytho
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"
+Name: "addtopath"; Description: "Add the ihc command to PATH (run steps from a terminal: ihc --list study.json)"; Flags: unchecked
+
+[Registry]
+; The user's own Path, so no administrator rights. Appended once; removed again
+; on uninstall (CurUninstallStepChanged below).
+Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; Tasks: addtopath; Check: NeedsAddPath(ExpandConstant('{app}'))
 
 [Run]
 Filename: "{app}\runtime\pythonw.exe"; Parameters: "-m app"; WorkingDir: "{app}"; Description: "Start The Great IHC Leap Forward"; Flags: nowait postinstall skipifsilent
@@ -80,3 +86,53 @@ Type: files; Name: "{app}\lsapp-selftest.log"
 Type: filesandordirs; Name: "{app}\keras"
 Type: filesandordirs; Name: "{app}\runtime"
 Type: filesandordirs; Name: "{app}\updates"
+
+[Code]
+const
+  UserPathKey = 'Environment';
+
+// True when Dir is not yet on the user's Path (compared case-insensitively,
+// with or without a trailing backslash).
+function NeedsAddPath(Dir: string): Boolean;
+var
+  Paths: string;
+begin
+  if not RegQueryStringValue(HKEY_CURRENT_USER, UserPathKey, 'Path', Paths) then
+    Paths := '';
+  Result := Pos(';' + Lowercase(Dir) + ';', ';' + Lowercase(Paths) + ';') = 0;
+  if Result then
+    Result := Pos(';' + Lowercase(Dir) + '\;', ';' + Lowercase(Paths) + ';') = 0;
+end;
+
+// Takes the install folder out of the user's Path again.
+procedure RemoveFromPath(Dir: string);
+var
+  Paths, Lower, Needle: string;
+  P: Integer;
+begin
+  if not RegQueryStringValue(HKEY_CURRENT_USER, UserPathKey, 'Path', Paths) then
+    Exit;
+  Needle := ';' + Lowercase(Dir) + ';';
+  Lower := ';' + Lowercase(Paths) + ';';
+  P := Pos(Needle, Lower);
+  if P = 0 then
+  begin
+    Needle := ';' + Lowercase(Dir) + '\;';
+    P := Pos(Needle, Lower);
+  end;
+  if P = 0 then
+    Exit;
+  // Lower has one extra leading ';', so P is where the entry starts in Paths.
+  Delete(Paths, P, Length(Needle) - 1);
+  if (Length(Paths) > 0) and (Paths[Length(Paths)] = ';') then
+    Delete(Paths, Length(Paths), 1);
+  if (Length(Paths) > 0) and (Paths[1] = ';') then
+    Delete(Paths, 1, 1);
+  RegWriteExpandStringValue(HKEY_CURRENT_USER, UserPathKey, 'Path', Paths);
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usPostUninstall then
+    RemoveFromPath(ExpandConstant('{app}'));
+end;

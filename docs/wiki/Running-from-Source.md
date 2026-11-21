@@ -26,6 +26,17 @@ python -m app --run measure  D:\LS-analysis\study.json
 
 It makes the same plan as that screen's **Run all remaining**, with the Options saved in the study and Redo where a stage is out of date, and records each run in the study. It stops at the first failure or a *poor* signal check, never unblinds, and exits 0 when every planned stage ran, 1 when one failed or a hold stopped it, and 2 when the screen or study file is not there.
 
+To run or list a single stage:
+
+```
+python -m app --list  D:\LS-analysis\study.json
+python -m app --stage overviews D:\LS-analysis\study.json --opt limit=3
+```
+
+`--list` prints every stage's id, group, title and state, as the window shows it. `--stage <id>` runs one stage exactly as its **Run** button does: with the Options saved in the study (plus Redo when the stage is out of date), `--opt key=value` on top, and the run recorded in the study's history. It refuses a stage the window would hold, giving the window's reason and exit status 2, unless you add `--force`; a stage that unblinds also needs `--unblind`. Exit status: 0 ran, 1 failed or stopped, 2 refused, 130 Ctrl+C. In the installed Windows app, `ihc` does the same (`ihc --list study.json`); see the Windows installer notes.
+
+If the slides or output drive drops during a run, the step waits and carries on by itself when the drive is back. A terminal shows `slides drive unreachable (<folder>), paused at <label>; waiting, Ctrl+C to stop`, then `drive back after N s, carrying on`. Ctrl+C stops the run.
+
 Common flags: `--limit N` (first N sections only), `--force` (redo finished work), `--dry-run` (repair tools: report only).
 
 ## Curators in a browser

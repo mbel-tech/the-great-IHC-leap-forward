@@ -131,6 +131,10 @@ foreach ($d in "app", "scripts", "analysis", "atlas") {
 foreach ($f in "config.example.json", "README.md") { Copy-Item "$Repo\$f" $Out }
 Get-ChildItem $Out -Recurse -Directory -Filter "__pycache__" | Remove-Item -Recurse -Force
 Set-Content -Encoding ascii (Join-Path $Out "The Great IHC Leap Forward.cmd") '@start "" "%~dp0runtime\pythonw.exe" -m app %*'
+# The command-line launcher: the console python.exe, so the output and the exit
+# status (0 ran, 1 failed, 2 refused) reach the prompt. The installer can put
+# this folder on PATH, so `ihc --list study.json` works from anywhere.
+Set-Content -Encoding ascii (Join-Path $Out "ihc.cmd") '@"%~dp0runtime\python.exe" -m app %*'
 
 # --- StarDist model -------------------------------------------------------
 # Fetched once here so the first Measure run needs no network. stardist ends

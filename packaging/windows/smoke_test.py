@@ -11,9 +11,11 @@ which a window appearing says nothing about.
 
 import importlib
 import os
+import json
 import socket
 import subprocess
 import sys
+import tempfile
 
 bundle = os.path.abspath(sys.argv[1])
 failures = []
@@ -81,6 +83,29 @@ def rscript():
 
 
 check("R and figure packages", rscript)
+
+def console_launcher():
+    """ihc.cmd lists a throwaway study's stages and exits 0 (Windows bundle only)."""
+    cmd = os.path.join(bundle, "ihc.cmd")
+    if sys.platform != "win32" or not os.path.exists(cmd):
+        return "no ihc.cmd here (skipped)"
+    with tempfile.TemporaryDirectory() as d:
+        os.makedirs(os.path.join(d, "out"))
+        os.makedirs(os.path.join(d, "slides"))
+        study = os.path.join(d, "study.json")
+        with open(study, "w", encoding="utf-8") as fh:
+            json.dump({"out_root": os.path.join(d, "out"),
+                       "slides_root": os.path.join(d, "slides")}, fh)
+        out = subprocess.run(["cmd", "/c", cmd, "--list", study],
+                             capture_output=True, text=True, cwd=d)
+    if out.returncode:
+        raise RuntimeError(f"exit {out.returncode}: {(out.stderr or out.stdout).strip()[-400:]}")
+    if "manifest" not in out.stdout:
+        raise RuntimeError("no stage list in its output: " + out.stdout[-200:])
+    return "ihc.cmd --list, exit 0"
+
+
+check("ihc.cmd console launcher", console_launcher)
 
 print(f"\nsmoke test {'FAILED' if failures else 'PASSED'}")
 sys.exit(1 if failures else 0)

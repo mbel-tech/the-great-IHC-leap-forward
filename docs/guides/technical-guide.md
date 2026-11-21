@@ -835,6 +835,18 @@ each run in the study file. It stops at the first failure and at any hold the wi
 weak-signal check before detection). It exits 0 when every planned stage ran, 1 when one failed or a
 hold stopped it, and 2 for an unknown screen or a missing study file. Unblinding is never on the plan.
 
+`python -m app --stage <id> <study.json> [--opt key=value]... [--force] [--unblind]` runs one stage as
+the window's Run button does: the study's saved options, Redo when the stage is out of date, the run
+recorded. It refuses (exit 2, nothing run or recorded) what the window would hold (`workflow` gives the
+reason) unless `--force`, an unblinding without `--unblind`, and a stage the study does not use.
+`--list <study.json>` prints id, group, title and state. Exit status: 0 ran, 1 failed or stopped, 2
+refused, 130 Ctrl+C. On a terminal a drive loss prints one line naming the folder and the step, and one
+when it is back; the marker lines are hidden. The Windows bundle's `ihc.cmd` is
+`runtime\python.exe -m app %*`, the console interpreter, so the output and the exit status reach the
+prompt; the installer can put the install folder on the user's Path (task *Add the ihc command to
+PATH*). The Mac app has no launcher of its own; it is run as
+`<app>/Contents/Resources/runtime/bin/python3 -m app` from `Contents/Resources`.
+
 ### 5.5 The study file and settings
 
 A study is one JSON file: `study.json` in the output folder for a study made by the app, or `config.json`

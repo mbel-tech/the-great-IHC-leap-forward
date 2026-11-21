@@ -204,6 +204,25 @@ Without the window, `python -m app --list study.json` shows each stage's state, 
 stage exactly as its Run button does and records it in the study (`--run <screen>` runs a
 screen's Run all remaining). Exit status: 0 ran, 1 failed, 2 refused, 130 Ctrl+C.
 
+```bash
+python -m app --list D:\LS-analysis\study.json
+python -m app --stage overviews D:\LS-analysis\study.json --opt limit=3
+```
+
+`--list` prints each stage's id, group, title and state. `--stage` refuses (exit 2, with the window's
+reason) a stage the window would hold, such as one whose earlier stages are not done, unless you add
+`--force`. In the installed Windows app the same thing is `ihc --list study.json` once you have ticked
+*Add the ihc command to PATH* in the installer (or run `ihc.cmd` from the install folder).
+
+**If the slides or output drive drops.** The stages that read slides (and the ones that write to the
+output folder) wait instead of failing. After 10 seconds the window shows an amber banner and a
+notification saying which folder is unreachable and which step is paused; on a terminal the same
+appears as one line, and another when the drive is back. When the drive reappears the run carries on by
+itself, redoing only the section or file it was on, so nothing needs pressing. To give up instead, press
+**Stop now** on the banner (or Ctrl+C at a terminal); the run is recorded as stopped while the drive was
+disconnected. If the drive comes back under a different letter, the wait cannot find it: stop, change the
+folder in Set up, and run again, which skips what is done.
+
 | Stage | Script | What it does |
 |---|---|---|
 | 0 | `00_manifest.py` | Parses all CZI headers **without extracting**, reconstructs the slide layout, renders slide maps under five candidate mounting conventions |

@@ -137,7 +137,7 @@
     "by_animal": {}
   },
   "reagent_controls": {
-    "_declared_note": "Records the operator's answer and nothing else; behaviour depends on the confirmed entries. A reagent control is a slide or section stained without the primary antibody, with an isotype IgG, pre-adsorbed, or unstained. It says how a section was stained, not which animal or treatment it is, so it is not blinding information.",
+    "_declared_note": "Records the operator's answer and nothing else; behaviour depends on the confirmed entries. A reagent control is a slide or section stained without the primary antibody, with an isotype IgG, pre-adsorbed, or unstained. It says how a section was stained, not which animal or treatment it is, so it is not blinding information. 05b and 05c read it only to print a warning, which changes no output.",
     "declared": "no"
   }
 }

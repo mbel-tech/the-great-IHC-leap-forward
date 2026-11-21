@@ -57,6 +57,7 @@ from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
 import ls_atlas as AT  # noqa: E402
 import ls_channels as CH  # noqa: E402
 import ls_naming as NM  # noqa: E402
+import ls_reagent_controls as RC  # noqa: E402
 
 MARKERS = list(CH.marker_names(CONFIG))
 
@@ -93,6 +94,21 @@ def _otsu(values):
     var = w1 * w2 * (m1 - m2) ** 2
     var[~valid] = -1
     return float(centres[int(np.argmax(var))])
+
+
+def series_of(rows, lookup):
+    """{series: rows in section_order}: one series per animal, and a reagent
+    control in a series of its own (ls_reagent_controls.series_animal), as 00
+    numbered its section_order. Merged into its donor's series it would share
+    that animal's section_order values, and the monotonic path would interleave
+    the two. The key is internal: rows keep their own `animal`.
+    """
+    out = {}
+    for r in rows:
+        out.setdefault(RC.series_animal(r, lookup), []).append(r)
+    for group in out.values():
+        group.sort(key=lambda r: int(r["section_order"]))
+    return out
 
 
 def silhouette(path, invert):
@@ -273,13 +289,11 @@ def main():
         rows = [r for r in csv.DictReader(fh) if r["marker_channel"] == args.marker]
     if args.animal:
         rows = [r for r in rows if r["animal"] == args.animal]
-    by_animal = {}
-    for r in rows:
-        by_animal.setdefault(r["animal"], []).append(r)
+    by_series = series_of(rows, RC.manifest_lookup(CONFIG))
 
     proposals = []
-    for animal, group in sorted(by_animal.items(), key=lambda kv: NM.natural_key(kv[0])):
-        group.sort(key=lambda r: int(r["section_order"]))
+    for series, group in sorted(by_series.items(), key=lambda kv: NM.natural_key(kv[0])):
+        animal = RC.series_label(series)
         sils, keep = [], []
         for r in group:
             p = os.path.join(OVERVIEW_DIR, r["animal"], r["marker_channel"],
@@ -311,7 +325,7 @@ def main():
             } for j in order]
             proposed = plate_meta[int(path[i])]
             proposals.append({
-                "scene_uid": r["scene_uid"], "animal": animal,
+                "scene_uid": r["scene_uid"], "animal": r["animal"],
                 "section_order": r["section_order"],
                 "img": os.path.join("..", "..", "overviews", r["animal"],
                                     r["marker_channel"],

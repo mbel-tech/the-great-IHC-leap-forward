@@ -125,4 +125,67 @@ chk("...and picks up the id at that position", M.anchors[uc].id, X.PLATES[1].id)
 chk("the header notice reports the drop count", els["ndropped"].textContent, "1");
 chk("...and the notice row is shown", els["dropRow"].style.display, "");
 
+// ---- the reagent-control badge --------------------------------------------
+// 04k carries each section's reagent_control (its kind, from config) into the
+// record; the section header shows a badge for it and nothing else changes.
+note("");
+chk("every record carries reagent_control", X.DATA.every(d => "reagent_control" in d), true);
+els["animal"].value = X.DATA[0].animal;
+const rcList = X.rows();
+const rcWas = rcList[0].reagent_control;
+rcList[0].reagent_control = "isotype";
+rcList[1].reagent_control = "";
+X.select(rcList[0].uid);
+chk("a reagent control's header shows the badge",
+    /rcbadge[^>]*>reagent control</.test(els["secInfo"].innerHTML), true);
+chk("...its kind in the tooltip", /title="isotype"/.test(els["secInfo"].innerHTML), true);
+X.select(rcList[1].uid);
+chk("...a stained section's does not", /reagent control/.test(els["secInfo"].innerHTML), false);
+rcList[0].reagent_control = rcWas;
+
+// ---- a reagent control is its own series ------------------------------------
+// 00 numbers a control in (animal + "#rc"), so its section_order restarts and
+// interleaves with its donor's. Grouped by animal, an unanchored control took
+// an interpolated level from the donor's anchors and anchoring it moved the
+// donor's interpolation. Grouped by series, neither can happen; the exported
+// animal column stays the real animal.
+note("");
+// A fresh load: the page's function declarations are globals, so after the
+// loads above X.exportCsv would call the LAST load's assign(), over its anchors.
+const R = load(`{DATA, PLATES, anchors, rows, assign, exportCsv, seriesOf, seriesLabel,
+  seriesList}`, "level_curator");
+const A = R.DATA[0].animal, RCS = A + "#rc";
+els["animal"].value = A;
+const donor = R.rows();
+chk("every record carries its series", R.DATA.every(d => typeof d.series === "string"), true);
+chk("...a stained section's series is its animal", R.seriesOf(donor[0]), A);
+for (const d of donor) delete R.anchors[d.uid];
+R.anchors[donor[0].uid] = {at: 0, id: R.PLATES[0].id};
+R.anchors[donor[donor.length - 1].uid] = {at: 1, id: R.PLATES[1].id};
+const before = JSON.stringify(R.assign(donor));
+const ctl = {uid: A + "_s09nc_sc01", animal: A, series: RCS, order: donor[1].order,
+             img: "sections/x.png", reagent_control: "no_primary"};
+R.DATA.push(ctl);
+chk("series_own: the donor's rows leave the control out",
+    R.rows().map(d => d.uid), donor.map(d => d.uid));
+chk("...the control series is listed, after its animal", R.seriesList().indexOf(RCS),
+    R.seriesList().indexOf(A) + 1);
+chk("...shown as the animal, marked reagent control", R.seriesLabel(RCS), A + " (reagent control)");
+els["animal"].value = RCS;
+chk("...and selecting it lists only the control", R.rows().map(d => d.uid), [ctl.uid]);
+chk("an unanchored control gets no level from the donor's anchors",
+    R.assign(R.rows())[0].kind, "none");
+R.anchors[ctl.uid] = {at: 1, id: R.PLATES[1].id};
+els["animal"].value = A;
+chk("anchoring the control leaves the donor's interpolation as it was",
+    JSON.stringify(R.assign(R.rows())), before);
+blobs.length = 0; R.exportCsv();
+const out = blobs[0].split("\n").map(l => l.split(","));
+const crow = out.find(r => r[0] === ctl.uid);
+chk("the export carries the control", crow !== undefined, true);
+chk("...under its real animal, not the series key", crow && crow[1], A);
+chk("...no exported row names a series key", out.some(r => /#rc/.test(r[1])), false);
+R.DATA.pop();
+delete R.anchors[ctl.uid];
+
 done();

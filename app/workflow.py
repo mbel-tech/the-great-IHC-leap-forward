@@ -110,7 +110,7 @@ PREPARE = Screen(
         ("Read and check the slides",
          "Reads every slide file, checks it, exports a picture of every section and "
          "measures where the camera saturated.",
-         ["manifest", "verify", "czi_selftest", "overviews", "contactsheets", "scene_renders", "pair",
+         ["manifest", "verify", "czi_selftest", "overviews", "reagent_screen", "contactsheets", "scene_renders", "pair",
           "channel_identity", "saturation_raw", "saturation_map"]),
         ("Build the atlas",
          "Turns the atlas into a set of plates with the regions marked. Only the "
@@ -288,6 +288,13 @@ PLAIN = {
     "overviews": "Saves a picture of every section at one fixed size and brightness, "
                  "scores each for focus and saturation, and marks where the camera hit "
                  "its maximum.",
+    "reagent_screen": "Looks for sections that may be reagent controls (stained without the "
+                      "primary antibody, or not stained), by the pattern of the stain rather "
+                      "than its brightness, and lists them for you to confirm or reject in "
+                      "Set up. It never decides for you. It can be stopped and picks up where it was; answering in Set up only re-scores, without reading the slides again. It runs only when the study says it "
+                      "is not sure, or says yes but none is confirmed yet. It cannot see isotype "
+                      "or pre-adsorbed controls, and cannot tell a missing primary from a failed "
+                      "stain or an animal that does not express the marker.",
     "contactsheets": "Puts each animal's sections side by side in brain order, so you can "
                      "browse the whole dataset quickly.",
     "scene_renders": "A picture of every scene on every slide, drawn from the scan files for "
@@ -551,6 +558,20 @@ OPTIONS = {
         _limit("files"),
     ],
     "overviews": [_force("sections"), _limit()],
+    "reagent_screen": [
+        Opt("--force", "bool", "Screen anyway",
+            "Normally the screen runs only when the study says it is not sure whether it "
+            "has reagent controls, or says yes with none confirmed. Turn this on to screen "
+            "regardless. It still resumes: a section already read is not read again."),
+        Opt("--reread", "bool", "Read every section again",
+            "Throw away what earlier runs measured and read every section from the slides "
+            "again. This can be stopped too: the next run continues the rereading where it "
+            "stopped rather than starting it over."),
+        Opt("--limit", "int", "Read at most N sections",
+            "Stop after reading this many sections; the next run resumes where it stopped. "
+            "The list of candidates is written once every section has been read. 0 means "
+            "all sections.", default=0, cli_default=0, minimum=0, zero="all"),
+    ],
     # Folder, resolution and brightness are study settings (Set up > Pictures).
     "scene_renders": [
         _force("pictures"), _limit("scenes"),
@@ -2138,6 +2159,23 @@ def detect_needs_redo(study):
         if bare - shaped:
             return "sections measured before 05c recorded what they were measured on"
     return None
+
+
+def limitation_text(out_root):
+    """The positivity limitation the Results page quotes: 06c's own words
+    (ls_reagent_report.limitation_text) over results/reagent_controls.csv when
+    06a has written it, else the text for a study with no no-primary control."""
+    import csv
+    import ls_reagent_report as LR          # numpy, through ls_overlay: only when asked
+    rows = []
+    path = os.path.join(out_root or "", "results", LR.REPORT_CSV)
+    if out_root and os.path.isfile(path):
+        try:
+            with open(path, newline="", encoding="utf-8") as fh:
+                rows = list(csv.DictReader(fh))
+        except (OSError, ValueError, csv.Error):
+            rows = []
+    return LR.limitation_text(rows)
 
 
 def notices(screen_sid, study):

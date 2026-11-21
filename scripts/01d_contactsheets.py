@@ -35,6 +35,7 @@ if _HERE not in sys.path:
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
 import ls_naming as NM  # noqa: E402
 import ls_progress as PG  # noqa: E402
+import ls_reagent_controls as RC  # noqa: E402
 
 OUT_ROOT = CONFIG["out_root"]
 OVERVIEW_DIR = os.path.join(OUT_ROOT, "overviews")
@@ -112,9 +113,14 @@ def load_qc():
     picks = chosen_variants()
     if picks:
         before = len(rows)
+        # A reagent control's scan is never a superseded re-scan of the stained
+        # one it shares a slide with: 02 carries it as its own entry, so it
+        # stays on the sheet (labelled) whatever variant the slide's pick names.
+        lookup = RC.expand(CONFIG, rows)
         rows = [
             r for r in rows
             if picks.get((r["animal"], r["slide"], r["marker_channel"]), r["variant"]) == r["variant"]
+            or is_reagent_control(r, lookup)
         ]
         if before != len(rows):
             print(f"  dropped {before - len(rows)} sections from superseded re-scans")
@@ -174,13 +180,49 @@ def flag(row, focus_floor):
     return "/".join(tags)
 
 
+def is_reagent_control(row, lookup):
+    """Whether this row's (scene, marker) is a confirmed reagent control (config)."""
+    return RC.is_control(lookup or {}, row["scene_uid"], row["marker_channel"])
+
+
+def caption(row, lookup=None):
+    """The line under a thumbnail on the sheet. A reagent control says so, in
+    place of its scene index, so it fits the thumbnail's width."""
+    if is_reagent_control(row, lookup):
+        return f"{row['section_order']:>3}  sl{row['slide']}  reagent control"
+    return f"{row['section_order']:>3}  sl{row['slide']}  s{row['scene_index']}"
+
+
+def gallery_caption(row, lookup, tag):
+    """The same in the gallery cell, HTML-escaped."""
+    words = f"{row['section_order']} sl{row['slide']}"
+    if is_reagent_control(row, lookup):
+        words += " reagent control"
+    return html.escape(words + (" " + tag if tag else ""))
+
+
 def thumb_path(row, kind):
     return os.path.join(
         OVERVIEW_DIR, row["animal"], row["marker_channel"], f"{row['scene_uid']}_{kind}.png"
     )
 
 
-def build_sheet(rows, animal, marker, kind, cols, thumb_w, out_dir, missing=None):
+def sheet_order(lookup):
+    """The sort key of a row on its animal's sheet and in the gallery: stained
+    sections first, then the reagent controls, each by (section_order, slide).
+
+    00 numbers a reagent control in a series of its own, so its section_order
+    repeats the donor's; sorted on section_order alone the two would
+    interleave. The sheet stays one per (animal, marker), under the same file
+    names: the series key (ls_reagent_controls.series_animal) only orders it.
+    """
+    lookup = lookup or {}
+    return lambda r: (RC.series_animal(r, lookup) != r["animal"],
+                      r["section_order"], r["slide"])
+
+
+def build_sheet(rows, animal, marker, kind, cols, thumb_w, out_dir, missing=None,
+                lookup=None):
     """Paged montage of one animal's series in one marker.
 
     `missing`, a list, receives the scene_uid of every section focus.csv lists
@@ -188,7 +230,7 @@ def build_sheet(rows, animal, marker, kind, cols, thumb_w, out_dir, missing=None
     without a word, which is the one thing this module promises not to do: a
     gap in the series must never be silently invented."""
     missing = missing if missing is not None else []
-    rows = sorted(rows, key=lambda r: (r["section_order"], r["slide"]))
+    rows = sorted(rows, key=sheet_order(lookup))
     focus_floor = quantile([r["focus_score"] for r in rows], FOCUS_LOW_QUANTILE)
 
     entries = []
@@ -237,11 +279,13 @@ def build_sheet(rows, animal, marker, kind, cols, thumb_w, out_dir, missing=None
                 draw.rectangle([cx, cy, cx + thumb_w, cy + thumb_h], outline="#c00000")
 
             tag = flag(row, focus_floor)
-            label = f"{row['section_order']:>3}  sl{row['slide']}  s{row['scene_index']}"
-            draw.text((cx + 2, cy + thumb_h + 3), label, fill="#303030", font=FONT_LABEL)
+            control = is_reagent_control(row, lookup)
+            draw.text((cx + 2, cy + thumb_h + 3), caption(row, lookup),
+                      fill="#a05a00" if control else "#303030", font=FONT_LABEL)
             if tag:
+                # A reagent control's caption is full, so its tag goes on the picture.
                 draw.text(
-                    (cx + thumb_w - 4 - 7 * len(tag), cy + thumb_h + 3),
+                    (cx + thumb_w - 4 - 7 * len(tag), cy + 3 if control else cy + thumb_h + 3),
                     tag, fill="#c00000", font=FONT_FLAG,
                 )
                 draw.rectangle(
@@ -254,7 +298,7 @@ def build_sheet(rows, animal, marker, kind, cols, thumb_w, out_dir, missing=None
     return written
 
 
-def build_gallery(by_key, sheets, kind):
+def build_gallery(by_key, sheets, kind, lookup=None):
     """Single HTML index linking every sheet and every full-size overview."""
     parts = [
         "<meta charset='utf-8'><title>LS section gallery</title>",
@@ -273,7 +317,7 @@ def build_gallery(by_key, sheets, kind):
     ]
 
     for (animal, marker) in sorted(by_key, key=lambda k: (NM.natural_key(k[0]), k[1])):
-        rows = sorted(by_key[(animal, marker)], key=lambda r: r["section_order"])
+        rows = sorted(by_key[(animal, marker)], key=sheet_order(lookup))
         focus_floor = quantile([r["focus_score"] for r in rows], FOCUS_LOW_QUANTILE)
         parts.append(f"<h2>{html.escape(animal)} &mdash; {html.escape(marker)} "
                      f"({len(rows)} sections)</h2>")
@@ -292,7 +336,7 @@ def build_gallery(by_key, sheets, kind):
             parts.append(
                 f"<div class='cell{' flag' if tag else ''}'>"
                 f"<a href='{html.escape(rel)}'><img loading='lazy' src='{html.escape(rel)}'></a>"
-                f"{r['section_order']} sl{r['slide']} {html.escape(tag)}</div>"
+                f"{gallery_caption(r, lookup, tag)}</div>"
             )
         parts.append("</div>")
 
@@ -313,6 +357,7 @@ def main():
     rows = load_qc()
     print(f"{len(rows)} sections in focus.csv")
 
+    lookup = RC.expand(CONFIG, rows)
     by_key = defaultdict(list)
     for r in rows:
         by_key[(r["animal"], r["marker_channel"])].append(r)
@@ -323,11 +368,11 @@ def main():
             sorted(by_key.items(), key=lambda kv: (NM.natural_key(kv[0][0]), kv[0][1]))):
         PG.report(n_done, len(by_key), "animals and markers")
         written = build_sheet(group, animal, marker, args.kind, args.cols, args.thumb,
-                              SHEET_DIR, missing)
+                              SHEET_DIR, missing, lookup)
         sheets.extend(written)
         print(f"  {animal:<7} {marker:<6} {len(group):>4} sections -> {len(written)} page(s)")
 
-    gallery = build_gallery(by_key, sheets, args.kind)
+    gallery = build_gallery(by_key, sheets, args.kind, lookup)
 
     flagged = 0
     for (animal, marker), group in by_key.items():

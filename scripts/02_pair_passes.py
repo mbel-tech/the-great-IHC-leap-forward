@@ -128,9 +128,19 @@ def choose_variants(rows):
     one: flagged scenes (from config, through ls_reagent_controls.expand, not
     the manifest column) do not count, so a control scan with more scenes
     than the stained scan cannot win, and an override naming a scan with no
-    stained scene is not followed. A slide whose every scan is a control
-    still keeps its own entry, chosen as before. The chosen scan keeps all its
-    rows: a single control section on a stained slide is still paired.
+    stained scene is not followed. The chosen scan keeps all its rows: a
+    single control section on a stained slide is still paired.
+
+    NOR DOES A CONTROL SCAN VANISH. A scan whose every scene is a reagent
+    control is carried as an entry of its own, keyed (animal + "#rc", slide,
+    marker) - the series 00 numbered it in - beside the stained pick, so it
+    is matched with the other pass's control scan, reaches pairs.csv and 04i
+    carries its curation over like any other section. Before, a control that
+    shared (animal, slide, marker) with a stained scan was simply not chosen:
+    no pairs.csv row, so 04m called it unpaired, 04n held it back and the
+    report never saw it. Among several control scans of one slide the choice
+    is made as for stained re-scans. The "#rc" key is internal: it is never
+    written to a file (main() writes the real animal).
     """
     override_path = os.path.join(MANIFEST_DIR, "chosen_variants.csv")
     overrides = {}
@@ -156,21 +166,30 @@ def choose_variants(rows):
                        if not RC.is_control(lookup, r["scene_uid"], r["marker_channel"])]
                    for v, rs in variants.items()}
         stained = {v: rs for v, rs in stained.items() if rs}
-        pool = stained or variants
-        if key in overrides and overrides[key] in pool:
-            pick = overrides[key]
-        else:
-            pick = sorted(pool, key=lambda v: (-len(pool[v]), v))[0]
-        chosen[key] = variants[pick]
-        if len(variants) > 1:
-            notes.append(
-                {
-                    "animal": key[0], "slide": key[1], "marker_channel": key[2],
-                    "chosen_variant": pick,
-                    "candidates": "|".join(f"{v}({len(variants[v])})" for v in sorted(variants)),
-                    "source": "override" if overrides.get(key) == pick else "most_scenes",
-                }
-            )
+        controls = {v: rs for v, rs in variants.items() if v not in stained}
+        rc_key = (key[0] + RC.RC_SERIES, key[1], key[2])
+        for series_key, pool in ((key, stained), (rc_key, controls)):
+            if not pool:
+                continue
+            if key in overrides and overrides[key] in pool:
+                pick = overrides[key]
+            else:
+                pick = sorted(pool, key=lambda v: (-len(pool[v]), v))[0]
+            chosen[series_key] = variants[pick]
+            # variant_choices.csv is read by 01d to drop superseded re-scans,
+            # keyed by the real animal: the stained pick, or the control pick
+            # of a slide that has no stained scan (01d keeps reagent controls
+            # either way).
+            if len(variants) > 1 and (series_key == key or not stained):
+                notes.append(
+                    {
+                        "animal": key[0], "slide": key[1], "marker_channel": key[2],
+                        "chosen_variant": pick,
+                        "candidates": "|".join(f"{v}({len(variants[v])})"
+                                               for v in sorted(variants)),
+                        "source": "override" if overrides.get(key) == pick else "most_scenes",
+                    }
+                )
     return chosen, notes
 
 
@@ -312,84 +331,96 @@ def main():
     pair_rows, offset_rows, no_centre = [], [], []
 
     for animal in animals:
-        slides = sorted({k[1] for k in chosen if k[0] == animal})
-        entries = []
+        # The animal's stained series, then its reagent-control series: a
+        # control scan is matched only against the other pass's control scan,
+        # never against a stained one, and numbered after the stained
+        # sections, so the donor's section_uids do not move.
+        ordered = []
+        for series in (animal, animal + RC.RC_SERIES):
+            slides = sorted({k[1] for k in chosen if k[0] == series})
+            entries = []
+            n_offsets = len(offset_rows)
 
-        for slide in slides:
-            a_all = chosen.get((animal, slide, marker_a), [])
-            b_all = chosen.get((animal, slide, marker_b), [])
+            for slide in slides:
+                a_all = chosen.get((series, slide, marker_a), [])
+                b_all = chosen.get((series, slide, marker_b), [])
 
-            # A scene with no recorded centre cannot be matched by position,
-            # and its nan would poison the whole slide's cost matrix. It keeps
-            # its own row in pairs.csv, as no_centre_<marker>, so it is listed
-            # rather than dropped - the same rule as every other status here.
-            a_rows = [r for r in a_all if has_centre(r)]
-            b_rows = [r for r in b_all if has_centre(r)]
-            blank = ([(marker_a, r) for r in a_all if not has_centre(r)]
-                     + [(marker_b, r) for r in b_all if not has_centre(r)])
-            for marker, r in blank:
-                entries.append({"slide": slide, "serial": r["slide_serial"], "marker": marker,
-                                "a": r if marker == marker_a else None,
-                                "b": r if marker == marker_b else None,
-                                "dist": "", "status": f"no_centre_{marker}"})
-                no_centre.append(r["scene_uid"])
-            blank_note = (f"; {len(blank)} scene(s) with no centre left out of matching"
-                          if blank else "")
+                # A scene with no recorded centre cannot be matched by position,
+                # and its nan would poison the whole slide's cost matrix. It keeps
+                # its own row in pairs.csv, as no_centre_<marker>, so it is listed
+                # rather than dropped - the same rule as every other status here.
+                a_rows = [r for r in a_all if has_centre(r)]
+                b_rows = [r for r in b_all if has_centre(r)]
+                blank = ([(marker_a, r) for r in a_all if not has_centre(r)]
+                         + [(marker_b, r) for r in b_all if not has_centre(r)])
+                for marker, r in blank:
+                    entries.append({"slide": slide, "serial": r["slide_serial"], "marker": marker,
+                                    "a": r if marker == marker_a else None,
+                                    "b": r if marker == marker_b else None,
+                                    "dist": "", "status": f"no_centre_{marker}"})
+                    no_centre.append(r["scene_uid"])
+                blank_note = (f"; {len(blank)} scene(s) with no centre left out of matching"
+                              if blank else "")
 
-            if not a_rows or not b_rows:
-                only = marker_a if a_rows else marker_b
-                other = marker_b if a_rows else marker_a
-                # The other pass was scanned but none of its scenes can be
-                # placed: these are unmatched, not the only pass there is.
-                other_scanned = bool(b_all if a_rows else a_all)
-                for r in (a_rows or b_rows):
-                    entries.append({"slide": slide, "serial": r["slide_serial"], "marker": only,
-                                    "a": r if a_rows else None, "b": None if a_rows else r,
-                                    "dist": "",
-                                    "status": (f"unmatched_{only}" if other_scanned
-                                               else f"only_{only}")})
-                offset_rows.append({"animal": animal, "slide": slide,
-                                    f"n_{a_slug}": len(a_all),
-                                    f"n_{b_slug}": len(b_all), "same_slide": "",
-                                    "tight_fraction": "", "median_residual_um": "",
-                                    "dx_um": "", "dy_um": "",
-                                    "inlier_votes": "", "n_matched": 0,
-                                    "note": (f"no {other} scene has a centre" if other_scanned
-                                             else f"only {only} present") + blank_note})
-                continue
+                if not a_rows or not b_rows:
+                    only = marker_a if a_rows else marker_b
+                    other = marker_b if a_rows else marker_a
+                    # The other pass was scanned but none of its scenes can be
+                    # placed: these are unmatched, not the only pass there is.
+                    other_scanned = bool(b_all if a_rows else a_all)
+                    for r in (a_rows or b_rows):
+                        entries.append({"slide": slide, "serial": r["slide_serial"], "marker": only,
+                                        "a": r if a_rows else None, "b": None if a_rows else r,
+                                        "dist": "",
+                                        "status": (f"unmatched_{only}" if other_scanned
+                                                   else f"only_{only}")})
+                    offset_rows.append({"animal": animal, "slide": slide,
+                                        f"n_{a_slug}": len(a_all),
+                                        f"n_{b_slug}": len(b_all), "same_slide": "",
+                                        "tight_fraction": "", "median_residual_um": "",
+                                        "dx_um": "", "dy_um": "",
+                                        "inlier_votes": "", "n_matched": 0,
+                                        "note": (f"no {other} scene has a centre" if other_scanned
+                                                 else f"only {only} present") + blank_note})
+                    continue
 
-            pairs, un_a, un_b, offset, diag = match_slide(a_rows, b_rows)
-            same = diag["same_slide"]
+                pairs, un_a, un_b, offset, diag = match_slide(a_rows, b_rows)
+                same = diag["same_slide"]
 
-            for a, b, dist in pairs:
-                entries.append({"slide": slide, "serial": a["slide_serial"], "marker": marker_a,
-                                "a": a, "b": b, "dist": round(dist, 1), "status": "matched"})
-            for r in un_a:
-                entries.append({"slide": slide, "serial": r["slide_serial"], "marker": marker_a,
-                                "a": r, "b": None, "dist": "",
-                                "status": (f"unmatched_{marker_a}" if same
-                                           else f"separate_slide_{marker_a}")})
-            for r in un_b:
-                entries.append({"slide": slide, "serial": r["slide_serial"], "marker": marker_b,
-                                "a": None, "b": r, "dist": "",
-                                "status": (f"unmatched_{marker_b}" if same
-                                           else f"separate_slide_{marker_b}")})
+                for a, b, dist in pairs:
+                    entries.append({"slide": slide, "serial": a["slide_serial"], "marker": marker_a,
+                                    "a": a, "b": b, "dist": round(dist, 1), "status": "matched"})
+                for r in un_a:
+                    entries.append({"slide": slide, "serial": r["slide_serial"], "marker": marker_a,
+                                    "a": r, "b": None, "dist": "",
+                                    "status": (f"unmatched_{marker_a}" if same
+                                               else f"separate_slide_{marker_a}")})
+                for r in un_b:
+                    entries.append({"slide": slide, "serial": r["slide_serial"], "marker": marker_b,
+                                    "a": None, "b": r, "dist": "",
+                                    "status": (f"unmatched_{marker_b}" if same
+                                               else f"separate_slide_{marker_b}")})
 
-            offset_rows.append({
-                "animal": animal, "slide": slide,
-                f"n_{a_slug}": len(a_all), f"n_{b_slug}": len(b_all),
-                "same_slide": int(same),
-                "tight_fraction": diag["tight_fraction"],
-                "median_residual_um": diag["median_residual_um"],
-                "dx_um": round(float(offset[0]), 1), "dy_um": round(float(offset[1]), 1),
-                "inlier_votes": diag["votes"], "n_matched": len(pairs),
-                "note": ("" if same else "constellations disagree - treat as separate slides")
-                        + blank_note,
-            })
+                offset_rows.append({
+                    "animal": animal, "slide": slide,
+                    f"n_{a_slug}": len(a_all), f"n_{b_slug}": len(b_all),
+                    "same_slide": int(same),
+                    "tight_fraction": diag["tight_fraction"],
+                    "median_residual_um": diag["median_residual_um"],
+                    "dx_um": round(float(offset[0]), 1), "dy_um": round(float(offset[1]), 1),
+                    "inlier_votes": diag["votes"], "n_matched": len(pairs),
+                    "note": ("" if same else "constellations disagree - treat as separate slides")
+                            + blank_note,
+                })
+
+            if series != animal:
+                for r in offset_rows[n_offsets:]:
+                    r["note"] = "reagent control scan" + ("; " + r["note"] if r["note"] else "")
+            entries.sort(key=lambda e: (e["slide"], e["serial"], e["marker"]))
+            ordered.extend(entries)
 
         # Canonical rostro-caudal numbering across the whole animal.
-        entries.sort(key=lambda e: (e["slide"], e["serial"], e["marker"]))
-        for position, e in enumerate(entries, start=1):
+        for position, e in enumerate(ordered, start=1):
             a, b = e["a"], e["b"]
             pair_rows.append({
                 "section_uid": f"{animal}_sec{position:03d}",

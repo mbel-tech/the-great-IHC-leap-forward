@@ -419,7 +419,8 @@ def load_ranges():
     if not os.path.exists(RANGES_PATH):
         return None
     with open(RANGES_PATH, encoding="utf-8") as fh:
-        return json.load(fh)
+        # Channels only: 01 also records which sections it sampled ("_sampled").
+        return {k: v for k, v in json.load(fh).items() if not str(k).startswith("_")}
 
 
 def load_fields(indices):

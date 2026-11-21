@@ -186,7 +186,16 @@ class Key:
 # The spec. Order here is the order keys appear in a generated config.
 # --------------------------------------------------------------------------
 
-_RC_CONSUMERS = ["00", "01", "01m", "02", "05b", "05c", "06a", "06c", "app"]
+#: Which sections are reagent controls (`files`, `scenes`): every stage that leaves
+#: them out of something, or puts them first.
+_RC_CONSUMERS = ["00", "01", "01b", "01d", "01m", "02", "04b", "04c", "04k", "04n", "05b",
+                 "05c", "06a", "06c", "06d", "app"]
+#: The other reagent_controls keys are each read by fewer stages, and some only to
+#: print a warning (`declared` and `rejected` in 05b/05c, `rejected` and
+#: `extra_patterns` in 00's name check): a warning changes no output, so those
+#: readers are named in the key's note and not here, which is what keeps 05c's
+#: hours of detection from going out of date when one changes.
+_RC_WARNS = (" 05b and 05c read it only to print a warning, which changes no output.")
 
 SPEC = [
     Key("schema_version", "int",
@@ -857,8 +866,8 @@ note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
              "confirmed entries. A reagent control is a slide or section stained without the "
              "primary antibody, with an isotype IgG, pre-adsorbed, or unstained. It says how "
              "a section was stained, not which animal or treatment it is, so it is not "
-             "blinding information.",
-        consumers=_RC_CONSUMERS),
+             "blinding information." + _RC_WARNS,
+        consumers=["01m", "app"]),
 
     Key("reagent_controls.files", "raw",
         "Slide files confirmed as reagent controls, by file name.",
@@ -881,20 +890,20 @@ note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
         "Which stained scenes or files each reagent control is compared with.",
         default={}, ui=False, in_example=False,
         note="{<scene_uid or file>: [<stained scene_uid or file>, ...]}.",
-        consumers=_RC_CONSUMERS),
+        consumers=["06a", "app"]),
 
     Key("reagent_controls.rejected", "list_str",
         "Scenes or files the operator said are NOT reagent controls.",
         default=[], ui=False, in_example=False,
-        note="Stops the name scan and the screen proposing the same item again.",
-        consumers=_RC_CONSUMERS),
+        note="Stops the name scan and the screen proposing the same item again." + _RC_WARNS,
+        consumers=["00", "01m", "app"]),
 
     Key("reagent_controls.extra_patterns", "raw",
         "Lab-specific file-name patterns that mark a reagent control.",
         default=[], ui=False, in_example=False,
         note="[{regex, kind}]. Each regex is searched case-insensitively in the path relative "
              "to the slides folder and must compile.",
-        consumers=_RC_CONSUMERS),
+        consumers=["00", "app"]),
 ]
 
 BY_PATH = {k.path: k for k in SPEC}

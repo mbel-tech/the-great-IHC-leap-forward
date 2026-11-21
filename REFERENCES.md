@@ -127,6 +127,35 @@ large-scale validation is required before such systems can be trusted unsupervis
 Also relevant: its account of how subjective manual IHC scoring is, which is the reason this
 pipeline keeps every judgement auditable and every threshold explicit rather than per-image.
 
+## Reagent controls for immunohistochemistry
+
+> Burry RW (2011). **Controls for immunocytochemistry: an update.** *J Histochem Cytochem*
+> 59(1):6–12. doi:[10.1369/jhc.2010.956920](https://doi.org/10.1369/jhc.2010.956920)
+>
+> Hewitt SM, Baskin DG, Frevert CW, Stahl WL, Rosa-Molinar E (2014). **Controls for
+> immunohistochemistry: the Histochemical Society's standards of practice for validation of
+> immunohistochemical assays.** *J Histochem Cytochem* 62(10):693–697.
+> doi:[10.1369/0022155414545224](https://doi.org/10.1369/0022155414545224)
+>
+> Torlakovic EE et al. (2014). **Standardization of negative controls in diagnostic
+> immunohistochemistry: recommendations from the international ad hoc expert panel.**
+> *Appl Immunohistochem Mol Morphol* 22(4):241–252.
+> doi:[10.1097/PAI.0000000000000069](https://doi.org/10.1097/PAI.0000000000000069)
+>
+> Wizenty J et al. (2018). **Autofluorescence: a potential pitfall in immunofluorescence-based
+> inflammation grading.** *J Immunol Methods*.
+
+Background and framing rather than tools. The first three give the kinds of reagent control and what
+each tests (omit the primary; non-immune IgG of the same isotype; antibody pre-adsorbed with its
+peptide; unstained), and are why the pipeline calls them **reagent controls** and keeps them apart
+from negative *tissue* controls. Wizenty et al. report tissue autofluorescence detectable across
+emission 425–738 nm, which is why the signal screen's between-marker feature expects the channels of a
+no-primary multiplex section to look alike.
+
+**Adopted:** the kinds, and the rule that a control is reported, not subtracted.
+**Not adopted:** nothing in these papers licenses finding an isotype or pre-adsorbed control from the
+image, so the screen does not try.
+
 ---
 
 ## Immunofluorescence normalisation — UniFORM

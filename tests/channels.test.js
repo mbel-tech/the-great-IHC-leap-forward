@@ -109,4 +109,21 @@ chk("the excluded section is exported with excluded=1",
 X.render();
 chk("strip cells carry data-uid, not onclick", els["strip"].innerHTML.includes("onclick="), false);
 
+// ---- the reagent-control badge --------------------------------------------
+// 04l carries each section's reagent_control (its kind, from config) into the
+// record; the section header shows a badge for it and nothing else changes.
+note("");
+chk("every record carries reagent_control", X.DATA.every(d => "reagent_control" in d), true);
+els["hideExcl"].checked = false; X.render();
+const rcSec = X.rows()[0], plainSec = X.rows()[1];
+const rcWas = rcSec.reagent_control;
+rcSec.reagent_control = "no_primary";
+plainSec.reagent_control = "";
+X.select(rcSec.uid);
+chk("a reagent control's header shows the badge",
+    /rcbadge[^>]*>reagent control</.test(els["secInfo"].innerHTML), true);
+X.select(plainSec.uid);
+chk("...a stained section's does not", /reagent control/.test(els["secInfo"].innerHTML), false);
+rcSec.reagent_control = rcWas;
+
 done();

@@ -111,7 +111,7 @@ ihc --stage overviews D:\LS-analysis\study.json --opt limit=3
 ihc --stage detect D:\LS-analysis\study.json --opt order=uid --opt qc=true
 ```
 
-- **On/off options:** use `true` or `false` (`yes`/`no` and `1`/`0` work too).
+- **On/off options:** use `true` or `false` (`yes`/`no`, `on`/`off` and `1`/`0` work too). Any other word is refused, so a typo cannot quietly switch an option off.
 - **Number options:** use a whole number.
 - **Unknown names:** an option a step does not have is refused, and the message lists the options it does have.
 
@@ -236,9 +236,9 @@ Every command ends with a number a script can test.
 | Exit code | Meaning |
 |---|---|
 | `0` | It ran: the step finished, or every step of the screen did. `--list` always ends 0. |
-| `1` | The step failed, was stopped during a drive wait, or a screen's run stopped at a failure or a question. |
+| `1` | The step failed, or a screen's run stopped at a failure or a question. |
 | `2` | Nothing was run: a step was refused (with the reason printed), or the command or study path was wrong. |
-| `130` | You pressed Ctrl+C. |
+| `130` | You pressed Ctrl+C (during a wait for the drive too; the run history then says *stopped while the drive was disconnected*). |
 
 A batch file for an overnight run might look like this. Because `ihc` is itself a batch file, call it with
 `call`. Without `call`, the script ends after the first line.

@@ -496,7 +496,15 @@ class Opt:
         """The value as this option's type, or ValueError."""
         if self.kind == "bool":
             if isinstance(value, str):
-                return value.strip().lower() in ("1", "true", "yes", "on")
+                word = value.strip().lower()
+                if word in ("1", "true", "yes", "on"):
+                    return True
+                if word in ("", "0", "false", "no", "off"):
+                    return False
+                # A typo such as "ture" used to read as off, silently: a
+                # --opt force=ture on the command line ran without the redo
+                # it asked for.
+                raise ValueError(f"{self.label}: say true or false, not {value!r}")
             return bool(value)
         if value is None or value == "":
             return None

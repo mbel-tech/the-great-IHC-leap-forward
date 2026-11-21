@@ -787,12 +787,13 @@ Code, plus the atlas plates in `atlas/` (salmon and Wullimann; cite both, see
 [How to cite](#how-to-cite)) and the citation metadata in `CITATION.cff`. No imaging data, and
 nothing derived from it, is committed.
 
-Four documents, answering four different questions:
+Five documents, answering five different questions:
 
 | Question | Document |
 |---|---|
 | How do I install, run or change this? | this README |
 | I am new: how do I use the app, screen by screen? | `docs/guides/user-guide.md` |
+| How do I run the steps from a command prompt, or in a script? | `docs/guides/command-line-guide.md` (also as a PDF beside it) |
 | What happens to a brain section, step by step, in plain language? | `docs/guides/pipeline-guide.md` |
 | What is the Methods section, with citations and the measured numbers? | `docs/guides/pipeline-methods.md` |
 

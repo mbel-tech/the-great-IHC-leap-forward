@@ -472,6 +472,17 @@ p = subprocess.run([sys.executable, "-m", "app", "--stage", "manifest"], cwd=REP
 chk("--stage without a study is refused with the usage", (p.returncode, "--stage" in p.stderr),
     (2, True))
 
+# An on/off option given a word that is neither on nor off is refused, not read
+# as off: `--opt force=ture` used to run without the redo it asked for.
+try:
+    H._options("overviews", {"force": "ture"})
+    chk("a mistyped on/off value is refused", False)
+except ValueError as exc:
+    chk("a mistyped on/off value is refused, naming the value", "ture" in str(exc))
+chk("...while true/off still read as on/off",
+    (H._options("overviews", {"force": "true"}), H._options("overviews", {"force": "off"})),
+    ({"--force": True}, {"--force": False}))
+
 print()
 print("ALL PASS" if not failures else f"{len(failures)} FAILED")
 sys.exit(1 if failures else 0)

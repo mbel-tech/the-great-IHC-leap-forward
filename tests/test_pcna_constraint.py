@@ -190,7 +190,20 @@ chk("...admissible, moved from 0.55", (own[0]["admissible"], own[0]["constraint_
     ("yes", "0.55"))
 chk("AF568 rows: blank", {(r["control_density"], r["stained_density"], r["admissible"],
                            r["constraint_moved_from"]) for r in nuc}, {("", "", "", "")})
+mdp = os.path.join(now, "usable__detection_tuning.md")
+md = open(mdp, encoding="utf-8").read() if os.path.exists(mdp) else ""
+chk("the report says the cut was moved, where the cut is given",
+    "Moved up from 0.55 by the reagent-control constraint" in md, True)
+chk("...and gives the constraint's reason and pair",
+    ("moved from 0.55: control false detections above target" in md,
+     "AB1_1a_s03 at AB1_1a_s01 (same_file)" in md), (True, True))
 shutil.rmtree(now, ignore_errors=True)
+for mode in ("none", "unusable"):
+    p = subprocess.run([sys.executable, GEN, SCRIPTS, tempfile.mkdtemp(), mode],
+                       env={k: v for k, v in os.environ.items() if k != "LS_CONFIG"},
+                       capture_output=True, text=True)
+    chk(f"{mode}: 05b says the constraint was not applied",
+        "AF488: reagent-control constraint not applied" in p.stdout, True)
 
 print()
 print("--- control_uses_borrowed_range: 05c ---")
@@ -227,11 +240,25 @@ def detect(cfg_over, controls, argv_extra=(), manifest_extra=()):
     finally:
         pyczi.open_czi, sys.argv = saved
         D5.load_model = saved_load
+    detect.nuclei = []
+    if os.path.exists(D5.NUCLEI_CSV):
+        with open(D5.NUCLEI_CSV, newline="", encoding="utf-8") as fh:
+            detect.nuclei = list(csv.reader(fh))
     rows = []
     if os.path.exists(D5.NORM_CSV):
         with open(D5.NORM_CSV, newline="", encoding="utf-8") as fh:
             rows = list(csv.DictReader(fh))
     return rc, {r["scene_uid"]: r for r in rows}, rec.means, D5
+
+
+class pyczi_fake:
+    def __enter__(self):
+        self.saved = pyczi.open_czi
+        pyczi.open_czi = PG.fake_open
+
+    def __exit__(self, *e):
+        pyczi.open_czi = self.saved
+        return False
 
 
 def write_manifest(out_root, uids):
@@ -250,6 +277,7 @@ def write_manifest(out_root, uids):
 with temp_study(acquisition=PG.ACQ) as study:
     write_manifest(study.out_root, PG.STAINED)
     rc, base_rows, _m, _D = detect({}, [])
+    base_nuclei = [r for r in detect.nuclei if r[0] in PG.STAINED or r[0] == "scene_uid"]
     chk("no controls: 05c runs", rc, 0)
     chk("no controls: every stained row says range_from own",
         sorted((u, r["range_from"]) for u, r in base_rows.items()),
@@ -276,6 +304,21 @@ with temp_study(acquisition=PG.ACQ, reagent_controls=RC_BLOCK) as study:
         (means[0] < 0.1, means[2] > 0.1), (True, True))
     chk("stained sections are unchanged",
         {u: rows[u] for u in PG.STAINED}, {u: base_rows[u] for u in PG.STAINED})
+    chk("...and so are their roi_nuclei.csv rows",
+        [r for r in detect.nuclei if r[0] in PG.STAINED or r[0] == "scene_uid"]
+        == base_nuclei and len(base_nuclei) > 1, True)
+    with pyczi_fake():
+        ctl = D5.section_range_for("AB1_1a_s03", "AF488", None, [], 0)
+    chk("06i's re-segment range: a control's is its stained pair's",
+        ctl[:2] == (float(rows["AB1_1a_s01"]["norm_lo"]),
+                    float(rows["AB1_1a_s01"]["norm_hi"])), True)
+    with pyczi_fake():
+        own = D5.section_range_for("AB1_1a_s01", "AF488", PG.fake_open("x.czi").doc,
+                                   [b for b in D5.G5.load_csv(D5.G5.BOX_CSV)
+                                    if b["scene_uid"] == "AB1_1a_s01"], 0)
+    chk("...a stained section's is its own",
+        own[:2] == (float(rows["AB1_1a_s01"]["norm_lo"]), float(rows["AB1_1a_s01"]["norm_hi"])),
+        True)
 
     print()
     print("--- a control whose pairing changed is measured again on resume ---")

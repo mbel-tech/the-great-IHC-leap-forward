@@ -4084,7 +4084,7 @@ One row per sampled crop: the signal statistics 05b's verdict is made from (summ
 | `control_density` | float | objects/mm² | Only when the PCNA reagent-control constraint ran for some marker (else the column is absent). StarDist objects per mm² on the paired no-primary controls' ROI central windows, each at its stained pair's intensity range, at the marker's final cut; the same on every row of the marker, blank for a marker it did not run for. Provisional. |
 | `stained_density` | float | objects/mm² | Only with control_density. Objects per mm² on the stained sample's windows at the same cut. |
 | `admissible` | text |  | Only with control_density. `yes` when control_density ≤ positivity.fp_target × stained_density at the final cut, else `no` (no grid point was admissible and the cut was kept). |
-| `constraint_moved_from` | float |  | Only with control_density. The cut the plateau rule chose (0.479 = the model default) when the constraint moved it to the lowest admissible grid point above; blank when it did not move. |
+| `constraint_moved_from` | float |  | Only with control_density. The cut the plateau rule chose (0.479071 = the model default) when the constraint moved it to the lowest admissible grid point above; blank when it did not move. |
 
 #### `results/roi_nuclei.csv`
 

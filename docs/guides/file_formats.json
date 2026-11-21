@@ -4801,7 +4801,7 @@
      "name": "constraint_moved_from",
      "type": "float",
      "units": "",
-     "meaning": "Only with control_density. The cut the plateau rule chose (0.479 = the model default) when the constraint moved it to the lowest admissible grid point above; blank when it did not move."
+     "meaning": "Only with control_density. The cut the plateau rule chose (0.479071 = the model default) when the constraint moved it to the lowest admissible grid point above; blank when it did not move."
     }
    ]
   },

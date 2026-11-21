@@ -231,6 +231,9 @@ def main(scripts, out, mode):
             json.dump(auto, fh, indent=1)
             fh.write("\n")
         shutil.copyfile(B.TUNING_CSV, os.path.join(out, f"{mode}__detection_tuning.csv"))
+        if mode == "usable":
+            # The report says the date; it is not compared byte for byte.
+            shutil.copyfile(B.REPORT_MD, os.path.join(out, f"{mode}__detection_tuning.md"))
         print(json.dumps({"scripts": os.path.dirname(os.path.abspath(B.__file__)),
                           "rc": rc, "calls": calls}))
     finally:

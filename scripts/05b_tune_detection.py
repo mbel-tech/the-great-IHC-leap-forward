@@ -264,7 +264,7 @@ def constrain_marker(marker, pairs, skipped, by_sec, geom, args, model, grid,
     here = next((v for p, v in table.items() if abs(p - at) < 1e-4), None) or {}
     moved = (new is not None and chosen is None) or (
         new is not None and abs(new - chosen) > 1e-6)
-    used = sorted({u for u, *_ in ccrops}, key=NM.natural_key)
+    used = sorted({c[0] for c in ccrops if c[4] is not None}, key=NM.natural_key)
     rec = {"fp_target": target,
            "controls": [{"control": u, "range_from": s, "pairing": t}
                         for u, s, t in pairs if u in used],
@@ -276,7 +276,7 @@ def constrain_marker(marker, pairs, skipped, by_sec, geom, args, model, grid,
            "control_density": _r(here.get("control_density")),
            "stained_density": _r(here.get("stained_density")),
            "admissible": here.get("admissible"),
-           "moved_from": (round(default if chosen is None else chosen, 4)
+           "moved_from": (round(default if chosen is None else chosen, 6)
                           if moved else None),
            "why": why,
            "provisional": True}
@@ -411,8 +411,17 @@ def report(entries):
                                 "contrast", "coverage", "saturated")), ""]
         if "curve" in e:
             p = e["chosen"].get("prob_thresh")
+            c = e.get("constraint") or {}
+            held = ""
+            if c.get("moved_from") is not None:
+                held = (f" Moved up from {c['moved_from']:g} by the reagent-control "
+                        f"constraint (below).")
+            elif c and not c.get("admissible"):
+                held = (" **Flagged: no cut on the grid meets the reagent-control "
+                        "constraint (below); kept.**")
             lines += [f"Probability cut: **{p if p is not None else e['model_default']['prob_thresh']}**"
-                      f"{'' if p is not None else ' (the model default, kept)'}. {e['why']}.", "",
+                      f"{'' if p is not None else ' (the model default, kept)'}. "
+                      f"{'The plateau rule: ' if c else ''}{e['why']}.{held}", "",
                       "| cut | " + " | ".join(f"{c:g}" for c, _ in e["curve"]) + " |",
                       "|---|" + "---|" * len(e["curve"]),
                       "| nuclei | " + " | ".join(str(n) for _, n in e["curve"]) + " |", ""]
@@ -511,6 +520,12 @@ def main():
                 print(f"{m}: probability cut "
                       f"{p if p is not None else 'kept at the model default'}"
                       f" - {e['why']}")
+            c = e.get("constraint")
+            if c is not None:
+                print(f"{'!! ' if not c['admissible'] else ''}{m}: reagent-control "
+                      f"constraint (provisional) - {c['why']}")
+            elif CONSTRAINT_NOTES.get(m):
+                print(f"{m}: reagent-control constraint {CONSTRAINT_NOTES[m]}")
     if not entries:
         return 1
 

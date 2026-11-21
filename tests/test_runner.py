@@ -315,6 +315,63 @@ with tempfile.TemporaryDirectory() as tmp:
     os.environ.pop("LS_CHILD", None)
     os.environ.pop("LS_STOP_FILE", None)
 
+# The study's folders reach ls_drive as LS_WATCH for the length of a run, in
+# this process and in a supervised child, so a drive that drops with study.json
+# on it is still seen to have dropped (the config cannot be read mid-drop).
+with tempfile.TemporaryDirectory() as tmp:
+    src, out_root = os.path.join(tmp, "slides"), os.path.join(tmp, "out")
+    os.makedirs(src)
+    os.makedirs(out_root)
+    cfg_path = os.path.join(out_root, "study.json")
+    with open(cfg_path, "w", encoding="utf-8") as fh:
+        json.dump({"source_dir": src, "out_root": out_root}, fh)
+    scripts = os.path.join(tmp, "scripts")
+    os.makedirs(scripts)
+    with open(os.path.join(scripts, "94_watch.py"), "w", encoding="utf-8") as fh:
+        fh.write("import os\ndef main():\n"
+                 "    print('watch=' + os.environ.get('LS_WATCH', ''))\n    return 0\n")
+
+    class Watch:
+        sid, title, script, cli_only, argv = "watch", "Watch", "94_watch.py", None, []
+
+    before_watch = os.environ.pop("LS_WATCH", None)
+    r = R.Runner(scripts, cfg_path)
+    got = []
+    r.run(Watch(), on_line=got.append)
+    chk("an in-process run sees the study's folders as LS_WATCH",
+        got[:1], ["watch=" + os.pathsep.join([src, out_root])])
+    chk("...and LS_WATCH is put back after it", os.environ.get("LS_WATCH"), None)
+
+    seen = {}
+    real_run_child = R.SV.run_child
+
+    def fake_run_child(argv, on_line, stop_file, **kw):
+        seen["watch"] = os.environ.get("LS_WATCH")
+        seen["env"] = dict(kw.get("env") or {})
+        return 0, [], ""
+    R.SV.run_child = fake_run_child
+
+    class Reader:
+        sid, title, script, cli_only, argv = "watch", "Watch", "94_watch.py", None, []
+        reader = "pylibCZIrw"
+    try:
+        r.run(Reader())
+    finally:
+        R.SV.run_child = real_run_child
+    chk("a supervised run's parent watches the study's folders",
+        seen.get("watch"), os.pathsep.join([src, out_root]))
+    chk("...and LS_WATCH is put back after it", os.environ.get("LS_WATCH"), None)
+
+    os.environ["LS_WATCH"] = os.path.join(tmp, "mine")
+    got = []
+    r.run(Watch(), on_line=got.append)
+    chk("an LS_WATCH already set is left as it is",
+        (got[:1], os.environ.get("LS_WATCH")),
+        (["watch=" + os.path.join(tmp, "mine")], os.path.join(tmp, "mine")))
+    os.environ.pop("LS_WATCH", None)
+    if before_watch is not None:
+        os.environ["LS_WATCH"] = before_watch
+
 print()
 print("ALL PASS" if not failures else f"{len(failures)} FAILED")
 sys.exit(1 if failures else 0)

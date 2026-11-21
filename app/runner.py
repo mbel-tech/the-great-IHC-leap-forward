@@ -295,6 +295,33 @@ class Runner:
 
     # ---- running ----------------------------------------------------------
 
+    @contextlib.contextmanager
+    def _watching(self):
+        """LS_WATCH set to the study's source_dir and out_root for one run.
+
+        ls_drive takes the folders to watch from LS_WATCH, else from the study
+        file - which normally lives IN out_root and so cannot be read once the
+        drive has gone. Named here, before the run and while the file can be
+        read, neither the stage, nor a supervised child (it inherits this
+        environment), nor the supervisor's own look at the drive has to read
+        it mid-drop. An LS_WATCH already set is left as it is.
+        """
+        if os.environ.get("LS_WATCH"):
+            yield
+            return
+        try:
+            folders = SV._drive_module().config_folders(self.config_path)
+        except Exception:                                   # noqa: BLE001
+            folders = []
+        if not folders:
+            yield
+            return
+        os.environ["LS_WATCH"] = os.pathsep.join(folders)
+        try:
+            yield
+        finally:
+            os.environ.pop("LS_WATCH", None)
+
     def run(self, stage, on_line=None, extra_argv=()):
         """Run one stage to completion. Returns a StageResult; never raises.
 
@@ -302,6 +329,10 @@ class Runner:
         several of them rewrite the same index files, so two at once would be a
         race with the user's data on the losing side.
         """
+        with self._watching():
+            return self._run(stage, on_line, extra_argv)
+
+    def _run(self, stage, on_line, extra_argv):
         # A callable is asked (05c: can this interpreter import StarDist?); the
         # function itself is truthy, and read as the answer it refused 05c always.
         why = stage.cli_only() if callable(stage.cli_only) else stage.cli_only

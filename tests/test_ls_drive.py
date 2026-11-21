@@ -424,6 +424,62 @@ try:
     time.sleep(0.4)
     chk("present: a drop as the file is looked for is waited out", res, True)
     os.environ.pop("LS_PROGRESS", None)
+
+    # THE STUDY FILE ON THE DRIVE THAT DROPS. study.json normally lives in
+    # out_root, so when the drive goes the config naming the watched folders
+    # goes with it. Read afresh then, it named nothing, every folder was
+    # "reachable", and a reader recorded the slide as failed. The folders read
+    # last are kept and used while the config cannot be read.
+    src, out = os.path.join(tmp, "slides"), os.path.join(tmp, "out")
+    out_gone = out + "_gone"
+    for p in (src, out, out_gone):
+        shutil.rmtree(p, ignore_errors=True)
+    os.makedirs(src)
+    os.makedirs(out)
+    cfg = os.path.join(out, "study.json")
+    with open(cfg, "w") as fh:
+        json.dump({"source_dir": src, "out_root": out}, fh)
+    os.environ.pop("LS_WATCH", None)
+    os.environ["LS_CONFIG"] = cfg
+    chk("config on the drive: watched", D.watched(), [src, out])
+    os.rename(out, out_gone)
+    chk("...the drive gone: still watched", D.watched(), [src, out])
+    chk("...and unreachable", D.reachable(), (False, out))
+    os.rename(out_gone, out)
+
+    # A unit that is the first to ask, with the drive dropping inside it.
+    cfg2 = os.path.join(out, "study2.json")
+    with open(cfg2, "w") as fh:
+        json.dump({"source_dir": src, "out_root": out}, fh)
+    os.environ["LS_CONFIG"] = cfg2
+    calls = []
+
+    def unit_drops():
+        calls.append(1)
+        if len(calls) == 1:
+            os.rename(out, out_gone)
+            later(0.3, lambda: os.rename(out_gone, out))
+            raise OSError(5, "Input/output error", cfg2)
+        return "done"
+    n0 = len(D.PAUSES)
+    try:
+        res, said = capture(lambda: D.per_slide(unit_drops, label="slide 9"))
+    except OSError as exc:
+        res, said = f"raised {exc}", ""
+    time.sleep(0.4)
+    chk("config on the drive: a drop is waited, not a failure", res, "done")
+    chk("...the unit redone once the drive is back", len(calls), 2)
+    chk("...one pause recorded", len(D.PAUSES) - n0, 1)
+
+    # present() on the dropped drive: waited for, never "missing".
+    f2 = os.path.join(out, "mask.npy")
+    open(f2, "wb").close()
+    os.rename(out, out_gone)
+    t = later(0.3, lambda: os.rename(out_gone, out))
+    res, said = capture(lambda: D.present(f2, "mask"))
+    t.join()
+    chk("config on the drive: present waits for the drive", res, True)
+    os.environ["LS_WATCH"] = os.pathsep.join([a, b])
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

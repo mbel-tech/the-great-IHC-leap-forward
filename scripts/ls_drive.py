@@ -21,6 +21,14 @@ Which folders are "the drive": env `LS_WATCH` (an os.pathsep list) if set, else
 does not import ls_config, so it works for a stage that has not loaded one. A
 folder counts as reachable when `os.listdir` on it succeeds.
 
+The study file normally lives IN out_root, so it goes with the drive. The
+folders it named are therefore remembered per config path (`config_folders`)
+and used while the file cannot be read: read afresh mid-drop it named nothing,
+every folder looked reachable, and a reader recorded the slide as failed. The
+cache is filled when this module loads and when `per_slide` starts a unit, so
+it is there before the drive can go; the app also sets `LS_WATCH` from the
+config before each run (app/runner.py), which needs no read at all.
+
 Stopping: while waiting there is no deadline, so the app (or anything else)
 asks the stage to give up by creating the file named by env `LS_STOP_FILE`;
 the wait notices within one poll and raises `Stopped`.
@@ -72,6 +80,9 @@ PAUSES = []
 # {"folder", "label", "t0"} while a printed `lost` has no `back` yet, else None.
 _ANNOUNCED = None
 
+# {abspath of a config: [source_dir, out_root]} as last read from it.
+_KNOWN = {}
+
 
 class Stopped(Exception):
     """The stop file appeared while waiting for the drive."""
@@ -81,21 +92,34 @@ def _progress():
     return os.environ.get("LS_PROGRESS") == "1"
 
 
+def config_folders(cfg_path=None):
+    """`source_dir` and `out_root` from the config at `cfg_path` (env
+    `LS_CONFIG` by default), or the ones it named when last read if it cannot
+    be read now - it is usually on the drive that has gone. [] for a config
+    never read."""
+    cfg_path = cfg_path or os.environ.get("LS_CONFIG")
+    if not cfg_path:
+        return []
+    key = os.path.abspath(cfg_path)
+    try:
+        with open(cfg_path, encoding="utf-8") as fh:
+            cfg = json.load(fh)
+    except (OSError, ValueError):
+        return list(_KNOWN.get(key, []))
+    if not isinstance(cfg, dict):
+        return list(_KNOWN.get(key, []))
+    folders = [cfg[k] for k in ("source_dir", "out_root")
+               if isinstance(cfg.get(k), str) and cfg[k]]
+    _KNOWN[key] = folders
+    return list(folders)
+
+
 def watched():
     """The folders whose absence means the drive is gone."""
     env = os.environ.get("LS_WATCH")
     if env:
         return [p for p in env.split(os.pathsep) if p]
-    cfg_path = os.environ.get("LS_CONFIG")
-    if not cfg_path:
-        return []
-    try:
-        with open(cfg_path, encoding="utf-8") as fh:
-            cfg = json.load(fh)
-    except (OSError, ValueError):
-        return []
-    return [cfg[k] for k in ("source_dir", "out_root")
-            if isinstance(cfg.get(k), str) and cfg[k]]
+    return config_folders()
 
 
 def reachable(paths=None):
@@ -243,6 +267,7 @@ class Watchdog:
 def per_slide(fn, *, label):
     """Run `fn`; if it fails because the drive went away, wait and run it again."""
     global _ANNOUNCED
+    watched()                   # the config's folders known before the drive can go
     while True:
         try:
             with Watchdog(label) as wd:
@@ -309,3 +334,10 @@ def per_slide_settled(fn, *, label):
         if not disturbed_since(tok[0]):
             return out
         wait_for_drive(label)
+
+
+# Remember the study's folders now, while its file can still be read.
+try:
+    watched()
+except Exception:                                           # noqa: BLE001
+    pass

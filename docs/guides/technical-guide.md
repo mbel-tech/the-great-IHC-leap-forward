@@ -754,13 +754,13 @@ The full table, generated from the code:
 | `reformat_perk_final` | 04a Reformat pERK - masked and censored | Normalisation and curation | `04a_reformat.py` | artifact_perk, censor_perk | `index {marker0}`, `sections {marker0}` | none |  | yes |
 | `sections_dataset` | 04m Every pERK section and its fate | Normalisation and curation | `04m_sections_dataset.py` | reformat_perk_final | `sections_dataset {marker0}` | none |  | yes |
 | `worklist` | 04n Order the ROI queue | Normalisation and curation | `04n_roi_worklist.py` | reformat_perk_final, sections_dataset | `reformatted/roi_worklist.csv` | none |  | yes |
-| `rgb_perk` | 04o Colour composites - pERK | Normalisation and curation | `04o_section_rgb.py` | reformat_perk_final | `sections_rgb {marker0}`, `sections_rgb_thumb {marker0}` | none |  | yes |
-| `rgb_pcna` | 04o Colour composites - PCNA | Normalisation and curation | `04o_section_rgb.py` | reformat_pcna_final | `sections_rgb {marker1}`, `sections_rgb_thumb {marker1}` | none |  | yes |
+| `rgb_perk` | 04o Colour composites - pERK | Normalisation and curation | `04o_section_rgb.py` | reformat_perk_final | `sections_rgb {marker0}`, `sections_rgb_thumb {marker0}` | pylibCZIrw |  | yes |
+| `rgb_pcna` | 04o Colour composites - PCNA | Normalisation and curation | `04o_section_rgb.py` | reformat_pcna_final | `sections_rgb {marker1}`, `sections_rgb_thumb {marker1}` | pylibCZIrw |  | yes |
 | `provenance` | 04p Trace every scanned section | Normalisation and curation | `04p_section_provenance.py` | reformat_pcna_final, reformat_perk_final | `reformatted/section_provenance.csv`, `tissue` | none |  | yes |
 | `roi_curator` | 04l ROI curator | Normalisation and curation | `04l_roi_curator.py` | worklist, rgb_perk, rgb_pcna, atlas_rebuild | `reformatted/roi_curator.html` | none | person | yes |
 | `import_curation` | 04q Import the curator's exports | Normalisation and curation | `04q_import_curation.py` | roi_curator | `curation/ls_roi_curator_v1.json` | none |  | yes |
 | `level_curator` | 04k Level curator (superseded) | Normalisation and curation | `04k_level_curator.py` | reformat_pcna_final, atlas_extract | `reformatted/level_curator.html` | none | person | yes |
-| `roi_geometry_verify` | 05a Verify the inverse transform | Quantification | `05a_roi_geometry.py` | reformat_perk_final | none | none |  | yes |
+| `roi_geometry_verify` | 05a Verify the inverse transform | Quantification | `05a_roi_geometry.py` | reformat_perk_final | none | pylibCZIrw |  | yes |
 | `roi_geometry` | 05a Place the ROIs on the slide | Quantification | `05a_roi_geometry.py` | roi_curator | `roi_geometry {marker0}`, `roi_boxes {marker0}` | none |  | yes |
 | `tune_detection` | 05b Check signal quality and tune detection | Quantification | `05b_tune_detection.py` | roi_geometry | `qc/detection_tuning.md` | pylibCZIrw |  | yes |
 | `detect` | 05c Detect and measure nuclei | Quantification | `05c_detect_rois.py` | roi_geometry, tune_detection | `results/roi_nuclei.csv` | pylibCZIrw |  | from source only (needs StarDist) |

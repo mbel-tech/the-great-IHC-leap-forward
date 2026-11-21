@@ -12,7 +12,7 @@ what lets a single bundled interpreter be the whole application.
 The exception is a stage that reads CZI pixels (`reader` pylibCZIrw or czifile):
 a native crash as the slides drive drops would take the window with it, so it
 runs as a child process of this same interpreter, `python -m app --stage <id>
-<study.json> --child`, supervised by app/supervise.py, which starts it again if
+<study.json> --child --argv-json <argv>`, supervised by app/supervise.py, which starts it again if
 it dies while the drive is gone. Inside that child (env `LS_CHILD=1`) the stage
 runs in-process as before.
 
@@ -114,6 +114,11 @@ class Runner:
         # The running child, and the file that asks it (and its supervisor) to stop.
         self._proc = None
         self._stop_file = None
+        # A stop that came while a child run was starting, before its stop file
+        # had a name; honoured as soon as it has one.
+        self._starting = False
+        self._stop_pending = False
+        self._stop_lock = threading.Lock()
         # The stages resolve config.json relative to their own file unless
         # LS_CONFIG says otherwise. Frozen, their own file is inside _internal/
         # and config.json is beside the executable, so without this every
@@ -293,7 +298,7 @@ class Runner:
 
         if (getattr(stage, "reader", None) in CHILD_READERS
                 and not os.environ.get("LS_CHILD")):
-            return self._run_child(stage, on_line)
+            return self._run_child(stage, on_line, list(stage.argv) + list(extra_argv))
 
         argv = [stage.script] + self.expand_argv(list(stage.argv) + list(extra_argv))
         tee = _Tee(on_line)
@@ -354,11 +359,13 @@ class Runner:
 
     # ---- in a child process -----------------------------------------------
 
-    def _run_child(self, stage, on_line):
+    def _run_child(self, stage, on_line, argv):
         """Run a reader stage as a supervised child (app/supervise.py).
 
-        The child is `python -m app --stage <id> <study.json> --child`, which
-        reads the stage's options from the study itself.
+        The child is `python -m app --stage <id> <study.json> --child
+        --argv-json <argv>`; `argv` is what the in-process path would expand
+        (the options and extra arguments included), so the child runs exactly
+        the stage this was asked for.
         """
         out = []
 
@@ -370,15 +377,22 @@ class Runner:
         def track(proc):
             self._proc = proc
 
+        with self._stop_lock:
+            self._starting, self._stop_pending = True, False
         with self._lock:
             fd, stop_file = tempfile.mkstemp(prefix="ls-stop-", suffix=".flag")
             os.close(fd)
             os.remove(stop_file)          # its existence is the request
-            self._stop_file = stop_file
+            with self._stop_lock:
+                self._stop_file = stop_file
+                self._starting = False
+                if self._stop_pending:
+                    open(stop_file, "w").close()
+                    self._stop_pending = False
             t0 = time.time()
             try:
                 rc, pauses, tail = SV.run_child(
-                    SV.child_argv(stage.sid, self.config_path), line, stop_file,
+                    SV.child_argv(stage.sid, self.config_path, argv), line, stop_file,
                     env={"LS_CONFIG": self.config_path}, cwd=SV.APP_PARENT, on_proc=track)
             except BaseException as e:                      # noqa: BLE001
                 detail = "".join(traceback.format_exception(type(e), e, e.__traceback__))
@@ -386,7 +400,8 @@ class Runner:
                                    f"{type(e).__name__}: {e}\n\n{detail}")
             finally:
                 self._proc = None
-                self._stop_file = None
+                with self._stop_lock:
+                    self._stop_file = None
                 try:
                     os.remove(stop_file)
                 except OSError:
@@ -401,12 +416,15 @@ class Runner:
         supervisor's, ends on it - and terminates the child. A stage running
         in this process is not affected.
         """
-        stop_file, proc = self._stop_file, self._proc
-        if stop_file:
-            try:
-                open(stop_file, "w").close()
-            except OSError:
-                pass
+        with self._stop_lock:
+            stop_file, proc = self._stop_file, self._proc
+            if stop_file:
+                try:
+                    open(stop_file, "w").close()
+                except OSError:
+                    pass
+            elif self._starting:
+                self._stop_pending = True
         if proc is not None and proc.poll() is None:
             try:
                 proc.terminate()

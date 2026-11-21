@@ -125,8 +125,9 @@ chk("pause words: two", PR.pause_words([{"seconds": 100}, {"seconds": 80}]), "pa
 chk("pause words: one short", PR.pause_words([{"seconds": 12.0}]), "paused 1x (12 s)")
 
 print("--- child_argv ---")
-chk("python -m app --stage <id> <study> --child",
-    SV.child_argv("01", "/s/study.json")[1:], ["-m", "app", "--stage", "01", "/s/study.json", "--child"])
+chk("python -m app --stage <id> <study> --child --argv-json <list>",
+    SV.child_argv("01", "/s/study.json", ["--force", "--n", 3])[1:],
+    ["-m", "app", "--stage", "01", "/s/study.json", "--child", "--argv-json", '["--force", "--n", "3"]'])
 chk("this interpreter, normally", SV.child_argv("01", "x")[0], sys.executable)
 bindir = os.path.join(TMP, "bin")
 os.makedirs(bindir)
@@ -166,12 +167,13 @@ chk("tail is its last word", tail, "no slides found")
 print("--- abnormal death with the drive present ---")
 reset()
 rc, pauses, tail, _ = run(child("say('reading'); os._exit(3)"))
-chk("rc 3 returned, no relaunch", (rc, launches()), (3, 1))
-chk("tail names the status", "3" in tail and "reading" in tail)
+chk("rc 1 returned, no relaunch", (rc, launches()), (1, 1))
+chk("tail names the raw status", "status 3" in tail and "reading" in tail)
 if os.name == "posix":
     reset()
     rc, pauses, tail, _ = run(child("import signal; os.kill(os.getpid(), signal.SIGKILL)"))
-    chk("killed by a signal, drive present: failure, no relaunch", (rc, launches()), (-9, 1))
+    chk("killed by a signal, drive present: failure, no relaunch", (rc, launches()), (1, 1))
+    chk("...the signal named", "signal 9" in tail)
     chk("...no pauses", pauses, [])
 
 print("--- abnormal death while the drive is gone ---")
@@ -213,6 +215,57 @@ rc, pauses, tail, _ = run(child(f"os.rename({DRIVE!r}, {GONE!r}); say('bad file'
 t.join()
 chk("rc 1, no relaunch", (rc, launches()), (1, 1))
 
+print("--- rc 1 with the drive still gone says no back ---")
+reset()
+rc, pauses, tail, lines = run(child(
+    f"os.rename({DRIVE!r}, {GONE!r}); say('\\n@@drive lost {DRIVE} | slide 3'); sys.exit(1)"))
+chk("rc 1, no relaunch", (rc, launches()), (1, 1))
+chk("its pause recorded up to the end", [p["label"] for p in pauses], ["slide 3"])
+chk("no back line while the drive is gone",
+    any((PR.parse_drive(ln) or ("",))[0] == "back" for ln in lines), False)
+restore()
+
+print("--- a child that keeps dying without output is given up on ---")
+reset()
+t0 = time.time()
+rc, pauses, tail, lines = run(child(
+    f"say('\\n@@drive lost {DRIVE} | x'); os._exit(3)",
+    f"say('\\n@@drive lost {DRIVE} | x'); os._exit(3)"))
+chk("six launches: five relaunches, then failure", (rc, launches()), (1, 1 + SV.MAX_IDLE_RELAUNCHES))
+chk("the error says so", "gave up" in tail and "status 3" in tail)
+chk("...promptly", time.time() - t0 < 30)
+reset()
+rc, pauses, tail, lines = run(child(
+    f"say('working'); say('\\n@@drive lost {DRIVE} | x'); os._exit(3)",
+    "n = int(open(c).read())\n"
+    f"if n < 9: say('working'); say('\\n@@drive lost {DRIVE} | x'); os._exit(3)\n"
+    "say('done'); sys.exit(0)"))
+chk("a child that prints between deaths is not capped", (rc, launches()), (0, 9))
+
+print("--- on_line raising does not hang on a chatty child ---")
+reset()
+
+
+def boom(_line):
+    raise RuntimeError("the log pane went away")
+
+
+res = {}
+
+
+def chatty():
+    try:
+        SV.run_child(child("while True: say('x' * 200)"), boom, STOP, poll=POLL)
+    except RuntimeError as e:
+        res["err"] = str(e)
+
+
+th = threading.Thread(target=chatty, daemon=True)
+th.start()
+th.join(20)
+chk("returns (does not hang)", th.is_alive(), False)
+chk("...raising on_line's error", res.get("err"), "the log pane went away")
+
 print("--- stop during the supervisor's wait ---")
 reset()
 t = later(0.4, lambda: open(STOP, "w").close())
@@ -223,7 +276,8 @@ chk("returns promptly", time.time() - t0 < 5)
 chk("failure, no relaunch", (rc != 0, launches()), (True, 1))
 chk("error says why", tail, "stopped while the drive was disconnected")
 chk("the unfinished pause is kept", len(pauses), 1)
-chk("...and closed with a back line", any((PR.parse_drive(ln) or ("",))[0] == "back" for ln in lines))
+chk("...without a back line: the drive is still gone",
+    any((PR.parse_drive(ln) or ("",))[0] == "back" for ln in lines), False)
 restore()
 
 print("--- the Runner: a reader stage goes to the child ---")
@@ -237,7 +291,7 @@ class Reader:
 real_argv = SV.child_argv
 r = RN.Runner(os.path.join(REPO, "scripts"), PATH)
 try:
-    SV.child_argv = lambda sid, study: child(
+    SV.child_argv = lambda sid, study, argv: child(
         "say('\\n@@drive lost /mnt/s | slide 1'); say('@@drive back 4.0'); say('wrote 3'); sys.exit(0)")
     got = []
     res = r.run(Reader(), on_line=got.append)
@@ -247,19 +301,53 @@ try:
     chk("lines streamed", "wrote 3" in got)
 
     reset()
-    SV.child_argv = lambda sid, study: child("say('cannot read'); sys.exit(1)")
+    SV.child_argv = lambda sid, study, argv: child("say('cannot read'); sys.exit(1)")
     res = r.run(Reader())
     chk("a failed child is a failed stage", (res.ok, res.error), (False, "cannot read"))
     chk("pauses default to []", res.pauses, [])
 
     reset()
-    SV.child_argv = lambda sid, study: child("os._exit(7)")
+    SV.child_argv = lambda sid, study, argv: child("os._exit(7)")
     res = r.run(Reader())
     chk("no output: the error names the status", (res.ok, "7" in (res.error or "")), (False, True))
 
+    print("--- the stage argv (options, extra) reaches the child ---")
+    reset()
+    seen = {}
+
+    def spy(sid, study, argv):
+        seen["argv"] = argv
+        return child("import json; say('ARGV ' + json.dumps(json.loads(sys.argv[-1]))); sys.exit(0)") \
+            + real_argv(sid, study, argv)[1:]
+
+    SV.child_argv = spy
+
+    class WithOpts(Reader):
+        argv = ["--marker", "{marker0}", "--force"]
+
+    got = []
+    res = r.run(WithOpts(), on_line=got.append, extra_argv=["--limit", "2"])
+    chk("child_argv gets stage.argv + extra_argv, unexpanded",
+        seen.get("argv"), ["--marker", "{marker0}", "--force", "--limit", "2"])
+    chk("...and the child's command line carries it",
+        'ARGV ["--marker", "{marker0}", "--force", "--limit", "2"]' in got)
+    chk("...and it ran", res.ok, True)
+
+    print("--- a stop before the run has its stop file is not lost ---")
+    reset()
+    SV.child_argv = lambda sid, study, argv: child("say('ran'); sys.exit(0)")
+    r._lock.acquire()
+    th = threading.Thread(target=lambda: seen.update(res=r.run(Reader())))
+    th.start()
+    time.sleep(0.3)
+    r.stop()                       # the run is waiting on the lock: no stop file yet
+    r._lock.release()
+    th.join(20)
+    chk("the pending stop is honoured", (seen["res"].ok, launches()), (False, 0))
+
     print("--- Runner.stop() during the child's own pause ---")
     reset()
-    SV.child_argv = lambda sid, study: child(
+    SV.child_argv = lambda sid, study, argv: child(
         f"os.rename({DRIVE!r}, {GONE!r}); say('\\n@@drive lost {DRIVE} | slide 5'); "
         "time.sleep(60)")
     t = later(0.8, r.stop)
@@ -276,7 +364,7 @@ try:
 
     print("--- Runner.stop() with the drive there ---")
     reset()
-    SV.child_argv = lambda sid, study: child("say('working'); time.sleep(60)")
+    SV.child_argv = lambda sid, study, argv: child("say('working'); time.sleep(60)")
     t = later(0.8, r.stop)
     t0 = time.time()
     res = r.run(Reader())
@@ -284,10 +372,11 @@ try:
     chk("ends at once, failed", (time.time() - t0 < 10, res.ok), (True, False))
     chk("no pauses", res.pauses, [])
     chk("says it was stopped", "stopped" in (res.error or ""))
+    chk("...with the raw status", "status" in (res.error or ""))
 
     print("--- the next run is not stopped by the last one's stop ---")
     reset()
-    SV.child_argv = lambda sid, study: child("say('fine'); sys.exit(0)")
+    SV.child_argv = lambda sid, study, argv: child("say('fine'); sys.exit(0)")
     chk("ok", r.run(Reader()).ok, True)
 finally:
     SV.child_argv = real_argv

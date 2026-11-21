@@ -804,14 +804,14 @@ subprocess (the exception, stages that read CZI pixels, is below). The installed
 5. Restores `sys.argv` and the working directory.
 
 **Stages that read CZI pixels run in a child process.** A stage whose `reader` is `pylibCZIrw` or
-`czifile` is started as `python -m app --stage <id> <study.json> --child` with the app's own interpreter
+`czifile` is started as `python -m app --stage <id> <study.json> --child --argv-json <argv>` (the stage's argv with its options, which the child runs as given, recording nothing itself) with the app's own interpreter
 (the console `python.exe` beside a `pythonw.exe`), because a crash inside native libCZI as the slides
 drive drops would otherwise close the window. `app/supervise.py` watches it: its output reaches the log
 pane line by line as before, and its `@@drive lost` / `@@drive back` lines (`ls_drive.py`)
 become the run's `pauses`, recorded with the run in the study file and shown in the run history as
 "ok, paused 2x (3 min)". Exit status 0, 1, 2 and 130 are the stage's own answers; any other status, or
 death by a signal, while a watched folder is unreachable means the supervisor waits for the drive and
-starts the stage again, and its resumability skips what is done. With the drive there, that death is an
+starts the stage again with the same argv, and its resumability skips what is done; a child that keeps dying without printing anything is restarted at most 5 times in a row. With the drive there, that death is an
 ordinary failure. `Runner.stop()` creates the stop file (`LS_STOP_FILE`) and ends the child; a stop
 during a pause is recorded as a failed run, "stopped while the drive was disconnected", with its pauses.
 Inside the child (`LS_CHILD=1`) the stage runs in-process as above.

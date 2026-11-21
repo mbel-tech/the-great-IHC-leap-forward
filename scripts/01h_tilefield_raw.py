@@ -48,6 +48,22 @@ if _HERE not in sys.path:
 # the whole process. Imported, not re-implemented: this block used to be four
 # lines copy-pasted into every stage.
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
+import ls_io as IO  # noqa: E402
+
+# The one shared ls_drive, or None (then this stage behaves as it did before):
+# a file read that fails because the USB drive went away waits for it and is
+# read again from the start.
+DR = IO.drive_module()
+
+
+def per_slide(fn, *, label):
+    """Run one self-contained file unit, redoing it after a dropped drive."""
+    return DR.per_slide(fn, label=label) if DR is not None else fn()
+
+
+def wait_if_gone(label):
+    """Wait while a watched folder is unreachable; 0.0 at once otherwise."""
+    return DR.wait_if_gone(label) if DR is not None else 0.0
 
 SOURCE_DIR = CONFIG["source_dir"]
 OUT_ROOT = CONFIG["out_root"]
@@ -86,7 +102,18 @@ def collect_tiles(paths, tiles_per_file, rng, failed=None):
     failed = failed if failed is not None else []
     stacks = defaultdict(list)
     for i, (path, marker) in enumerate(paths, 1):
-        try:
+        # Which tiles are picked comes from `rng`, shared across files. A redo
+        # after a dropped drive restores the state it had when this file
+        # began, so it picks the very same tiles - and so does every later
+        # file - as an uninterrupted run.
+        state = rng.getstate()
+        # This attempt's tiles, started afresh by every attempt and added to
+        # `stacks` only once it is over - so a redo cannot add a tile twice.
+        got = []
+
+        def unit(path=path, marker=marker, state=state):
+            rng.setstate(state)
+            got.clear()
             with czifile.CziFile(path, memmap=True) as czi:
                 base = [e for e in czi.subblock_directory if not e.is_pyramid]
                 by_channel = defaultdict(list)
@@ -105,10 +132,23 @@ def collect_tiles(paths, tiles_per_file, rng, failed=None):
                             continue
                         if np.median(arr) < MIN_TILE_MEDIAN:
                             continue
-                        stacks[name].append(block_median(arr, TILE_N))
+                        got.append((name, block_median(arr, TILE_N)))
+
+        error = None
+        try:
+            per_slide(unit, label=os.path.basename(path))
         except Exception as exc:  # noqa: BLE001
-            print(f"  !! {os.path.basename(path)}: {exc}")
-            failed.append((os.path.basename(path), str(exc)))
+            if DR is not None and isinstance(exc, DR.Stopped):
+                raise
+            error = exc
+        # A file that fails with its folder reachable is the file's own
+        # failure, and the tiles it gave before failing stay in the sample,
+        # as they always did.
+        for name, reduced in got:
+            stacks[name].append(reduced)
+        if error is not None:
+            print(f"  !! {os.path.basename(path)}: {error}")
+            failed.append((os.path.basename(path), str(error)))
             continue
         print(f"\r  [{i}/{len(paths)}] {os.path.basename(path):<20} "
               f"{ {k: len(v) for k, v in stacks.items()} }", end="")
@@ -189,6 +229,9 @@ def main():
     absent = []
     for r in rows:
         p = os.path.join(SOURCE_DIR, r["file"])
+        # A file "absent" because the drive has just dropped is waited for:
+        # leaving it out would change the pool, and so which files are sampled.
+        wait_if_gone(r["file"])
         if os.path.exists(p):
             by_marker[r["marker_channel"]].append((p, r["marker_channel"]))
         else:
@@ -222,7 +265,8 @@ def main():
         raise SystemExit("no tiles collected" + (": " + "; ".join(why) if why else ""))
 
     print("\nderiving the stitched-domain mapping from real tile geometry ...")
-    mapping = stitch_map(chosen[0][0])
+    mapping = per_slide(lambda: stitch_map(chosen[0][0]),
+                        label=f"{os.path.basename(chosen[0][0])} (tile geometry)")
     if mapping is None:
         print("  !! could not derive mapping; writing tile-domain field only")
     else:

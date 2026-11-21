@@ -290,6 +290,173 @@ os.environ.pop("LS_STOP_FILE")
 os.remove(stop)
 chk("the stop file stops 01k", stopped)
 
+# ===================================================================== 01h
+
+print()
+print("--- 01h: the drive drops mid-file ---")
+H = load_stage("01h_tilefield_raw.py")
+# A small tile grid, so a run takes a moment rather than half a gigabyte: the
+# stage reads these at call time. 204/12 = 17, 180/12 = 15, as 2040 and 1836.
+H.TILE_PX, H.PITCH_PX = 204, 180
+H.TILE_N, H.PITCH_N = H.TILE_PX // H.FIELD_DIVISOR, H.PITCH_PX // H.FIELD_DIVISOR
+COUNT = {"open": 0, "asarray": 0}
+
+
+class _Entry:
+    is_pyramid = False
+    dims = ("C", "Y", "X")
+
+    def __init__(self, name, idx, c, scene, x, y, m):
+        self.name, self.idx = name, idx
+        self.start = (c, y, x)
+        self.scene_index, self.mosaic_index = scene, m
+
+    def asimage(self, czi):
+        return self
+
+    def asarray(self):
+        COUNT["asarray"] += 1
+        maybe_drop(("asarray", COUNT["asarray"]), self.name)
+        # Different for every tile, so which tiles were picked shows in the field.
+        return pixels(self.name, self.idx, shape=(H.TILE_PX, H.TILE_PX)) + np.uint16(500)
+
+
+class _CziFile:
+    def __init__(self, path, memmap=True):
+        if not os.path.exists(path):
+            raise FileNotFoundError(path)
+        COUNT["open"] += 1
+        maybe_drop(("open", COUNT["open"]), path)
+        name = os.path.basename(path)
+        self.subblock_directory = []
+        for scene in range(4):
+            for gy in range(3):
+                for gx in range(3):
+                    for c in (0, 1):
+                        self.subblock_directory.append(_Entry(
+                            name, len(self.subblock_directory), c, scene,
+                            gx * H.PITCH_PX, gy * H.PITCH_PX, gy * 3 + gx))
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+class _Czifile:
+    CziFile = _CziFile
+
+
+H.czifile = _Czifile
+HA, HB, HC = "LS06_s01a.czi", "LS06_s02a.czi", "LS06_s03a.czi"
+for f in (HA, HB):
+    open(os.path.join(STUDY.source_dir, f), "wb").close()
+MANIFEST_FILES = os.path.join(STUDY.out_root, "manifest", "manifest_files.csv")
+write_csv(MANIFEST_FILES, [{"file": f, "marker_channel": marker, "is_redundant_copy": "0"}
+                           for f in (HA, HB)])
+H_ARGV = ["01h", "--files", "2", "--tiles", "30"]
+
+
+def h_clear():
+    shutil.rmtree(H.FIELD_DIR, ignore_errors=True)
+    COUNT.update(open=0, asarray=0)
+
+
+def h_snapshot():
+    # The numbers themselves; the PNG figure carries matplotlib's metadata.
+    return snapshot(sorted(glob.glob(os.path.join(H.FIELD_DIR, "*.npy"))
+                           + glob.glob(os.path.join(H.FIELD_DIR, "*.tif"))))
+
+
+h_clear()
+rc, text = run(H, H_ARGV)
+chk("uninterrupted 01h exits zero", rc, 0)
+base_h = h_snapshot()
+chk("...wrote both channels' fields", len([k for k in base_h if k.endswith(".npy")]), 4)
+
+h_clear()
+DROP["at"] = ("asarray", 10)              # part way through the first file
+rc, text = run(H, H_ARGV)
+settle()
+chk("the drop fired", DROP["at"], None)
+chk("01h with the drive dropped exits zero", rc, 0)
+chk("...says the drive came back", "@@drive back" in text)
+got = h_snapshot()
+chk("...writes the same files", sorted(got), sorted(base_h))
+chk("...byte for byte (same tiles picked)", [k for k in base_h if got.get(k) != base_h[k]], [])
+chk("...no .tmp left", tmp_left(), [])
+
+print()
+print("--- 01h: a drop while the stitch geometry is read ---")
+h_clear()
+DROP["at"] = ("open", 3)                  # 2 sampled files, then stitch_map
+rc, text = run(H, H_ARGV)
+settle()
+chk("the drop fired", DROP["at"], None)
+chk("exits zero", rc, 0)
+chk("...says the drive came back", "@@drive back" in text)
+got = h_snapshot()
+chk("...byte for byte", [k for k in base_h if got.get(k) != base_h[k]], [])
+
+print()
+print("--- 01h: the folder is gone while the manifest's files are looked for ---")
+h_clear()
+t = vanish_for(0.3)
+rc, text = run(H, H_ARGV)
+t.join(5)
+chk("exits zero after waiting", rc, 0)
+chk("...says the drive came back", "@@drive back" in text)
+got = h_snapshot()
+chk("...byte for byte", [k for k in base_h if got.get(k) != base_h[k]], [])
+
+print()
+print("--- 01h: a file that fails with the folder there is still a failure ---")
+write_csv(MANIFEST_FILES, [{"file": f, "marker_channel": marker, "is_redundant_copy": "0"}
+                           for f in (HA, HB, HC)])
+open(os.path.join(STUDY.source_dir, HC), "wb").close()
+real_init = _CziFile.__init__
+
+
+def _broken_c(self, path, memmap=True):
+    if os.path.basename(path) == HC:
+        raise RuntimeError("truncated subblock directory")
+    real_init(self, path, memmap)
+
+
+_CziFile.__init__ = _broken_c
+h_clear()
+rc, text = run(H, ["01h", "--files", "3", "--tiles", "30"])
+_CziFile.__init__ = real_init
+chk("exits 1", rc, 1)
+chk("...naming the broken file", HC in [ln for ln in text.splitlines() if ln.strip()][-1])
+chk("...without waiting for a drive that never left", "@@drive" in text, False)
+os.remove(os.path.join(STUDY.source_dir, HC))
+write_csv(MANIFEST_FILES, [{"file": f, "marker_channel": marker, "is_redundant_copy": "0"}
+                           for f in (HA, HB)])
+
+print()
+print("--- 01h: Stopped is not swallowed as a per-file failure ---")
+h_clear()
+open(stop, "wb").close()
+os.environ["LS_STOP_FILE"] = stop
+DROP["at"] = ("asarray", 5)
+stopped = False
+# collect_tiles itself, on one file: through main(), the stitch-geometry read
+# that follows would raise Stopped too and hide a per-file handler that
+# swallowed it.
+try:
+    import random
+    with contextlib.redirect_stdout(io.StringIO()):
+        H.collect_tiles([(os.path.join(STUDY.source_dir, HA), marker)], 30,
+                        random.Random(H.SEED), [])
+except DR.Stopped:
+    stopped = True
+settle()
+os.environ.pop("LS_STOP_FILE")
+os.remove(stop)
+chk("the stop file stops 01h", stopped)
+
 print()
 print("FAILURES" if fails else "ALL PASS")
 sys.exit(1 if fails else 0)

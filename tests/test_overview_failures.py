@@ -174,5 +174,206 @@ chk("...header only", rows, [])
 chk("...with its columns", bool(keys and "scene_uid" in keys and "file" in keys))
 
 print()
+print("--- the drive drops mid-file: 01 waits, redoes the file, same numbers ---")
+# The slides are on a USB drive that goes away rather than failing a read. A
+# read that raises while the slides folder is unreachable is not the file's
+# fault: 01 waits for the folder and redoes the whole file, and what it writes
+# must be byte for byte what an uninterrupted run writes - no duplicate rows,
+# no section recorded as failed. A file that is missing while the folder IS
+# reachable is still an ordinary failure.
+import glob  # noqa: E402
+import shutil  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
+
+DR = OV.IO.drive_module()
+chk("ls_drive loads", DR is not None)
+DR.POLL = 0.05
+os.environ["LS_WATCH"] = STUDY.source_dir
+os.environ["LS_PROGRESS"] = "1"
+
+FA, FB, FC = "LS02_s01a.czi", "LS02_s02a.czi", "LS02_s03a.czi"
+for f in (FA, FB):
+    open(os.path.join(STUDY.source_dir, f), "wb").close()
+drop_scenes = scene_rows(FA, "1") + scene_rows(FB, "2")
+# One drop: (file, scene) whose read raises the first time, with the folder gone.
+DROP = {"at": None}
+
+
+def _vanish_for(seconds):
+    """Rename the slides folder away now; a thread puts it back later."""
+    gone = STUDY.source_dir + ".gone"
+    os.rename(STUDY.source_dir, gone)
+
+    def back():
+        time.sleep(seconds)
+        os.rename(gone, STUDY.source_dir)
+    t = threading.Thread(target=back, daemon=True)
+    t.start()
+    return t
+
+
+class _BigDoc:
+    """Scenes big enough to sample (>= 500 tissue pixels at 5.2 um/px), and
+    pixels that differ per file, scene and channel, so a byte comparison means
+    something."""
+    scenes_bounding_rectangle = {0: _Rect(0, 0, 4000, 3000), 1: _Rect(5000, 0, 4000, 3000)}
+
+    def __init__(self, path):
+        self.path = path
+        if not os.path.exists(path):
+            raise FileNotFoundError(path)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self, roi, plane, scene, zoom):
+        name = os.path.basename(self.path)
+        if DROP["at"] == (name, scene):
+            DROP["at"] = None
+            DROP["thread"] = _vanish_for(0.3)
+            raise OSError(5, "Input/output error", self.path)
+        h, w = int(round(roi[3] * zoom)), int(round(roi[2] * zoom))
+        seed = int(hashlib.sha1(f"{name}|{scene}|{plane['C']}".encode()).hexdigest()[:8], 16)
+        a = np.random.default_rng(seed).integers(300, 900, (h, w)).astype(np.uint16)
+        a[h // 4:3 * h // 4, w // 4:3 * w // 4] += np.uint16(15000 + 1000 * plane["C"])
+        a[h // 3, w // 3:w // 2] = 65535          # a clipped run for the mask
+        return a[None, :, :]
+
+
+class _BigPyCzi:
+    @staticmethod
+    def open_czi(path):
+        return _BigDoc(path)
+
+
+import hashlib  # noqa: E402
+OV.pyczi = _BigPyCzi
+
+
+def clear_outputs():
+    for p in (OV.QC_CSV, OV.SAT_RAW_CSV, FAIL_CSV):
+        if os.path.exists(p):
+            os.remove(p)
+    for d in (OV.OVERVIEW_DIR, OV.CENSOR_RAW_DIR):
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def snapshot():
+    """Every output 01 wrote, as bytes, keyed by path under out_root."""
+    out = {}
+    for p in [OV.QC_CSV, OV.SAT_RAW_CSV, OV.RANGES_PATH] + sorted(
+            glob.glob(os.path.join(OV.OVERVIEW_DIR, "**", "*.png"), recursive=True)
+            + glob.glob(os.path.join(OV.CENSOR_RAW_DIR, "*.png"))):
+        if not os.path.exists(p):
+            continue
+        with open(p, "rb") as fh:
+            out[os.path.relpath(p, STUDY.out_root)] = fh.read()
+    return out
+
+
+def tmp_left():
+    return sorted(glob.glob(os.path.join(STUDY.out_root, "**", "*.tmp"), recursive=True))
+
+
+write_manifest(drop_scenes)
+clear_outputs()
+rc, text = run_main()
+chk("uninterrupted run exits zero", rc, 0)
+base = snapshot()
+with open(OV.QC_CSV, newline="", encoding="utf-8") as fh:
+    chk("...and exported every section", sorted(r["scene_uid"] for r in csv.DictReader(fh)),
+        sorted(r["scene_uid"] for r in drop_scenes))
+
+clear_outputs()
+DROP["at"] = (FA, 1)
+rc, text = run_main()
+DROP.get("thread") and DROP["thread"].join(5)
+chk("the drop fired", DROP["at"], None)
+chk("a run with the drive dropped exits zero", rc, 0)
+chk("...says the drive came back", "@@drive back" in text)
+got = snapshot()
+chk("...writes the same files", sorted(got), sorted(base))
+chk("...byte for byte", [k for k in base if got.get(k) != base[k]], [])
+keys, rows = read_failures()
+chk("...overview_failures.csv header only", rows, [])
+with open(OV.QC_CSV, newline="", encoding="utf-8") as fh:
+    uids = [r["scene_uid"] for r in csv.DictReader(fh)]
+chk("...no duplicate rows", len(uids), len(set(uids)))
+chk("...no .tmp left", tmp_left(), [])
+
+print()
+print("--- a drop, and a file missing while the folder is there ---")
+clear_outputs()
+write_manifest(drop_scenes + scene_rows(FC, "3"))
+DROP["at"] = (FA, 1)
+rc, text = run_main()
+DROP.get("thread") and DROP["thread"].join(5)
+chk("the drop fired", DROP["at"], None)
+chk("main() exits non-zero", rc != 0)
+keys, rows = read_failures()
+chk("only the missing file is listed", sorted(r["scene_uid"] for r in rows or []),
+    sorted(r["scene_uid"] for r in scene_rows(FC, "3")))
+got = snapshot()
+chk("...the dropped file's outputs are as uninterrupted",
+    [k for k in base if got.get(k) != base[k] and "focus" not in k and "saturation" not in k],
+    [])
+
+print()
+print("--- the folder is gone before a CZI is looked for: wait, not 'missing' ---")
+clear_outputs()
+write_manifest(drop_scenes)
+t = _vanish_for(0.3)
+rc, text = run_main()
+t.join(5)
+chk("exits zero", rc, 0)
+chk("...after waiting for the drive", "@@drive back" in text)
+got = snapshot()
+chk("...byte for byte as uninterrupted", [k for k in base if got.get(k) != base[k]], [])
+
+print()
+print("--- --force: the drop lands while the display ranges are sampled ---")
+clear_outputs()
+rc, text = run_main("--force")
+chk("uninterrupted --force exits zero", rc, 0)
+base_f = snapshot()
+clear_outputs()
+os.remove(OV.RANGES_PATH)
+DROP["at"] = (FB, 0)                  # sampling reads FB's scene 0 before export does
+rc, text = run_main("--force")
+DROP.get("thread") and DROP["thread"].join(5)
+chk("the drop fired", DROP["at"], None)
+chk("a --force run with the drive dropped exits zero", rc, 0)
+chk("...says the drive came back", "@@drive back" in text)
+got = snapshot()
+chk("...same display ranges and outputs, byte for byte",
+    [k for k in base_f if got.get(k) != base_f[k]], [])
+chk("...no .tmp left", tmp_left(), [])
+
+print()
+print("--- Stopped is not swallowed as a per-file failure ---")
+clear_outputs()
+stop = os.path.join(STUDY.root if hasattr(STUDY, "root") else os.path.dirname(STUDY.out_root),
+                    "STOP")
+open(stop, "wb").close()
+os.environ["LS_STOP_FILE"] = stop
+# One file only: with a second one, the wait before ITS exists check would
+# raise Stopped too and hide a per-file handler that swallowed the first.
+write_manifest(scene_rows(FA, "1"))
+DROP["at"] = (FA, 0)
+stopped = False
+try:
+    run_main()
+except DR.Stopped:
+    stopped = True
+DROP.get("thread") and DROP["thread"].join(5)
+os.environ.pop("LS_STOP_FILE")
+os.remove(stop)
+chk("the stop file stops the stage", stopped)
+
+print()
 print("FAILURES" if fails else "ALL PASS")
 sys.exit(1 if fails else 0)

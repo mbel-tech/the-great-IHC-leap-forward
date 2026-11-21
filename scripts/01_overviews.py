@@ -52,6 +52,28 @@ import ls_io as IO  # noqa: E402
 import ls_jsonio as JS  # noqa: E402
 import ls_reagent_controls as RC  # noqa: E402
 
+# The one shared ls_drive (None when it cannot be loaded, and then every
+# helper below behaves as this stage did before it existed): a slide read that
+# fails because the USB drive went away waits for it and is redone.
+DR = IO.drive_module()
+
+
+def per_slide(fn, *, label):
+    """Run one self-contained slide unit, redoing it after a dropped drive."""
+    return DR.per_slide(fn, label=label) if DR is not None else fn()
+
+
+def wait_if_gone(label):
+    """Wait while a watched folder is unreachable; 0.0 at once otherwise."""
+    return DR.wait_if_gone(label) if DR is not None else 0.0
+
+
+def is_stop(exc):
+    """True for ls_drive.Stopped, which a per-file `except Exception` must not
+    record as that file's failure: the operator asked the stage to stop."""
+    return DR is not None and isinstance(exc, DR.Stopped)
+
+
 SOURCE_DIR = CONFIG["source_dir"]
 OUT_ROOT = CONFIG["out_root"]
 BASE_PX_UM = CONFIG["pixel_size_um"]
@@ -465,22 +487,35 @@ def sample_display_ranges(scenes, fields, zoom, force, narrowed=False):
     done = 0
     for fname, rows in by_file.items():
         path = os.path.join(SOURCE_DIR, fname)
+        # A CZI that is "missing" because the drive dropped is waited for, not
+        # skipped: a skipped file changes the ranges every section is drawn with.
+        wait_if_gone(fname)
         if not os.path.exists(path):
             continue
-        with pyczi.open_czi(path) as czidoc:
-            rects = czidoc.scenes_bounding_rectangle
-            for r in rows:
-                s = int(r["scene_index"])
-                if s not in rects:
-                    continue
-                dapi = apply_tile_field(read_scene(czidoc, rects[s], 0, zoom, scene=s), fields.get(0), 1 / zoom)
-                mark = apply_tile_field(read_scene(czidoc, rects[s], 1, zoom, scene=s), fields.get(1), 1 / zoom)
-                mask = dapi > tissue_threshold(dapi)
-                if mask.sum() < 500:
-                    continue
-                values.setdefault("DAPI", []).append(dapi[mask][::7])
-                values.setdefault(r["marker_channel"], []).append(mark[mask][::7])
-                done += 1
+
+        def unit(path=path, rows=rows):
+            # Self-contained, so a redo after a dropped drive starts the file
+            # over: the chunks are merged only once the whole file is read.
+            chunks = []
+            with pyczi.open_czi(path) as czidoc:
+                rects = czidoc.scenes_bounding_rectangle
+                for r in rows:
+                    s = int(r["scene_index"])
+                    if s not in rects:
+                        continue
+                    dapi = apply_tile_field(read_scene(czidoc, rects[s], 0, zoom, scene=s), fields.get(0), 1 / zoom)
+                    mark = apply_tile_field(read_scene(czidoc, rects[s], 1, zoom, scene=s), fields.get(1), 1 / zoom)
+                    mask = dapi > tissue_threshold(dapi)
+                    if mask.sum() < 500:
+                        continue
+                    chunks.append(("DAPI", dapi[mask][::7]))
+                    chunks.append((r["marker_channel"], mark[mask][::7]))
+            return chunks
+
+        chunks = per_slide(unit, label=f"{fname} (display range sample)")
+        for name, chunk in chunks:
+            values.setdefault(name, []).append(chunk)
+        done += len(chunks) // 2
         print(f"\r  sampled {done}/{len(sample)}", end="")
     print()
 
@@ -594,6 +629,9 @@ def export(scenes, fields, ranges, ceilings, zoom, limit, force):
         if limit and exported >= limit:
             break
         path = os.path.join(SOURCE_DIR, fname)
+        # Before the exists check: a CZI on a drive that has just dropped is
+        # waited for, not recorded as missing.
+        wait_if_gone(fname)
         if not os.path.exists(path):
             failed += len(rows)
             record_failures(failures, fname, rows,
@@ -607,18 +645,26 @@ def export(scenes, fields, ranges, ceilings, zoom, limit, force):
         d_lo, d_hi = channel_range(ranges, "DAPI")
         m_lo, m_hi = channel_range(ranges, marker)
 
-        done_here = set()
-        try:
+        # One file is the unit a dropped drive redoes. Everything it measures
+        # goes into `acc`, which each attempt starts afresh; nothing reaches
+        # qc_rows, sat_raw or the failure list until the attempt is over. So a
+        # redo cannot duplicate a row, and an ordinary failure on the fifth
+        # scene still keeps the first four, exactly as before. The PNGs are
+        # written to their final names atomically and simply overwritten.
+        acc = {}
+
+        def unit(path=path, rows=rows, fname=fname, marker=marker, ceiling=ceiling,
+                 out_dir=out_dir, d_lo=d_lo, d_hi=d_hi, m_lo=m_lo, m_hi=m_hi):
+            acc.clear()
+            acc.update(qc={}, sat={}, missing=[])
             with pyczi.open_czi(path) as czidoc:
                 rects = czidoc.scenes_bounding_rectangle
                 for r in rows:
-                    if limit and exported >= limit:
+                    if limit and exported + len(acc["qc"]) >= limit:
                         break
                     s = int(r["scene_index"])
                     if s not in rects:
-                        failed += 1
-                        done_here.add(r["scene_uid"])
-                        record_failures(failures, fname, [r], f"scene {s} not in the CZI")
+                        acc["missing"].append(r)
                         continue
 
                     dapi_raw = read_scene(czidoc, rects[s], 0, zoom, scene=s)
@@ -636,7 +682,7 @@ def export(scenes, fields, ranges, ceilings, zoom, limit, force):
                     # The raw clipping mask 04j censors from, written here from
                     # the planes just read rather than by a second pass over
                     # every CZI in 01k.
-                    sat_raw[r["scene_uid"]] = raw_clip_record(
+                    acc["sat"][r["scene_uid"]] = raw_clip_record(
                         r, fname, rects[s], s, zoom, dapi_raw, mark_raw, mark, ceiling)
                     h, w = dapi.shape
                     um_px = BASE_PX_UM / zoom
@@ -657,11 +703,11 @@ def export(scenes, fields, ranges, ceilings, zoom, limit, force):
                     # Blue nuclei, yellow marker: the most separable pairing and
                     # it survives the common forms of colour blindness.
                     rgb = np.dstack([m8, m8, d8])
-                    Image.fromarray(d8).save(os.path.join(out_dir, f"{uid}_DAPI.png"))
-                    Image.fromarray(m8).save(os.path.join(out_dir, f"{uid}_MARK.png"))
-                    Image.fromarray(rgb).save(os.path.join(out_dir, f"{uid}_RGB.png"))
+                    IO.save_image(d8, os.path.join(out_dir, f"{uid}_DAPI.png"))
+                    IO.save_image(m8, os.path.join(out_dir, f"{uid}_MARK.png"))
+                    IO.save_image(rgb, os.path.join(out_dir, f"{uid}_RGB.png"))
 
-                    qc_rows[uid] = {
+                    acc["qc"][uid] = {
                         "scene_uid": uid, "file": fname, "animal": r["animal"],
                         "slide": r["slide"], "variant": r["variant"],
                         "marker_channel": marker, "scene_index": s,
@@ -686,14 +732,29 @@ def export(scenes, fields, ranges, ceilings, zoom, limit, force):
                         "reader": "pylibCZIrw",
                         "display_ranges_id": rid,
                     }
-                    exported += 1
-                    done_here.add(uid)
+
+        error = None
+        try:
+            per_slide(unit, label=fname)
         except Exception as exc:  # noqa: BLE001 - one bad file must not kill the run
+            if is_stop(exc):
+                raise
+            error = exc
+        # The attempt's results, in scene order - all of them on success, the
+        # scenes before the failure otherwise (as before this was a unit).
+        for r in acc.get("missing", []):
+            failed += 1
+            record_failures(failures, fname, [r], f"scene {r['scene_index']} not in the CZI")
+        sat_raw.update(acc.get("sat", {}))
+        qc_rows.update(acc.get("qc", {}))
+        exported += len(acc.get("qc", {}))
+        if error is not None:
             # Only the sections not already written or already recorded: a file
             # that fails on its fifth scene still exported the first four.
+            done_here = set(acc.get("qc", {})) | {r["scene_uid"] for r in acc.get("missing", [])}
             lost = [r for r in rows if r["scene_uid"] not in done_here]
             failed += len(lost)
-            record_failures(failures, fname, lost, f"{type(exc).__name__}: {exc}")
+            record_failures(failures, fname, lost, f"{type(error).__name__}: {error}")
 
         # Checkpoint per file: this runs unattended against an external drive
         # that has already dropped writes once.

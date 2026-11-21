@@ -18,6 +18,9 @@ say the slides drive went and came back. `parse_drive` reads them, wherever on t
 line they are - a `\r  12/454` counter has no newline after it, so a marker can
 arrive glued to one - and `parse` never takes their numbers for a count.
 
+DriveFlag holds the window's view of one drop (when to flag it, the banner's
+words, the line logged when it is back), Qt-free like the rest.
+
 The time arithmetic is here too, Qt-free so it can be tested without a window:
 how long a running stage has left (TimeLeft, left_words) and how long a stage's
 last complete run took (last_took, last_run_words).
@@ -77,6 +80,83 @@ def parse_drive(line):
     if m.group("secs") is not None:
         return ("back", float(m.group("secs")))
     return ("lost", m.group("folder"), m.group("label"))
+
+
+# How long a drop lasts before the window flags it: a blip that is over in a
+# few seconds gets only its line in the log.
+DRIVE_FLAG_AFTER = 10.0
+
+
+def drive_lost_words(folder, label):
+    """The banner's words for a drive that has been gone for a while."""
+    return (f"Slides drive disconnected ({folder}). Paused at {label} - will resume "
+            "automatically when it is back. If it comes back under another drive letter, "
+            "stop the run and fix the study's folders.")
+
+
+class DriveFlag:
+    """One dropped drive as the window sees it, Qt-free; times are passed in.
+
+    `lost` starts a drop (a second `lost` before `back` is the same drop, from
+    the watchdog and then the read that failed, and only updates what is
+    paused); `due` says when the banner should go up; `flag` puts it up;
+    `back` and `ended` close the drop. `notified` is the window's own note of
+    whether the system notification was shown, so the "back" one follows only
+    a shown one.
+    """
+
+    def __init__(self, after=DRIVE_FLAG_AFTER):
+        self.after = after
+        self._reset()
+
+    def _reset(self):
+        self.since = None
+        self.folder = self.label = None
+        self.flagged = False
+        self.notified = False
+
+    def lost(self, t, folder, label):
+        """True if this starts a new drop (start the wait), False if one is on."""
+        self.folder, self.label = folder, label
+        if self.since is not None:
+            return False
+        self.since = t
+        return True
+
+    def left(self, t):
+        """Seconds until the flag is due; None with no unflagged drop."""
+        if self.since is None or self.flagged:
+            return None
+        return max(0.0, self.after - (t - self.since))
+
+    def due(self, t):
+        return self.left(t) == 0.0
+
+    def flag(self):
+        """Mark the drop as shown; the banner's words."""
+        self.flagged = True
+        return drive_lost_words(self.folder, self.label)
+
+    def back(self, t, seconds=None):
+        """(log line, was flagged, was notified); the drop is over.
+
+        `seconds` is what the stage said it waited; without it, the time since
+        the lost line.
+        """
+        if seconds is None:
+            seconds = t - self.since if self.since is not None else 0.0
+        line = f"drive back after {duration_words(seconds)}"
+        if self.label:
+            line += f", redoing {self.label}"
+        out = (line, self.flagged, self.notified)
+        self._reset()
+        return out
+
+    def ended(self):
+        """The stage ended, back or not: forget the drop. Whether it was flagged."""
+        was = self.flagged
+        self._reset()
+        return was
 
 
 def pause_words(pauses):

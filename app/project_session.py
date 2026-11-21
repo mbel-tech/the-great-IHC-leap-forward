@@ -462,7 +462,7 @@ class ProjectSession(QObject):
                 project.record_run(*args, wait=False, **kw)
             except LP.DriveGone:
                 return                  # still gone: try again on the next tick
-            except LP.ProjectError:
+            except (LP.ProjectError, OSError):
                 pass                    # not the drive: as record_run would have said, dropped
             self._pending.pop(0)
             if project is self.project:

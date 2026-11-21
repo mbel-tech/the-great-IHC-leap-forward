@@ -180,6 +180,19 @@ if QApplication is not None:
     chk("...the error kept", LP.Project.open(path).block["runs"][-1].get("error"),
         "stopped while the drive was disconnected")
 
+    # A pending record that then fails for another reason (an OSError with the
+    # drive back) is dropped, not retried on every tick for ever.
+    class Broken:
+        def record_run(self, *a, **k):
+            raise OSError(13, "Permission denied")
+    s._pending.append((Broken(), ("05c", True, "a", "b"), {}))
+    s._retry.start()
+    end = time.time() + 5
+    while s.pending_runs() and time.time() < end:
+        app.processEvents()
+        time.sleep(0.02)
+    chk("a pending record failing with an OSError is dropped", s.pending_runs(), 0)
+
 shutil.rmtree(TMP, ignore_errors=True)
 print()
 print("ALL PASS" if not failures else f"{len(failures)} FAILED")

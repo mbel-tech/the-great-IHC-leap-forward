@@ -11,3 +11,7 @@ PySide6<6.10
 PySide6-Essentials<6.10
 PySide6-Addons<6.10
 shiboken6<6.10
+#
+# opencv-python-headless 5.1 publishes Apple Silicon wheels for macOS 15 only
+# (cv2.abi3.so and its .dylibs); 5.0.0.93's wheel is tagged macOS 13.
+opencv-python-headless<5.1

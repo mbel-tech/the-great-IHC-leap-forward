@@ -714,6 +714,21 @@ measures the batch and not the reagent. The 06c workbook carries the table as a 
 sheet; with a no-primary control reported, its limitation text points there instead of saying that
 absolute rates are not defensible.
 
+*Corrected positive rate (provisional).* With a no-primary control measured, stage 06a also writes
+`results/roi_corrected.csv`: for each stained section, marker and region, the raw positive rate pooled
+over the section's ROIs, beside a corrected rate. The correction is Rogan–Gladen,
+p_corr = (p_obs − f) / (1 − f), where f is the false-positive rate of the no-primary controls paired with
+that section (the operator's pairing, else the same slide file, else the same animal; never all sections
+of the study, so a batch difference cannot enter), each control's nuclei counted against its own cut, in
+the same region, or over all its regions when that region has fewer than `positivity.fp_min_nuclei`
+control nuclei. It assumes sensitivity 1, that every truly positive nucleus is called positive: it removes
+the control's false positives and adds back nothing missed, so it is a lower-bound adjustment. The 95%
+interval is the 2.5–97.5 percentiles of 4000 Monte-Carlo draws from Jeffreys posteriors of p_obs and f
+(fixed seed), clipped to [0, 1]. The corrected rate is blank, with the reason, when p_obs ≤ f, when no
+control is paired, or when too few control nuclei exist; for a marker segmented on its own channel the
+positive density less the control's is given instead. The raw values are not changed. The 06c workbook
+shows it on a "corrected_rate" sheet.
+
 # 13. Blinding
 
 No stage described in this document reads the treatment group. Every intermediate file is keyed

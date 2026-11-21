@@ -70,6 +70,9 @@ Writes, all still keyed by animal only:
     results/roi_measurements.csv       one row per placed ROI
     results/detector_specificity.csv   what the background discs found
     results/reagent_controls.csv       the reagent controls, when there are any
+    results/roi_corrected.csv          the rate corrected for the paired no_primary
+                                       controls' false-positive rate, when one is
+                                       measured (ls_reagent_report.corrected_rows)
 
 Run:  python 06a_roi_dataset.py
 """
@@ -586,6 +589,46 @@ def reagent_report(lookup, rc_nuc, rc_bg, areas, by_idx, cuts, measured,
     return rows, {k: c for k, c in own_cuts.items() if k in pairing}
 
 
+def corrected_report(lookup, rc_nuc, rc_cuts, rows, st_areas, st_ab, rc_areas,
+                     measured, boxed=None):
+    """results/roi_corrected.csv's rows (ls_reagent_report.corrected_rows), or
+    [] when no no_primary reagent control is measured.
+
+    The stained side is pooled from the rows roi_measurements.csv is written
+    from (ROI discs only), per (section, marker, region): their n_nuclei and
+    n_positive, blank when any disc had no cut; the usable ROI area (st_areas)
+    and the Abercrombie factor those rows were given (st_ab). Nothing is
+    added to those rows. Each stained section's controls are the inverse of
+    the report's pairing (ls_reagent_report.controls_for: operator, same file,
+    same animal; never study-wide), each counted against its own cut
+    (rc_cuts).
+    """
+    np_keys = sorted(k for k in lookup
+                     if k in measured and (lookup[k] or {}).get("kind") == "no_primary")
+    if not np_keys:
+        return []
+    scene_rows = RR.study_rows(CONFIG)
+    pairs = {k: RR.pairing_for(k[0], k[1], lookup, scene_rows, CONFIG, boxed)
+             for k in np_keys}
+    np_lookup = {k: lookup[k] for k in np_keys}
+    stained = {}
+    for r in rows:
+        if r["roi_kind"] != "roi":
+            continue
+        key = (r["scene_uid"], r["marker"], r["region"])
+        s = stained.setdefault(key, {"n": 0, "pos": 0, "own": False,
+                                     "area": st_areas.get(key, 0.0),
+                                     "ab": st_ab.get(key, 1.0)})
+        s["n"] += r["n_nuclei"]
+        s["pos"] = "" if (s["pos"] == "" or r["n_positive"] == "") else s["pos"] + r["n_positive"]
+        s["own"] = s["own"] or bool(r["denominator_withheld_reason"])
+    sets = {(u, m): RR.controls_for(u, m, np_lookup, scene_rows, CONFIG, boxed, pairs)
+            for u, m in {(k[0], k[1]) for k in stained}}
+    return RR.corrected_rows(stained, rc_nuc, rc_cuts, sets, fp_min_nuclei=FP_MIN_NUCLEI,
+                             control_areas={k: v for k, v in rc_areas.items()
+                                            if (k[0], k[1]) in pairs})
+
+
 def cut_check_controls(lookup, rc_nuc, rc_bg):
     """The k check's controls: {(uid, marker): {"bg", "roi", "own", "kind"}}
     for every measured no_primary control. `bg` is its usable background
@@ -893,6 +936,7 @@ def main(argv=None):
     rc_areas = collections.Counter()   # (uid, marker, region) -> usable mm2
     st_areas = collections.Counter()   # the same for stained sections
     st_discs = {}                      # (uid, marker) -> background discs
+    st_ab = {}                         # (uid, marker, region) -> its rows' factor
     for uid in sorted(uids):
         # PER MARKER, so `i` restarts at 1 for each one - which is how 05c
         # numbered them. Under `paired` there is exactly one group per section
@@ -1024,6 +1068,10 @@ def main(argv=None):
                     "n_censored": sum(here.cen) if here else 0,
                 }
                 rows.append(row)
+                if b["roi_kind"] == "roi":
+                    # Beside the row, never in it: the header is the first
+                    # row's keys (roi_corrected.csv's density reads like it).
+                    st_ab[(uid, mk, b["region"])] = ab
 
             # what the background discs report about the detector, per
             # section and marker: this marker's discs only, against this
@@ -1129,6 +1177,11 @@ def main(argv=None):
     kc_rows = RR.cut_check_rows(cut_check_controls(rc_lookup, rc_nuc, rc_bg), st_discs,
                                 FP_TARGET, fp_min_nuclei=FP_MIN_NUCLEI)
     kc_csv = os.path.join(os.path.dirname(MEAS_CSV), RR.CUT_CHECK_CSV)
+    # The corrected rate, per stained section x marker x region, beside the
+    # raw one (which is unchanged): only when a no_primary control is measured.
+    corr_rows = corrected_report(rc_lookup, rc_nuc, rc_cuts, rows, st_areas, st_ab,
+                                 rc_areas, measured, boxed)
+    corr_csv = os.path.join(os.path.dirname(MEAS_CSV), RR.ROI_CORRECTED_CSV)
     rc_csv = os.path.join(os.path.dirname(MEAS_CSV), RR.REPORT_CSV)
     # A control's own cut, at full precision, for 06i to draw it by - in a file
     # of its own, never positivity_cuts.csv (which lists stained sections only).
@@ -1137,14 +1190,15 @@ def main(argv=None):
                              (rc_cuts_csv,
                               [{"scene_uid": u, "marker": m, "cut": repr(c)}
                                for (u, m), c in sorted(rc_cuts.items())], CUTS_COLUMNS),
-                             (kc_csv, kc_rows, RR.CUT_CHECK_COLUMNS)):
+                             (kc_csv, kc_rows, RR.CUT_CHECK_COLUMNS),
+                             (corr_csv, corr_rows, RR.ROI_CORRECTED_COLUMNS)):
         if data:
             IO.atomic_write_csv(path, data, cols)
         elif os.path.exists(path):
             # No control measured (or none confirmed any more): a stale report
             # would switch 06c's limitation text, a stale cut colour 06i's
-            # pictures, and a stale k check offer a multiplier, on controls
-            # this run does not have.
+            # pictures, a stale k check offer a multiplier, and a stale
+            # corrected rate correct by, controls this run does not have.
             os.remove(path)
     for path, data in ((MEAS_CSV, rows), (SPEC_CSV, spec)):
         if not data:
@@ -1185,6 +1239,15 @@ def main(argv=None):
                               f"{r['note'][len(RR.NOT_MEASURED) + 2:] or 'reason unknown'}"
                               for r in late[:5])
                   + (" ..." if len(late) > 5 else ""))
+    if corr_rows:
+        done = [r for r in corr_rows if r["frac_positive_corrected"] != ""
+                or "density correction" in r["correction_note"]]
+        paired = [r for r in corr_rows if r["fp_rate_source"] != RR.NO_PAIR_SOURCE]
+        print(f"corrected positive rate (provisional until validated; assumes "
+              f"sensitivity 1, so a lower-bound adjustment) -> {corr_csv}: "
+              f"{len(paired)} of {len(corr_rows)} stained section x marker x region "
+              f"have a same-slide or same-animal no_primary control, {len(done)} "
+              f"corrected")
     if kc_rows:
         print(f"k check against no_primary reagent controls (provisional until "
               f"validated; fp_target {FP_TARGET:g}) -> {kc_csv}")

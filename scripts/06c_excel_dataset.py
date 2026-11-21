@@ -59,6 +59,16 @@ are controls is not reported as unmeasured. When 06a also wrote
 below the controls' table as a "Cut check" block, labelled provisional: the k
 each marker's controls suggest. It is applied only from the app's Results page.
 
+**The corrected rate.** When 06a wrote `results/roi_corrected.csv` (a
+no-primary reagent control is measured), its rows are the "corrected_rate"
+sheet: per stained section, marker and region, the raw pooled `frac_positive`
+with `frac_positive_corrected` and its 95% interval right beside it, under a
+header that states the sensitivity-1 assumption (the correction is a
+lower-bound adjustment) and that it is provisional. It is per section, the
+grain the operator chose, so it is its own sheet rather than columns on
+`by_roi`, which is per animal; nothing is pooled to the animal here. The
+other sheets are unchanged, with or without it.
+
 **What "total tissue area" means here.** It is the area of the ROI discs
 themselves, mapped onto the slide and summed - not the whole section, and not a
 mask-derived tissue fraction. The operator places discs inside tissue, so the
@@ -256,6 +266,24 @@ CUT_CHECK_LINES = (
     "that cannot be given (the note says why), never 0. The suggestion never changes the "
     "cut by itself: it is applied only from the app's Results page.",
 )
+
+
+#: The sheet results/roi_corrected.csv is shown on, when 06a wrote it.
+CORRECTED_SHEET = "corrected_rate"
+
+
+def _corrected_sheet():
+    """The corrected-rate sheet from results/roi_corrected.csv beside
+    MEAS_CSV, or None when 06a wrote none (no no_primary control measured).
+    The raw frac_positive sits right beside the corrected columns, as in the
+    file; the header states the sensitivity-1 assumption."""
+    path = os.path.join(os.path.dirname(MEAS_CSV), RR.ROI_CORRECTED_CSV)
+    rows = G5.load_csv(path) if os.path.exists(path) else []
+    if not rows:
+        return None
+    return (CORRECTED_SHEET,
+            [{c: _cell(r.get(c, "")) for c in RR.ROI_CORRECTED_COLUMNS} for r in rows],
+            RR.corrected_sheet_header())
 
 
 def _rc_sheet(rc_rows):
@@ -603,6 +631,9 @@ def main(argv=None):
 
     sheets = [("by_roi", by_roi), ("by_disc", by_disc),
               ("by_section", by_section), ("coverage", coverage)]
+    corrected = _corrected_sheet()
+    if corrected:
+        sheets.append(corrected)
     if rc_rows:
         sheets.append(_rc_sheet(rc_rows))
     write_workbook(args.out, sheets)
@@ -611,6 +642,7 @@ def main(argv=None):
     print(f"{len(by_roi)} rows (one per ROI per sample) -> {args.out}")
     print(f"  sheets: by_roi, by_disc ({len(by_disc)}), "
           f"by_section ({len(by_section)}), coverage"
+          + (f", {CORRECTED_SHEET} ({len(corrected[1])})" if corrected else "")
           + (f", Reagent controls ({len(rc_rows)})" if rc_rows else ""))
     print(f"  {RR.limitation_text(rc_rows)}")
     # Sections, not by_section rows: under `multiplex` a section has a row per

@@ -1763,7 +1763,7 @@ Stage `roi_dataset`. Turns the per-nucleus rows into per-ROI numbers. Still blin
   `results/detector_specificity.csv` and `results/roi_geometry_changed.csv`; and
   `results/reagent_controls.csv` and `results/reagent_control_cuts.csv` (each control's own cut, never in
   `positivity_cuts.csv`) when a measured section is a confirmed reagent control; and
-  `results/reagent_cut_check.csv` when a no_primary one is measured.
+  `results/reagent_cut_check.csv` and `results/roi_corrected.csv` when a no_primary one is measured.
 - **How:** **positivity cut** per section and marker from that section's background discs:
   median + k × 1.4826 × MAD (k = `positivity.cut_k` for the marker, 3 by default), needing at least 5 background nuclei (else no cut, and positives are blank,
   not zero). **Specificity:** the fraction of background nuclei above the cut, a measured false-positive
@@ -1790,6 +1790,17 @@ Stage `roi_dataset`. Turns the per-nucleus rows into per-ROI numbers. Still blin
   it disc nuclei no disc rate (blank, with the count in the note). The console prints the suggested k per marker and whether the disc rate falls inside the
   controls' interval at the k in force. It never changes `positivity.cut_k`. With no measured
   no_primary control the file is removed.
+  **The corrected rate** (`ls_reagent_report.corrected_rows`, provisional until validated):
+  `results/roi_corrected.csv`, per stained section x marker x region, pools the ROI rows it writes to
+  `roi_measurements.csv` (which is unchanged, not a key added) and corrects the raw rate for f, the
+  paired no_primary controls' ROI nuclei above each control's own cut in the same region (all their
+  regions under `positivity.fp_min_nuclei` nuclei, and the source says so): Rogan-Gladen
+  (p − f) / (1 − f), assuming sensitivity 1, so a lower-bound adjustment, with a 95% interval from
+  4000 Monte-Carlo draws of Jeffreys posteriors (seed 20261121). The controls are
+  `controls_for`, the inverse of the report's pairing (operator, same file, same animal; never
+  study-wide). Blank, with a note, when it cannot be given. A marker segmented on its own channel
+  gets the positive density less the control's instead, in the note. With no measured no_primary
+  control the file is removed.
 - **Settings:** `section_thickness_um`, `pixel_size_um`, `detection`, `reagent_controls`,
   `positivity.cut_k`, `positivity.fp_target`, `positivity.fp_min_nuclei`.
 
@@ -1824,7 +1835,10 @@ Stage `excel_sample`. The analysis table as a workbook, one row per ROI per anim
   under a plain-language header (what A and B mean, isotype rows test the antibody and no-primary rows
   the secondary, a background disc is not a reagent control). When 06a wrote
   `results/reagent_cut_check.csv`, the same sheet carries it below as a `Cut check` block, labelled
-  provisional. `write_workbook` takes an optional third item per sheet, the lines above the table, and a
+  provisional. When 06a wrote `results/roi_corrected.csv`, a `corrected_rate` sheet carries it: the raw
+  `frac_positive` beside `frac_positive_corrected` and its interval, per section, marker and region (its own
+  sheet, because `by_roi` is per animal and nothing is pooled to the animal), under a header stating the
+  sensitivity-1 assumption and that it is provisional. `write_workbook` takes an optional third item per sheet, the lines above the table, and a
   fourth, more tables below it (`[(lines, rows)]`).
 - **How:** groups 06a's rows. Withheld values (no cut, no denominator, Abercrombie not applied) are blank,
   with the reason carried from 06a. Reagent-control boxes are left out of `planned` and `coverage`. The
@@ -2150,7 +2164,15 @@ no_primary controls only (an entry of another `kind` is ignored), each control's
 cut at k, pooled, with a `wilson` 95% interval; the stained sections' leave-one-disc-out rate at k;
 `suggested` on the smallest k meeting `fp_target`, else `NO_K_MEETS` in the note. Blank, never 0, when a
 rate cannot be given, including under `fp_min_nuclei` nuclei; rates withheld for a marker segmented on its own channel. `agreement(row)` says
-whether the disc rate falls inside the controls' interval. It reads no group key.
+whether the disc rate falls inside the controls' interval. **The corrected rate:**
+`controls_for(uid, marker, lookup, scene_rows, config, boxed=None)` is the inverse of `pairing_for` for a
+stained section, `(tier, control uids)` with tier operator, same_file, same_animal or none (never
+study-wide), no_primary controls only. `rogan_gladen(n_pos, n, f_pos, f_n)` gives (p − f) / (1 − f) and a
+Monte-Carlo interval from Jeffreys Beta(k + 0.5, n − k + 0.5) draws (4000, seed 20261121), blank with
+"at or below the reagent control's false-positive rate" when p ≤ f; `density_correction(pos, area_mm2,
+f_pos, f_area_mm2, factor=1.0)` the same for densities with Gamma(k + 0.5) Poisson draws.
+`corrected_rows(...)` gives `results/roi_corrected.csv`'s rows (`ROI_CORRECTED_COLUMNS`) and
+`corrected_sheet_header()` 06c's lines above them. It reads no group key.
 
 ### `ls_reagent_screen.py`
 
@@ -4391,6 +4413,29 @@ The k check, provisional until validated on a study with known controls: the pos
 | `meets_target` | 0/1 |  | 1 when control_fp <= positivity.fp_target, else 0; blank when control_fp is. |
 | `suggested` | 0/1 |  | 1 on the smallest k that meets the target, 0 on the others; blank when there is no rate. |
 | `note` | text |  | Why something is blank or left out: a control with too few background nuclei for a cut (named), no control rate, own-channel marker, no disc rate, or `no k on the grid meets the target`. |
+
+#### `results/roi_corrected.csv`
+
+The corrected positive rate, provisional until validated on a study with known controls: one row per stained section, marker and region, the raw pooled rate beside a Rogan-Gladen correction for the paired no-primary reagent controls' false-positive rate, (p - f) / (1 - f), with a 95% interval (4000 Monte-Carlo draws of Jeffreys posteriors for p and f, seed 20261121). It assumes sensitivity 1 (every truly positive nucleus is called positive), so it is a lower-bound adjustment. The controls are the inverse of reagent_controls.csv's pairing (ls_reagent_report.controls_for): the operator's paired_with, else the same file, else the same animal; never study-wide. isotype, preadsorbed and unstained controls are not used. roi_measurements.csv is unchanged. Written only when a no_primary control is measured; otherwise a previous file is removed. 06c shows it as the "corrected_rate" sheet.
+
+- **Written by:** 06a_roi_dataset.py
+- **Read by:** 06c_excel_dataset.py
+
+| Column | Type | Units | Meaning |
+|------------|------|------|---------------------------|
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
+| `marker` | text |  | The marker's dye name, as declared in the study. |
+| `region` | text |  | The atlas region the section's ROIs are pooled over. |
+| `n_nuclei` | int |  | ROI nuclei of the section in the region, summed over its ROIs, as roi_measurements.csv counts them. |
+| `n_positive` | int |  | Of those, positive under the section's own cut; blank when any of its ROIs had no cut. |
+| `frac_positive` | float | fraction | The raw pooled rate, n_positive / n_nuclei; blank with no cut, no nuclei, or for a marker segmented on its own channel. |
+| `frac_positive_corrected` | float | fraction | (frac_positive - fp_rate) / (1 - fp_rate). Blank, never 0, when it cannot be given: at or below the control's rate, no pairable control, no control with a cut, fewer than positivity.fp_min_nuclei control nuclei, or a marker segmented on its own channel (correction_note then carries the density correction). |
+| `frac_positive_corrected_lo` | float | fraction | Lower end of the 95% interval: the 2.5th percentile of the Monte-Carlo corrected draws, clipped to [0, 1]. |
+| `frac_positive_corrected_hi` | float | fraction | Upper end: the 97.5th percentile, clipped to [0, 1]; 1 where every stained nucleus is positive. |
+| `fp_rate` | float | fraction | f: the paired no_primary controls' ROI nuclei above each control's own cut, pooled, in the same region (or all regions, see fp_rate_source). Blank under positivity.fp_min_nuclei nuclei, or for a marker segmented on its own channel. |
+| `fp_rate_n` | int |  | The control nuclei f is over. |
+| `fp_rate_source` | text |  | The pairing tier (operator, same_file, same_animal) and the controls used, then the region, or `all regions` when the region had fewer than positivity.fp_min_nuclei control nuclei; a paired control with no cut of its own is named as left out. `none: no same-slide or same-animal control` when there is none. |
+| `correction_note` | text |  | Why a value is blank, or, for a marker segmented on its own channel, the density correction: positive per mm2 (Abercrombie-corrected, as positive_density_per_mm2) less the control's, with a 95% interval from Poisson rates. |
 
 #### `results/roi_geometry_changed.csv`
 

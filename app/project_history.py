@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QDialog, QDialogButtonBox, QLabel, QPlainTextEdit, QTableWidget, QTableWidgetItem,
     QTabWidget, QVBoxLayout, QWidget)
 
+import progress as PR
 import theme as T
 
 SHORT = 70
@@ -42,10 +43,17 @@ def decision_rows(block):
     return out
 
 
+def result_words(run):
+    """`ok`, `FAILED`, or either with its pauses: `ok, paused 2x (3 min)`."""
+    words = "ok" if run.get("ok") else "FAILED"
+    paused = PR.pause_words(run.get("pauses"))
+    return f"{words}, {paused}" if paused else words
+
+
 def run_rows(block):
     """[(stage, started, ended, result, config, code)] newest first."""
     return [(r.get("stage", ""), _when(r.get("started")), _when(r.get("ended")),
-             "ok" if r.get("ok") else "FAILED", r.get("config_sha") or "", r.get("code") or "")
+             result_words(r), r.get("config_sha") or "", r.get("code") or "")
             for r in reversed((block or {}).get("runs") or [])]
 
 

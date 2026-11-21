@@ -1115,7 +1115,8 @@ class MainWindow(QMainWindow):
         self.drawer.stop_progress()
         problem = self.session.record_run(st.sid, res.ok, getattr(self, "_run_started", None),
                                           now_iso(), options=getattr(self, "_run_values", None),
-                                          inputs=getattr(self, "_run_inputs", None))
+                                          inputs=getattr(self, "_run_inputs", None),
+                                          pauses=res.pauses, error=res.record_error())
         if problem:
             self._log(f"could not record the run in the project: {problem}")
         self.stage_finished.emit(st.sid, bool(res.ok))

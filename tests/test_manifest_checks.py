@@ -339,5 +339,173 @@ finally:
     shutil.rmtree(src, ignore_errors=True)
 
 print()
+print("--- the drive drops while 00 reads: waited for, redone, same manifest ---")
+# The slides are on a USB drive that goes away rather than failing a read. An
+# archive or header read that fails while the slides folder is unreachable is
+# not the file's fault: 00 waits for the folder, opens the archive afresh,
+# reads the header again, and writes exactly what an uninterrupted run
+# writes. A read that fails with the folder there is recorded, as before.
+#
+# The drop is real as far as 00 can tell: the folder is renamed away for
+# 0.3 s. zipfile is a stand-in whose archives, once a wait has ended since
+# they were opened, refuse to open a member - as a vanished volume's do.
+import threading  # noqa: E402
+import time  # noqa: E402
+
+DR = M.IO.drive_module()
+saved_env = {k: os.environ.get(k) for k in ("LS_WATCH", "LS_PROGRESS")}
+saved_poll = DR.POLL
+DR.POLL = 0.05
+os.environ["LS_PROGRESS"] = "1"
+src = tempfile.mkdtemp(prefix="manifest_drop_")
+os.environ["LS_WATCH"] = src
+saved_dir, saved_only = M.SOURCE_DIR, M.CONFIG.get("source_files")
+saved_zip = M.zipfile
+DROP = {"at": None, "t": None}
+BREAK = {"at": None}
+
+
+def vanish_for(seconds):
+    gone = src + ".gone"
+    os.rename(src, gone)
+
+    def back():
+        time.sleep(seconds)
+        os.rename(gone, src)
+    t = threading.Thread(target=back, daemon=True)
+    t.start()
+    return t
+
+
+def maybe_drop(key, what):
+    if DROP["at"] == key:
+        DROP["at"] = None
+        DROP["t"] = vanish_for(0.3)
+        raise OSError(5, "Input/output error", what)
+
+
+class StandInZip(zipfile.ZipFile):
+    def __init__(self, path, *a, **kw):
+        maybe_drop(("archive", os.path.basename(path)), path)
+        super().__init__(path, *a, **kw)
+        self.gen = len(DR.PAUSES)
+
+    def open(self, name, *a, **kw):
+        if len(DR.PAUSES) > self.gen:
+            raise OSError(116, "Stale file handle", self.filename)
+        return super().open(name, *a, **kw)
+
+
+class StandInZipModule:
+    ZipFile = StandInZip
+    BadZipFile = zipfile.BadZipFile
+
+
+def header(fh):
+    name = os.path.basename(getattr(fh, "name", ""))
+    if BREAK["at"] == name:
+        raise RuntimeError("corrupt header")
+    maybe_drop(("header", name), name)
+    return fh.read().decode()
+
+
+def manifest_snapshot():
+    got = {}
+    for root in (M.MANIFEST_DIR, M.QC_DIR):
+        for dirpath, _, names in os.walk(root):
+            for n in names:
+                p = os.path.join(dirpath, n)
+                with open(p, "rb") as fh:
+                    got[os.path.relpath(p, STUDY.out_root)] = fh.read()
+    return got
+
+
+def clear_manifest():
+    for root in (M.MANIFEST_DIR, M.QC_DIR):
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def drop_run():
+    code, out = run_main()
+    if DROP["t"] is not None:
+        DROP["t"].join(5)
+        DROP["t"] = None
+    return code, out
+
+
+try:
+    with zipfile.ZipFile(os.path.join(src, "batch.zip"), "w") as z:
+        z.writestr("LS45_8a.czi", b"a")
+        z.writestr("LS45_8b.czi", b"b")
+    with zipfile.ZipFile(os.path.join(src, "later.zip"), "w") as z:
+        z.writestr("LS46_3a.czi", b"c")
+    with open(os.path.join(src, "LS47_1a.czi"), "wb") as fh:
+        fh.write(b"d")
+    M.SOURCE_DIR = src
+    M.CONFIG["source_files"] = None
+    M.discover_sources = REAL_DISCOVER
+    M.zipfile = StandInZipModule
+    M.read_metadata = header
+    M.summarise = lambda name: fake_info(0.65, "AF568" if name in "ac" else "AF488")
+
+    clear_manifest()
+    code, out = drop_run()
+    chk("undisturbed: exit 0", code, 0)
+    base00 = manifest_snapshot()
+    with open(FILES_CSV, newline="", encoding="utf-8") as fh:
+        chk("...every file in the manifest",
+            sorted(r["file"] for r in csv.DictReader(fh)),
+            ["LS45_8a.czi", "LS45_8b.czi", "LS46_3a.czi", "LS47_1a.czi"])
+
+    for what, key in (("a zip member's header", ("header", "LS45_8b.czi")),
+                      ("a loose CZI's header", ("header", "LS47_1a.czi")),
+                      ("opening an archive", ("archive", "later.zip"))):
+        clear_manifest()
+        DROP["at"] = key
+        code, out = drop_run()
+        chk(f"drop on {what}: it fired", DROP["at"], None)
+        chk("...exit 0", code, 0)
+        chk("...the drive came back", "@@drive back" in out, True)
+        got = manifest_snapshot()
+        chk("...the same files", sorted(got), sorted(base00))
+        chk("...byte for byte", [k for k in base00 if got.get(k) != base00[k]], [])
+        uids = []
+        if os.path.exists(SCENES_CSV):
+            with open(SCENES_CSV, newline="", encoding="utf-8") as fh:
+                uids = [r["scene_uid"] for r in csv.DictReader(fh)]
+        chk("...no duplicate rows", len(uids), len(set(uids)))
+
+    clear_manifest()
+    t = vanish_for(0.3)
+    code, out = drop_run()
+    t.join(5)
+    chk("the folder gone as 00 starts: exit 0", code, 0)
+    chk("...after waiting for the drive, not finding nothing", "@@drive back" in out, True)
+    got = manifest_snapshot()
+    chk("...byte for byte", [k for k in base00 if got.get(k) != base00[k]], [])
+
+    clear_manifest()
+    BREAK["at"] = "LS45_8b.czi"
+    seed_stale()
+    code, out = drop_run()
+    BREAK["at"] = None
+    chk("a header that fails with the folder there: the run fails", code != 0, True)
+    chk("...naming it, with the error", "LS45_8b.czi" in out and "corrupt header" in out, True)
+    chk("...without waiting for a drive that never left", "@@drive" in out, False)
+    chk("...and writes neither table", stale_both(), [True, True])
+finally:
+    M.SOURCE_DIR = saved_dir
+    M.CONFIG["source_files"] = saved_only
+    M.zipfile = saved_zip
+    DR.POLL = saved_poll
+    for k, v in saved_env.items():
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
+    shutil.rmtree(src, ignore_errors=True)
+    shutil.rmtree(src + ".gone", ignore_errors=True)
+
+print()
 print("ALL OK" if not fails else f"{fails} FAILED")
 sys.exit(1 if fails else 0)

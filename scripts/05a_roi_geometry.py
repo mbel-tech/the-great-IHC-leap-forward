@@ -86,6 +86,36 @@ _lsio = importlib.util.spec_from_file_location(
 IO = importlib.util.module_from_spec(_lsio)
 _lsio.loader.exec_module(IO)
 
+# The one shared ls_drive (None when it cannot be loaded, and then this stage
+# behaves as it did before it existed): a CZI read that fails because the USB
+# drive went away waits for it and is redone.
+DR = IO.drive_module()
+
+
+def per_slide(fn, *, label):
+    """Run one self-contained CZI read, redoing it after a dropped drive - also
+    when the drive went during it without the read failing (ls_drive's
+    per_slide_settled)."""
+    return DR.per_slide_settled(fn, label=label) if DR is not None else fn()
+
+
+def wait_if_gone(label):
+    """Wait while a watched folder is unreachable; 0.0 at once otherwise."""
+    return DR.wait_if_gone(label) if DR is not None else 0.0
+
+
+def present(path, label):
+    """os.path.exists for a file on the drive (ls_drive's present): one that is
+    absent because the drive has dropped is waited for and looked for again,
+    never reported missing - even when the drive drops as it is looked for."""
+    return DR.present(path, label) if DR is not None else os.path.exists(path)
+
+
+def is_stop(exc):
+    """True for ls_drive.Stopped, which a per-file `except Exception` must not
+    record as that file's failure: the operator asked the stage to stop."""
+    return DR is not None and isinstance(exc, DR.Stopped)
+
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
@@ -694,13 +724,16 @@ def build(regions_csv, limit=None, plates_csv=None, require_background=True,
     rect_cache = {}
 
     for n, uid in enumerate(uids, 1):
+        # Before anything is looked for - the overview, the CZI: a drive that
+        # has dropped is waited for here, not reported as a file missing.
+        wait_if_gone(uid)
         f, m, ix = focus.get(uid), man.get(uid), index.get(uid)
         if not (f and m and ix):
             skipped.append((uid, "not in focus.csv / manifest / reformat_index"))
             continue
         src = os.path.join(OVERVIEW_DIR, f["animal"], f["marker_channel"],
                            uid + "_DAPI.png")
-        if not os.path.exists(src):
+        if not present(src, uid):
             skipped.append((uid, "overview PNG missing"))
             continue
 
@@ -730,9 +763,16 @@ def build(regions_csv, limit=None, plates_csv=None, require_background=True,
         czi = m["file"]
         if czi not in rect_cache:
             path = os.path.join(CONFIG["source_dir"], czi)
+            # A CZI that cannot be opened because the drive dropped is waited
+            # for and read again, not cached as an error: that would skip
+            # every section on it. One that fails with the folder there is.
+            wait_if_gone(czi)
             try:
-                rect_cache[czi] = scene_rects(path)
+                rect_cache[czi] = per_slide(lambda path=path: scene_rects(path),
+                                            label=f"{czi} (scene rectangles)")
             except Exception as exc:                      # noqa: BLE001
+                if is_stop(exc):
+                    raise
                 rect_cache[czi] = {"_error": str(exc)}
         rects = rect_cache[czi]
         si = int(m["scene_index"])
@@ -1045,15 +1085,23 @@ def verify_czi(limit=4):
         uid = g["scene_uid"]
         ov = os.path.join(OVERVIEW_DIR, g["animal"], g["marker"], uid + "_DAPI.png")
         path = os.path.join(CONFIG["source_dir"], g["czi_file"])
-        if not (os.path.exists(ov) and os.path.exists(path)):
+        # A CZI on a drive that has just dropped is waited for, not passed
+        # over.
+        if not (present(ov, uid) and present(path, g["czi_file"])):
             continue
         stored = np.asarray(Image.open(ov).convert("L")).astype(np.float64)
         rx, ry, rw, rh = (int(g[k]) for k in ("scene_x", "scene_y", "scene_w", "scene_h"))
         zoom = float(g["native_um_px"]) / float(g["overview_um_px"])
         from pylibCZIrw import czi as pyczi
-        with pyczi.open_czi(path) as doc:
-            a = CR.read_plane(doc, _Rect(rx, ry, rw, rh), DAPI_PLANE,
-                              scene=int(g["scene_index"]), zoom=zoom).astype(np.float64)
+
+        def unit(path=path, rx=rx, ry=ry, rw=rw, rh=rh, zoom=zoom, g=g):
+            # Self-contained: a redo after a dropped drive opens the file again.
+            with pyczi.open_czi(path) as doc:
+                return CR.read_plane(doc, _Rect(rx, ry, rw, rh), DAPI_PLANE,
+                                     scene=int(g["scene_index"]),
+                                     zoom=zoom).astype(np.float64)
+
+        a = per_slide(unit, label=f"{g['czi_file']} ({uid}, --verify)")
         same_shape = a.shape == stored.shape
         h, w = min(stored.shape[0], a.shape[0]), min(stored.shape[1], a.shape[1])
         r = np.corrcoef(stored[:h, :w].ravel(), a[:h, :w].ravel())[0, 1]

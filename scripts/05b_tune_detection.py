@@ -57,6 +57,18 @@ _spec.loader.exec_module(D5)
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
 import czi_read as CR  # noqa: E402
 import ls_io as IO  # noqa: E402
+
+# The one shared ls_drive (None when it cannot be loaded, and then this stage
+# behaves as it did before it existed): a section whose reads fail because the
+# USB drive went away waits for it and is read again from its first box.
+DR = IO.drive_module()
+
+
+def per_section(fn, *, label):
+    """Run one section's self-contained read, redoing it after a dropped drive
+    - also when the drive went during it without the read failing (ls_drive's
+    per_slide_settled)."""
+    return DR.per_slide_settled(fn, label=label) if DR is not None else fn()
 import ls_jsonio  # noqa: E402
 import ls_naming as NM  # noqa: E402
 import ls_reagent_controls as RC  # noqa: E402
@@ -167,31 +179,43 @@ def read_crops(marker, uids, by_sec, geom, rois, side, model_input=False,
         if not boxes:
             continue
         path = os.path.join(CONFIG["source_dir"], g["czi_file"])
-        with CR.open_czi(path, int(float(g.get("scene_w") or 0)) or None,
-                         pyczi=pyczi) as doc:
-            norm, usable = None, model_input
-            if shared:
-                # 05c's own helper over the section's whole box list, so the
-                # range is the one 05c will stretch by, not one of the sample.
-                try:
-                    if borrow and uid in borrow:
-                        norm = D5.borrowed_range(borrow[uid], marker, by_sec,
-                                                 geom)[:2]
-                    else:
-                        norm = D5.section_range(doc, by_sec[uid], marker,
-                                                int(g["scene_index"]))[:2]
-                except SG.SegmentError:
-                    usable = False
-            for bi, b in spread(boxes, rois):
-                full = CR.read_plane(doc, D5._Rect(int(b["czi_x0"]), int(b["czi_y0"]),
-                                                   int(b["czi_w"]), int(b["czi_h"])),
-                                     plane, scene=int(g["scene_index"])
-                                     ).astype(np.float32)
-                r = window(b, side)
-                cut = (slice(r.y - int(b["czi_y0"]), r.y - int(b["czi_y0"]) + r.h),
-                       slice(r.x - int(b["czi_x0"]), r.x - int(b["czi_x0"]) + r.w))
-                x = SG.stardist_input(full, norm)[cut] if usable else None
-                out.append((uid, bi, b, full[cut], x))
+
+        # One section is the unit a dropped drive redoes: each attempt opens
+        # the CZI afresh and collects the section's crops into a list of its
+        # own, which joins `out` only once the attempt has returned - so a
+        # redo cannot add a crop twice. A read that fails with the folders
+        # reachable is raised, as it always was.
+        def unit(uid=uid, g=g, boxes=boxes, path=path):
+            got = []
+            with CR.open_czi(path, int(float(g.get("scene_w") or 0)) or None,
+                             pyczi=pyczi) as doc:
+                norm, usable = None, model_input
+                if shared:
+                    # 05c's own helper over the section's whole box list, so
+                    # the range is the one 05c will stretch by, not one of the
+                    # sample.
+                    try:
+                        if borrow and uid in borrow:
+                            norm = D5.borrowed_range(borrow[uid], marker,
+                                                     by_sec, geom)[:2]
+                        else:
+                            norm = D5.section_range(doc, by_sec[uid], marker,
+                                                    int(g["scene_index"]))[:2]
+                    except SG.SegmentError:
+                        usable = False
+                for bi, b in spread(boxes, rois):
+                    full = CR.read_plane(doc, D5._Rect(int(b["czi_x0"]), int(b["czi_y0"]),
+                                                       int(b["czi_w"]), int(b["czi_h"])),
+                                         plane, scene=int(g["scene_index"])
+                                         ).astype(np.float32)
+                    r = window(b, side)
+                    cut = (slice(r.y - int(b["czi_y0"]), r.y - int(b["czi_y0"]) + r.h),
+                           slice(r.x - int(b["czi_x0"]), r.x - int(b["czi_x0"]) + r.w))
+                    x = SG.stardist_input(full, norm)[cut] if usable else None
+                    got.append((uid, bi, b, full[cut], x))
+            return got
+
+        out.extend(per_section(unit, label=f"{uid} ({g['czi_file']})"))
     return out
 
 

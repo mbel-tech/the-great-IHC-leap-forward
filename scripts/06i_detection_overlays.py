@@ -138,6 +138,24 @@ import ls_io as IO  # noqa: E402
 import ls_overlay as LO  # noqa: E402
 import czi_read as CR  # noqa: E402
 
+# The one shared ls_drive (None when it cannot be loaded, and then this stage
+# behaves as it did before it existed): a read that fails because the USB
+# drive went away waits for it and is done again, the CZI opened afresh.
+DR = IO.drive_module()
+
+
+def per_section(fn, *, label):
+    """Run one self-contained read of a section, redoing it after a dropped
+    drive - also when the drive went during it without the read failing
+    (ls_drive's per_slide_settled)."""
+    return DR.per_slide_settled(fn, label=label) if DR is not None else fn()
+
+
+def is_stop(exc):
+    """True for ls_drive.Stopped, which a per-section `except Exception` must
+    not record as that section not drawn: the operator asked the stage to stop."""
+    return DR is not None and isinstance(exc, DR.Stopped)
+
 # 05c is loaded, not imported by name: its file name starts with a digit. Its
 # segmentation, membership rule, outline file and settings record are used as
 # they are, so a crop is drawn by the very code that counted it.
@@ -1085,11 +1103,17 @@ def _draw_marker(args, marker):
         try:
             recs = []
             if "scene" in kinds_drawn:
-                with CR.open_czi(czi, int(float(g.get("scene_w") or 0)) or None,
-                                 pyczi=pyczi) as doc:
-                    draw_scene(doc, g, marker, boxes, prep["outlines"],
-                               prep["kinds_by_roi"], prep["lo"], prep["hi"],
-                               _abs(srec["path"]), lines)
+                # The unit a dropped drive redoes: the CZI opened afresh and
+                # the scene drawn whole again. The picture goes to a .part and
+                # is renamed into place only when complete, so a redo
+                # overwrites the .part and leaves no half picture.
+                def scene_unit():
+                    with CR.open_czi(czi, int(float(g.get("scene_w") or 0)) or None,
+                                     pyczi=pyczi) as doc:
+                        draw_scene(doc, g, marker, boxes, prep["outlines"],
+                                   prep["kinds_by_roi"], prep["lo"], prep["hi"],
+                                   _abs(srec["path"]), lines)
+                per_section(scene_unit, label=f"{uid} ({g['czi_file']}, scene picture)")
                 recs.append(srec)
             if "roi" in kinds_drawn:
                 recs += list(adopted.values())
@@ -1114,6 +1138,8 @@ def _draw_marker(args, marker):
         except NotDrawn as exc:
             reason, stale = str(exc), False
         except Exception as exc:  # noqa: BLE001 - one section, not the run
+            if is_stop(exc):
+                raise
             # A read that failed - the drive unplugged, a file moved -
             # says nothing against the pictures already drawn.
             reason, stale = f"{type(exc).__name__}: {exc}", False
@@ -1229,12 +1255,18 @@ def _draw_marker(args, marker):
                     path = os.path.join(CONFIG["source_dir"], g["czi_file"])
                     prep = None
                     if "scene" in kinds_drawn or crops_left:
-                        with CR.open_czi(path, int(float(g.get("scene_w") or 0)) or None,
-                                         pyczi=pyczi) as doc:
-                            prep = prepare_scene(doc, uid, marker, boxes, g, raw,
-                                                 header, cut, meas_by.get(uid, {}),
-                                                 get_model,
-                                                 control=(uid, marker) in control_keys)
+                        # The unit a dropped drive redoes: every box read
+                        # again, the CZI opened afresh. Nothing in it is
+                        # written; its result is used only once it returns.
+                        def prep_unit(uid=uid, g=g, boxes=boxes, raw=raw,
+                                      cut=cut, path=path):
+                            with CR.open_czi(path, int(float(g.get("scene_w") or 0)) or None,
+                                             pyczi=pyczi) as doc:
+                                return prepare_scene(
+                                    doc, uid, marker, boxes, g, raw, header, cut,
+                                    meas_by.get(uid, {}), get_model,
+                                    control=(uid, marker) in control_keys)
+                        prep = per_section(prep_unit, label=f"{uid} ({g['czi_file']})")
                         if prep["how"] == "re-segmented":
                             fp = fingerprint(uid, marker, raw, ident["cut"], boxes,
                                              context)
@@ -1272,6 +1304,8 @@ def _draw_marker(args, marker):
                         draw_job, uid, g, path, boxes, prep, srec, lines,
                         set(kinds_drawn), adopted, ident, fp, need)
                 except Exception as exc:  # noqa: BLE001 - taken back by finish()
+                    if is_stop(exc):
+                        raise
                     item["error"] = exc
                 pending.append(item)
                 while len(pending) >= workers:

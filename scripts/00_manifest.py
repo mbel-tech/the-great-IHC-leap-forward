@@ -53,6 +53,53 @@ import ls_naming as NM  # noqa: E402
 import ls_progress as PG  # noqa: E402
 import ls_reagent_controls as RC  # noqa: E402
 
+# The one shared ls_drive (None when it cannot be loaded, and then this stage
+# behaves as it did before it existed): an archive or header read that fails
+# because the USB drive went away waits for it and is done again.
+DR = IO.drive_module()
+
+
+def per_file(fn, *, label):
+    """Run one self-contained archive or header read, redoing it after a
+    dropped drive - also when the drive went during it without the read
+    failing (ls_drive's per_slide_settled)."""
+    return DR.per_slide_settled(fn, label=label) if DR is not None else fn()
+
+
+def is_stop(exc):
+    """True for ls_drive.Stopped, which a per-file `except Exception` must not
+    record as that file's failure: the operator asked the stage to stop."""
+    return DR is not None and isinstance(exc, DR.Stopped)
+
+
+class _Archives:
+    """The zips discovery opened, reopened when the drive has gone since.
+
+    A member's opener used to close over the ZipFile discovery opened, and
+    after a dropped drive that handle is to a volume that went away: every
+    later member of it would fail with the folder back, recorded as that
+    file's failure. Here a member is opened through the archive's current
+    handle, and the archive is opened afresh first if the drive may have gone
+    since it was (ls_drive.disturbed_since). Every handle is closed by `stack`.
+    """
+
+    def __init__(self, stack):
+        self.stack = stack
+        self.open_zips = {}
+
+    def add(self, zpath, zf, mark):
+        self.stack.enter_context(zf)
+        self.open_zips[zpath] = (zf, mark)
+
+    def member(self, zpath, name):
+        zf, mark = self.open_zips[zpath]
+        if DR is not None and DR.disturbed_since(mark):
+            mark = DR.mark()
+            zf = zipfile.ZipFile(zpath)
+            self.add(zpath, zf, mark)
+        return zf.open(name)
+
+
 SOURCE_DIR = CONFIG["source_dir"]
 OUT_ROOT = CONFIG["out_root"]
 # Confirmed mounting convention; section_order is written from this column.
@@ -143,19 +190,43 @@ def discover_sources(stack, skipped=None):
     unreadable = []
 
     entries = []
+    archives = _Archives(stack)
 
-    for path in sorted(glob.glob(os.path.join(SOURCE_DIR, "*.czi"))):
+    # The folder listed as one unit: a drive that has dropped lists as empty,
+    # not as an error, and a study of no files is not what was asked.
+    loose, zips = per_file(
+        lambda: (sorted(glob.glob(os.path.join(SOURCE_DIR, "*.czi"))),
+                 sorted(glob.glob(os.path.join(SOURCE_DIR, "*.zip")))),
+        label=f"{SOURCE_DIR} (listing)")
+
+    for path in loose:
         name = os.path.basename(path)
         if not SRC.takes_loose(name, only):
             continue
         found.add(name)
         entries.append(("LOOSE", name, path, (lambda p: (lambda: open(p, "rb")))(path)))
 
-    for zpath in sorted(glob.glob(os.path.join(SOURCE_DIR, "*.zip"))):
+    for zpath in zips:
         zname = os.path.basename(zpath)
         whole = SRC.takes_zip(zname, only)
+
+        # One archive's central directory is the unit a dropped drive redoes:
+        # opened afresh, read whole. An attempt's handle that is abandoned is
+        # closed here, not left open for the run.
+        def unit(zpath=zpath):
+            mark = DR.mark() if DR is not None else 0
+            zf = zipfile.ZipFile(zpath)
+            try:
+                infos = zf.infolist()
+                if DR is not None and DR.disturbed_since(mark):
+                    raise OSError(f"the drive went while {zpath} was read")
+            except BaseException:
+                zf.close()
+                raise
+            return zf, infos, mark
+
         try:
-            zf = stack.enter_context(zipfile.ZipFile(zpath))
+            zf, infos, mark = per_file(unit, label=zname)
         except (zipfile.BadZipFile, OSError) as exc:
             # Counted only where it was asked for. With a source_files subset
             # an unreadable archive nobody named is not this run's business -
@@ -165,9 +236,10 @@ def discover_sources(stack, skipped=None):
             else:
                 unreadable.append(zname)
             continue
+        archives.add(zpath, zf, mark)
         if whole and only:
             found.add(zname)
-        for info in zf.infolist():
+        for info in infos:
             if not SRC.takes_member(info.filename, whole, only):
                 continue
             found.add(os.path.basename(info.filename))
@@ -176,7 +248,7 @@ def discover_sources(stack, skipped=None):
                     zname,
                     info.filename,
                     zpath,
-                    (lambda z, n: (lambda: z.open(n)))(zf, info.filename),
+                    (lambda z, n: (lambda: archives.member(z, n)))(zpath, info.filename),
                 )
             )
 
@@ -756,10 +828,19 @@ def main():
                 )
                 continue
 
-            try:
+            # One header read is the unit a dropped drive redoes: the file or
+            # the member opened afresh (its archive too, if the drive went
+            # since it was opened) and read again.
+            def unit(opener=opener):
                 with opener() as fh:
-                    info = summarise(read_metadata(fh))
+                    return summarise(read_metadata(fh))
+
+            try:
+                info = per_file(unit, label=f"{source}/{member}" if source != "LOOSE"
+                                else member)
             except Exception as exc:  # noqa: BLE001 - want the reason in the report
+                if is_stop(exc):
+                    raise
                 failures.append((source, member, repr(exc)[:120]))
                 continue
 

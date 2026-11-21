@@ -46,6 +46,25 @@ _lssrc = importlib.util.spec_from_file_location(
 SRC = importlib.util.module_from_spec(_lssrc)
 _lssrc.loader.exec_module(SRC)
 
+# The one shared ls_drive (None when it cannot be loaded, and then this stage
+# behaves as it did before it existed): a read that fails because the USB
+# drive went away waits for it and is done again.
+DR = IO.drive_module()
+
+
+def per_file(fn, *, label):
+    """Run one self-contained archive or file check, redoing it after a
+    dropped drive - also when the drive went during it without the check
+    failing (ls_drive's per_slide_settled)."""
+    return DR.per_slide_settled(fn, label=label) if DR is not None else fn()
+
+
+def present(path, label):
+    """os.path.exists for a file on the drive (ls_drive's present): one that is
+    absent because the drive has dropped is waited for, not called missing."""
+    return DR.present(path, label) if DR is not None else os.path.exists(path)
+
+
 # check()'s columns, pinned: an inventory with nothing in it must still
 # leave a file with a header rather than crash on rows[0].
 STATUS_KEYS = ["file", "zip", "expected_bytes", "actual_bytes", "status", "crc_ok"]
@@ -77,14 +96,26 @@ def zip_inventory(problems=None):
     inventory = {}
     # A named CZI extracted loose is found; 00b only checks zip members, and a
     # loose file with no archive has nothing to be checked against.
-    found = {os.path.basename(p)
-             for p in glob.glob(os.path.join(SOURCE_DIR, "*.czi"))}
+    # The folder listed as one unit: a drive that has dropped lists as empty,
+    # not as an error, and "no archives" would read as nothing to check.
+    loose, zips = per_file(
+        lambda: (sorted(glob.glob(os.path.join(SOURCE_DIR, "*.czi"))),
+                 sorted(glob.glob(os.path.join(SOURCE_DIR, "*.zip")))),
+        label=f"{SOURCE_DIR} (listing)")
+    found = {os.path.basename(p) for p in loose}
     unreadable = []
-    for zpath in sorted(glob.glob(os.path.join(SOURCE_DIR, "*.zip"))):
+    for zpath in zips:
         zname = os.path.basename(zpath)
         whole = SRC.takes_zip(zname, only)
+
+        # One archive's central directory is the unit a dropped drive redoes:
+        # opened afresh and read whole, the archive closed again either way.
+        def unit(zpath=zpath):
+            with zipfile.ZipFile(zpath) as zf:
+                return zf.infolist()
+
         try:
-            zf = zipfile.ZipFile(zpath)
+            infos = per_file(unit, label=zname)
         except (zipfile.BadZipFile, OSError) as exc:
             if whole:
                 print(f"  !! unreadable archive: {zname}")
@@ -94,26 +125,25 @@ def zip_inventory(problems=None):
             continue
         if whole:
             found.add(zname)
-        with zf:
-            for info in zf.infolist():
-                name = os.path.basename(info.filename)
-                if not SRC.takes_member(info.filename, whole, only):
-                    continue
-                found.add(name)
-                if name in inventory and inventory[name]["size"] != info.file_size:
-                    print(f"  !! {name} differs between archives - keeping first")
-                    problems.append(f"{name} differs between {inventory[name]['zip']} "
-                                    f"and {os.path.basename(zpath)}")
-                    continue
-                inventory.setdefault(
-                    name,
-                    {
-                        "size": info.file_size,
-                        "crc": info.CRC,
-                        "zip": os.path.basename(zpath),
-                        "compress_type": info.compress_type,
-                    },
-                )
+        for info in infos:
+            name = os.path.basename(info.filename)
+            if not SRC.takes_member(info.filename, whole, only):
+                continue
+            found.add(name)
+            if name in inventory and inventory[name]["size"] != info.file_size:
+                print(f"  !! {name} differs between archives - keeping first")
+                problems.append(f"{name} differs between {inventory[name]['zip']} "
+                                f"and {os.path.basename(zpath)}")
+                continue
+            inventory.setdefault(
+                name,
+                {
+                    "size": info.file_size,
+                    "crc": info.CRC,
+                    "zip": os.path.basename(zpath),
+                    "compress_type": info.compress_type,
+                },
+            )
     # Only with a source_files list, as in 00: a named file found nowhere -
     # used to be skipped silently, so a CZI whose only zip would not open was
     # never checked and the run said the extraction was verified.
@@ -135,34 +165,41 @@ def file_crc(path):
     return crc & 0xFFFFFFFF
 
 
-def check(inventory, do_crc=False):
-    rows = []
-    for name, meta in sorted(inventory.items()):
-        path = os.path.join(SOURCE_DIR, name)
-        row = {
-            "file": name,
-            "zip": meta["zip"],
-            "expected_bytes": meta["size"],
-            "actual_bytes": "",
-            "status": "",
-            "crc_ok": "",
-        }
-        if not os.path.exists(path):
-            row["status"] = "missing"
+def check_one(name, meta, do_crc=False):
+    """One extracted CZI's status row: missing, size, and with `do_crc` its
+    bytes. A file absent because the drive has dropped is waited for."""
+    path = os.path.join(SOURCE_DIR, name)
+    row = {
+        "file": name,
+        "zip": meta["zip"],
+        "expected_bytes": meta["size"],
+        "actual_bytes": "",
+        "status": "",
+        "crc_ok": "",
+    }
+    if not present(path, name):
+        row["status"] = "missing"
+    else:
+        actual = os.path.getsize(path)
+        row["actual_bytes"] = actual
+        if actual != meta["size"]:
+            # A file still being written is short, not corrupt.
+            row["status"] = "in_progress" if actual < meta["size"] else "size_mismatch"
         else:
-            actual = os.path.getsize(path)
-            row["actual_bytes"] = actual
-            if actual != meta["size"]:
-                # A file still being written is short, not corrupt.
-                row["status"] = "in_progress" if actual < meta["size"] else "size_mismatch"
-            else:
-                row["status"] = "ok"
-                if do_crc:
-                    row["crc_ok"] = int(file_crc(path) == meta["crc"])
-                    if not row["crc_ok"]:
-                        row["status"] = "crc_mismatch"
-        rows.append(row)
-    return rows
+            row["status"] = "ok"
+            if do_crc:
+                row["crc_ok"] = int(file_crc(path) == meta["crc"])
+                if not row["crc_ok"]:
+                    row["status"] = "crc_mismatch"
+    return row
+
+
+def check(inventory, do_crc=False):
+    # One file is the unit a dropped drive redoes: looked for, sized and
+    # (--crc) read again from its first byte, its row added once.
+    return [per_file(lambda name=name, meta=meta: check_one(name, meta, do_crc),
+                     label=name)
+            for name, meta in sorted(inventory.items())]
 
 
 def summarise(rows, inventory):

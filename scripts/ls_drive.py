@@ -161,15 +161,17 @@ def _close_announced():
         _say_back(seconds)
 
 
-def wait_for_drive(label, poll=None):
+def wait_for_drive(label, poll=None, paths=None):
     """Block until every watched folder is reachable; return seconds waited.
 
     Returns 0.0 at once when nothing is gone. Raises `Stopped` if the file
-    named by LS_STOP_FILE exists at any poll while waiting.
+    named by LS_STOP_FILE exists at any poll while waiting. `paths` names the
+    folders to wait for in place of `watched()` (the run record waits for the
+    folder its study file is in).
     """
     global _ANNOUNCED
     poll = POLL if poll is None else poll
-    ok, folder = reachable()
+    ok, folder = reachable(paths)
     if ok:
         _close_announced()
         return 0.0
@@ -183,7 +185,7 @@ def wait_for_drive(label, poll=None):
         if stop and os.path.exists(stop):
             raise Stopped(f"stopped while waiting for {folder}")
         time.sleep(poll)
-        ok, now_gone = reachable()
+        ok, now_gone = reachable(paths)
         if ok:
             break
         folder = now_gone

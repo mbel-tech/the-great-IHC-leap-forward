@@ -33,6 +33,7 @@ writes curation (04q's import) needs the window's hand-over to the open
 curator, and is left to the window: it is never on Prepare's or Measure's plan.
 """
 
+import contextlib
 import copy
 import json
 import os
@@ -52,7 +53,7 @@ import ls_project as LP                     # noqa: E402
 import progress as PR                       # noqa: E402
 import stages as S                          # noqa: E402
 import workflow as W                        # noqa: E402
-from runner import Runner                   # noqa: E402
+from runner import Runner, _Tee            # noqa: E402
 
 USAGE = "usage: python -m app --run <%s> <study.json>"
 
@@ -106,6 +107,27 @@ def for_terminal(say):
     return line
 
 
+def _record(path, shown, say, sid, ok, started, ended, **kw):
+    """Record a run in the study file, waiting for the drive it is on.
+
+    study.json is usually in out_root, on the drive that drops, so a run that
+    ended with the drive gone is recorded once it is back (ls_project
+    .record_run_at) - "stopped while the drive was disconnected" included.
+    The wait's own lines go through `shown`, the terminal filter, as a
+    stage's do: LS_PROGRESS=1 is set for the whole process (Runner), and the
+    raw `@@drive` markers are not for a person. Ctrl+C ends the wait.
+    """
+    tee = _Tee(shown)
+    try:
+        with contextlib.redirect_stdout(tee):
+            LP.record_run_at(path, sid, ok, started, ended, **kw)
+    except LP.ProjectError as exc:
+        tee.flush()
+        say(f"could not record the run in the study: {exc}")
+    finally:
+        tee.flush()
+
+
 def run_screen(path, screen, runner=None, out=None):
     """Run `screen`'s plan for the study at `path`. [(sid, ok, seconds, error)].
 
@@ -132,12 +154,8 @@ def run_screen(path, screen, runner=None, out=None):
         say(f"=== [{n}/{len(plan)}] {base.title}" + (f"  options: {values}" if values else ""))
         started = now_iso()
         res = runner.run(W.with_options(base, values), on_line=shown)
-        try:
-            LP.Project.open(path).record_run(sid, res.ok, started, now_iso(),
-                                             options=values, inputs=inputs,
-                                             pauses=res.pauses, error=res.record_error())
-        except LP.ProjectError as exc:
-            say(f"could not record the run in the study: {exc}")
+        _record(path, shown, say, sid, res.ok, started, now_iso(), options=values,
+                inputs=inputs, pauses=res.pauses, error=res.record_error())
         results.append((sid, bool(res.ok), res.seconds, res.error))
         if getattr(res, "interrupted", False):
             say(f"--- {base.title}: stopped by Ctrl+C")
@@ -263,14 +281,11 @@ def run_stage(path, sid, runner=None, out=None, force=False, unblind=False, opts
     inputs = W.run_inputs(sid, values, now)
     say(f"=== {base.title}" + (f"  options: {values}" if values else ""))
     started = now_iso()
-    res = runner.run(W.with_options(base, values), on_line=for_terminal(say))
+    shown = for_terminal(say)
+    res = runner.run(W.with_options(base, values), on_line=shown)
     rc, error = _outcome(res)
-    try:
-        LP.Project.open(path).record_run(sid, res.ok, started, now_iso(),
-                                         options=values, inputs=inputs,
-                                         pauses=res.pauses, error=error)
-    except LP.ProjectError as exc:
-        say(f"could not record the run in the study: {exc}")
+    _record(path, shown, say, sid, res.ok, started, now_iso(), options=values,
+            inputs=inputs, pauses=res.pauses, error=error)
     if res.ok:
         say(f"--- {base.title}: done in {res.seconds:.0f}s")
     else:

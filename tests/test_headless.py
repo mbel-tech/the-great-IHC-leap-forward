@@ -395,6 +395,55 @@ ok, rc, said, _r = stage(PB, "czi_selftest", runner=H.Runner(SDIR, PB), opts={"p
 chk("Ctrl+C in the real child: exit 130, recorded as failed",
     (rc, runs_of(PB)[-1]["ok"], len(runs_of(PB))), (130, False, 3))
 
+print("--- the run is recorded after the drive the study file is on comes back ---")
+import shutil                                                   # noqa: E402
+import threading                                                # noqa: E402
+
+
+def on_drive(name):
+    """A study whose study.json is inside out_root, as the app lays one out."""
+    first = fresh(name)
+    with open(first, encoding="utf-8") as fh:
+        cfg = json.load(fh)
+    path = os.path.join(cfg["out_root"], "study.json")
+    shutil.copy(first, path)
+    os.remove(first)
+    return path, cfg["out_root"]
+
+
+class DropsAtEnd(StandIn):
+    """A stage that ends with the drive gone; it is back 0.5 s later."""
+
+    def __init__(self, out_root, ok=True):
+        super().__init__()
+        self.out_root, self.ok = out_root, ok
+
+    def run(self, stage, on_line=None, extra_argv=()):
+        self.ran.append(stage.sid)
+        os.rename(self.out_root, self.out_root + ".gone")
+        threading.Timer(0.5, lambda: os.rename(self.out_root + ".gone", self.out_root)).start()
+        return StageResult(stage.sid, self.ok, 0.1, "",
+                           None if self.ok else "stopped while the drive was disconnected",
+                           stopped=not self.ok)
+
+
+H.Runner(H.SCRIPTS, PATH)                   # LS_PROGRESS=1, as on a real command line
+watch_was = os.environ.pop("LS_WATCH", None)
+PD, OUT_D = on_drive("ondrive")
+ok, rc, said, _r = stage(PD, "manifest", runner=DropsAtEnd(OUT_D, ok=False))
+chk("a run that ended with the drive gone is recorded once it is back",
+    [(x["stage"], x["ok"], x.get("error")) for x in runs_of(PD)],
+    [("manifest", False, "stopped while the drive was disconnected")])
+chk("...the wait is said in words", "drive back after" in said and "unreachable" in said)
+chk("...not as raw marker lines", "@@drive" in said, False)
+PD2, OUT_D2 = on_drive("ondrive2")
+os.environ["LS_CONFIG"] = PD2
+results = H.run_screen(PD2, "prepare", runner=DropsAtEnd(OUT_D2), out=io.StringIO())
+chk("--run records it too", [x["stage"] for x in runs_of(PD2)][:1], [results[0][0]])
+if watch_was is not None:
+    os.environ["LS_WATCH"] = watch_was
+os.environ["LS_CONFIG"] = PATH
+
 print("--- the command line ---")
 env = dict(os.environ, PYTHONIOENCODING="utf-8")
 p = subprocess.run([sys.executable, "-m", "app", "--run", "nowhere", PATH], cwd=REPO,

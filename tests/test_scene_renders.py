@@ -87,10 +87,50 @@ READS = []
 ZOOMS = []
 
 
+# The drive-dropout checks at the end: DROP["at"] names the (scene, plane, nth
+# read) that raises once, with the slides folder renamed away for 0.3 s;
+# BREAK["at"] one that raises with the folder there. A drop also ends every
+# handle opened before it (GEN), as a vanished volume does. Counted per scene
+# and plane, since the two planes are read on two threads.
+DROP = {"at": None, "thread": None}
+BREAK = {"at": None}
+GEN = {"n": 0}
+NTH = {}
+
+
+def vanish_for(seconds):
+    """Rename the slides folder away; a thread puts it back after `seconds`."""
+    import threading
+    import time
+    gone = STUDY.source_dir + ".gone"
+    os.rename(STUDY.source_dir, gone)
+
+    def back():
+        time.sleep(seconds)
+        os.rename(gone, STUDY.source_dir)
+    t = threading.Thread(target=back, daemon=True)
+    t.start()
+    return t
+
+
 class _Doc:
     scenes_bounding_rectangle = {k: _R(*v) for k, v in RECTS.items()}
 
+    def __init__(self):
+        self.gen = GEN["n"]
+
     def read(self, roi, plane, scene, zoom):
+        n = NTH[(scene, plane["C"])] = NTH.get((scene, plane["C"]), 0) + 1
+        key = (scene, plane["C"], n)
+        if BREAK["at"] == key:
+            raise RuntimeError("corrupt subblock")
+        if self.gen != GEN["n"]:
+            raise OSError(5, "Input/output error (a handle from before the drop)")
+        if DROP["at"] == key:
+            DROP["at"] = None
+            GEN["n"] += 1
+            DROP["thread"] = vanish_for(0.3)
+            raise OSError(5, "Input/output error")
         x, y, w, h = roi
         rx, ry = RECTS[scene][:2]
         READS.append((scene, h))
@@ -431,6 +471,114 @@ chk("--keep-background redraws the whole rectangle",
 chk("an overview of another size is not used",
     L.scene_silhouette(os.path.join(ov_dir, UIDS[0] + "_DAPI.png"),
                        (0, 0, W * 2, H * 2)) is None)
+
+print()
+print("--- the drive drops mid-file: the file is redone, the same bytes ---")
+import glob  # noqa: E402
+
+DR = L.IO.drive_module()
+chk("ls_drive loads", DR is not None)
+DR.POLL = 0.05
+os.environ["LS_WATCH"] = STUDY.source_dir
+os.environ["LS_PROGRESS"] = "1"
+
+
+def run_l(*argv):
+    """(the SystemExit message or '', what was printed)."""
+    NTH.clear()
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        ended = run_failing(*argv)
+    return ended, buf.getvalue()
+
+
+def l_snapshot():
+    got = {}
+    for p in [L.INDEX_CSV, L.FAILURES_CSV] + [pic(f, u) for f in ("stain+DAPI", "stain_only")
+                                               for u in UIDS]:
+        if os.path.exists(p):
+            with open(p, "rb") as fh:
+                got[os.path.basename(os.path.dirname(p)) + "/" + os.path.basename(p)] = fh.read()
+    return got
+
+
+def settle():
+    if DROP["thread"] is not None:
+        DROP["thread"].join(5)
+        DROP["thread"] = None
+
+
+ended, text = run_l("--force")
+chk("uninterrupted redraw", ended == "" and "@@drive" not in text, ended)
+base_l = l_snapshot()
+chk("...the index, the failures list and four pictures", len(base_l) == 6, sorted(base_l))
+# The second scene's marker plane: the first scene already drawn, its picture
+# and index row must come out once and the same.
+DROP["at"] = (1, 1, 1)
+ended, text = run_l("--force")
+settle()
+chk("the drop fired", DROP["at"] is None, DROP["at"])
+chk("01l with the drive dropped finishes", ended == "", ended)
+chk("...says the drive came back, once", text.count("@@drive back") == 1,
+    text.count("@@drive back"))
+got = l_snapshot()
+chk("...writes the same files", sorted(got) == sorted(base_l), sorted(got))
+chk("...byte for byte (the file reopened, not the old handles reused)",
+    [k for k in base_l if got.get(k) != base_l[k]] == [],
+    [k for k in base_l if got.get(k) != base_l[k]])
+# One row per picture: earlier runs into other folders have rows of their own.
+uids = [r["scene_uid"] for r in csv.DictReader(open(L.INDEX_CSV, encoding="utf-8"))
+        if r["stain_only_png"].startswith(PICS)]
+chk("...no duplicate index rows", len(uids) == len(set(uids)), uids)
+left = glob.glob(os.path.join(PICS, "**", "*.tmp"), recursive=True) + glob.glob(
+    os.path.join(STUDY.out_root, "**", "*.tmp"), recursive=True)
+chk("...no .tmp left", left == [], left)
+
+print()
+print("--- the slides folder is gone when the CZI is looked for ---")
+t = vanish_for(0.3)
+GEN["n"] += 1
+ended, text = run_l("--force")
+t.join(5)
+chk("waits, then draws", ended == "", ended)
+chk("...says the drive came back", "@@drive back" in text)
+got = l_snapshot()
+chk("...byte for byte", [k for k in base_l if got.get(k) != base_l[k]] == [],
+    [k for k in base_l if got.get(k) != base_l[k]])
+
+print()
+print("--- a scene whose read fails with the folder there: as before ---")
+BREAK["at"] = (0, 0, 1)
+ended, text = run_l("--force")
+BREAK["at"] = None
+chk("the stage ends as a failure", "1 scene(s) not drawn" in ended, ended)
+chk("...without waiting for a drive that never left", "@@drive" not in text)
+listed = list(csv.DictReader(open(L.FAILURES_CSV, encoding="utf-8")))
+chk("...that scene is listed, with why",
+    [(r["scene_uid"], r["reason"]) for r in listed]
+    == [(UIDS[0], "RuntimeError: corrupt subblock")], listed)
+got = l_snapshot()
+chk("...and the other scene is drawn as uninterrupted",
+    [k for k in base_l if UIDS[1] in k and got.get(k) != base_l[k]] == [])
+
+print()
+print("--- Stopped is not swallowed as a scene's failure ---")
+stop = os.path.join(os.path.dirname(STUDY.out_root), "STOP")
+open(stop, "wb").close()
+os.environ["LS_STOP_FILE"] = stop
+DROP["at"] = (0, 0, 1)
+stopped = False
+try:
+    run_l("--force")
+except DR.Stopped:
+    stopped = True
+settle()
+os.environ.pop("LS_STOP_FILE")
+os.remove(stop)
+DROP["at"] = None
+chk("the stop file stops 01l", stopped)
+os.environ.pop("LS_WATCH")
+os.environ.pop("LS_PROGRESS")
 
 print()
 print("ALL PASS" if not fails else f"{fails} FAILED")

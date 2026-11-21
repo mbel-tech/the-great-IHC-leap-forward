@@ -148,6 +148,34 @@ import ls_io as IO  # noqa: E402
 import czi_read as CR  # noqa: E402
 import ls_progress as PG  # noqa: E402
 
+# The one shared ls_drive (None when it cannot be loaded, and then this stage
+# behaves as it did before it existed): a CZI whose read fails because the USB
+# drive went away waits for it and is drawn again from its first scene.
+DR = IO.drive_module()
+
+
+def per_slide(fn, *, label):
+    """Run one self-contained slide unit, redoing it after a dropped drive."""
+    return DR.per_slide(fn, label=label) if DR is not None else fn()
+
+
+def wait_if_gone(label):
+    """Wait while a watched folder is unreachable; 0.0 at once otherwise."""
+    return DR.wait_if_gone(label) if DR is not None else 0.0
+
+
+def is_stop(exc):
+    """True for ls_drive.Stopped, which a per-file `except Exception` must not
+    record as that file's failure: the operator asked the stage to stop."""
+    return DR is not None and isinstance(exc, DR.Stopped)
+
+
+def drive_gone():
+    """True while a watched folder cannot be reached: a per-scene failure then
+    is the drive's, not the scene's, and the whole file is redone."""
+    return DR is not None and not DR.reachable()[0]
+
+
 OUT_ROOT = CONFIG["out_root"]
 SOURCE_DIR = CONFIG["source_dir"]
 NATIVE_UM = float(CONFIG["pixel_size_um"])
@@ -652,8 +680,7 @@ def background_for(row, keep_background):
 
 def save_png(img, path):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with IO.atomic_save(path) as tmp:
-        Image.fromarray(img).save(tmp, format="PNG")
+    IO.save_image(img, path, format="PNG")
 
 
 def render_scene(read_nuc, read_mark, rect, b, fields_nm, ranges, range_mode,
@@ -858,11 +885,26 @@ def main():
     def draw_file(fname, todo, info):
         """(index rows by key, failures, uids drawn) for one CZI's scenes."""
         marker, colour, n_idx, m_idx, fields_nm, mdir = info
-        new_rows, bad, drawn = {}, [], set()
         path = os.path.join(SOURCE_DIR, fname)
+        # Before the exists check: a CZI on a drive that has just dropped is
+        # waited for, not recorded as not found.
+        wait_if_gone(fname)
         if not os.path.exists(path):
-            return new_rows, [(r["scene_uid"], f"CZI not found: {path}") for r in todo], drawn
-        try:
+            return {}, [(r["scene_uid"], f"CZI not found: {path}") for r in todo], set()
+
+        # One file is the unit a dropped drive redoes (see 01_overviews'
+        # export): each attempt opens the CZI and its two plane handles afresh
+        # and starts `acc` empty, and nothing leaves this function until the
+        # attempt is over - so a redo cannot add an index row twice, and an
+        # ordinary failure part way still keeps the scenes drawn before it.
+        # The pictures are written atomically to their final names and simply
+        # overwritten by a redo.
+        acc = {}
+
+        def unit():
+            acc.clear()
+            acc.update(rows={}, bad=[], drawn=set(), said=[])
+            new_rows, bad, drawn = acc["rows"], acc["bad"], acc["drawn"]
             with pyczi.open_czi(path) as doc:
                 rects = CR.scene_rects(doc)
             widest = max([rects[int(r["scene_index"])][2] for r in todo
@@ -915,8 +957,12 @@ def main():
                         save_png(only, p_only)
                         del rgb, only, got
                     except Exception as exc:  # noqa: BLE001 - see above
+                        # Not the scene's fault if the drive went: the whole
+                        # file is redone once it is back.
+                        if is_stop(exc) or drive_gone():
+                            raise
                         bad.append((uid, f"{type(exc).__name__}: {exc}"))
-                        print(f"\n  !! {uid}: {type(exc).__name__}: {exc}")
+                        acc["said"].append(f"\n  !! {uid}: {type(exc).__name__}: {exc}")
                         continue
                     finally:
                         gate.release(need)
@@ -931,13 +977,28 @@ def main():
                         "stain_only_png": os.path.abspath(p_only),
                         "reader": "pylibCZIrw", "source": source, **facts}
                     drawn.add(uid)
+
+        error = None
+        try:
+            per_slide(unit, label=fname)
         except Exception as exc:  # noqa: BLE001 - one bad file must not stop the rest
+            if is_stop(exc):
+                raise
+            error = exc
+        # The attempt's results: all of them on success, the scenes before the
+        # failure otherwise (as before this was a unit).
+        new_rows = acc.get("rows", {})
+        bad = list(acc.get("bad", []))
+        drawn = acc.get("drawn", set())
+        for line in acc.get("said", []):
+            print(line)
+        if error is not None:
             # Only the scenes not already drawn or already named: a file that
             # fails part-way (its handles, say) still drew the ones before.
             named = {uid for uid, _ in bad}
-            bad += [(r["scene_uid"], f"{type(exc).__name__}: {exc}") for r in todo
+            bad += [(r["scene_uid"], f"{type(error).__name__}: {error}") for r in todo
                     if r["scene_uid"] not in drawn and r["scene_uid"] not in named]
-            print(f"\n  !! {fname}: {exc}")
+            print(f"\n  !! {fname}: {error}")
         return new_rows, bad, drawn
 
     workers = max(1, args.workers)

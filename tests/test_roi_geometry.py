@@ -884,6 +884,178 @@ with temp_study(acquisition={"layout": "paired",
         ("were placed" in _all, "Mk2 was placed" in _all,
          "; no marker was placed." in _all), (False, False, True))
 
+    # ---- the drive drops while a scene rectangle is read -------------------
+    # The slides are on a USB drive that goes away rather than failing a read.
+    # build() caches a CZI it cannot open as `_error` and skips every section
+    # of it, so a drop used to cost those sections their boxes. Now the read
+    # waits for the folder and is redone; a CZI that fails with the folder
+    # there is still skipped as before. A stand-in pylibCZIrw renames the
+    # slides folder away and raises, and a thread puts it back 0.3 s later.
+    import threading as _thr                                  # noqa: E402
+    import time as _time                                      # noqa: E402
+    import types as _types                                    # noqa: E402
+
+    _DR = P5.IO.drive_module()
+    chk("ls_drive loads", _DR is not None, True)
+    _DR.POLL = 0.05
+    _DROP = {"open": False, "read": False, "thread": None}
+    _BREAK = {"open": False}
+
+    def _vanish_for(seconds):
+        gone = MK.source_dir + ".gone"
+        os.rename(MK.source_dir, gone)
+
+        def back():
+            _time.sleep(seconds)
+            os.rename(gone, MK.source_dir)
+        t = _thr.Thread(target=back, daemon=True)
+        t.start()
+        return t
+
+    def _settle():
+        if _DROP["thread"] is not None:
+            _DROP["thread"].join(5)
+            _DROP["thread"] = None
+
+    class _DrRect:
+        def __init__(self, x, y, w, h):
+            self.x, self.y, self.w, self.h = x, y, w, h
+
+    class _DrDoc:
+        scenes_bounding_rectangle = {0: _DrRect(100, 200, 1000, 1000)}
+
+        def __init__(self, path):
+            self.path = path
+
+        def read(self, roi, plane, scene, zoom):
+            if _DROP["read"]:
+                _DROP["read"] = False
+                _DROP["thread"] = _vanish_for(0.3)
+                raise OSError(5, "Input/output error", self.path)
+            x, y, w, h = roi
+            n = int(round(h * zoom)), int(round(w * zoom))
+            return np.random.default_rng(x + y).integers(0, 255, n)[:, :, None]
+
+    @_ctx.contextmanager
+    def _dr_open_czi(path, **_kw):
+        if _BREAK["open"]:
+            raise RuntimeError("truncated subblock directory")
+        if _DROP["open"]:
+            _DROP["open"] = False
+            _DROP["thread"] = _vanish_for(0.3)
+            raise OSError(5, "Input/output error", path)
+        if not os.path.exists(path):
+            raise FileNotFoundError(path)
+        yield _DrDoc(path)
+
+    _fake = _types.ModuleType("pylibCZIrw")
+    _fake.czi = _types.SimpleNamespace(open_czi=_dr_open_czi)
+    _saved_mods = {k: sys.modules.get(k) for k in ("pylibCZIrw", "pylibCZIrw.czi")}
+    sys.modules["pylibCZIrw"], sys.modules["pylibCZIrw.czi"] = _fake, _fake.czi
+    os.environ["LS_WATCH"] = MK.source_dir
+    os.environ["LS_PROGRESS"] = "1"
+    open(os.path.join(MK.source_dir, "AB12_1a.czi"), "wb").close()
+
+    def _build_dr():
+        buf = _io.StringIO()
+        saved = P5.RF.reformat
+        try:
+            P5.RF.reformat = _Reformat()
+            P5.use_marker("Mk1")
+            with _ctx.redirect_stdout(buf):
+                got = P5.build(regions_csv, require_background=False)
+        finally:
+            P5.RF.reformat = saved
+        return got, buf.getvalue()
+
+    try:
+        (_g0, _b0, _s0), _ = _build_dr()
+        chk("undropped: the section is placed from the CZI's rectangle",
+            (len(_g0), len(_b0), _s0), (1, 1, []))
+        _DROP["open"] = True
+        (_g1, _b1, _s1), _said = _build_dr()
+        _settle()
+        chk("the drop fired", _DROP["open"], False)
+        chk("a drop while the rectangle is read: nothing skipped", _s1, [])
+        chk("...the same geometry and boxes as undropped", (_g1, _b1) == (_g0, _b0), True)
+        chk("...and the drive is said to be back", "@@drive back" in _said, True)
+
+        _t = _vanish_for(0.3)
+        (_g2, _b2, _s2), _said = _build_dr()
+        _t.join(5)
+        chk("the folder gone before the CZI is opened: waited for, the same result",
+            (_g2, _b2, _s2) == (_g0, _b0, []), True)
+        chk("...and the drive is said to be back", "@@drive back" in _said, True)
+
+        _BREAK["open"] = True
+        (_g3, _b3, _s3), _said = _build_dr()
+        _BREAK["open"] = False
+        chk("a CZI that fails with the folder there is skipped, as before",
+            [w for _u, w in _s3],
+            ["no scene rectangle: truncated subblock directory"])
+        chk("...without waiting for a drive that never left", "@@drive" in _said, False)
+
+        _stop = os.path.join(MK.root, "STOP")
+        open(_stop, "wb").close()
+        os.environ["LS_STOP_FILE"] = _stop
+        _DROP["open"] = True
+        _stopped = False
+        try:
+            _build_dr()
+        except _DR.Stopped:
+            _stopped = True
+        _settle()
+        os.environ.pop("LS_STOP_FILE")
+        os.remove(_stop)
+        chk("Stopped is not cached as that CZI's error: it stops the stage", _stopped, True)
+
+        # verify_czi: the one place 05a reads pixels. Run on the boxes just
+        # placed; the geometry row names the CZI and the overview it checks.
+        _gcsv = os.path.join(MK.root, "roi_geometry_dr.csv")
+        _wcsv(_gcsv, _g0, list(_g0[0].keys()))
+        _ov = os.path.join(P5.OVERVIEW_DIR, _g0[0]["animal"], _g0[0]["marker"],
+                           _g0[0]["scene_uid"] + "_DAPI.png")
+        _ov_bytes = open(_ov, "rb").read()
+        _zoom = float(_g0[0]["native_um_px"]) / float(_g0[0]["overview_um_px"])
+        _n = int(round(1000 * _zoom))
+        Image.fromarray(np.random.default_rng(300).integers(
+            0, 255, (_n, _n)).astype(np.uint8)).save(_ov)
+        _saved_g = P5.GEOM_CSV
+        P5.GEOM_CSV = _gcsv
+
+        def _verify_dr():
+            buf = _io.StringIO()
+            with _ctx.redirect_stdout(buf):
+                got = P5.verify_czi(limit=2)
+            return got, buf.getvalue()
+
+        try:
+            _v0, _said0 = _verify_dr()
+            chk("verify_czi checks the section undropped", _v0[1], 1)
+            _DROP["read"] = True
+            _v1, _said = _verify_dr()
+            _settle()
+            chk("the drop fired", _DROP["read"], False)
+            chk("verify_czi with the drive dropped: the same answer", _v1, _v0)
+            chk("...and the drive is said to be back", "@@drive back" in _said, True)
+            _t = _vanish_for(0.3)
+            _v2, _said = _verify_dr()
+            _t.join(5)
+            chk("verify_czi with the folder gone first: waited for, not passed over",
+                _v2, _v0)
+        finally:
+            P5.GEOM_CSV = _saved_g
+            with open(_ov, "wb") as fh:
+                fh.write(_ov_bytes)
+    finally:
+        for _k, _m in _saved_mods.items():
+            if _m is None:
+                sys.modules.pop(_k, None)
+            else:
+                sys.modules[_k] = _m
+        os.environ.pop("LS_WATCH", None)
+        os.environ.pop("LS_PROGRESS", None)
+
 
 print()
 print("--- multiplex: each marker's boxes carry the marker they were placed for ---")

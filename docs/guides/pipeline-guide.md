@@ -1641,7 +1641,7 @@ listed and skipped; drawing the detection overlays saves them once.
 
 The two texture measurements are made so that a uniform brightening or darkening of a whole section —
 the background differs by about a factor of two between animals — cannot change them. The variation
-is taken above the region's own background glass rather than above zero, and a spot is counted against
+is taken above the region's own background between the nuclei rather than above zero, and a spot is counted against
 the nucleus's own median and spread.
 
 It reads one section at a time and can be stopped; the next run reads only what is left, or a section

@@ -15,13 +15,15 @@ autofluorescence score (06k) to learn from. The keys:
   0.95 at 12 px, so a small round nucleus would look less solid than a large
   one. Counted this way a digital disc is 1.0 at every size.
 - `marker_cv`: the coefficient of variation of the marker inside the nucleus,
-  taken ABOVE THE BOX'S OWN GLASS: sd / max(mean - b, s), with b the median and
-  s the 1.4826 x MAD of the box's pixels that are in no nucleus. A plain
+  taken ABOVE THE BOX'S NON-NUCLEAR PIXELS: sd / max(mean - b, s), with b the
+  median and s the 1.4826 x MAD of the box's pixels that are in no nucleus
+  (tissue background between nuclei, or glass where the box has any). A plain
   sd / mean moves with an additive background, and two nuclei of different
   brightness swap order under the ~2x background batch between animals; this
   does not move at all under x * gain + offset. The floor s keeps a nucleus at
-  the glass's level from dividing by about zero. Blank ("") when the box has no
-  glass pixels, or the nucleus is at or below the glass and the glass is flat.
+  the background's level from dividing by about zero. Blank ("") when the box
+  has no non-nuclear pixels, or the nucleus is at or below them and they are
+  flat.
 - `marker_spots`: the local maxima inside the nucleus above its own median +
   3 x 1.4826 x MAD. A maximum is a pixel at least as bright as each of its 8
   neighbours inside the nucleus; a flat-topped maximum is counted once. With a
@@ -66,7 +68,7 @@ def background(label_img, marker):
     return med, _MAD_SD * float(np.median(np.abs(v - med)))
 
 
-_glass = background
+_non_nuclear = background
 
 
 def _pad(sl, shape):
@@ -120,7 +122,7 @@ def features(label_img, nucleus_id, dapi, marker, other=None, *, bbox=None,
             raise ValueError(f"nucleus {nid} is not in the label image")
         bbox = found[1]
     if background is None:
-        background = _glass(labels, marker)
+        background = _non_nuclear(labels, marker)
     sl = _pad(bbox, labels.shape)
     mask = labels[sl] == nid
     if not mask.any():

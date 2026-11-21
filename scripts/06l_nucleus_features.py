@@ -10,7 +10,8 @@ exactly as roi_nuclei.csv is (scene_uid, marker, roi_index, nucleus_id):
   roundness            4 pi A / P^2 of the nucleus's mask
   solidity             its area over its convex hull's
   marker_cv            sd of the marker inside it over its mean ABOVE the box's
-                       own glass (offset- and gain-free; see ls_nucleus_features)
+                       non-nuclear pixels (offset- and gain-free; see
+                       ls_nucleus_features)
   marker_spots         local maxima above its median + 3 x 1.4826 x MAD
   other_marker_median  under multiplex, the other marker's median inside it;
                        blank under paired, where the other marker is a
@@ -47,7 +48,9 @@ that died between the two writes) or a stale one (re-detected, re-curated) are
 dropped first, through a temp file and one replace; a torn last line is cut
 back. So a stopped run, a re-run and a --force all leave one row per nucleus.
 
---limit N reads at most N sections and stops; run again to go on. --force
+--limit N reads at most N sections and stops; run again to go on. A section
+that cannot be done (no saved outlines, no boxes) is listed and does not count
+against N, so a --limit run never stalls on the same ones. --force
 reads every section again, even those with current features (with --limit, the
 first N of them; the others keep their features). --marker restricts to one
 marker. A CZI read that fails because the slide drive went away is waited out
@@ -240,14 +243,27 @@ def measure(doc, marker, uid, boxes, outlines, want, scene):
                           f"outlines are {labels.shape}")
         oth = got["other"].astype(np.float64) if "other" in got else None
         bbox = NF.bboxes(labels)
-        glass = NF.background(labels, mark)
+        rest = NF.background(labels, mark)
         for nid in sorted(want[ri]):
             f = NF.features(labels, nid, None, mark, oth, bbox=bbox[nid],
-                            background=glass)
+                            background=rest)
             rows.append([uid, marker, ri, nid, _fmt(f["roundness"], 4),
                          _fmt(f["solidity"], 4), _fmt(f["marker_cv"], 4),
                          f["marker_spots"], _fmt(f["other_marker_median"], 1)])
     return rows
+
+
+def cannot_do(marker, uid, by_sec, geom):
+    """Why a section cannot be done, found without reading it; else None."""
+    if not by_sec.get(uid):
+        return (f"no boxes in {os.path.basename(G5.resolve_paths(marker)[1])} for this "
+                f"section")
+    if geom.get(uid) is None:
+        return "no row in the geometry file for this section"
+    if not D5.present(D5.outline_path(marker, uid), uid):
+        return (f"no saved outlines (detection_outlines/{marker}/{uid}.npz) - "
+                f"06i_detection_overlays.py saves them once, then run this again")
+    return None
 
 
 # ---------------------------------------------------------------- the checkpoint
@@ -371,21 +387,31 @@ def main():
     if not os.path.exists(NUCLEI_CSV):
         print(f"no {NUCLEI_CSV} - run 05c_detect_rois.py first")
         return 1
+    work = plan(args)
+    if not work:
+        # Refused before anything is written: a header-only file would read as
+        # this stage having run.
+        print("no marker has boxes - run 05a_roi_geometry.py first")
+        return 1
     os.makedirs(RESULTS, exist_ok=True)
     prepare_files()
     done = _read_done()
-    work = plan(args)
-    if not work:
-        print("no marker has boxes - run 05a_roi_geometry.py first")
-        return 1
 
     # What is kept: current sections, not being read this run, and every
     # logged section of a marker this run does not look at.
     looked = {m for m, *_ in work}
     keep = {k: v for k, v in done.items() if k[0] not in looked}
-    todo, budget = [], args.limit or None
+    todo, budget, not_done = [], args.limit or None, []
     for marker, by_sec, geom, secs in work:
         for uid, fp in secs:
+            # Refused before the budget is spent: a section that cannot be done
+            # (no outlines saved yet, its boxes gone) is not retried in place of
+            # one that can, so --limit N always gets through N new sections.
+            why = cannot_do(marker, uid, by_sec, geom)
+            if why:
+                not_done.append((marker, uid, why))
+                print(f"  {marker} {uid}: NOT DONE - {why}")
+                continue
             current = done.get((marker, uid)) == fp
             read = (not current) or args.force
             if read and (budget is None or budget > 0):
@@ -400,13 +426,13 @@ def main():
 
     n_all = sum(len(s) for *_, s in work)
     n_left = sum(1 for m, _b, _g, s in work for u, fp in s
-                 if (m, u) not in keep) - len(todo)
+                 if (m, u) not in keep) - len(todo) - len(not_done)
     n_done = sum(1 for m, _b, _g, s in work for u, _f in s if (m, u) in keep)
     print(f"{n_all} measured section(s); {n_done} already done, {len(todo)} to read"
           + (f" (at most {args.limit} this run)" if args.limit else ""))
 
     by_marker = {m: (b, g) for m, b, g, _s in work}
-    not_done, n_rows, pyczi = [], 0, None
+    n_read, n_rows, pyczi = 0, 0, None
     for start in range(0, len(todo), BATCH):
         batch = todo[start:start + BATCH]
         keys_by = {}
@@ -416,16 +442,6 @@ def main():
             by_sec, geom = by_marker[marker]
             boxes, g = by_sec.get(uid, []), geom.get(uid)
             try:
-                if not boxes:
-                    raise NotDone(f"no boxes in {os.path.basename(G5.resolve_paths(marker)[1])} for "
-                                  f"this section")
-                if g is None:
-                    raise NotDone("no row in the geometry file for this section")
-                npz = D5.outline_path(marker, uid)
-                if not D5.present(npz, uid):
-                    raise NotDone("no saved outlines (detection_outlines/"
-                                  f"{marker}/{uid}.npz) - 06i_detection_overlays.py "
-                                  "saves them once, then run this again")
                 outlines = load_outlines(marker, uid)
                 want = check(outlines, keys_by[marker].get(uid, []), boxes)
                 path = os.path.join(CONFIG["source_dir"], g["czi_file"])
@@ -452,10 +468,11 @@ def main():
                 print(f"  {marker} {uid}: NOT DONE - {type(exc).__name__}: {exc}")
                 continue
             commit(marker, uid, fp, rows)
+            n_read += 1
             n_rows += len(rows)
             print(f"  {marker} {uid}: {len(rows)} nuclei")
 
-    print(f"{len(todo) - len(not_done)} section(s) read, {n_rows} nuclei written "
+    print(f"{n_read} section(s) read, {n_rows} nuclei written "
           f"to {FEATURES_CSV}")
     if not_done:
         print(f"{len(not_done)} section(s) not done (listed above); their features "

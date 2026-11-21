@@ -45,7 +45,7 @@ def disc(shape, cy, cx, r):
 
 
 def two_nuclei(seed, spots_a=6, spots_b=0, mean_a=1000.0, mean_b=1000.0, sd=5.0):
-    """A 60 x 120 box: nucleus 1 on the left, nucleus 2 on the right, glass round them."""
+    """A 60 x 120 box: nucleus 1 on the left, nucleus 2 on the right, background round them."""
     rng = np.random.default_rng(seed)
     shape = (60, 120)
     labels = np.zeros(shape, np.uint32)
@@ -117,7 +117,7 @@ labels, dapi, marker = two_nuclei(4)
 flat = np.full(labels.shape, 800.0)
 ff = NF.features(labels, 1, dapi, flat)
 chk("a flat marker has no spots", ff["marker_spots"], 0)
-chk("a flat marker with no signal above the glass has a blank marker_cv",
+chk("a flat marker with no signal above the background has a blank marker_cv",
     ff["marker_cv"], "")
 try:
     NF.features(labels, 99, dapi, marker)
@@ -132,7 +132,7 @@ chk("bboxes() gives the slice of each label",
 # ---------------------------------------------------------------- the stage
 
 print("--- the stage, on a stand-in for pylibCZIrw ---")
-from _fixture import use_temp_study, load_stage                  # noqa: E402
+from _fixture import use_temp_study, load_stage, temp_study      # noqa: E402
 
 PAIRED = {"layout": "paired", "markers": ["AF568", "AF488"], "channels": []}
 STUDY = use_temp_study(acquisition=PAIRED)
@@ -341,6 +341,18 @@ chk("...its rows are gone rather than kept stale",
     UIDS[0] in {r["scene_uid"] for r in features_rows()}, False)
 chk("...and it was not read", SCENE[UIDS[0]] in scenes_read(), False)
 
+print("--- --limit is not spent on a section that cannot be done ---")
+os.remove(M.DONE_CSV)                         # every section to read again
+del READS[:]
+run("--limit", "1")
+chk("--limit 1, the first section unable to be done: the next one is read",
+    scenes_read(), [SCENE[UIDS[1]]])
+chk("...and the one not done is named", f"{UIDS[0]}: NOT DONE" in LAST[0])
+del READS[:]
+run("--limit", "1")
+chk("...a second --limit 1 goes on to the one after", scenes_read(), [SCENE[UIDS[2]]])
+run()
+
 print("--- the drive drops mid-section: waited for, the section read again ---")
 before = sorted(map(tuple, (r.values() for r in features_rows())))
 DROP["at"] = SCENE[UIDS[2]]
@@ -357,8 +369,21 @@ chk("...nothing listed as not done but the one with no outlines",
 print("--- roi_nuclei_untouched ---")
 chk("roi_nuclei.csv is byte-identical after every run", digest(D5.NUCLEI_CSV), NUCLEI_SHA)
 
+print("--- a refused run writes nothing ---")
+with temp_study(acquisition=PAIRED) as empty:
+    os.makedirs(os.path.join(empty.out_root, "results"), exist_ok=True)
+    with open(os.path.join(empty.out_root, "results", "roi_nuclei.csv"), "w",
+              encoding="utf-8") as fh:
+        fh.write(",".join(D5.COLUMNS) + "\n")
+    ME = load_stage("06l_nucleus_features.py", name="lsstage_06l_empty")
+    sys.argv = ["06l_nucleus_features.py"]
+    with contextlib.redirect_stdout(io.StringIO()):
+        rc = ME.main()
+    chk("no boxes: exit 1", rc, 1)
+    chk("...and no nucleus_features.csv for the app to read as done",
+        os.path.exists(ME.FEATURES_CSV), False)
+
 print("--- multiplex: the other marker's median inside the nucleus ---")
-from _fixture import temp_study                                  # noqa: E402
 
 chk("paired: no other marker", M.other_marker(MARKER), None)
 TWO_NUCLEAR = {"layout": "multiplex", "channels": [

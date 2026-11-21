@@ -179,6 +179,9 @@ chk("...made from detection", S.BY_ID["nucleus_features"].made_from, ["detect"])
 chk("...with plain words", bool(W.PLAIN.get("nucleus_features", "").strip()))
 chk("...whose options are its flags",
     [o.flag for o in W.options_for("nucleus_features")], ["--force", "--limit"])
+chk("...a finished run with sections not done says how many",
+    W.shortfall("nucleus_features", "  4 section(s) read\n2 section(s) not done (listed "
+                "above)\n"), "2 sections not done")
 
 print("--- 06i detection overlays: a Results button, on request only ---")
 chk("overlays are a stage", "detection_overlays" in S.BY_ID)

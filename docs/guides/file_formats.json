@@ -5366,7 +5366,7 @@
      "name": "marker_cv",
      "type": "float",
      "units": "",
-     "meaning": "sd of the marker inside the nucleus / max(mean - b, s), b and s the median and 1.4826 x MAD of the box's pixels in no nucleus: a coefficient of variation above the box's own glass, unchanged by an offset or a gain. Blank when the box has no such pixels, or the nucleus is not above them and they are flat."
+     "meaning": "sd of the marker inside the nucleus / max(mean - b, s), b and s the median and 1.4826 x MAD of the box's pixels in no nucleus: a coefficient of variation above the box's non-nuclear pixels, unchanged by an offset or a gain. Blank when the box has no such pixels, or the nucleus is not above them and they are flat."
     },
     {
      "name": "marker_spots",

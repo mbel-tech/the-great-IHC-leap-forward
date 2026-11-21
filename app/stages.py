@@ -810,7 +810,7 @@ STAGES = [
           # exactly the sections it changes on the next run.
           made_from=["detect"],
           blurb="Roundness, solidity, the marker's coefficient of variation above "
-                "the box's own glass and its spot count, for every nucleus in "
+                "the box's non-nuclear pixels and its spot count, for every nucleus in "
                 "roi_nuclei.csv, from the outlines 05c saved and the marker plane "
                 "re-read under them; under multiplex also the other marker's median. "
                 "Never runs StarDist; roi_nuclei.csv is unchanged. For the "

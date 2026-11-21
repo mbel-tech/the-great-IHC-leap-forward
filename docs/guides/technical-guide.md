@@ -2004,7 +2004,10 @@ Stage `nucleus_features` (Quantification, run on request). Shape and marker text
 - **Resumes per section:** rows appended and synced, then one line in `nucleus_features_done.csv` with a
   fingerprint of the outline file, the section's nucleus list, its boxes, its CZI scene, the planes read
   and the feature version. A section with no current line is read; its rows are dropped first, through a
-  temp file and one replace, and a torn last line is cut back. `--limit N`, `--force`, `--marker`.
+  temp file and one replace, and a torn last line is cut back. `--limit N` (a section with no saved
+  outlines is listed and not counted against N), `--force`, `--marker`. A run that leaves sections not
+  done ends with "N section(s) not done", which the app shows as a shortfall. Completeness is the done
+  log, not the CSV existing.
 - **Drive:** each section is one `ls_drive.per_slide_settled` unit, as in 05c and 06i: a read that fails
   because the slide drive went away waits for it and reads the section again; nothing is written until the
   unit returns.
@@ -4349,7 +4352,7 @@ Shape and marker texture of every nucleus in roi_nuclei.csv, one row per roi_nuc
 | `nucleus_id` | int |  | The nucleus's label in its box's saved outlines, as in roi_nuclei.csv. |
 | `roundness` | float |  | 4 pi A / P^2 of the nucleus's mask (skimage perimeter), capped at 1. About 0.9 for a filled disc. Blank for an object with no perimeter. |
 | `solidity` | float |  | Pixel area over the pixels whose centres lie in the convex hull of its pixel centres: 1.0 for a digital disc of any size. |
-| `marker_cv` | float |  | sd of the marker inside the nucleus / max(mean - b, s), b and s the median and 1.4826 x MAD of the box's pixels in no nucleus: a coefficient of variation above the box's own glass, unchanged by an offset or a gain. Blank when the box has no such pixels, or the nucleus is not above them and they are flat. |
+| `marker_cv` | float |  | sd of the marker inside the nucleus / max(mean - b, s), b and s the median and 1.4826 x MAD of the box's pixels in no nucleus: a coefficient of variation above the box's non-nuclear pixels, unchanged by an offset or a gain. Blank when the box has no such pixels, or the nucleus is not above them and they are flat. |
 | `marker_spots` | int | count | Local maxima of the marker inside the nucleus (8 neighbours, a plateau counted once) above its own median + 3 x 1.4826 x MAD. Unchanged by an offset or a gain. |
 | `other_marker_median` | float | grey value | Under multiplex, the other marker's median inside the nucleus (the first other marker of the declared order on another plane). Blank under paired. |
 

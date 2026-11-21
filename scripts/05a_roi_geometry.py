@@ -1090,7 +1090,7 @@ def verify_czi(limit=4):
                                      scene=int(g["scene_index"]),
                                      zoom=zoom).astype(np.float64)
 
-        a = per_slide(unit, label=f"{g['czi_file']} ({uid}, --verify-czi)")
+        a = per_slide(unit, label=f"{g['czi_file']} ({uid}, --verify)")
         same_shape = a.shape == stored.shape
         h, w = min(stored.shape[0], a.shape[0]), min(stored.shape[1], a.shape[1])
         r = np.corrcoef(stored[:h, :w].ravel(), a[:h, :w].ravel())[0, 1]

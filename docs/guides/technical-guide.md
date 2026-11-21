@@ -1198,7 +1198,9 @@ Nothing reads them.
 - **Settings:** `scene_render.*`, `display`, `acquisition`, `pixel_size_um`.
 - **Failure and re-run:** resumable per picture; `--force` redraws. Before each scene it checks free
   memory (RAM plus page file) and skips a scene that will not fit, with a reason, rather than crashing. `--workers` runs scenes in
-  parallel; `--limit` counts scenes tried.
+  parallel; `--limit` counts scenes tried. If the drive drops while a CZI is drawn, it waits for the drive
+  (`ls_drive`) and draws that CZI again from its first scene; a scene that fails with the drive there is
+  listed as before.
 
 ### `01m_reagent_screen.py`
 
@@ -1238,6 +1240,9 @@ the operator to confirm or reject in Set up. It never assigns one.
   modification time, scene, planes, clip ceiling, zoom, feature constants), and a run reads only
   sections whose key is missing or changed. Scoring and the strip are always redone from the checkpoint
   and the stored thumbnails, so confirming or rejecting in Set up re-scores without reading a pixel.
+  If the drive drops while a file is read, it waits for the drive (`ls_drive`) and reads that file again
+  from its first section (each section's tiles are seeded by its uid, so the same ones); a section that
+  fails with the drive there is listed unscreened as before.
   `--force` only overrides the run gate and still resumes. `--reread` reads every section again, and is
   resumable too: rows carry the reread's id, kept in `qc/reagent_screen_reread.json` until it finishes,
   and any run while it is pending continues it. `--limit N` reads at most N and leaves
@@ -1592,7 +1597,9 @@ frame.
   last line, as does a marker with no `display.colours` entry; what was built is kept, and a re-run builds
   only what is missing. An excluded section (`--include-excluded`) with no composite is listed apart and
   does not fail the run, as with `04a --render-excluded`. Under `multiplex` the sections are taken from
-  `focus.csv` as 04a takes them (one row per scan), so every marker finds them.
+  `focus.csv` as 04a takes them (one row per scan), so every marker finds them. If the drive drops while
+  a section is rendered from the CZI, it waits for the drive (`ls_drive`), opens the CZI again and
+  renders that section from the start.
 
 ### `04p_section_provenance.py`
 
@@ -1696,6 +1703,8 @@ real slide pixels.
   placed and written, and the run exits 1 with `!! N <marker> polygon ROI(s) REFUSED ...` as its last
   line (`not_placed`). A ROI row with no shape at all (neither `sec_r` nor `sec_poly`; only a damaged
   or legacy export has one) is refused the same way, with `!! N <marker> ROI row(s) REFUSED (no shape ...`.
+  A scene rectangle (or `--verify`'s CZI read) that fails because the drive dropped is waited for
+  (`ls_drive`) and read again, not listed as missing.
 
 ### `05b_tune_detection.py`
 

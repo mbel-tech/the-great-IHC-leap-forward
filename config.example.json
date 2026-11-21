@@ -137,9 +137,9 @@
     "by_animal": {}
   },
   "positivity": {
-    "_fp_target_note": "Recorded with the study so the check can be repeated. Only the reagent-control check of the cut will read it (not built yet), and it never changes the cut by itself: a suggested multiplier is applied only by the operator (positivity.cut_k). Between 0.001 and 0.2.",
+    "_fp_target_note": "Recorded with the study so the check can be repeated. 06a's reagent-control check of the cut (results/reagent_cut_check.csv) reads it, and it never changes the cut by itself: a suggested multiplier is applied only by the operator (positivity.cut_k). Between 0.001 and 0.2.",
     "fp_target": 0.01,
-    "_cut_k_note": "{<marker or \"*\">: k}, each k between 1.0 and 10.0. The cut is median + k x 1.4826 x MAD of the section's own background-disc nuclei, so it stays relative to each section. A marker not listed takes \"*\", and with neither it is 3.0. 06a counts by it; 05c colours its crops by it; 06i redraws from 06a's cuts. Changing it puts 06a and the results out of date, never detection. Set it before unblinding.",
+    "_cut_k_note": "{<marker or \"*\">: k}, each k between 1.0 and 10.0. The cut is median + k x 1.4826 x MAD of the section's own background-disc nuclei, so it stays relative to each section. A marker not listed takes \"*\", and with neither it is 3.0. 06a counts by it; 05c colours its crops by it; 06i redraws from 06a's cuts; 06c states it on the Reagent controls sheet. Changing it puts 06a and the results out of date, never detection. Set it before unblinding.",
     "cut_k": {
       "*": 3.0
     },

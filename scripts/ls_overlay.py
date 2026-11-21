@@ -139,6 +139,34 @@ def section_cut(values, k=CUT_K):
     return m + k * s
 
 
+def leave_one_disc_out(discs, k=CUT_K):
+    """(false positives, nuclei) counted out of sample over one section's
+    background discs for one marker, or None.
+
+    `discs`: one entry per disc, each a list of (median, censored) pairs - a
+    bare number is (number, False) - or None/empty for a disc with no kept
+    nuclei. Each disc with CUT_MIN_NUCLEI usable (uncensored) values is left
+    out in turn, the cut is formed at `k` from the usable values of every
+    OTHER disc (section_cut), and the left-out disc's nuclei are counted
+    against it by is_positive - a censored one is positive and still a
+    nucleus. Needs two such discs. 06a's leave_one_disc_out and the reagent
+    k check (ls_reagent_report.cut_check_rows) both count by this one rule.
+    """
+    pairs = [[(x, False) if not isinstance(x, (tuple, list)) else (x[0], bool(x[1]))
+              for x in d] if d else [] for d in discs]
+    usable = [[v for v, c in d if not c] for d in pairs]
+    qual = [i for i, u in enumerate(usable) if len(u) >= CUT_MIN_NUCLEI]
+    if len(qual) < 2:
+        return None
+    fp = n = 0
+    for i in qual:
+        cut = section_cut([v for j, u in enumerate(usable) if j != i
+                           for v in u], k)
+        fp += sum(1 for v, c in pairs[i] if is_positive(v, c, cut))
+        n += len(pairs[i])
+    return fp, n
+
+
 def section_values(rows):
     """The values a section's cut is taken from, in row order: marker_median
     of each background-disc row that is not censored, not on an artifact and

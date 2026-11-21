@@ -700,7 +700,7 @@ before the unblinding step read it.
 *What is reported.* Stage 06a writes `results/reagent_controls.csv`, one row per control section,
 marker and region, from the same nuclei and the same cut machinery as the stained sections, and the
 control's own cuts to `results/reagent_control_cuts.csv`. Part A is the share of the control's nuclei
-that its own per-section cut (median + 3 × 1.4826 × MAD of its own background-disc nuclei) calls
+that its own per-section cut (median + k × 1.4826 × MAD of its own background-disc nuclei, k the marker's `positivity.cut_k`, 3 by default) calls
 positive: the false-positive rate of the positivity rule where there is no specific signal, including
 autofluorescence and non-specific secondary binding that is not uniform. It is shown beside the
 paired stained sections' rate in the same region and their difference, as a margin (a density per mm²

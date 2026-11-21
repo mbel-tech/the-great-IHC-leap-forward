@@ -108,6 +108,7 @@ if _HERE not in sys.path:
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
 import ls_naming as NM  # noqa: E402
 import ls_reagent_report as RR  # noqa: E402
+import ls_overlay as LO  # noqa: E402
 OUT_ROOT = G5.OUT_ROOT
 RESULTS = os.path.join(OUT_ROOT, "results")
 NUCLEI_CSV = os.path.join(RESULTS, "roi_nuclei.csv")
@@ -218,6 +219,13 @@ def _cell(v):
     return float(v) if "." in v else int(v)
 
 
+def _cut_ks(rc_rows):
+    """{marker: the k its cut is formed at} for the reagent-control sheet's
+    header, so it states the multiplier in force (positivity.cut_k)."""
+    return {m: LO.cut_k(CONFIG, m) for m in sorted({r.get("marker") or "" for r in rc_rows})
+            if m}
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=XLSX)
@@ -238,7 +246,7 @@ def main(argv=None):
         # end 06e's loop on the first cycle.
         write_workbook(args.out, [("Reagent controls",
                                    [{k: _cell(v) for k, v in r.items()} for r in rc_rows],
-                                   RR.sheet_header(rc_rows))])
+                                   RR.sheet_header(rc_rows, _cut_ks(rc_rows)))])
         print(f"no stained section measured yet - only the reagent controls "
               f"({len(rc_rows)} rows) -> {args.out}")
         print(f"  {RR.limitation_text(rc_rows)}")
@@ -554,7 +562,7 @@ def main(argv=None):
     if rc_rows:
         sheets.append(("Reagent controls", [{k: _cell(v) for k, v in r.items()}
                                             for r in rc_rows],
-                       RR.sheet_header(rc_rows)))
+                       RR.sheet_header(rc_rows, _cut_ks(rc_rows))))
     write_workbook(args.out, sheets)
 
     print("=" * 72)

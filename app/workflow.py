@@ -857,6 +857,8 @@ SETTING_SECTIONS = [
 #: The multiplier a marker not named in positivity.cut_k is cut at
 #: (ls_overlay.CUT_K; not imported, since that module brings numpy).
 CUT_K_DEFAULT = 3.0
+#: positivity.fp_target's default (ls_config), for the same reason as above.
+FP_TARGET_DEFAULT = 0.01
 
 
 def cut_k_rows(cfg):
@@ -1840,6 +1842,11 @@ def _setting(cfg, key):
         # Every marker at the default multiplier is the cut every study had
         # before the key: Set up writes the default out when it saves, and that
         # must not put 06a out of date for a cut that has not moved.
+        return None
+    if key == "positivity.fp_target" and isinstance(node, (int, float)) and \
+            not isinstance(node, bool) and float(node) == FP_TARGET_DEFAULT:
+        # The same for the reagent k check's target: the default written out
+        # is the target every study had, and its file is unchanged by it.
         return None
     if key == "detection.auto" and isinstance(node, dict):
         # 05b writes its whole report here (the date, the count curve), but 05c

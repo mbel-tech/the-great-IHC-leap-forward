@@ -5,7 +5,11 @@ Reads `results/roi_nuclei.csv` and decides three things.
 **Where the positivity cut comes from.** Each section's own background discs -
 tissue the operator judged to carry no real signal - give a robust upper bound:
 
-    cut = median(background) + 3 * 1.4826 * MAD(background)
+    cut = median(background) + k * 1.4826 * MAD(background)
+
+k is the marker's positivity.cut_k (ls_overlay.cut_k), 3 unless the study sets
+it. The reagent k check (results/reagent_cut_check.csv) tests k against the
+study's no-primary reagent controls; it never changes k by itself.
 
 Per section, because this is a high-baseline marker and the background level
 moves from section to section. **The earlier reason given here was wrong and is
@@ -175,6 +179,8 @@ def measured_empty(path, have):
     return logged - set(have)
 
 T_UM = CONFIG["section_thickness_um"]
+#: The false-positive rate the k check holds the cut to (positivity.fp_target).
+FP_TARGET = float((CONFIG.get("positivity") or {}).get("fp_target", 0.01))
 AB = CONFIG["detection"].get("abercrombie", {})
 AB_ON = bool(AB.get("enabled"))
 BASE_PX_UM = CONFIG["pixel_size_um"]
@@ -496,20 +502,12 @@ def leave_one_disc_out(discs, k=LO.CUT_K):
     given a cut on its own - not one stitched together from slivers. A
     thinner disc still feeds the cuts the others are counted
     against - its values are as usable there as in the in-sample cut.
+
+    The counting itself is ls_overlay.leave_one_disc_out, which the reagent
+    k check (ls_reagent_report.cut_check_rows) counts stained discs by too.
     """
-    usable = [[v for v, c in zip(d.v, d.cen) if not c] if d else []
-              for d in discs]
-    qual = [i for i, u in enumerate(usable) if len(u) >= LO.CUT_MIN_NUCLEI]
-    if len(qual) < 2:
-        return None
-    fp = n = 0
-    for i in qual:
-        cut = LO.section_cut([v for j, u in enumerate(usable) if j != i
-                              for v in u], k)
-        d = discs[i]
-        fp += sum(1 for v, c in zip(d.v, d.cen) if LO.is_positive(v, c, cut))
-        n += len(d.v)
-    return fp, n
+    return LO.leave_one_disc_out(
+        [list(zip(d.v, d.cen)) if d else None for d in discs], k)
 
 
 #: Why a confirmed reagent control has no measurement for a marker yet.
@@ -585,6 +583,63 @@ def reagent_report(lookup, rc_nuc, rc_bg, areas, by_idx, cuts, measured,
     return rows, {k: c for k, c in own_cuts.items() if k in pairing}
 
 
+def cut_check_controls(lookup, rc_nuc, rc_bg):
+    """The k check's controls: {(uid, marker): {"bg", "roi", "own", "kind"}}
+    for every measured no_primary control. `bg` is its usable background
+    values (rc_bg), `roi` its ROI nuclei as (median, censored). isotype,
+    preadsorbed and unstained controls are never used here."""
+    out = {}
+    for r in rc_nuc:
+        key = (r["scene_uid"], r["marker"])
+        if (lookup.get(key) or {}).get("kind") != "no_primary":
+            continue
+        c = out.setdefault(key, {"bg": list(rc_bg.get(key, ())), "roi": [],
+                                 "own": False, "kind": "no_primary"})
+        if r["roi_kind"] == "roi":
+            c["roi"].append((r["marker_median"], r["censored"]))
+            c["own"] = c["own"] or bool(r["own"])
+    return out
+
+
+def cut_check_lines(rows, st_discs, lookup, rc_nuc, rc_bg):
+    """Two lines per marker: the suggested k, and whether the stained
+    sections' disc rate agrees with the controls' at the k in force (checked
+    at that k itself when it is not on the grid)."""
+    out = []
+    for mk in sorted({r["marker"] for r in rows}):
+        m = [r for r in rows if r["marker"] == mk]
+        sug = [r for r in m if r["suggested"] == 1]
+        if sug:
+            r = sug[0]
+            out.append(f"[{mk}] suggested k {r['k']}: control false-positive rate "
+                       f"{r['control_fp'] * 100:.1f}% (95% {r['control_fp_lo'] * 100:.1f}-"
+                       f"{r['control_fp_hi'] * 100:.1f}%) on {r['n_control_nuclei']} "
+                       f"nuclei of {r['n_control_sections']} control section(s); "
+                       f"never applied by itself (positivity.cut_k)")
+        elif RR.NO_K_MEETS in m[0]["note"]:
+            out.append(f"[{mk}] {RR.NO_K_MEETS} ({FP_TARGET:g}): the control rate is "
+                       f"{m[-1]['control_fp'] * 100:.1f}% even at k {m[-1]['k']}")
+        else:
+            out.append(f"[{mk}] no suggested k: {m[0]['note']}")
+        k = LO.cut_k(CONFIG, mk)
+        here = [r for r in m if r["k"] == k]
+        if not here:
+            here = [r for r in RR.cut_check_rows(
+                cut_check_controls(lookup, rc_nuc, rc_bg),
+                {key: d for key, d in st_discs.items() if key[1] == mk},
+                FP_TARGET, ks=(k,)) if r["marker"] == mk]
+        said = RR.agreement(here[0]) if here else None
+        if said:
+            r = here[0]
+            out.append(f"[{mk}] at the k in force ({k}): {said} (discs "
+                       f"{r['disc_fp'] * 100:.1f}% vs controls "
+                       f"{r['control_fp_lo'] * 100:.1f}-{r['control_fp_hi'] * 100:.1f}%)")
+        else:
+            out.append(f"[{mk}] at the k in force ({k}): cannot compare - no disc rate "
+                       f"or no control rate")
+    return out
+
+
 def main(argv=None):
     # argv is accepted and ignored: this stage has no flags, and taking it
     # lets 06e call every stage the same way instead of branching on a label.
@@ -624,7 +679,7 @@ def main(argv=None):
     # on disc membership alone, so a disc overhanging the silhouette - or, in
     # one case, sitting 2.6 mm off the scanned scene entirely - contributed
     # objects found on glass. Those are worst in a BACKGROUND disc, where they
-    # enter median + 3*1.4826*MAD and drag the positivity cut down, making a
+    # enter median + k*1.4826*MAD and drag the positivity cut down, making a
     # section look more positive than it is.
     n_all = n_art = n_off = n_kept = 0
     # Every section 05c MEASURED, taken before the drop: one whose nuclei were
@@ -834,6 +889,7 @@ def main(argv=None):
     rows, spec = [], []
     rc_areas = collections.Counter()   # (uid, marker, region) -> usable mm2
     st_areas = collections.Counter()   # the same for stained sections
+    st_discs = {}                      # (uid, marker) -> background discs
     for uid in sorted(uids):
         # PER MARKER, so `i` restarts at 1 for each one - which is how 05c
         # numbered them. Under `paired` there is exactly one group per section
@@ -982,9 +1038,14 @@ def main(argv=None):
                 no_denom = bgrows[0]["denominator_withheld_reason"]
                 # The out-of-sample rate, over the same discs the in-sample
                 # one sums, and withheld where it is: see leave_one_disc_out.
+                bgdiscs = [by_idx.get((uid, mk, r["roi_index"])) for r in bgrows]
                 loo = (None if no_denom else leave_one_disc_out(
-                    [by_idx.get((uid, mk, r["roi_index"])) for r in bgrows],
-                    LO.cut_k(CONFIG, mk)))
+                    bgdiscs, LO.cut_k(CONFIG, mk)))
+                if not no_denom:
+                    # The same discs, for the reagent k check's disc rate at
+                    # every k on its grid (ls_reagent_report.cut_check_rows).
+                    st_discs[(uid, mk)] = [list(zip(d.v, d.cen)) if d else None
+                                           for d in bgdiscs]
                 spec.append({
                     "scene_uid": uid, "animal": bgrows[0]["animal"],
                     "marker": bgrows[0]["marker"],
@@ -1060,6 +1121,11 @@ def main(argv=None):
     boxed = {(u, mk) for u, bs in box_by.items() for mk in split_by_marker(bs)}
     rc_rows, rc_cuts = reagent_report(rc_lookup, rc_nuc, rc_bg, rc_areas, by_idx,
                                       cuts, measured, rc_factors, st_areas, boxed)
+    # The k check: the no_primary controls' own cuts at every k on the grid,
+    # beside the stained sections' leave-one-disc-out rate at the same k.
+    kc_rows = RR.cut_check_rows(cut_check_controls(rc_lookup, rc_nuc, rc_bg), st_discs,
+                                FP_TARGET)
+    kc_csv = os.path.join(os.path.dirname(MEAS_CSV), RR.CUT_CHECK_CSV)
     rc_csv = os.path.join(os.path.dirname(MEAS_CSV), RR.REPORT_CSV)
     # A control's own cut, at full precision, for 06i to draw it by - in a file
     # of its own, never positivity_cuts.csv (which lists stained sections only).
@@ -1067,13 +1133,15 @@ def main(argv=None):
     for path, data, cols in ((rc_csv, rc_rows, RR.COLUMNS),
                              (rc_cuts_csv,
                               [{"scene_uid": u, "marker": m, "cut": repr(c)}
-                               for (u, m), c in sorted(rc_cuts.items())], CUTS_COLUMNS)):
+                               for (u, m), c in sorted(rc_cuts.items())], CUTS_COLUMNS),
+                             (kc_csv, kc_rows, RR.CUT_CHECK_COLUMNS)):
         if data:
             IO.atomic_write_csv(path, data, cols)
         elif os.path.exists(path):
             # No control measured (or none confirmed any more): a stale report
-            # would switch 06c's limitation text, and a stale cut colour 06i's
-            # pictures, on controls this run does not have.
+            # would switch 06c's limitation text, a stale cut colour 06i's
+            # pictures, and a stale k check offer a multiplier, on controls
+            # this run does not have.
             os.remove(path)
     for path, data in ((MEAS_CSV, rows), (SPEC_CSV, spec)):
         if not data:
@@ -1114,6 +1182,11 @@ def main(argv=None):
                               f"{r['note'][len(RR.NOT_MEASURED) + 2:] or 'reason unknown'}"
                               for r in late[:5])
                   + (" ..." if len(late) > 5 else ""))
+    if kc_rows:
+        print(f"k check against no_primary reagent controls (provisional until "
+              f"validated; fp_target {FP_TARGET:g}) -> {kc_csv}")
+        for line in cut_check_lines(kc_rows, st_discs, rc_lookup, rc_nuc, rc_bg):
+            print("  " + line)
     # ONE BLOCK PER MARKER. This stage runs once for both, and all three of
     # these numbers are per marker. An h RANGE spanning two markers is not a
     # range of anything - pERK 9.4 and PCNA 6.0 would print as "6.0-9.4" and

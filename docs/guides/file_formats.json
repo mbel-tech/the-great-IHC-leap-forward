@@ -5992,6 +5992,92 @@
    ]
   },
   {
+   "path": "results/reagent_cut_check.csv",
+   "names": [
+    "reagent_cut_check.csv"
+   ],
+   "writer": "06a_roi_dataset.py",
+   "what": "The k check, provisional until validated on a study with known controls: the positivity cut's multiplier k tested against the no-primary reagent controls, per marker and k on the grid 2.0-5.0. Each control's ROI nuclei are counted against its own cut at k (median + k x 1.4826 x MAD of its own background-disc nuclei), beside the stained sections' leave-one-disc-out rate at the same k. isotype, preadsorbed and unstained controls are not used. Written only when a no_primary control is measured; otherwise a previous file is removed. It never changes positivity.cut_k: a suggested k is applied only by the operator.",
+   "readers": [
+    "a person"
+   ],
+   "columns_from": "ls_reagent_report.py:CUT_CHECK_COLUMNS",
+   "columns": [
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye name, as declared in the study."
+    },
+    {
+     "name": "k",
+     "type": "float",
+     "units": "",
+     "meaning": "The multiplier the cut is formed at for this row."
+    },
+    {
+     "name": "n_control_sections",
+     "type": "int",
+     "units": "",
+     "meaning": "no_primary control sections with a cut of their own (at least 5 usable background nuclei) counted at this k."
+    },
+    {
+     "name": "n_control_nuclei",
+     "type": "int",
+     "units": "",
+     "meaning": "Their ROI nuclei, censored included: the rate's denominator."
+    },
+    {
+     "name": "control_fp",
+     "type": "float",
+     "units": "fraction",
+     "meaning": "Control ROI nuclei called positive (above their own section's cut at k, or censored) over n_control_nuclei, pooled over control sections. Blank when there is no such nucleus, or for a marker segmented on its own channel."
+    },
+    {
+     "name": "control_fp_lo",
+     "type": "float",
+     "units": "fraction",
+     "meaning": "Lower end of the Wilson 95% interval on control_fp."
+    },
+    {
+     "name": "control_fp_hi",
+     "type": "float",
+     "units": "fraction",
+     "meaning": "Upper end of the Wilson 95% interval on control_fp."
+    },
+    {
+     "name": "disc_fp",
+     "type": "float",
+     "units": "fraction",
+     "meaning": "The stained sections' background discs, leave-one-disc-out at k (the rule of detector_specificity.csv's loo_ columns), pooled over sections. Blank with no section of two discs of 5 usable nuclei."
+    },
+    {
+     "name": "disc_fp_n",
+     "type": "int",
+     "units": "",
+     "meaning": "The nuclei disc_fp is over."
+    },
+    {
+     "name": "meets_target",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when control_fp <= positivity.fp_target, else 0; blank when control_fp is."
+    },
+    {
+     "name": "suggested",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 on the smallest k that meets the target, 0 on the others; blank when there is no rate."
+    },
+    {
+     "name": "note",
+     "type": "text",
+     "units": "",
+     "meaning": "Why something is blank or left out: a control with too few background nuclei for a cut (named), no control rate, own-channel marker, no disc rate, or `no k on the grid meets the target`."
+    }
+   ]
+  },
+  {
    "path": "results/roi_geometry_changed.csv",
    "names": [
     "roi_geometry_changed.csv"

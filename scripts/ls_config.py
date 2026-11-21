@@ -867,12 +867,12 @@ note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
         "checked against: 0.01 accepts 1 in 100 control nuclei called positive.",
         default=0.01, minimum=0.001, maximum=0.2,
         label="Reagent-control false-positive target",
-        note="Recorded with the study so the check can be repeated. Only the "
-             "reagent-control check of the cut will read it (not built yet), "
-             "and it never changes the cut by itself: a suggested multiplier is "
-             "applied only by the operator (positivity.cut_k). Between 0.001 "
-             "and 0.2.",
-        consumers=["app"], consumers_pending=True),
+        note="Recorded with the study so the check can be repeated. 06a's "
+             "reagent-control check of the cut (results/reagent_cut_check.csv) "
+             "reads it, and it never changes the cut by itself: a suggested "
+             "multiplier is applied only by the operator (positivity.cut_k). "
+             "Between 0.001 and 0.2.",
+        consumers=["06a", "app"]),
 
     Key("positivity.cut_k", "raw",
         "How many spreads above a section's own background median a nucleus "
@@ -883,10 +883,11 @@ note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
              "median + k x 1.4826 x MAD of the section's own background-disc "
              "nuclei, so it stays relative to each section. A marker not listed "
              "takes \"*\", and with neither it is 3.0. 06a counts by it; 05c "
-             "colours its crops by it; 06i redraws from 06a's cuts. Changing it "
+             "colours its crops by it; 06i redraws from 06a's cuts; 06c states "
+             "it on the Reagent controls sheet. Changing it "
              "puts 06a and the results out of date, never detection. Set it "
              "before unblinding.",
-        consumers=["05c", "06a", "06i", "app"]),
+        consumers=["05c", "06a", "06c", "06i", "app"]),
 
     Key("positivity.cut_k_source", "raw",
         "Where positivity.cut_k came from: the default, the operator, or the "

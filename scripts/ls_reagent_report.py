@@ -20,6 +20,7 @@ Which sections are controls is decided from config (ls_reagent_controls), never
 from a file name or the manifest's display-only column. This reads no group key.
 """
 
+import math
 import os
 import statistics as st
 from array import array
@@ -382,6 +383,132 @@ def row_order(row):
     return (NM.natural_key(row["scene_uid"]), row["marker"], row["region"])
 
 
+# ---------------------------------------------------------------- the k check
+
+#: The k check, beside reagent_controls.csv (06a writes it; Task 3's apply reads it).
+CUT_CHECK_CSV = "reagent_cut_check.csv"
+
+#: The multipliers the cut is checked at.
+K_GRID = (2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0)
+
+CUT_CHECK_COLUMNS = ["marker", "k", "n_control_sections", "n_control_nuclei",
+                     "control_fp", "control_fp_lo", "control_fp_hi", "disc_fp",
+                     "disc_fp_n", "meets_target", "suggested", "note"]
+
+#: The note on every row of a marker whose controls meet the target at no k.
+NO_K_MEETS = "no k on the grid meets the target"
+
+NO_CUT_NOTE = ("left out, fewer than {n} usable background nuclei for a cut of its "
+               "own: {uids}")
+NO_CONTROL_RATE = "no no_primary control with a cut of its own and ROI nuclei: no rate"
+OWN_NOTE = ("segmented on the marker's own channel: there is no count of all cells, "
+            "so no false-positive rate (06a withholds it too) and no suggestion")
+NO_DISC_RATE = (f"no stained section with two background discs of "
+                f">={LO.CUT_MIN_NUCLEI} usable nuclei: no disc rate")
+
+
+def wilson(k, n, z=1.96):
+    """The Wilson score interval for k of n, clipped to [0, 1]."""
+    if n <= 0:
+        raise ValueError("wilson needs n > 0")
+    p = k / n
+    z2 = z * z
+    den = 1.0 + z2 / n
+    centre = (p + z2 / (2 * n)) / den
+    half = z * math.sqrt(p * (1 - p) / n + z2 / (4 * n * n)) / den
+    return max(0.0, centre - half), min(1.0, centre + half)
+
+
+def _no_primary(c):
+    return (c.get("kind") or "no_primary") == "no_primary"
+
+
+def cut_check_rows(controls, stained_discs, fp_target, ks=K_GRID):
+    """results/reagent_cut_check.csv's rows: per marker x k, CUT_CHECK_COLUMNS.
+
+    `controls`: (scene_uid, marker) -> {"bg": usable background values, "roi":
+    [(median, censored)] of its ROI nuclei}, no_primary only. An entry with a
+    "kind" other than no_primary is ignored; one with "own": True is a marker
+    segmented on its own channel, which gets rows with no rate. `stained_discs`:
+    (scene_uid, marker) -> that STAINED section's background discs, each a list
+    of (median, censored) pairs or None (ls_overlay.leave_one_disc_out).
+
+    control_fp: each control section's ROI nuclei against its OWN cut at k
+    (ls_overlay.section_cut over its own background), pooled over sections,
+    with a Wilson 95% interval. disc_fp: leave-one-disc-out at k over the
+    stained sections, pooled. suggested = 1 on the smallest k that meets
+    fp_target. A blank is a rate that cannot be given, never a 0.
+    """
+    by_marker = {}
+    for (uid, mk), c in controls.items():
+        if _no_primary(c):
+            by_marker.setdefault(mk, []).append((uid, c))
+    rows = []
+    for mk in sorted(by_marker):
+        ctl = sorted(by_marker[mk], key=lambda x: NM.natural_key(x[0]))
+        own = any(c.get("own") for _u, c in ctl)
+        with_cut = [(list(c.get("bg") or ()), list(c.get("roi") or ())) for _u, c in ctl
+                    if LO.background_stats(list(c.get("bg") or ())) is not None]
+        no_cut = [u for u, c in ctl
+                  if LO.background_stats(list(c.get("bg") or ())) is None]
+        discs = [d for (_u, m), d in sorted(stained_discs.items()) if m == mk]
+        n = sum(len(roi) for _bg, roi in with_cut)
+        notes = []
+        if no_cut:
+            notes.append(NO_CUT_NOTE.format(n=LO.CUT_MIN_NUCLEI, uids=", ".join(no_cut)))
+        if own:
+            notes.append(OWN_NOTE)
+        elif not n:
+            notes.append(NO_CONTROL_RATE)
+        m_rows = []
+        for k in ks:
+            row = dict.fromkeys(CUT_CHECK_COLUMNS, "")
+            row.update(marker=mk, k=float(k), n_control_sections=len(with_cut),
+                       n_control_nuclei=n)
+            if n and not own:
+                fp = 0
+                for bg, roi in with_cut:
+                    cut = LO.section_cut(bg, k)
+                    fp += sum(1 for v, c in roi if LO.is_positive(v, c, cut))
+                lo, hi = wilson(fp, n)
+                row.update(control_fp=round(fp / n, 4), control_fp_lo=round(lo, 4),
+                           control_fp_hi=round(hi, 4),
+                           meets_target=int(fp / n <= fp_target), suggested=0)
+            dfp = dn = 0
+            for d in discs:
+                got = LO.leave_one_disc_out(d, k)
+                if got:
+                    dfp += got[0]
+                    dn += got[1]
+            if dn:
+                row.update(disc_fp=round(dfp / dn, 4), disc_fp_n=dn)
+            m_rows.append(row)
+        rated = [r for r in m_rows if r["meets_target"] != ""]
+        meeting = [r for r in rated if r["meets_target"] == 1]
+        if meeting:
+            meeting[0]["suggested"] = 1
+        elif rated:
+            notes.append(NO_K_MEETS)
+        for r in m_rows:
+            r["note"] = "; ".join(notes + ([NO_DISC_RATE] if r["disc_fp"] == "" else []))
+        rows.extend(m_rows)
+    return rows
+
+
+def agreement(row):
+    """Whether the stained sections' disc rate falls inside the controls'
+    interval on one cut-check row, in words; None when either is blank."""
+    d, lo, hi = (row.get(c) for c in ("disc_fp", "control_fp_lo", "control_fp_hi"))
+    if "" in (d, lo, hi) or None in (d, lo, hi):
+        return None
+    d, lo, hi = float(d), float(lo), float(hi)
+    if d < lo:
+        return "discs understate"
+    if d > hi:
+        return "discs overstate"
+    return "discs agree with controls"
+
+
 # ---------------------------------------------------------------- the text
 
 def _has_a(r):
@@ -416,16 +543,26 @@ def limitation_text(rows):
     return CONTROL_TEXT.format(markers=", ".join(markers) if markers else "a marker")
 
 
-def sheet_header(rows):
-    """The plain-language lines above the table on 06c's "Reagent controls" sheet."""
+def cut_rule_text(ks=None):
+    """How a section's own cut is formed, with the k in force: `ks` is
+    {marker: k} (ls_overlay.cut_k); without it, the rule and its default."""
+    here = (", here " + ", ".join(f"{m} {float(k)}" for m, k in sorted(ks.items()))
+            if ks else f", {LO.CUT_K} unless the study sets it")
+    return ("median + k x 1.4826 x MAD of its own background-disc nuclei, "
+            "k = positivity.cut_k" + here)
+
+
+def sheet_header(rows, ks=None):
+    """The plain-language lines above the table on 06c's "Reagent controls" sheet.
+    `ks`: {marker: the k in force} (ls_overlay.cut_k), stated in the text."""
     return [
         "Reagent controls: sections stained without the primary antibody (no_primary), "
         "unstained, with an isotype IgG, or with a pre-adsorbed antibody. Their rows are "
         "kept out of every other sheet and output; this is where they are reported.",
         limitation_text(rows),
         "A: n_positive and pct_positive are what the positivity rule calls on the reagent "
-        "control under its own per-section cut (median + 3 x 1.4826 x MAD of its own "
-        "background-disc nuclei): the rule's false-positive rate where there is no "
+        "control under its own per-section cut (" + cut_rule_text(ks) + "): the rule's "
+        "false-positive rate where there is no "
         "specific signal. stained_pct_* are the paired stained sections' pct_positive in "
         "the same region (median, min, max); specificity_margin = stained_pct_median - "
         "pct_positive, in percentage points. positive_per_mm2 and "

@@ -787,7 +787,8 @@ STAGES = [
           settings=["pixel_size_um", "section_thickness_um",
                     "acquisition.marker_segmentation", "detection.abercrombie.enabled",
                     "reagent_controls.files", "reagent_controls.scenes",
-                    "reagent_controls.paired_with", "positivity.cut_k"],
+                    "reagent_controls.paired_with", "positivity.cut_k",
+                    "positivity.fp_target"],
           blurb="Positivity cut from each section's own background discs "
                 "(median + k x 1.4826 x MAD, k = positivity.cut_k, 3 by default), "
                 "the detector's false-positive "
@@ -846,7 +847,8 @@ STAGES = [
                     "acquisition.marker_segmentation", "detection.abercrombie.enabled",
                     "groups.order", "groups.by_animal",
                     "reagent_controls.files", "reagent_controls.scenes",
-                    "reagent_controls.paired_with", "positivity.cut_k"],
+                    "reagent_controls.paired_with", "positivity.cut_k",
+                    "positivity.fp_target"],
           blurb="06a, 06c and 06d in one run, then the figures for every "
                 "measured marker - the same pass the hourly loop makes, made "
                 "once. 06b, the unblinding join, stays its own step. The R "

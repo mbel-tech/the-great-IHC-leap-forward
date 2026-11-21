@@ -298,7 +298,9 @@ Detection takes hours; finished sections are kept, so a stopped run resumes.
 - **The positivity cut** is set per section from that section's background discs, from the marker median
   of each disc nucleus that is not censored, on an artifact or off the tissue:
 
-  > cut = median + 3 × 1.4826 × MAD
+  > cut = median + k × 1.4826 × MAD
+
+  with k the marker's `positivity.cut_k` (3 unless the study sets it).
 
   The MAD (median absolute deviation) times 1.4826 is a robust stand-in for the standard deviation; robust
   because a few bright objects in a disc would inflate a standard deviation and raise the very cut meant to
@@ -1760,9 +1762,10 @@ Stage `roi_dataset`. Turns the per-nucleus rows into per-ROI numbers. Still blin
 - **Writes:** `results/roi_measurements.csv`, `results/positivity_cuts.csv`,
   `results/detector_specificity.csv` and `results/roi_geometry_changed.csv`; and
   `results/reagent_controls.csv` and `results/reagent_control_cuts.csv` (each control's own cut, never in
-  `positivity_cuts.csv`) when a measured section is a confirmed reagent control.
+  `positivity_cuts.csv`) when a measured section is a confirmed reagent control; and
+  `results/reagent_cut_check.csv` when a no_primary one is measured.
 - **How:** **positivity cut** per section and marker from that section's background discs:
-  median + 3 × 1.4826 × MAD, needing at least 5 background nuclei (else no cut, and positives are blank,
+  median + k × 1.4826 × MAD (k = `positivity.cut_k` for the marker, 3 by default), needing at least 5 background nuclei (else no cut, and positives are blank,
   not zero). **Specificity:** the fraction of background nuclei above the cut, a measured false-positive
   rate. **Abercrombie:** N = n × T / (T + h), with T from `section_thickness_um` and h the mean diameter of the
   segmented nuclei, measured per region and marker; withheld, with the reason in the row, for objects that are not
@@ -1777,7 +1780,17 @@ Stage `roi_dataset`. Turns the per-nucleus rows into per-ROI numbers. Still blin
   is removed. The default pairing tiers consider only stained sections with 05a boxes for the marker
   (the manifest's, when 05a has placed none for it). A confirmed control with nothing measured for a
   marker gets one row with blank measures and a note saying why (no 05a boxes, or not detected yet).
-- **Settings:** `section_thickness_um`, `pixel_size_um`, `detection`, `reagent_controls`.
+  **The k check** (`ls_reagent_report.cut_check_rows`, provisional until validated): per marker and
+  k in {2.0, 2.5, ..., 5.0}, the no_primary controls' ROI nuclei above each control's own cut at k
+  (pooled, Wilson 95% interval), beside the stained sections' leave-one-disc-out rate at the same k
+  (`ls_overlay.leave_one_disc_out`, the rule `detector_specificity.csv`'s `loo_` columns use), and
+  `suggested` = 1 on the smallest k meeting `positivity.fp_target`. isotype, preadsorbed and unstained
+  controls are not used; a control with fewer than 5 usable background nuclei is left out and named in
+  the note. The console prints the suggested k per marker and whether the disc rate falls inside the
+  controls' interval at the k in force. It never changes `positivity.cut_k`. With no measured
+  no_primary control the file is removed.
+- **Settings:** `section_thickness_um`, `pixel_size_um`, `detection`, `reagent_controls`,
+  `positivity.cut_k`, `positivity.fp_target`.
 
 ### `06b_join_sampling.py`
 
@@ -2057,7 +2070,8 @@ curation, so making its shape configurable would let an edit orphan every result
 ### `ls_overlay.py`
 
 Shared module, pure NumPy (Pillow is imported only when a file is written). The positivity rule and the
-per-section cut (`section_cut`), what colour each nucleus is drawn, a crop's pixels (`crop_image`) and its
+per-section cut (`section_cut`, at the marker's `cut_k`), the leave-one-disc-out count
+(`leave_one_disc_out`, which 06a's `detector_specificity.csv` and the reagent k check share), what colour each nucleus is drawn, a crop's pixels (`crop_image`) and its
 caption (`crop_lines`). One home, so 06a's counts and 05c's and 06i's pictures cannot disagree. Native
 pixels only; nothing is resampled. Reads no study file.
 
@@ -2125,8 +2139,15 @@ Abercrombie factor 06a's stained rows of that marker and region carry, so it rea
 `stained_positive_per_mm2_*` (each paired section's positive density by the same factor, from
 `stained_areas`); `specificity_margin` is then stained − control in per mm2 and `note` says so (percentage
 points otherwise). A region with discs and no nucleus still gets a row. `limitation_text(rows)`
-is 06c's existing statement unless a `no_primary` row exists; `sheet_header(rows)` is the sheet's header,
-which says a background disc is not a reagent control. It reads no group key.
+is 06c's existing statement unless a `no_primary` row exists; `sheet_header(rows, ks)` is the sheet's header,
+which states the cut rule with the k in force per marker (`ks`, from `ls_overlay.cut_k`) and says a
+background disc is not a reagent control. **The k check:** `cut_check_rows(controls, stained_discs,
+fp_target, ks=K_GRID)` gives `results/reagent_cut_check.csv`'s rows (`CUT_CHECK_COLUMNS`, per marker x k):
+no_primary controls only (an entry of another `kind` is ignored), each control's ROI nuclei against its own
+cut at k, pooled, with a `wilson` 95% interval; the stained sections' leave-one-disc-out rate at k;
+`suggested` on the smallest k meeting `fp_target`, else `NO_K_MEETS` in the note. Blank, never 0, when a
+rate cannot be given; rates withheld for a marker segmented on its own channel. `agreement(row)` says
+whether the disc rate falls inside the controls' interval. It reads no group key.
 
 ### `ls_reagent_screen.py`
 
@@ -4334,6 +4355,28 @@ Each measured reagent control's own cut (per section and marker, at full precisi
 | `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
 | `cut` | float | grey value | The cut, as Python's repr of the float. |
+
+#### `results/reagent_cut_check.csv`
+
+The k check, provisional until validated on a study with known controls: the positivity cut's multiplier k tested against the no-primary reagent controls, per marker and k on the grid 2.0-5.0. Each control's ROI nuclei are counted against its own cut at k (median + k x 1.4826 x MAD of its own background-disc nuclei), beside the stained sections' leave-one-disc-out rate at the same k. isotype, preadsorbed and unstained controls are not used. Written only when a no_primary control is measured; otherwise a previous file is removed. It never changes positivity.cut_k: a suggested k is applied only by the operator.
+
+- **Written by:** 06a_roi_dataset.py
+- **Read by:** a person
+
+| Column | Type | Units | Meaning |
+|------------|------|------|---------------------------|
+| `marker` | text |  | The marker's dye name, as declared in the study. |
+| `k` | float |  | The multiplier the cut is formed at for this row. |
+| `n_control_sections` | int |  | no_primary control sections with a cut of their own (at least 5 usable background nuclei) counted at this k. |
+| `n_control_nuclei` | int |  | Their ROI nuclei, censored included: the rate's denominator. |
+| `control_fp` | float | fraction | Control ROI nuclei called positive (above their own section's cut at k, or censored) over n_control_nuclei, pooled over control sections. Blank when there is no such nucleus, or for a marker segmented on its own channel. |
+| `control_fp_lo` | float | fraction | Lower end of the Wilson 95% interval on control_fp. |
+| `control_fp_hi` | float | fraction | Upper end of the Wilson 95% interval on control_fp. |
+| `disc_fp` | float | fraction | The stained sections' background discs, leave-one-disc-out at k (the rule of detector_specificity.csv's loo_ columns), pooled over sections. Blank with no section of two discs of 5 usable nuclei. |
+| `disc_fp_n` | int |  | The nuclei disc_fp is over. |
+| `meets_target` | 0/1 |  | 1 when control_fp <= positivity.fp_target, else 0; blank when control_fp is. |
+| `suggested` | 0/1 |  | 1 on the smallest k that meets the target, 0 on the others; blank when there is no rate. |
+| `note` | text |  | Why something is blank or left out: a control with too few background nuclei for a cut (named), no control rate, own-channel marker, no disc rate, or `no k on the grid meets the target`. |
 
 #### `results/roi_geometry_changed.csv`
 

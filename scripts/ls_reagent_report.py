@@ -617,6 +617,8 @@ ROI_CORRECTED_CSV = "roi_corrected.csv"
 ROI_CORRECTED_COLUMNS = ["scene_uid", "marker", "region", "n_nuclei", "n_positive",
                          "frac_positive", "frac_positive_corrected",
                          "frac_positive_corrected_lo", "frac_positive_corrected_hi",
+                         "positive_density_per_mm2", "positive_density_corrected",
+                         "positive_density_corrected_lo", "positive_density_corrected_hi",
                          "fp_rate", "fp_rate_n", "fp_rate_source", "correction_note"]
 
 #: The Monte-Carlo interval's draws and seed.
@@ -646,6 +648,10 @@ def controls_for(uid, marker, lookup, scene_rows, config, boxed=None):
       same_file    controls on this section's file;
       same_animal  controls of this section's animal.
 
+    A control with an operator override (`paired_with` under its uid or
+    file) is used ONLY for the sections and files it lists: it is dropped
+    from the same_file and same_animal tiers of every other section.
+
     Study-wide pairing is never used: with none of these the answer is
     ("none", []). Only `no_primary` controls; isotype, preadsorbed and
     unstained never. `boxed`: {(scene_uid, marker)} 05a placed boxes on; as in
@@ -660,11 +666,15 @@ def controls_for(uid, marker, lookup, scene_rows, config, boxed=None):
                     if mk == marker and cu != uid and _no_primary(e or {})},
                    key=NM.natural_key)
     pw = RC.entries(config)["paired_with"]
-    got = [cu for cu in cands
-           if any(t in (uid, file) for t in
-                  (pw.get(cu) or pw.get(info.get(cu, ("", ""))[0]) or []))]
+
+    def override(cu):
+        return pw.get(cu) or pw.get(info.get(cu, ("", ""))[0]) or []
+
+    got = [cu for cu in cands if any(t in (uid, file) for t in override(cu))]
     if got:
         return "operator", got
+    # The operator's pairing is exclusive: such a control pairs with nothing else.
+    cands = [cu for cu in cands if not override(cu)]
     if boxed and any(m == marker for _u, m in boxed):
         cands = [cu for cu in cands if (cu, marker) in boxed]
     if file:
@@ -719,12 +729,13 @@ def rogan_gladen(n_pos, n, f_pos, f_n, draws=DRAWS, seed=SEED):
 
 
 def density_correction(pos, area_mm2, f_pos, f_area_mm2, draws=DRAWS, seed=SEED,
-                       factor=1.0):
+                       factor=1.0, f_factor=None):
     """A positive density less the reagent control's, for a marker segmented
     on its own channel (no denominator, so no fraction to correct):
-    corrected = d - d_f, d = pos x factor / area_mm2 and d_f = f_pos x factor
-    / f_area_mm2. `factor` is the Abercrombie factor 06a gives the marker and
-    region (positive_density_per_mm2), the same for both.
+    corrected = d - d_f, d = pos x factor / area_mm2 and d_f = f_pos x
+    f_factor / f_area_mm2. `factor` is the Abercrombie factor 06a gives the
+    marker and region (positive_density_per_mm2); `f_factor` the control's,
+    `factor` when not given.
 
     The 95% interval propagates Poisson rates: Gamma(k + 0.5) draws for each
     count over its area, `draws` with a fixed `seed`, 2.5-97.5 percentiles,
@@ -735,54 +746,73 @@ def density_correction(pos, area_mm2, f_pos, f_area_mm2, draws=DRAWS, seed=SEED,
     if not area_mm2 or not f_area_mm2:
         out["note"] = "no usable ROI area to give a density from"
         return out
-    d, df = pos * factor / area_mm2, f_pos * factor / f_area_mm2
+    if f_factor is None:
+        f_factor = factor
+    d, df = pos * factor / area_mm2, f_pos * f_factor / f_area_mm2
     if d <= df:
         out["note"] = DENSITY_AT_OR_BELOW
         return out
     import numpy as np
     rng = _rng(seed)
     dd = rng.gamma(pos + 0.5, 1.0, draws) * factor / area_mm2
-    fd = rng.gamma(f_pos + 0.5, 1.0, draws) * factor / f_area_mm2
+    fd = rng.gamma(f_pos + 0.5, 1.0, draws) * f_factor / f_area_mm2
     lo, hi = (float(x) for x in np.percentile(np.clip(dd - fd, 0.0, None), [2.5, 97.5]))
     out.update(corrected=d - df, lo=lo, hi=hi)
     return out
 
 
-def _pool(ctl, uids, mk, region, cuts):
-    """(positives, nuclei) over the controls' ROI nuclei in `region` (None:
-    every region), each control against its own cut."""
-    k = n = 0
+def _pool_regions(ctl, uids, mk, cuts):
+    """{region: (positives, nuclei)} over the controls' ROI nuclei, each
+    against its own cut."""
+    out = {}
     for u in uids:
         cut = cuts[(u, mk)]
         for rg, vals in ctl.get((u, mk), {}).items():
-            if region is None or rg == region:
-                k += vals.n_pos(cut)
-                n += len(vals.v)
-    return k, n
+            k, n = out.get(rg, (0, 0))
+            out[rg] = (k + vals.n_pos(cut), n + len(vals.v))
+    return out
+
+
+def _r(x, nd):
+    return round(x, nd) if x != "" else ""
 
 
 def corrected_rows(stained, control_nuclei, cuts, control_sets,
                    fp_min_nuclei=FP_MIN_NUCLEI, control_areas=None,
-                   draws=DRAWS, seed=SEED):
+                   draws=DRAWS, seed=SEED, control_factors=None):
     """results/roi_corrected.csv's rows, ROI_CORRECTED_COLUMNS, one per
     stained (section, marker, region).
 
     `stained`: (scene_uid, marker, region) -> {"n": ROI nuclei, "pos":
     positives ("" with no cut), "area": usable ROI mm2, "own": segmented on
-    its own channel, "ab": the Abercrombie factor 06a's rows carry}, pooled
-    over the section's ROIs in that region. `control_nuclei`: 06a's control
-    nuclei (scene_uid, marker, region, roi_kind, marker_median, censored).
-    `cuts`: (control uid, marker) -> its own cut. `control_sets`: (scene_uid,
-    marker) -> controls_for(...). `control_areas`: (control uid, marker,
-    region) -> usable ROI mm2, for the density correction.
+    its own channel, "pos_ab": sum over its ROI rows of n_positive x that
+    row's Abercrombie factor (so pos_ab / area is the pooled
+    positive_density_per_mm2), "ab": a factor to fall back on}, pooled over
+    the section's ROIs in that region. `control_nuclei`: 06a's control nuclei
+    (scene_uid, marker, region, roi_kind, marker_median, censored). `cuts`:
+    (control uid, marker) -> its own cut. `control_sets`: (scene_uid, marker)
+    -> controls_for(...). `control_areas`: (control uid, marker, region) ->
+    usable ROI mm2, for the density correction. `control_factors`: (marker,
+    region) -> the Abercrombie factor a control's density there is given
+    (06a's rc_factors, as reagent_controls.csv's positive_per_mm2); missing,
+    the stained factor.
 
-    f is pooled over the paired controls' ROI nuclei in the same region, each
-    against its own cut. A control with no cut is left out, and the source
-    says so. Under `fp_min_nuclei` nuclei in the region f is pooled over all
-    of those controls' regions, and the source says "all regions"; under it
-    still, there is no rate (blank, with the count in the note).
+    Nuclear markers: f is pooled over the paired controls' ROI nuclei in the
+    same region, each against its own cut. Under `fp_min_nuclei` nuclei in
+    the region f is pooled over all of those controls' regions, and the
+    source says "all regions"; under it still, there is no rate (blank, with
+    the count in the note).
+
+    A marker segmented on its own channel has no fraction: its positive
+    density (positive_density_per_mm2) is corrected by the controls' instead
+    (density_correction), with no minimum object count - a good control has
+    few objects, and the Poisson interval carries the uncertainty. It needs
+    control ROI area: none in the region falls back to all of those controls'
+    regions, and the source says so. A control with no cut is left out
+    either way, and the source says so.
     """
     control_areas = control_areas or {}
+    control_factors = control_factors or {}
     ctl = {}
     for r in control_nuclei:
         if r["roi_kind"] != "roi":
@@ -793,13 +823,24 @@ def corrected_rows(stained, control_nuclei, cuts, control_sets,
     for (uid, mk, rg) in sorted(stained, key=lambda k: (NM.natural_key(k[0]), k[1], k[2])):
         s = stained[(uid, mk, rg)]
         n, pos, own = s["n"], s["pos"], bool(s.get("own"))
+        area = s.get("area") or 0.0
+        pos_ab = s.get("pos_ab")
+        if pos_ab is None and pos != "":
+            pos_ab = pos * (s.get("ab") or 1.0)
         row = dict.fromkeys(ROI_CORRECTED_COLUMNS, "")
         row.update(scene_uid=uid, marker=mk, region=rg, n_nuclei=n, n_positive=pos,
                    frac_positive=(round(pos / n, 4) if (pos != "" and n and not own) else ""))
+        if own and pos != "" and area:
+            row["positive_density_per_mm2"] = round(pos_ab / area, 1)
         notes = []
+        if own:
+            notes.append("segmented on the marker's own channel: no count of all cells, "
+                         "so no fraction and no false-positive rate; the positive density "
+                         "is corrected instead")
         tier, uids = control_sets.get((uid, mk), ("none", []))
         if tier == "none" or not uids:
             row["fp_rate_source"] = NO_PAIR_SOURCE
+            row["correction_note"] = "; ".join(notes)
             out.append(row)
             continue
         used = [u for u in uids if (u, mk) in cuts]
@@ -813,49 +854,69 @@ def corrected_rows(stained, control_nuclei, cuts, control_sets,
             row["correction_note"] = "; ".join(notes)
             out.append(row)
             continue
-        f_pos, f_n = _pool(ctl, used, mk, rg, cuts)
-        region = rg
+        by_rg = _pool_regions(ctl, used, mk, cuts)
+
+        def source():
+            return src + " (" + tail[0] + ")" + "".join("; " + t for t in tail[1:])
+
+        if own:
+            areas = {}
+            for (u, m, r2), a in control_areas.items():
+                if m == mk and u in used:
+                    areas[r2] = areas.get(r2, 0.0) + a
+            regions = [rg]
+            if areas.get(rg, 0.0) > 0:
+                tail.insert(0, rg)
+            else:
+                regions = sorted(set(areas) | set(by_rg))
+                tail.insert(0, f"all regions: no control ROI area in {rg}")
+            row["fp_rate_source"] = source()
+            f_area = sum(areas.get(r2, 0.0) for r2 in regions)
+            f_pos = sum(by_rg.get(r2, (0, 0))[0] for r2 in regions)
+            row["fp_rate_n"] = sum(by_rg.get(r2, (0, 0))[1] for r2 in regions)
+            s_fac = (pos_ab / pos) if (pos not in ("", 0)) else (s.get("ab") or 1.0)
+            f_ab = sum(by_rg.get(r2, (0, 0))[0] * control_factors.get((mk, r2), s_fac)
+                       for r2 in regions)
+            f_fac = (f_ab / f_pos) if f_pos else control_factors.get((mk, rg), s_fac)
+            if pos == "":
+                notes.append(NO_STAINED_CUT)
+            elif not f_area:
+                notes.append("no control ROI area in any region: no density correction")
+            else:
+                dc = density_correction(pos, area, f_pos, f_area, draws, seed,
+                                        factor=s_fac, f_factor=f_fac)
+                row.update(positive_density_corrected=_r(dc["corrected"], 1),
+                           positive_density_corrected_lo=_r(dc["lo"], 1),
+                           positive_density_corrected_hi=_r(dc["hi"], 1))
+                notes.append(f"control positive density {round(f_ab / f_area, 1)} per mm2"
+                             + (": " + dc["note"] if dc["note"] else ""))
+            row["correction_note"] = "; ".join(notes)
+            out.append(row)
+            continue
+
+        f_pos, f_n = by_rg.get(rg, (0, 0))
         if f_n < fp_min_nuclei:
-            region = None
             here = f_n
-            f_pos, f_n = _pool(ctl, used, mk, None, cuts)
+            f_pos = sum(k for k, _n in by_rg.values())
+            f_n = sum(n_ for _k, n_ in by_rg.values())
             tail.insert(0, f"all regions: {here} nuclei in {rg}, fewer than "
                            f"{fp_min_nuclei}")
         else:
             tail.insert(0, rg)
-        row["fp_rate_source"] = src + " (" + tail[0] + ")" + "".join(
-            "; " + t for t in tail[1:])
+        row["fp_rate_source"] = source()
+        row["fp_rate_n"] = f_n
         if f_n < fp_min_nuclei:
             notes.append(FEW_CONTROL.format(n=f_n, min=fp_min_nuclei).replace(
                 "no rate and no suggested k", "no rate and no correction"))
-            row["fp_rate_n"] = f_n
             row["correction_note"] = "; ".join(notes)
             out.append(row)
             continue
-        row["fp_rate_n"] = f_n
-        if not own:
-            row["fp_rate"] = round(f_pos / f_n, 4)
+        row["fp_rate"] = round(f_pos / f_n, 4)
         if pos == "":
             notes.append(NO_STAINED_CUT)
-        elif own:
-            area = s.get("area") or 0.0
-            f_area = sum(a for (u, m, r2), a in control_areas.items()
-                         if m == mk and u in used and (region is None or r2 == region))
-            ab = s.get("ab") or 1.0
-            dc = density_correction(pos, area, f_pos, f_area, draws, seed, factor=ab)
-            notes.append("segmented on the marker's own channel: no count of all cells, "
-                         "so no fraction and no false-positive rate")
-            if dc["corrected"] != "":
-                notes.append(
-                    f"density correction (positive per mm2, Abercrombie factor "
-                    f"{round(ab, 4)}): stained {round(pos * ab / area, 1)}, control "
-                    f"{round(f_pos * ab / f_area, 1)}, corrected {round(dc['corrected'], 1)} "
-                    f"(95% {round(dc['lo'], 1)}-{round(dc['hi'], 1)}) per mm2")
-            else:
-                notes.append(dc["note"])
         else:
             rg_out = rogan_gladen(pos, n, f_pos, f_n, draws, seed)
-            row.update({c: (round(rg_out[k], 4) if rg_out[k] != "" else "")
+            row.update({c: _r(rg_out[k], 4)
                         for c, k in (("frac_positive_corrected", "corrected"),
                                      ("frac_positive_corrected_lo", "lo"),
                                      ("frac_positive_corrected_hi", "hi"))})
@@ -883,6 +944,11 @@ def corrected_sheet_header():
         "(operator, same_file or same_animal, never study-wide) and the controls, and says "
         "\"all regions\" when the region had fewer than positivity.fp_min_nuclei control "
         "nuclei. A blank is a number that cannot be given (correction_note says why), never "
-        "0. For a marker segmented on its own channel the fractions are blank and the note "
-        "carries the density correction (positive per mm2 less the control's).",
+        "0. For a marker segmented on its own channel the fractions are blank and "
+        "positive_density_per_mm2 (Abercrombie-corrected positive nuclei per mm2, as "
+        "positive_density_per_mm2 in roi_measurements.csv) is corrected instead: "
+        "positive_density_corrected = it less the paired controls' positive density, with a "
+        "95% interval from Poisson rates (_lo, _hi). That needs no minimum object count, only "
+        "control ROI area (all the controls' regions when the region has none). For other "
+        "markers the density columns are blank.",
     ]

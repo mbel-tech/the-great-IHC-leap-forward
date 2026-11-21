@@ -64,7 +64,9 @@ no-primary reagent control is measured), its rows are the "corrected_rate"
 sheet: per stained section, marker and region, the raw pooled `frac_positive`
 with `frac_positive_corrected` and its 95% interval right beside it, under a
 header that states the sensitivity-1 assumption (the correction is a
-lower-bound adjustment) and that it is provisional. It is per section, the
+lower-bound adjustment) and that it is provisional; for a marker segmented on
+its own channel, positive_density_per_mm2 beside positive_density_corrected
+instead. It is per section, the
 grain the operator chose, so it is its own sheet rather than columns on
 `by_roi`, which is per animal; nothing is pooled to the animal here. The
 other sheets are unchanged, with or without it.

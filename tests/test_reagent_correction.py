@@ -138,6 +138,19 @@ iso = dict(LOOKUP)
 iso[("A1_s01_sc02", "pERK")] = {"kind": "isotype"}
 chk("an isotype control is never used: the same-animal no_primary one is",
     RR.controls_for("A1_s01_sc01", "pERK", iso, ROWS, CFG), ("same_animal", ["A1_s02_sc01"]))
+# The operator's pairing is exclusive: Z9 is paired with C3 only, so a stained
+# section on Z9's own file (or animal) does not get it.
+ROWS_X = ROWS + [{"scene_uid": "Z9_s01_sc02", "file": "Z9_1.czi", "animal": "Z9",
+                  "marker_channel": "pERK"}]
+chk("a control the operator paired elsewhere is not taken by the file rule",
+    RR.controls_for("Z9_s01_sc02", "pERK", LOOKUP, ROWS_X, CFG_PW), ("none", []))
+chk("...and is by it without the override",
+    RR.controls_for("Z9_s01_sc02", "pERK", LOOKUP, ROWS_X, CFG), ("same_file", ["Z9_s01_sc01"]))
+CFG_PW_A1 = {"reagent_controls": {"declared": "yes",
+                                  "paired_with": {"A1_s01_sc02": ["C3_s01_sc01"]}}}
+chk("...a pinned same-file control gives way to the same-animal one",
+    RR.controls_for("A1_s01_sc01", "pERK", LOOKUP, ROWS, CFG_PW_A1),
+    ("same_animal", ["A1_s02_sc01"]))
 chk("a control is never paired with itself",
     RR.controls_for("A1_s01_sc02", "pERK", LOOKUP, ROWS, CFG)[1].count("A1_s01_sc02"), 0)
 
@@ -167,9 +180,13 @@ chk("header is ROI_CORRECTED_COLUMNS", list(rows[0]), RR.ROI_CORRECTED_COLUMNS)
 chk("the exact column list", RR.ROI_CORRECTED_COLUMNS,
     ["scene_uid", "marker", "region", "n_nuclei", "n_positive", "frac_positive",
      "frac_positive_corrected", "frac_positive_corrected_lo", "frac_positive_corrected_hi",
+     "positive_density_per_mm2", "positive_density_corrected",
+     "positive_density_corrected_lo", "positive_density_corrected_hi",
      "fp_rate", "fp_rate_n", "fp_rate_source", "correction_note"])
 r = one(rows, "S1")
 chk("raw columns carried", (r["n_nuclei"], r["n_positive"], r["frac_positive"]), (100, 30, 0.3))
+chk("a nuclear marker: the density columns blank, never 0",
+    (r["positive_density_per_mm2"], r["positive_density_corrected"]), ("", ""))
 chk("f = 3 / 60 from C1 only", (r["fp_rate"], r["fp_rate_n"]), (0.05, 60))
 chk("corrected = (0.3 - 0.05) / 0.95",
     approx(r["frac_positive_corrected"], round((0.3 - 0.05) / 0.95, 4)), True)
@@ -226,7 +243,7 @@ chk("p_obs <= f: blank, with the note",
     ("", True))
 
 print("--- own_marker_density ---")
-OWN = {("S1", "PCNA", "Dm"): {"n": 80, "pos": 40, "area": 0.5, "own": True, "ab": 0.5}}
+OWN = {("S1", "PCNA", "Dm"): {"n": 80, "pos": 40, "area": 0.5, "own": True, "pos_ab": 20.0}}
 OCTL = ([nuc("C1", 200, marker="PCNA", own=True) for _ in range(5)]
         + [nuc("C1", 50, marker="PCNA", own=True) for _ in range(55)])
 orow = one(RR.corrected_rows(OWN, OCTL, {("C1", "PCNA"): 100.0},
@@ -236,8 +253,44 @@ chk("segment: own -> no fraction, no corrected fraction",
     (orow["frac_positive"], orow["frac_positive_corrected"], orow["fp_rate"]), ("", "", ""))
 chk("...the count of positives still there", orow["n_positive"], 40)
 # stained 40 x 0.5 / 0.5 = 40 per mm2; control 5 x 0.5 / 1.0 = 2.5 per mm2.
-chk("...the density correction is computed: 40 - 2.5 = 37.5 per mm2",
-    "37.5" in orow["correction_note"] and "per mm2" in orow["correction_note"], True)
+chk("...positive_density_per_mm2 = sum(n_pos x factor) / area = 40",
+    orow["positive_density_per_mm2"], 40.0)
+chk("...the density correction in its columns: 40 - 2.5 = 37.5 per mm2",
+    orow["positive_density_corrected"], 37.5)
+chk("...with its interval",
+    orow["positive_density_corrected_lo"] <= 37.5 <= orow["positive_density_corrected_hi"],
+    True)
+chk("...source names the region", orow["fp_rate_source"], "same_animal: C1 (Dm)")
+# Two ROIs with different factors: 30 x 0.5 + 10 x 1.0 = 25 over 0.5 mm2.
+mix = one(RR.corrected_rows({("S1", "PCNA", "Dm"): dict(OWN[("S1", "PCNA", "Dm")],
+                                                       pos_ab=25.0)},
+                            OCTL, {("C1", "PCNA"): 100.0},
+                            {("S1", "PCNA"): ("same_animal", ["C1"])}, fp_min_nuclei=50,
+                            control_areas={("C1", "PCNA", "Dm"): 1.0}), "S1", "PCNA")
+chk("pooled over ROIs: the sum of each row's n_pos x factor, not the last factor",
+    mix["positive_density_per_mm2"], 50.0)
+FEWO = [nuc("C1", 200, marker="PCNA", own=True)] + [nuc("C1", 50, marker="PCNA", own=True)
+                                                    for _ in range(2)]
+fo = one(RR.corrected_rows(OWN, FEWO, {("C1", "PCNA"): 100.0},
+                           {("S1", "PCNA"): ("same_animal", ["C1"])}, fp_min_nuclei=50,
+                           control_areas={("C1", "PCNA", "Dm"): 1.0}), "S1", "PCNA")
+chk("own marker: 3 control objects (< fp_min_nuclei) still corrected - no count gate",
+    (fo["positive_density_corrected"] != "", fo["fp_rate_n"], "all regions"
+     in fo["fp_rate_source"]), (True, 3, False))
+VV = [dict(x, region="Vv") for x in OCTL]
+fv = one(RR.corrected_rows(OWN, VV, {("C1", "PCNA"): 100.0},
+                           {("S1", "PCNA"): ("same_animal", ["C1"])}, fp_min_nuclei=50,
+                           control_areas={("C1", "PCNA", "Vv"): 1.0}), "S1", "PCNA")
+chk("own marker, no control ROI area in the region: all regions, said so",
+    ("all regions" in fv["fp_rate_source"], fv["positive_density_corrected"]), (True, 37.5))
+fz = one(RR.corrected_rows(OWN, OCTL, {("C1", "PCNA"): 100.0},
+                           {("S1", "PCNA"): ("same_animal", ["C1"])}, fp_min_nuclei=50,
+                           control_areas={}), "S1", "PCNA")
+chk("own marker, no control area at all: blank, never 0, with a note",
+    (fz["positive_density_corrected"], "area" in fz["correction_note"]), ("", True))
+fn = one(RR.corrected_rows(OWN, OCTL, {}, {("S1", "PCNA"): ("none", [])}), "S1", "PCNA")
+chk("own marker, no control: the raw density still there, corrected blank",
+    (fn["positive_density_per_mm2"], fn["positive_density_corrected"]), (40.0, ""))
 chk("...against the same density as positive_density_per_mm2",
     RR.density_correction(40, 0.5, 5, 1.0, factor=0.5)["corrected"], 37.5)
 
@@ -426,11 +479,15 @@ om = [r for r in omeas if (r["scene_uid"], r["marker"], r["roi_kind"])
 orc = one(orep, "A1_s02_sc01", "PCNA")
 chk("own marker: no fraction, no corrected fraction, no fp_rate",
     (oc["frac_positive"], oc["frac_positive_corrected"], oc["fp_rate"]), ("", "", ""))
-chk("...the note's stained density is 06a's positive_density_per_mm2",
-    f"stained {om['positive_density_per_mm2']}," in oc["correction_note"], True)
-chk("...and its control density the report's positive_per_mm2",
-    f"control {orc['positive_per_mm2']}," in oc["correction_note"], True)
-chk("...and a corrected density is given", "corrected " in oc["correction_note"], True)
+chk("...positive_density_per_mm2 is 06a's", oc["positive_density_per_mm2"],
+    om["positive_density_per_mm2"])
+chk("...the control density in the note is the report's positive_per_mm2",
+    f"control positive density {orc['positive_per_mm2']} per mm2" in oc["correction_note"],
+    True)
+chk("...and a corrected density is given",
+    approx(oc["positive_density_corrected"],
+           round(float(om["positive_density_per_mm2"]) - float(orc["positive_per_mm2"]), 1),
+           0.11), True)
 
 # ===================================================== 06c
 print("--- 06c: the corrected columns beside the raw rate ---")

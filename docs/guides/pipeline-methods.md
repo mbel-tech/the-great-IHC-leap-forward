@@ -726,7 +726,9 @@ the control's false positives and adds back nothing missed, so it is a lower-bou
 interval is the 2.5–97.5 percentiles of 4000 Monte-Carlo draws from Jeffreys posteriors of p_obs and f
 (fixed seed), clipped to [0, 1]. The corrected rate is blank, with the reason, when p_obs ≤ f, when no
 control is paired, or when too few control nuclei exist; for a marker segmented on its own channel the
-positive density less the control's is given instead. The raw values are not changed. The 06c workbook
+positive density less the controls' is given instead, with a Poisson interval and no minimum object
+count (a good control has few objects). A control the operator pairs is used only for the sections it
+is paired with. The raw values are not changed. The 06c workbook
 shows it on a "corrected_rate" sheet.
 
 # 13. Blinding

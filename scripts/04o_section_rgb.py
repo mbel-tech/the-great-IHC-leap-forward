@@ -142,6 +142,21 @@ _lsio = importlib.util.spec_from_file_location(
 IO = importlib.util.module_from_spec(_lsio)
 _lsio.loader.exec_module(IO)
 
+# The one shared ls_drive (None when it cannot be loaded, and then this stage
+# behaves as it did before it existed): a section render that fails because
+# the USB drive went away waits for it and is redone, the CZI opened afresh.
+DR = IO.drive_module()
+
+
+def per_slide(fn, *, label):
+    """Run one self-contained render, redoing it after a dropped drive."""
+    return DR.per_slide(fn, label=label) if DR is not None else fn()
+
+
+def wait_if_gone(label):
+    """Wait while a watched folder is unreachable; 0.0 at once otherwise."""
+    return DR.wait_if_gone(label) if DR is not None else 0.0
+
 # 05a owns the map from the canonical grid back to the slide. It is borrowed,
 # not restated: a second copy of six chained transforms is six chances for the
 # picture and the measurement to disagree.
@@ -627,8 +642,8 @@ def refresh_thumb(rgb_dir, uid, size):
     if not os.path.isdir(tdir):
         return
     with Image.open(os.path.join(rgb_dir, uid + ".png")) as im:
-        im.convert("RGB").resize((size, size), Image.LANCZOS).save(
-            os.path.join(tdir, uid + ".png"))
+        IO.save_image(im.convert("RGB").resize((size, size), Image.LANCZOS),
+                      os.path.join(tdir, uid + ".png"))
 
 
 class CziSource:
@@ -658,6 +673,7 @@ class CziSource:
         self._cm = None
         self._doc = None
         self._rects = None
+        self._stack = self._plane_docs = None
         self.rows = []
 
     def file_of(self, uid):
@@ -670,29 +686,51 @@ class CziSource:
         self._close_doc()
         path = os.path.join(CONFIG["source_dir"], fname)
         if not os.path.exists(path):
+            # Missing because the drive has just dropped is not "not found":
+            # an OSError, so the render's per_slide waits and redoes it.
+            if DR is not None and not DR.reachable()[0]:
+                raise FileNotFoundError(path)
             raise CziUnavailable(f"CZI not found: {path}")
         # open_czi is a context manager; the document is what __enter__ returns.
+        self._stack = contextlib.ExitStack()
         self._cm = self._pyczi.open_czi(path)
         self._doc = self._cm.__enter__()
         self._rects = {int(k): (int(r.x), int(r.y), int(r.w), int(r.h))
                        for k, r in self._doc.scenes_bounding_rectangle.items()}
-        self._path = fname
         # One more handle per plane, each keeping the tiles it has decoded
         # (czi_read.open_czi), so the bands of a section that cross one tile
         # decode it once and the two planes can be read at the same time.
         widest = max([r[2] for r in self._rects.values()] or [1])
-        self._stack = contextlib.ExitStack()
         self._plane_docs = {
             idx: self._stack.enter_context(
                 CR.open_czi(path, widest, pyczi=self._pyczi))
             for idx in {self.n_idx, self.m_idx}}
+        # Last: only a file whose every handle opened counts as open, so one
+        # that failed part way is opened again rather than half reused.
+        self._path = fname
 
     def _close_doc(self):
-        if self._doc is not None:
-            self._stack.close()
-            self._cm.__exit__(None, None, None)
+        stack, cm, doc = self._stack, self._cm, self._doc
         self._cm = self._doc = self._path = self._rects = None
         self._stack = self._plane_docs = None
+        if doc is not None:
+            try:
+                if stack is not None:
+                    stack.close()
+            finally:
+                cm.__exit__(None, None, None)
+
+    def reset(self):
+        """Forget the open file, so the next render opens it afresh.
+
+        For a redo after the drive dropped: the handles opened before it are
+        to a volume that went away, and closing them may fail too - which is
+        not this render's failure, so it is not raised.
+        """
+        try:
+            self._close_doc()
+        except Exception:  # noqa: BLE001 - a dead handle; it is forgotten either way
+            pass
 
     def render(self, uid, focus_row, dapi_png, extra, flip, art, cen, art_native, um_px):
         m = self.man.get(uid)
@@ -966,20 +1004,41 @@ def main():
         art = None if excluded_here else RF.load_artifact(uid, (RF.WORK_SIZE, RF.WORK_SIZE))
         cen = None if excluded_here else RF.load_censor(uid, (RF.WORK_SIZE, RF.WORK_SIZE))
         if czi is not None:
-            try:
-                got = czi.render(uid, r, dapi, extra, flip, art, cen,
-                                 None if excluded_here else load_artifact_native(uid),
+            art_native = None if excluded_here else load_artifact_native(uid)
+            tries = [0]
+
+            # One section render is the unit a dropped drive redoes: read,
+            # drawn and written whole each attempt, and a redo first forgets
+            # the handles opened before the drop, so the CZI is opened again.
+            # The picture and its thumbnail are written atomically to their
+            # final names, so a redo overwrites them; the log row and the
+            # count are added only once the unit has returned.
+            def unit(uid=uid, r=r, dapi=dapi, extra=extra, flip=flip, art=art,
+                     cen=cen, art_native=art_native, out_path=out_path):
+                if tries[0]:
+                    czi.reset()
+                tries[0] += 1
+                got = czi.render(uid, r, dapi, extra, flip, art, cen, art_native,
                                  args.um_px)
+                if got is None:
+                    return None
+                img, comp = got
+                IO.save_image(composite(comp, img, colour, NUCLEAR_COLOUR), out_path)
+                refresh_thumb(out_dir, uid, args.thumb_size)
+                return img.shape[0]
+
+            # Before the render looks for its CZI: a drive that has dropped is
+            # waited for here, not reported as a CZI not found.
+            wait_if_gone(czi.file_of(uid) or uid)
+            try:
+                side = per_slide(unit, label=f"{uid} ({czi.file_of(uid) or 'no CZI'})")
             except CziUnavailable as exc:
                 not_built(uid, str(exc))
                 continue
-            if got is None:
+            if side is None:
                 not_built(uid, "no tissue mask could be formed")
                 continue
-            img, comp = got
-            Image.fromarray(composite(comp, img, colour, NUCLEAR_COLOUR)).save(out_path)
-            refresh_thumb(out_dir, uid, args.thumb_size)
-            czi.log(uid, img.shape[0], args.um_px)
+            czi.log(uid, side, args.um_px)
             made += 1
             continue
 

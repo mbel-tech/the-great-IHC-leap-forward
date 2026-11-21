@@ -1,0 +1,5 @@
+scene_uid,animal,marker,roi_kind,region,seed_n,roi_index,plate_id,sec_x,sec_y,roi_area_um2,roi_area_mm2,roi_outline_area_um2,roi_usable_area_fraction,n_nuclei,n_positive,frac_positive,profile_density_per_mm2,abercrombie_factor,abercrombie_withheld_reason,mean_nucleus_diam_um,cell_density_per_mm2,denominator_withheld_reason,positive_density_per_mm2,marker_median_of_roi,section_bg_level,section_bg_spread,section_bg_nuclei,section_positivity_cut,n_censored
+M1,LS01,AF568,roi,Dm,1,1,,128,128,3141592.7,3.141593,3141592.7,,3,2,0.6667,1.0,0.5833,,10.0,0.6,,0.4,150.0,100.0,14.8,5,144.5,0
+M1,LS01,AF568,background,__background__,1,2,,128,128,3141592.7,3.141593,3141592.7,,5,0,0.0,1.6,0.5833,,10.0,0.9,,0.0,100.0,100.0,14.8,5,144.5,0
+M2,LS01,AF488,roi,Dm,1,1,,128,128,3141592.7,3.141593,3141592.7,,3,2,0.6667,1.0,0.7,,6.0,0.7,,0.4,150.0,100.0,14.8,5,144.5,0
+M2,LS01,AF488,background,__background__,1,2,,128,128,3141592.7,3.141593,3141592.7,,5,0,0.0,1.6,0.6222,,8.5,1.0,,0.0,100.0,100.0,14.8,5,144.5,0

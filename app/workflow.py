@@ -850,8 +850,27 @@ SETTING_SECTIONS = [
      ["detection.nucleus_diameter_um", "detection.abercrombie.enabled",
       "detection.stardist.use_auto", "detection.stardist.prob_thresh",
       "detection.stardist.nms_thresh",
-      "detection.threshold.mad_k", "detection.threshold.min_area_um2"]),
+      "detection.threshold.mad_k", "detection.threshold.min_area_um2",
+      "positivity.fp_target", "positivity.fp_min_nuclei"]),
 ]
+
+#: The multiplier a marker not named in positivity.cut_k is cut at
+#: (ls_overlay.CUT_K; not imported, since that module brings numpy).
+CUT_K_DEFAULT = 3.0
+
+
+def cut_k_rows(cfg):
+    """[(label, k)] for Set up's read-only multiplier table: "*" first, then
+    every marker of the study, then any marker the map names that the study
+    does not have. Each k is the one ls_overlay.cut_k gives that marker."""
+    table = ((cfg or {}).get("positivity") or {}).get("cut_k")
+    table = table if isinstance(table, dict) else {}
+    star = float(table.get("*", CUT_K_DEFAULT))
+    import ls_channels                      # the layout decides where the names are
+    markers = list(ls_channels.marker_names(cfg or {}))
+    markers += [m for m in table if m != "*" and m not in markers]
+    return [("every marker (*)", star)] + [(m, float(table.get(m, star))) for m in markers]
+
 
 #: Sub-headings inside a card, shown before the key they name: (heading, one line).
 SECTION_HEADINGS = {
@@ -860,6 +879,10 @@ SECTION_HEADINGS = {
         "How sharp the colour pictures in the ROI curator are, and where their pixels "
         "come from. Pictures already made keep their old look until the colour "
         "pictures run again with Redo."),
+    "positivity.fp_target": (
+        "Positivity cut",
+        "The multiplier each marker's positivity cut is formed at is shown below; "
+        "the reagent-control check suggests one, and nothing changes it by itself."),
     "scene_render.out_dir": (
         "Scene pictures",
         "Where the pictures of every scene go, how sharp they are, where their "
@@ -1699,6 +1722,9 @@ NOT_TRACKED = {
                   "compared",
     "groups.by_animal": "05c reads it only for the order it measures sections in, "
                         "and the finished file is the same either way",
+    "positivity.cut_k": "05c reads it only to colour its overlay crops; 06a's cuts "
+                        "are what count, and 06i redraws every crop whose cut "
+                        "differs from 06a's",
 }
 
 
@@ -1808,6 +1834,13 @@ def _setting(cfg, key):
         if not isinstance(node, dict) or part not in node:
             return None
         node = node[part]
+    if key == "positivity.cut_k" and isinstance(node, dict) and all(
+            isinstance(v, (int, float)) and not isinstance(v, bool)
+            and float(v) == CUT_K_DEFAULT for v in node.values()):
+        # Every marker at the default multiplier is the cut every study had
+        # before the key: Set up writes the default out when it saves, and that
+        # must not put 06a out of date for a cut that has not moved.
+        return None
     if key == "detection.auto" and isinstance(node, dict):
         # 05b writes its whole report here (the date, the count curve), but 05c
         # takes only the chosen cut from it; a marker with none uses the model's own.

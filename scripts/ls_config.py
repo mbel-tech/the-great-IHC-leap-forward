@@ -607,9 +607,10 @@ note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
         "How many robust standard deviations above the background median a "
         "pixel must be to count as signal, for the `threshold` backend.",
         default=3.0, label="Threshold: MAD multiplier",
-        note="3.0 is the same multiplier 06a uses for the positivity cut, so "
-             "the pipeline has one definition of `above background` rather "
-             "than two. Raising it finds fewer, brighter objects. It is "
+        note="Separate from positivity.cut_k, the multiplier 06a forms the "
+             "positivity cut at, and not linked to it: changing one never "
+             "changes the other. Both start at 3.0. Raising this finds fewer, "
+             "brighter objects. It is "
              "applied to the frame being segmented rather than to curated "
              "background discs, because 05c runs before 06a and cannot read a "
              "file 06a has not written. Median and MAD rather than mean and "
@@ -857,6 +858,50 @@ note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
              "reported and skipped rather than guessed at. The metadata-join "
              "sub-project replaces this with a real table join.",
         consumers=["04l", "05c", "06b", "06c", "06d"]),
+
+    # ---- positivity: the per-section cut 06a counts by ----------------------
+    Key("positivity.fp_target", "float",
+        "The false-positive rate on no-primary reagent controls the cut is "
+        "checked against: 0.01 accepts 1 in 100 control nuclei called positive.",
+        default=0.01, minimum=0.001, maximum=0.2,
+        label="Reagent-control false-positive target",
+        note="Recorded with the study so the check can be repeated. Only the "
+             "reagent-control check of the cut will read it (not built yet), "
+             "and it never changes the cut by itself: a suggested multiplier is "
+             "applied only by the operator (positivity.cut_k). Between 0.001 "
+             "and 0.2.",
+        consumers=["app"], consumers_pending=True),
+
+    Key("positivity.cut_k", "raw",
+        "How many spreads above a section's own background median a nucleus "
+        "must be to count as positive, per marker, with \"*\" for every "
+        "marker not named.",
+        default={"*": 3.0}, ui=False,
+        note="{<marker or \"*\">: k}, each k between 1.0 and 10.0. The cut is "
+             "median + k x 1.4826 x MAD of the section's own background-disc "
+             "nuclei, so it stays relative to each section. A marker not listed "
+             "takes \"*\", and with neither it is 3.0. 06a counts by it; 05c "
+             "colours its crops by it; 06i redraws from 06a's cuts. Changing it "
+             "puts 06a and the results out of date, never detection. Set it "
+             "before unblinding.",
+        consumers=["05c", "06a", "06i", "app"]),
+
+    Key("positivity.cut_k_source", "raw",
+        "Where positivity.cut_k came from: the default, the operator, or the "
+        "reagent-control check, and when.",
+        default={"by": "default"}, ui=False, in_example=False,
+        note="{by: default | operator | controls, at, check}. `check` is the "
+             "sha of the results/reagent_cut_check.csv a suggestion was taken "
+             "from. A record the app writes; no stage reads it.",
+        consumers=["app"]),
+
+    Key("positivity.fp_min_nuclei", "int",
+        "The fewest reagent-control nuclei a false-positive rate is given for; "
+        "below it the rate is left blank with a note, never 0.",
+        default=50, minimum=1, label="Reagent-control minimum nuclei",
+        note="A rate from a handful of nuclei is noise with a decimal point. "
+             "Blank rather than 0, because 0 reads as `looked and found none`.",
+        consumers=["app"], consumers_pending=True),
 
     # ---- reagent controls (slides stained without the primary, isotype, unstained...) ----
     Key("reagent_controls.declared", "str",
@@ -1111,6 +1156,32 @@ def _check_reagent_controls(value):
     return out
 
 
+#: The range every positivity.cut_k value must lie in.
+CUT_K_RANGE = (1.0, 10.0)
+
+
+def _check_cut_k(value):
+    """Problems with positivity.cut_k - {marker or "*": k} - as a list of strings.
+
+    A key is not checked against the study's markers: a map written for a
+    marker the study has since renamed is still the operator's record, and
+    ls_overlay.cut_k simply never asks for it.
+    """
+    if not isinstance(value, dict):
+        return [f"must be a table of marker -> multiplier, e.g. {{\"*\": 3.0}}, "
+                f"not a {type(value).__name__}"]
+    lo, hi = CUT_K_RANGE
+    out = []
+    for marker, k in value.items():
+        if not isinstance(marker, str) or not marker.strip():
+            out.append(f"has a key {marker!r}: each key is a marker name or \"*\"")
+        elif not _is_num(k):
+            out.append(f"[{marker!r}] must be a number, got {type(k).__name__}")
+        elif not lo <= k <= hi:
+            out.append(f"[{marker!r}] must be between {lo} and {hi}, got {k}")
+    return out
+
+
 def _check(key, value):
     """Return an error string, or None if `value` is acceptable for `key`."""
     t = key.type
@@ -1123,6 +1194,10 @@ def _check(key, value):
     elif t == "int":
         if not isinstance(value, int) or isinstance(value, bool):
             return f"expected a whole number, got {type(value).__name__}"
+        if key.minimum is not None and value < key.minimum:
+            return f"must be at least {key.minimum}, got {value}"
+        if key.maximum is not None and value > key.maximum:
+            return f"must be at most {key.maximum}, got {value}"
     elif t == "float":
         if not _is_num(value):
             return f"expected a number, got {type(value).__name__}"
@@ -1276,6 +1351,8 @@ def validate(cfg, path="<config>", strict_paths=False):
             continue
         if key.path == "atlas_source" and atlas_registry is not None:
             problem = _check_atlas_source(cfg, value)
+        elif key.path == "positivity.cut_k":
+            problem = "; ".join(_check_cut_k(value)) or None
         else:
             problem = _check(key, value)
         if problem:

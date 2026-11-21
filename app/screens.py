@@ -1037,6 +1037,8 @@ class SetupScreen(QWidget):
             pl.addWidget(_scroll(form), 1)
             if sid == "atlas":
                 self._add_fiji_row(pl, project)
+            if sid == "detection":
+                self._add_cut_k_table(pl, project)
             foot = QHBoxLayout()
             status = QLabel("")
             status.setWordWrap(True)
@@ -1453,6 +1455,33 @@ class SetupScreen(QWidget):
             self.groups_line.setText("No treatment groups in the study: the analysis is "
                                      "blind until Unblind, and Shotgun is off.")
         self.groups_line.setStyleSheet(f"color:{COLOUR['failed']}" if bad else QUIET)
+
+    def _add_cut_k_table(self, layout, project):
+        """The positivity cut's multiplier per marker (positivity.cut_k), read-only.
+
+        Shown, not edited here: the multiplier is changed only on purpose, by the
+        reagent-control check's apply button, so a stray keystroke can never move
+        every cut in the study."""
+        from PySide6.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView
+        rows = W.cut_k_rows({"positivity": project.get("positivity") or {},
+                             "acquisition": project.get("acquisition") or {}})
+        title = QLabel("Positivity cut multiplier, per marker (median + k x 1.4826 x MAD "
+                       "of each section's own background discs)")
+        title.setWordWrap(True)
+        title.setStyleSheet(QUIET)
+        layout.addWidget(title)
+        table = QTableWidget(len(rows), 2)
+        table.setObjectName("cut_k_table")
+        table.setHorizontalHeaderLabels(["Marker", "k"])
+        table.verticalHeader().setVisible(False)
+        table.setEditTriggers(QTableWidget.NoEditTriggers)
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        for i, (label, k) in enumerate(rows):
+            table.setItem(i, 0, QTableWidgetItem(label))
+            table.setItem(i, 1, QTableWidgetItem(f"{k:g}"))
+        table.setMaximumHeight(table.horizontalHeader().height()
+                               + sum(table.rowHeight(i) for i in range(len(rows))) + 4)
+        layout.addWidget(table)
 
     def _add_fiji_row(self, layout, project):
         """'Add atlas from Fiji…', when this copy of the pipeline has the importer."""

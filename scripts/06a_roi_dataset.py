@@ -471,7 +471,7 @@ class _Disc:
         self.segon_own = None           # ...and of the first own-channel row
 
 
-def leave_one_disc_out(discs):
+def leave_one_disc_out(discs, k=LO.CUT_K):
     """(false positives, nuclei) counted out of sample, or None.
 
     `discs` is one section's background discs for one marker (a _Disc each,
@@ -482,7 +482,8 @@ def leave_one_disc_out(discs):
     from the usable values of every OTHER disc by the same rule
     (ls_overlay.section_cut), and the left-out disc's nuclei are counted
     against it with the same positivity rule the in-sample rate uses. Summed
-    over discs.
+    over discs. `k` is the marker's multiplier (ls_overlay.cut_k), the one the
+    section's own cut is formed at.
 
     "Usable" is what the cut is taken from - kept and not censored. A
     censored nucleus is still positive by LO.is_positive and still a nucleus,
@@ -504,7 +505,7 @@ def leave_one_disc_out(discs):
     fp = n = 0
     for i in qual:
         cut = LO.section_cut([v for j, u in enumerate(usable) if j != i
-                              for v in u])
+                              for v in u], k)
         d = discs[i]
         fp += sum(1 for v, c in zip(d.v, d.cen) if LO.is_positive(v, c, cut))
         n += len(d.v)
@@ -560,7 +561,7 @@ def reagent_report(lookup, rc_nuc, rc_bg, areas, by_idx, cuts, measured,
             for k in todo}
     own_cuts = {}
     for k, bg in rc_bg.items():
-        c = LO.section_cut(bg)
+        c = LO.section_cut(bg, LO.cut_k(CONFIG, k[1]))
         if c is not None:
             own_cuts[k] = c
     needed = {(s, m) for (_u, m), (_kind, us) in pairing.items() for s in us}
@@ -768,7 +769,8 @@ def main(argv=None):
           f"-> {n_kept} nuclei quantified")
 
     # ---- the per-section cut, from that section's own background discs
-    # (ls_overlay.section_cut: median + 3 * 1.4826 * MAD, none under 5 values.)
+    # (ls_overlay.section_cut: median + k * 1.4826 * MAD, none under 5 values;
+    # k is the marker's positivity.cut_k, 3.0 when the study sets none.)
     #
     # PER (SECTION, MARKER). Under `paired` a section has one marker and this
     # is the per-section cut unchanged. Under `multiplex` both markers share
@@ -782,7 +784,7 @@ def main(argv=None):
         got = LO.background_stats(bg)
         if got is None:
             continue
-        cuts[key] = LO.section_cut(bg)
+        cuts[key] = LO.section_cut(bg, LO.cut_k(CONFIG, key[1]))
         bgstat[key] = got
 
     # ---- h for Abercrombie, measured per region and marker
@@ -981,7 +983,8 @@ def main(argv=None):
                 # The out-of-sample rate, over the same discs the in-sample
                 # one sums, and withheld where it is: see leave_one_disc_out.
                 loo = (None if no_denom else leave_one_disc_out(
-                    [by_idx.get((uid, mk, r["roi_index"])) for r in bgrows]))
+                    [by_idx.get((uid, mk, r["roi_index"])) for r in bgrows],
+                    LO.cut_k(CONFIG, mk)))
                 spec.append({
                     "scene_uid": uid, "animal": bgrows[0]["animal"],
                     "marker": bgrows[0]["marker"],

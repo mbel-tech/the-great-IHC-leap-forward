@@ -1121,6 +1121,12 @@ if MW:
     w.setup.advanced.setChecked(True)
     chk("Show advanced settings brings every card back",
         w.setup.tabs.count(), 1 + len(W.setting_sections(LC.dialog_fields())))
+    from PySide6.QtWidgets import QTableWidget as _QTW
+    _ck = w.setup.findChild(_QTW, "cut_k_table")
+    chk("Nucleus detection shows the cut multiplier per marker, read-only",
+        (_ck is not None and _ck.item(0, 0).text(), _ck is not None and _ck.item(0, 1).text(),
+         _ck is not None and _ck.editTriggers() == _QTW.NoEditTriggers),
+        ("every marker (*)", "3", True))
     w.setup.advanced.setChecked(False)
     chk("Set up says where this study's slides come from",
         CFG["source_dir"] in w.setup.current.text(), True)

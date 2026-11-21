@@ -2028,9 +2028,13 @@ shares one storage, and two studies can share scene uids, so the value of each k
 recognised by its mark, `<out_root>/curation/study_id.txt` (a random id made once, moving with the folder),
 and its entry is carried over, never taken from another study. Used by 04k, 04l, 04q and the app's import.
 
+### `ls_drive.py`
+
+Shared module, standard library only: what a stage does when the slides or output drive goes away. `reachable()` checks the watched folders (`source_dir` and `out_root`, or `LS_WATCH`), `wait_for_drive` waits for them with no time limit (polling every 2 s, ended by the `LS_STOP_FILE` file or Ctrl+C), and `per_slide` reruns one slide's work from its start once the drive is back. It prints `@@drive lost <folder> | <label>` and `@@drive back <seconds>` when `LS_PROGRESS=1`, which the app turns into its banner; a watchdog thread prints the first even while a read is stuck. Stages reach the one shared instance through `ls_io.drive_module()`.
+
 ### `ls_io.py`
 
-Shared module: `atomic_write_csv`, `atomic_save` (a context manager for any file), a retry for a vanishing drive (five attempts, about 15 seconds of waiting), `pick_column` (a column by any of its accepted names),
+Shared module: `atomic_write_csv`, `atomic_save` (a context manager for any file), `save_image` (an image written the same way), a retry for a vanishing drive (five attempts, about 15 seconds of waiting; while a watched folder is gone it waits for the drive instead, without using up an attempt), `pick_column` (a column by any of its accepted names),
 and `embed`/`fill`, which put JSON into an HTML template safely for a `<script>` block in one pass. Section
 5.6.
 
@@ -2427,6 +2431,7 @@ straight from `sys.argv`) without running it. A script with no options says "(no
 | `ls_coloc.py` | (none) |  |  |
 | `ls_config.py` | (none) |  |  |
 | `ls_curation.py` | (none) |  |  |
+| `ls_drive.py` | (none) |  |  |
 | `ls_io.py` | (none) |  |  |
 | `ls_jsonio.py` | (none) |  |  |
 | `ls_layouts.py` | (none) |  |  |

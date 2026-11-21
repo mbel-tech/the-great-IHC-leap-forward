@@ -422,6 +422,10 @@ class Runner:
                 if _is_stopped(e):
                     return done(StageResult(stage.sid, False, time.time() - t0, tee.text(),
                                             SV.STOPPED_IN_PAUSE, stopped=True))
+                if isinstance(e, KeyboardInterrupt) and drive.open is not None:
+                    # Ctrl+C during a wait for the drive: a stop in a pause.
+                    return done(StageResult(stage.sid, False, time.time() - t0, tee.text(),
+                                            SV.STOPPED_IN_PAUSE, interrupted=True))
                 detail = "".join(traceback.format_exception(type(e), e, e.__traceback__))
                 return done(StageResult(stage.sid, False, time.time() - t0,
                                         tee.text(), f"{type(e).__name__}: {e}\n\n{detail}",

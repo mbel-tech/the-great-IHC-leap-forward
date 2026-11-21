@@ -320,6 +320,26 @@ with tempfile.TemporaryDirectory() as tmp:
     if before_watch is not None:
         os.environ["LS_WATCH"] = before_watch
 
+    # Ctrl+C during an in-process wait for the drive: recorded as a stop in a
+    # pause, with the pause, and marked interrupted (the command line's 130).
+    import _thread
+    os.environ["LS_WATCH"] = watch
+    shutil.move(watch, watch + "-gone")
+    t = threading.Timer(0.6, _thread.interrupt_main)
+    t.start()
+    try:
+        res = r.run(Waits(), on_line=lambda ln: None)
+    except KeyboardInterrupt:
+        res = None
+    t.join()
+    shutil.move(watch + "-gone", watch)
+    chk("Ctrl+C in an in-process wait: interrupted, stopped in a pause",
+        (res.interrupted, res.record_error(), len(res.pauses)) if res else None,
+        (True, "stopped while the drive was disconnected", 1))
+    os.environ.pop("LS_WATCH", None)
+    if before_watch is not None:
+        os.environ["LS_WATCH"] = before_watch
+
     # In the supervised child, the supervisor's stop file is the one that counts.
     os.environ["LS_CHILD"] = "1"
     os.environ["LS_STOP_FILE"] = os.path.join(tmp, "supervisor.flag")

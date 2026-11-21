@@ -394,6 +394,8 @@ try:
     chk("an interrupted result, with its pause, for the parent to record",
         (res.interrupted, res.ok, [p["label"] for p in res.pauses]) if res else None,
         (True, False, ["slide 6"]))
+    chk("...recorded as stopped while the drive was disconnected",
+        res.record_error() if res else None, SV.STOPPED_IN_PAUSE)
 finally:
     SV.child_argv = real_argv
 
@@ -431,6 +433,18 @@ t.join()
 restore()
 chk("Ctrl+C while the supervisor waits for the drive: not raised", escaped, False)
 chk("...rc 130, the pause kept", (rc, [p["label"] for p in pauses]), (130, ["slide 4"]))
+chk("...told as a stop during a wait for the drive", tail, SV.STOPPED_IN_PAUSE)
+
+reset()
+t = later(1.0, _thread.interrupt_main)
+try:
+    rc, pauses, tail, lines = run(child(
+        "say('working')\nfor _ in range(300):\n    say('tick'); time.sleep(0.05)"))
+except KeyboardInterrupt:
+    rc, tail = None, ""
+t.join()
+chk("Ctrl+C with the drive there: 130, stopped by Ctrl+C", (rc, tail),
+    (130, SV.STOPPED_CTRL_C))
 
 print("--- inside the child (LS_CHILD=1) a reader stage runs in-process ---")
 scripts = os.path.join(TMP, "scripts")

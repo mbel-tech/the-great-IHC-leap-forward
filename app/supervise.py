@@ -44,7 +44,8 @@ in-process path would hand `expand_argv`, i.e. `stage.argv` as
   * Ctrl+C (KeyboardInterrupt in this process, wherever it lands: reading the
     child, waiting for it, or waiting for the drive) ends the child and
     returns 130 with the pauses seen so far, a loss still open included, so
-    the parent records the run as it would any other.
+    the parent records the run as it would any other - as STOPPED_IN_PAUSE
+    when it came during a wait for the drive.
 
 The supervisor's own wait does not call `ls_drive.wait_for_drive`: that prints
 to this process's stdout (the app's, on a worker thread) and reads the stop
@@ -355,5 +356,10 @@ def run_child(argv, on_line, stop_file, *, env=None, cwd=None, poll=None, on_pro
                 proc.kill()
                 proc.wait()
         run.finish()
+        # Pressed during a wait for the drive: recorded as a stop in a pause.
+        ok, folder = DR.reachable()
+        if not ok and run.open is None:
+            run.open = {"t0": time.time(), "folder": folder, "label": label}
+        in_pause = run.open is not None
         run.close_quietly()
-        return 130, run.pauses, STOPPED_CTRL_C
+        return 130, run.pauses, (STOPPED_IN_PAUSE if in_pause else STOPPED_CTRL_C)

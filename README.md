@@ -199,6 +199,11 @@ bash scripts/run_all.sh                # or: bash scripts/run_all.sh from 9
 
 Every stage is resumable — re-running skips completed work.
 
+Without the window, `python -m app --list study.json` shows each stage's state, and
+`python -m app --stage <id> study.json [--opt key=value] [--force] [--unblind]` runs one
+stage exactly as its Run button does and records it in the study (`--run <screen>` runs a
+screen's Run all remaining). Exit status: 0 ran, 1 failed, 2 refused, 130 Ctrl+C.
+
 | Stage | Script | What it does |
 |---|---|---|
 | 0 | `00_manifest.py` | Parses all CZI headers **without extracting**, reconstructs the slide layout, renders slide maps under five candidate mounting conventions |

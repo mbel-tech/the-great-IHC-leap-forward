@@ -86,7 +86,7 @@ def _report(exc_type, exc, tb):
 def main():
     sys.excepthook = _report
     # No window, so no Qt: it runs where there is no display.
-    if "--run" in sys.argv:
+    if any(a in sys.argv for a in ("--run", "--stage", "--list", "--help", "-h")):
         import headless
         return headless.main(sys.argv)
     try:

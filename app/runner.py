@@ -393,7 +393,10 @@ class Runner:
             try:
                 rc, pauses, tail = SV.run_child(
                     SV.child_argv(stage.sid, self.config_path, argv), line, stop_file,
-                    env={"LS_CONFIG": self.config_path}, cwd=SV.APP_PARENT, on_proc=track)
+                    # LS_SCRIPTS: the child loads the stage from the same
+                    # scripts folder this runner does.
+                    env={"LS_CONFIG": self.config_path, "LS_SCRIPTS": self.scripts_dir},
+                    cwd=SV.APP_PARENT, on_proc=track)
             except BaseException as e:                      # noqa: BLE001
                 detail = "".join(traceback.format_exception(type(e), e, e.__traceback__))
                 return StageResult(stage.sid, False, time.time() - t0, "".join(out),

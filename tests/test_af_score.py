@@ -359,15 +359,90 @@ with Image.open(PNG) as im:
 chk("...a tile holds the stretched crop, not the grey placeholder",
     tuple(px[18 + 32, 32]) != (60, 60, 60) and px[18:18 + 64, :64].std() > 10)
 key = read(KEY)
-chk("...with a key: 24 top and 24 random tiles",
+# Operator ruling 2026-11-22: the random half is drawn from the flagged nuclei
+# (score >= 0.5) outside the top 24, so precision at 0.5 can be read off it.
+ktuple = lambda r: (r["scene_uid"], r["roi_index"], r["nucleus_id"])  # noqa: E731
+top_keys = {ktuple(k) for k in key if k["strip"] == "top"}
+flagged_rest = [r for r in rows if r["flagged"] == "1" and ktuple(r) not in top_keys]
+chk("(the fixture has at least 24 flagged nuclei outside the top 24)",
+    len(flagged_rest) >= 24)
+chk("...with a key: 24 top and 24 random_flagged tiles",
     sorted({s: sum(1 for k in key if k["strip"] == s)
-            for s in ("top", "random")}.items()),
-    [("random", 24), ("top", 24)])
+            for s in ("top", "random", "random_flagged")}.items()),
+    [("random", 0), ("random_flagged", min(24, len(flagged_rest))), ("top", 24)])
+rnd_key = [k for k in key if k["strip"] == "random_flagged"]
+chk("every random_flagged tile has af_score >= 0.5 and is flagged",
+    all(float(k["af_score"]) >= 0.5 and k["flagged"] == "1" for k in rnd_key), True)
+chk("...and none is in the top 24", any(ktuple(k) in top_keys for k in rnd_key), False)
+chk("...the top 24 are still the 24 highest scores",
+    sorted((float(k["af_score"]) for k in key if k["strip"] == "top"), reverse=True),
+    sorted((float(r["af_score"]) for r in rows), reverse=True)[:24])
+chk("...the run says the random half is drawn from the flagged",
+    "at random from the flagged" in out)
 chk("...and a blank label column for the operator",
     {k["operator_label"] for k in key}, {""})
-first = sha(SCORES)
+first, first_key, first_png = sha(SCORES), sha(KEY), sha(PNG)
 run(K, [])
 chk("deterministic: a second run writes the same af_scores.csv", sha(SCORES), first)
+chk("...the same af_review.csv (the same random_flagged draw)", sha(KEY), first_key)
+chk("...and the same af_review.png", sha(PNG), first_png)
+
+print("--- review_items: the random half is drawn from the flagged ---")
+
+
+def synth(marker, scores, uid="S1"):
+    return [((uid, marker, 1, i), round(float(s), 4)) for i, s in enumerate(scores, 1)]
+
+
+many = synth("M", np.linspace(0.0, 0.999, 200)) + synth("N", np.linspace(0.6, 0.99, 80))
+top, rnd = K.review_items(many, "M")
+topk = {k for k, _s in top}
+chk("plenty flagged: 24 top and 24 random", (len(top), len(rnd)), (24, 24))
+chk("...every random tile has score >= 0.5", all(s >= K.FLAG_AT for _k, s in rnd), True)
+chk("...none is in the top 24", any(k in topk for k, _s in rnd), False)
+chk("...only this marker's nuclei", {k[1] for k, _s in top + rnd}, {"M"})
+chk("...the top 24 are the highest", [s for _k, s in top],
+    sorted((s for k, s in many if k[1] == "M"), reverse=True)[:24])
+chk("...the same draw twice", K.review_items(many, "M") == (top, rnd), True)
+chk("...and the same draw from the list in another order",
+    K.review_items(list(reversed(many)), "M") == (top, rnd), True)
+# 30 flagged in all: 24 go to the top, 6 are left for the random half.
+few = synth("M", list(np.linspace(0.0, 0.49, 170)) + list(np.linspace(0.5, 0.9, 30)))
+top, rnd = K.review_items(few, "M")
+chk("30 flagged: the random half is the 6 left, all of them",
+    (len(top), len(rnd), sorted(k for k, _s in rnd)),
+    (24, 6, sorted(k for k, s in few if s >= 0.5 and k not in {t for t, _ in top})))
+titles = K.review_titles("M", "af_suspect", "unstained", top, rnd)
+chk("...its title says it is drawn from the flagged and is short",
+    ("from the flagged" in titles[1], "only 6" in titles[1],
+     f"fewer than {K.N_REVIEW}" in titles[1]), (True, True, True))
+full_titles = K.review_titles("M", "af_suspect", "unstained", *K.review_items(many, "M"))
+chk("...a full half's title does not say it is short",
+    ("from the flagged" in full_titles[1], "fewer than" in full_titles[1]), (True, False))
+# 10 flagged: all in the top, none left.
+none_left = synth("M", list(np.linspace(0.0, 0.49, 190)) + list(np.linspace(0.5, 0.9, 10)))
+top, rnd = K.review_items(none_left, "M")
+chk("10 flagged: an empty random half", (len(top), len(rnd)), (24, 0))
+chk("...and its title says so", "only 0" in K.review_titles("M", "f", "k", top, rnd)[1])
+
+print("--- the stage: a short random_flagged half is drawn shorter and says so ---")
+# Flag at the 30th-highest score, so exactly 6 flagged nuclei are left after the
+# top 24; then restore the threshold and the outputs the later checks read.
+scores_now = sorted((float(r["af_score"]) for r in read(SCORES)), reverse=True)
+saved_flag = K.FLAG_AT
+K.FLAG_AT = scores_now[29]
+try:
+    code_s, out_s = run(K, [])
+finally:
+    K.FLAG_AT = saved_flag
+key_s = read(KEY)
+n_short = sum(1 for k in key_s if k["strip"] == "random_flagged")
+chk("06k runs", code_s, 0)
+chk("...the random_flagged half is the 6 left",
+    (n_short, sum(1 for k in key_s if k["strip"] == "top")), (6, 24))
+chk("...and the run says it is short", "only 6" in out_s and "fewer than 24" in out_s)
+run(K, [])
+chk("(outputs restored at the real threshold)", sha(KEY), first_key)
 
 print("--- counts_unchanged ---")
 chk("roi_corrected.csv exists in this fixture (a paired no-primary control)",

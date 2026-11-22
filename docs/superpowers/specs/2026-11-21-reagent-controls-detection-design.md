@@ -149,11 +149,11 @@ Area and DAPI already exist.
 **Outputs.**
 - `results/af_scores.csv`: one row per scored nucleus, with `af_score`, the flag (`af_suspect` or `control_like`, set at score ≥ 0.5) and `trained_on` (unstained / no_primary).
 - The 06c sheet shows, per region × marker, the positive rate with and without `af_suspect` nuclei, beside the raw rate. Counts are never changed.
-- `qc/af_review.png`: a strip of the 24 highest-scoring stained nuclei and 24 random ones for the operator to look at.
+- `qc/af_review.png`: a strip of the 24 highest-scoring stained nuclei, for orientation, and 24 drawn at random (same seed) from the flagged nuclei (score ≥ 0.5) not among them, all of them when fewer are left, for the operator to look at (operator ruling 2026-11-22).
 
 **Gate.** Training needs at least 200 above-cut control nuclei of the chosen kind per marker. Below that the stage writes nothing and says why.
 
-**Validation (required before any censoring PR).** On the Task 8 study, the operator hand-labels the review strip. The flag must reach precision ≥ 0.8 at the 0.5 score on that set. Until then it stays a flag.
+**Validation (required before any censoring PR).** On the Task 8 study, the operator hand-labels the review strip. The flag must reach precision ≥ 0.8 at the 0.5 score, measured on the strip's random flagged half (operator ruling 2026-11-22). Until then it stays a flag.
 
 ## Validation plan (all four)
 

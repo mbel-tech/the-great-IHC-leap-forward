@@ -6,7 +6,8 @@ roi_measurements.csv and roi_corrected.csv are read or not read, never written.
 flagged nuclei, and labels it provisional. Censoring on this flag waits for the
 validation: the operator hand-labels the review strip of a study with known
 controls, and the flag must reach a precision of at least 0.8 at a score of 0.5
-on it.
+on its random_flagged row (flagged nuclei drawn at random; the top row is shown
+for orientation - operator ruling 2026-11-22).
 
 THE MODEL (ls_af_model): positive-unlabelled logistic regression, per marker.
   labelled    above-cut ROI nuclei of the study's UNSTAINED reagent controls
@@ -76,7 +77,10 @@ Writes:
                                   made before a control was confirmed or
                                   removed
   qc/af_review.png                per marker, the 24 highest-scoring stained
-                                  nuclei and 24 drawn at random (seed 20261121)
+                                  nuclei (for orientation) and 24 drawn at
+                                  random (seed 20261121) from the flagged ones
+                                  (score >= 0.5) not among them - all of them
+                                  when fewer are left, and the title says so -
                                   as 64 px crops of the marker channel
   qc/af_review.csv                which nucleus each tile is, with a blank
                                   operator_label column for the hand-labelling
@@ -325,15 +329,31 @@ def _order(k):
 
 
 def review_items(scored, marker):
-    """(top, random): up to N_REVIEW each, of one marker's scored nuclei."""
+    """(top, random_flagged) of one marker's scored nuclei: the N_REVIEW
+    highest scores, and up to N_REVIEW drawn (seed SEED) from the flagged
+    nuclei (score >= FLAG_AT) not in the top - all of them when fewer are
+    left. Precision at FLAG_AT is read off the random half (operator ruling
+    2026-11-22); the top half is shown for orientation."""
     mine = sorted(((k, s) for k, s in scored if k[1] == marker),
                   key=lambda t: (-t[1], _order(t[0])))
     top = mine[:N_REVIEW]
-    rest = sorted(mine[N_REVIEW:], key=lambda t: _order(t[0]))
+    rest = sorted((t for t in mine[N_REVIEW:] if t[1] >= FLAG_AT),
+                  key=lambda t: _order(t[0]))
     rng = np.random.default_rng(SEED)
     pick = sorted(rng.choice(len(rest), size=min(N_REVIEW, len(rest)), replace=False)) \
         if rest else []
     return top, [rest[i] for i in pick]
+
+
+def review_titles(marker, flag, kind, top, rnd):
+    """The strip's two title bands for one marker: (top, random_flagged)."""
+    head = (f"{marker}: the {len(top)} highest af_score (flag {flag}, trained on {kind}) "
+            f"- for orientation; provisional")
+    tail = (f"{marker}: {len(rnd)} at random from the flagged (af_score >= {FLAG_AT:g}) "
+            f"outside the top {N_REVIEW} (seed {SEED}) - precision is read off this row")
+    if len(rnd) < N_REVIEW:
+        tail += f"; only {len(rnd)} such, fewer than {N_REVIEW}"
+    return head, tail
 
 
 def read_crops(marker, items, cand):
@@ -550,10 +570,9 @@ def main(argv=None):
         flag, kind = info[mk]
         top, rnd = review_items(scored, mk)
         crops = read_crops(mk, top + rnd, cand)
-        for strip, items, title in (
-                ("top", top, f"{mk}: the {len(top)} highest af_score (flag {flag}, "
-                             f"trained on {kind}) - provisional"),
-                ("random", rnd, f"{mk}: {len(rnd)} at random (seed {SEED})")):
+        t_top, t_rnd = review_titles(mk, flag, kind, top, rnd)
+        print(f"  review strip: {t_rnd}")
+        for strip, items, title in (("top", top, t_top), ("random_flagged", rnd, t_rnd)):
             blocks.append((title, [(f"{s:.2f}", crops.get(k)) for k, s in items]))
             for i, (k, s) in enumerate(items, 1):
                 key_rows.append({"marker": mk, "strip": strip, "position": i,
@@ -566,8 +585,8 @@ def main(argv=None):
     draw_strip(blocks)
     print(f"review strip -> {REVIEW_PNG} (key: {REVIEW_CSV})")
     print("PROVISIONAL: a flag only, no count is changed. Validate on a study with known "
-          "controls (hand-label the strip; precision >= 0.8 at score 0.5) before any "
-          "censoring.")
+          "controls (hand-label the strip; precision >= 0.8 at score 0.5, on its "
+          "random_flagged row) before any censoring.")
     return 0
 
 

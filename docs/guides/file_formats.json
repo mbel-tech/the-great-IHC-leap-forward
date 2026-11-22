@@ -5611,7 +5611,7 @@
      "name": "strip",
      "type": "text",
      "units": "",
-     "meaning": "`top` (the highest af_score) or `random` (drawn with seed 20261121 from the rest)."
+     "meaning": "`top` (the 24 highest af_score, for orientation) or `random_flagged` (up to 24 drawn with seed 20261121 from the flagged nuclei, af_score >= 0.5, not in the top; all of them when fewer are left). Precision at 0.5 is measured on the `random_flagged` rows (operator ruling 2026-11-22)."
     },
     {
      "name": "position",
@@ -5673,7 +5673,7 @@
    "path": "qc/af_review.png",
    "names": [],
    "writer": "06k_af_score.py",
-   "what": "The autofluorescence flag's review strip: per marker, the 24 highest-scoring stained nuclei and 24 at random, for hand-labelling against qc/af_review.csv.",
+   "what": "The autofluorescence flag's review strip: per marker, the 24 highest-scoring stained nuclei (for orientation) and 24 drawn at random from the flagged nuclei not among them (all of them, and the title says so, when fewer are left), for hand-labelling against qc/af_review.csv.",
    "format": "RGB PNG, 24 x 64 px wide: per marker a title band and a row of 64 px crops of the marker channel centred on each nucleus (05c's plane, stretched p1-p99.8 per crop), its score under it; a crop that could not be read (no slide drive) is grey and says `no image`.",
    "columns": []
   },

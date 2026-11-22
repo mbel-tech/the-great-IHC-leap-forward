@@ -364,7 +364,7 @@ AF_CONTROLS_CHANGED = "control set changed - run 06k"
 AF_LINES = (
     "Positive rate without flagged nuclei (provisional until validated on a study with "
     "known controls: the operator hand-labels qc/af_review.png and the flag must reach a "
-    "precision of at least 0.8 at a score of 0.5). A flag only: no count is changed, and "
+    "precision of at least 0.8 at a score of 0.5 on its random flagged row). A flag only: no count is changed, and "
     "frac_positive is by_roi's raw rate.",
     "06k scores each above-cut nucleus of a stained section by how much it looks like the "
     "above-cut nuclei of the study's reagent controls (unstained ones when there are at "

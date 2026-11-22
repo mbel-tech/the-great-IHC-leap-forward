@@ -830,7 +830,8 @@ STAGES = [
                 "least 200 per marker), by a logistic regression on section-relative "
                 "size, shape, DAPI, marker level and texture. No count changes; 06c "
                 "shows the positive rate without the flagged nuclei beside the raw one. "
-                "Draws a review strip of 24 top and 24 random nuclei for hand-labelling. "
+                "Draws a review strip of 24 top and 24 random flagged nuclei for "
+                "hand-labelling. "
                 "The pixels read are for the strip only. Exit 1 when no marker reaches "
                 "the training gate means not enough control nuclei to train, not a "
                 "crash: it says how many it had."),

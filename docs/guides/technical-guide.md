@@ -2045,8 +2045,10 @@ Each of the latter gets `af_score`, flagged at >= 0.5 (`af_suspect` when trained
   `results/af_gate.csv` (per marker, the unstained and no_primary counts, what it trained on and, when
   not scored, why: `below_gate` or `no_stained`; and `control_set`, `ls_reagent_report.control_set_hash`
   of the (scene_uid, kind) of every confirmed reagent control of the marker), then
-  `qc/af_review.csv` and `qc/af_review.png`: per marker the 24 highest scores and 24 drawn at random
-  (seed 20261121) as 64 px crops of the marker plane (05c's `plane_index_for`, read through 06l's loaded
+  `qc/af_review.csv` and `qc/af_review.png`: per marker the 24 highest scores (`strip` `top`, for
+  orientation) and 24 drawn at random (seed 20261121) from the flagged nuclei (score ≥ 0.5) not among them
+  (`strip` `random_flagged`; all of them when fewer are left, and the title and the run's output say so;
+  precision at 0.5 is read off this row) as 64 px crops of the marker plane (05c's `plane_index_for`, read through 06l's loaded
   05c); a crop that cannot be read is grey.
 - **Gate:** a marker below 200 of either kind is not scored, and the counts are printed. When no marker
   is scored, nothing is written, the outputs of an earlier run are removed (a stale file would have 06c
@@ -4521,7 +4523,7 @@ The key to qc/af_review.png: which nucleus each tile is, for the operator to han
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
 | `marker` | text |  | The marker. |
-| `strip` | text |  | `top` (the highest af_score) or `random` (drawn with seed 20261121 from the rest). |
+| `strip` | text |  | `top` (the 24 highest af_score, for orientation) or `random_flagged` (up to 24 drawn with seed 20261121 from the flagged nuclei, af_score >= 0.5, not in the top; all of them when fewer are left). Precision at 0.5 is measured on the `random_flagged` rows (operator ruling 2026-11-22). |
 | `position` | int |  | The tile's place in its row, 1-based from the left. |
 | `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `roi_index` | int |  | As in af_scores.csv. |
@@ -4534,7 +4536,7 @@ The key to qc/af_review.png: which nucleus each tile is, for the operator to han
 
 #### `qc/af_review.png`
 
-The autofluorescence flag's review strip: per marker, the 24 highest-scoring stained nuclei and 24 at random, for hand-labelling against qc/af_review.csv.
+The autofluorescence flag's review strip: per marker, the 24 highest-scoring stained nuclei (for orientation) and 24 drawn at random from the flagged nuclei not among them (all of them, and the title says so, when fewer are left), for hand-labelling against qc/af_review.csv.
 
 - **Written by:** 06k_af_score.py
 - **Read by:** a person

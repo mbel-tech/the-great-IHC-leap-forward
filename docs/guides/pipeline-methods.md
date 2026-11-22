@@ -781,8 +781,10 @@ model was trained on unstained controls and `control_like` when on no-primary on
 shows, per animal, marker and region, the positive rate with the flagged nuclei left out of both the
 count and the denominator, beside the raw rate, on an `af_flag` sheet. *Validation criterion.* The flag
 stays a flag until it has been validated on a study with known controls: the operator hand-labels the
-review strip (the 24 highest-scoring stained nuclei and 24 drawn at random, per marker), and the flag
-must reach a precision of at least 0.8 at a score of 0.5 on that strip. Until then nothing is censored by
+review strip (per marker, the 24 highest-scoring stained nuclei, shown for orientation, and 24 drawn at
+random with a fixed seed from the flagged nuclei, score ≥ 0.5, not among them; all of them when fewer are
+left), and the flag must reach a precision of at least 0.8 at a score of 0.5, measured on the random
+flagged half. Until then nothing is censored by
 it, and its rate is reported as provisional.
 
 # 13. Blinding

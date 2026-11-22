@@ -1703,9 +1703,10 @@ per-sample spreadsheet (06c) then has an `af_flag` sheet: per animal, marker and
 rate and beside it the rate with the flagged nuclei taken out, blank with a note wherever a section is not
 scored, the positivity cut has changed or a section has been confirmed as a reagent control (or no longer
 is one) since the flag was made (run this step again), and a line naming
-any marker that had too few control nuclei. `qc/af_review.png` shows the 24 highest-scoring nuclei and 24 at random for each marker, and
+any marker that had too few control nuclei. `qc/af_review.png` shows for each marker the 24 highest-scoring nuclei, for orientation, and 24 drawn at random from the flagged nuclei
+(score 0.5 or more) not among them (all of them, and the title says so, when fewer are left), and
 `qc/af_review.csv` says which nucleus each picture is, with an empty column to label them by hand. The
-flag stays a flag until that labelling, on a study with known controls, shows a precision of at least 0.8.
+flag stays a flag until that labelling of the random flagged row, on a study with known controls, shows a precision of at least 0.8.
 
 
 \newpage

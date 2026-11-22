@@ -303,6 +303,11 @@ AF_SHEET = "af_flag"
 AF_SCORES = "af_scores.csv"
 AF_SECTIONS = "af_scored_sections.csv"
 AF_GATE = "af_gate.csv"
+#: 06a's cut files, beside MEAS_CSV (06a_roi_dataset.CUTS_CSV / RC_CUTS_CSV), which
+#: 06k's recorded cuts are compared with. 06a is not imported here (it reads a
+#: whole study at import); tests/test_af_score.py holds the names to 06a's.
+AF_CUTS = "positivity_cuts.csv"
+AF_RC_CUTS = "reagent_control_cuts.csv"
 #: The note on a row whose flags were scored under a cut 06a no longer uses.
 AF_STALE = "flags older than the cut - run 06k"
 
@@ -355,18 +360,19 @@ def _af_sheet(meas, by_roi, sec_by):
         except (TypeError, ValueError):
             return False
 
-    now = {"stained": cuts_of("positivity_cuts.csv"),
-           "control": cuts_of("reagent_control_cuts.csv")}
+    now = {"stained": cuts_of(AF_CUTS), "control": cuts_of(AF_RC_CUTS)}
     stale = {(r["scene_uid"], r["marker"]) for r in secs
              if not same(r.get("cut"), now.get(r.get("role", "stained"), {}).get(
                  (r["scene_uid"], r["marker"])))}
     stale_markers = {m for (u, m) in stale
                      if any(r["role"] == "control" for r in secs
                             if (r["scene_uid"], r["marker"]) == (u, m))}
-    # Measured and found empty: nothing there to flag, so scored with 0.
+    # Measured and found empty: no nucleus in its ROIs, so nothing to flag -
+    # scored with 0. Its background discs may still hold nuclei.
     n_sec = collections.Counter()
     for r in meas:
-        n_sec[(r["scene_uid"], r["marker"])] += int(r["n_nuclei"] or 0)
+        n_sec[(r["scene_uid"], r["marker"])] += (int(r["n_nuclei"] or 0)
+                                                 if r["roi_kind"] == "roi" else 0)
     empty = {k for k, v in n_sec.items() if v == 0}
     # A flagged nucleus's region and animal are its disc's, as 06a wrote it.
     disc = {(r["scene_uid"], r["marker"], r["roi_index"]): r for r in meas}
@@ -418,7 +424,12 @@ def _af_sheet(meas, by_roi, sec_by):
     lines = list(AF_LINES)
     gpath = os.path.join(base, AF_GATE)
     for g in (G5.load_csv(gpath) if os.path.exists(gpath) else []):
-        if not g.get("trained_on"):
+        if g.get("trained_on"):
+            continue
+        if g.get("reason") == "no_stained":
+            lines.append(f"{g['marker']} not scored: no stained nucleus above the cut "
+                         f"with features, so it has no row here.")
+        else:
             lines.append(f"{g['marker']} not scored: {g['n_unstained']} unstained / "
                          f"{g['n_no_primary']} no_primary < 200 above-cut reagent-control "
                          f"nuclei (06k's training gate), so it has no row here.")

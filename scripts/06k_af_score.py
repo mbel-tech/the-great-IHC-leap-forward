@@ -112,7 +112,7 @@ COLUMNS = ["scene_uid", "marker", "roi_index", "nucleus_id", "af_score", "flag_n
            "flagged", "trained_on"]
 SECTION_COLUMNS = ["scene_uid", "marker", "role", "cut", "n_scored", "n_flagged",
                    "flag_name", "trained_on"]
-GATE_COLUMNS = ["marker", "n_unstained", "n_no_primary", "trained_on"]
+GATE_COLUMNS = ["marker", "n_unstained", "n_no_primary", "trained_on", "reason"]
 REVIEW_COLUMNS = ["marker", "strip", "position", "scene_uid", "roi_index", "nucleus_id",
                   "af_score", "flagged", "flag_name", "trained_on", "operator_label"]
 
@@ -445,7 +445,11 @@ def main(argv=None):
         kind = choose(n)
         gate_rows.append({"marker": mk, "n_unstained": n["unstained"],
                           "n_no_primary": n["no_primary"],
-                          "trained_on": kind if kind and g["stained"] else ""})
+                          "trained_on": kind if kind and g["stained"] else "",
+                          # Why not scored: below the training gate, or past it
+                          # with no featured stained nucleus above the cut.
+                          "reason": ("below_gate" if kind is None
+                                     else "" if g["stained"] else "no_stained")})
         if kind is None:
             print(f"{mk}: not scored - {n['unstained']} above-cut nuclei on unstained "
                   f"reagent controls and {n['no_primary']} on no_primary ones (featured "

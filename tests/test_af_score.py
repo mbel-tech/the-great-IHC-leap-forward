@@ -383,7 +383,7 @@ chk("the section not yet scored blanks the rate, with a note",
 # With every stained section scored, the rate is (positives - flagged) / (n - flagged).
 
 
-def sub_sheet(extra_meas=(), extra_gate=()):
+def sub_sheet(extra_meas=(), extra_gate=(), extra_nuclei=()):
     """06c over a copy of results/ without the unfeatured section (plus
     `extra_meas` rows, and `extra_gate` rows in af_gate.csv): (header lines, Dm row)."""
     d = tempfile.mkdtemp(prefix="af_meas_")
@@ -402,13 +402,20 @@ def sub_sheet(extra_meas=(), extra_gate=()):
         with open(os.path.join(d, "af_gate.csv"), "a", newline="", encoding="utf-8") as fh:
             w = csv.DictWriter(fh, fieldnames=K.GATE_COLUMNS)
             w.writerows(extra_gate)
-    saved = G6C.MEAS_CSV
-    G6C.MEAS_CSV = sub
+    nuc = G6C.NUCLEI_CSV
+    if extra_nuclei:
+        nuc = os.path.join(d, "roi_nuclei.csv")
+        with open(G6C.NUCLEI_CSV, "rb") as a, open(nuc, "wb") as b:
+            b.write(a.read())
+        with open(nuc, "a", newline="", encoding="utf-8") as fh:
+            csv.DictWriter(fh, fieldnames=NUC_COLS).writerows(extra_nuclei)
+    saved = (G6C.MEAS_CSV, G6C.NUCLEI_CSV)
+    G6C.MEAS_CSV, G6C.NUCLEI_CSV = sub, nuc
     try:
         code, out = run(G6C, ["--out", xlsx])
         assert code == 0, out
     finally:
-        G6C.MEAS_CSV = saved
+        G6C.MEAS_CSV, G6C.NUCLEI_CSV = saved
     v = [[c.value for c in row] for row in openpyxl.load_workbook(xlsx)[G6C.AF_SHEET].iter_rows()]
     lines = " ".join(str(x[0]) for x in v[:v.index(head)] if x and isinstance(x[0], str))
     b = [dict(zip(head, x)) for x in v[v.index(head) + 1:] if x and x[0]]
@@ -428,12 +435,21 @@ print("--- 06c and 06k name the same files ---")
 chk("06c reads the files 06k writes",
     (G6C.AF_SCORES, G6C.AF_SECTIONS, G6C.AF_GATE),
     tuple(os.path.basename(p) for p in (K.SCORES_CSV, K.SECTIONS_CSV, K.GATE_CSV)))
+chk("...and 06a's cut files by the names 06a writes them",
+    (G6C.AF_CUTS, G6C.AF_RC_CUTS),
+    tuple(os.path.basename(p) for p in (G6A.CUTS_CSV, G6A.RC_CUTS_CSV)))
 
 print("--- a section measured empty counts as scored, with 0 flagged ---")
 empty = dict(read(meas)[0], scene_uid="A1_s01_sc06", n_nuclei="0", n_positive="0")
 empty = {k: (v if k not in ("n_nuclei", "n_positive") else "0") for k, v in empty.items()}
 empty["roi_kind"], empty["region"], empty["roi_index"] = "roi", "Dm", "1"
-_l, dm_e = sub_sheet(extra_meas=[empty])
+# Its background disc has nuclei: empty means no nucleus in its ROIs.
+empty_bg = dict(empty, roi_kind="background", region="__background__", roi_index="2",
+                n_nuclei="7", n_positive="0")
+bg_nuc = [dict(read(os.path.join(RES, "roi_nuclei.csv"))[0], scene_uid="A1_s01_sc06",
+               roi_kind="background", region="__background__", roi_index="2",
+               nucleus_id=str(i)) for i in range(1, 8)]
+_l, dm_e = sub_sheet(extra_meas=[empty, empty_bg], extra_nuclei=bg_nuc)
 chk("...the rate is still given, unchanged",
     (dm_e["frac_positive_without_flagged"], dm_e["note"] or ""),
     (dm["frac_positive_without_flagged"], ""))
@@ -443,10 +459,17 @@ gate = read(K.GATE_CSV)
 chk("06k records each marker's counts and what it trained on",
     [(r["marker"], r["n_unstained"], r["n_no_primary"], r["trained_on"]) for r in gate],
     [("AF568", "250", "300", "unstained")])
-lines_g, _dm = sub_sheet(extra_gate=[{"marker": "AF488", "n_unstained": 12,
-                                       "n_no_primary": 34, "trained_on": ""}])
+chk("...with a blank reason when scored", [r["reason"] for r in gate], [""])
+lines_g, _dm = sub_sheet(extra_gate=[
+    {"marker": "AF488", "n_unstained": 12, "n_no_primary": 34, "trained_on": "",
+     "reason": "below_gate"},
+    {"marker": "AF647", "n_unstained": 250, "n_no_primary": 0, "trained_on": "",
+     "reason": "no_stained"}])
 chk("...and the sheet header says the unscored one was not scored, and why",
     "AF488 not scored: 12 unstained / 34 no_primary < 200" in lines_g)
+chk("...a marker past the gate with nothing to score is not said to be below it",
+    ("AF647 not scored: no stained nucleus above the cut with features" in lines_g,
+     "AF647 not scored: 250" in lines_g), (True, False))
 
 print("--- flags older than the cut are not used ---")
 secs = read(SECTIONS)

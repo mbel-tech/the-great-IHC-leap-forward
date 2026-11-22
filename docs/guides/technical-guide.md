@@ -1909,7 +1909,7 @@ Stage `excel_sample`. The analysis table as a workbook, one row per ROI per anim
   header that says provisional and states the validation criterion, and names each marker
   `af_gate.csv` says was not scored, with its counts. Blank, with a `note`, when there is no raw rate, when
   any of the row's sections is not in `af_scored_sections.csv` (a section 06a measured empty counts as
-  scored, none flagged), when a cut recorded there - the section's, or a control the marker trained on -
+  scored, none flagged; empty means no nucleus in its ROIs), when a cut recorded there - the section's, or a control the marker trained on -
   is not the cut in `positivity_cuts.csv` / `reagent_control_cuts.csv` now ("flags older than the cut -
   run 06k"), or when more are flagged than positive. `write_workbook` takes an optional third item per sheet, the lines above the table, and a
   fourth, more tables below it (`[(lines, rows)]`).
@@ -2025,7 +2025,8 @@ Each of the latter gets `af_score`, flagged at >= 0.5 (`af_suspect` when trained
 - **Writes:** `results/af_scores.csv` (`COLUMNS`), `results/af_scored_sections.csv` (every stained section
   x marker scored, with counts, and every control trained on, each with the cut it was counted against:
   06c tells "none flagged" from "not scored" by it, and blanks a row whose cut has changed since),
-  `results/af_gate.csv` (per marker, the unstained and no_primary counts and what it trained on), then
+  `results/af_gate.csv` (per marker, the unstained and no_primary counts, what it trained on and, when
+  not scored, why: `below_gate` or `no_stained`), then
   `qc/af_review.csv` and `qc/af_review.png`: per marker the 24 highest scores and 24 drawn at random
   (seed 20261121) as 64 px crops of the marker plane (05c's `plane_index_for`, read through 06l's loaded
   05c); a crop that cannot be read is grey.
@@ -4480,6 +4481,7 @@ Every section x marker 06k scored (role `stained`, including those with no nucle
 | `n_unstained` | int | count | Above-cut ROI nuclei on unstained reagent controls, featured sections only. |
 | `n_no_primary` | int | count | The same on no_primary reagent controls. |
 | `trained_on` | text |  | `unstained`, `no_primary`, or blank when not scored (below 200 of either kind, or no stained above-cut nucleus). |
+| `reason` | text |  | Why the marker was not scored: `below_gate` (fewer than 200 above-cut nuclei of either kind) or `no_stained` (past the gate, but no featured stained nucleus above the cut). Blank when scored. |
 
 #### `qc/af_review.csv`
 

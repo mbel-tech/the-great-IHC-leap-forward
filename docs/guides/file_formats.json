@@ -5576,6 +5576,12 @@
      "type": "text",
      "units": "",
      "meaning": "`unstained`, `no_primary`, or blank when not scored (below 200 of either kind, or no stained above-cut nucleus)."
+    },
+    {
+     "name": "reason",
+     "type": "text",
+     "units": "",
+     "meaning": "Why the marker was not scored: `below_gate` (fewer than 200 above-cut nuclei of either kind) or `no_stained` (past the gate, but no featured stained nucleus above the cut). Blank when scored."
     }
    ]
   },

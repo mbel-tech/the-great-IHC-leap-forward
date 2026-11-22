@@ -325,6 +325,8 @@ def read_crops(marker, items, cand):
     for uid, keys in sorted(by_uid.items()):
         g = geom.get(uid)
         if not g:
+            print(f"  {marker} {uid}: no geometry row for this section; its review "
+                  f"crops are drawn grey")
             continue
         path = os.path.join(CONFIG["source_dir"], g["czi_file"])
         try:
@@ -338,6 +340,9 @@ def read_crops(marker, items, cand):
                                        scene=int(g["scene_index"]))["mark"]
                     a = np.asarray(a, dtype=np.float64)
                     if a.shape != (TILE, TILE):
+                        # At the scene's edge the read comes back short.
+                        print(f"  {marker} {uid} nucleus {k[3]}: crop read {a.shape}, "
+                              f"not {TILE} x {TILE}; drawn grey")
                         continue
                     lo, hi = LO.stretch(a)
                     out[k] = LO.grey(a, lo, hi)

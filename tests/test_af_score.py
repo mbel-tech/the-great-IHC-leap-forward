@@ -240,15 +240,64 @@ PNG = os.path.join(STUDY.out_root, "qc", "af_review.png")
 KEY = os.path.join(STUDY.out_root, "qc", "af_review.csv")
 
 
-def scenario(n_u, n_n):
+def prepare(n_u, n_n):
     write_study(n_u, n_n)
     code, out = run(G6A)
     assert code == 0, out
+
+
+def scenario(n_u, n_n):
+    prepare(n_u, n_n)
     return run(K, [])
 
 
+# The review crops, on a stand-in for pylibCZIrw (as tests/test_nucleus_features.py):
+# a 64 px gradient per read, and a geometry row per section so 06k finds the scene.
+READS = []
+
+
+class _Doc:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self, roi, plane, scene, zoom=1.0):
+        READS.append((tuple(roi), int(plane["C"]), int(scene)))
+        x, y, w, h = roi
+        return (np.add.outer(np.arange(h), np.arange(w)) * 10 + 100).astype(np.uint16)[None]
+
+
+class _PyCzi:
+    @staticmethod
+    def open_czi(path, **_kw):
+        return _Doc()
+
+
+sys.modules["pylibCZIrw"] = type(sys)("pylibCZIrw")
+sys.modules["pylibCZIrw"].czi = _PyCzi
+G5L = K.stage_06l().G5
+G5L.use_marker("AF568")
+os.makedirs(os.path.dirname(G5L.GEOM_CSV), exist_ok=True)
+with open(G5L.GEOM_CSV, "w", newline="", encoding="utf-8") as fh:
+    w = csv.DictWriter(fh, fieldnames=["scene_uid", "animal", "marker", "czi_file",
+                                       "scene_index", "scene_w"])
+    w.writeheader()
+    for i, u in enumerate(ALL, 1):
+        w.writerow({"scene_uid": u, "animal": "A1", "marker": "AF568",
+                    "czi_file": "A1_1.czi", "scene_index": i, "scene_w": 400})
+
+
 print("--- unstained_preferred ---")
-code, out = scenario(250, 300)
+prepare(250, 300)
+meas = os.path.join(RES, "roi_measurements.csv")
+corr = os.path.join(RES, "roi_corrected.csv")
+UNTOUCHED = [os.path.join(RES, n) for n in ("roi_nuclei.csv", "roi_measurements.csv",
+                                             "roi_corrected.csv", "positivity_cuts.csv",
+                                             "reagent_control_cuts.csv")]
+before = [sha(p) for p in UNTOUCHED]
+code, out = run(K, [])
 print("     " + out.strip().replace("\n", "\n     "))
 rows = read(SCORES)
 chk("06k runs", code, 0)
@@ -282,6 +331,13 @@ chk("the review strip is drawn", os.path.exists(PNG))
 from PIL import Image  # noqa: E402
 with Image.open(PNG) as im:
     chk("...24 tiles of 64 px across", im.size[0], 24 * K.TILE)
+chk("...from the slide: one 64 px read per tile, none grey",
+    (len(READS), {r[0][2:] for r in READS}, "review crops not read" in out,
+     "no geometry" in out), (48, {(64, 64)}, False, False))
+with Image.open(PNG) as im:
+    px = np.asarray(im.convert("RGB"))
+chk("...a tile holds the stretched crop, not the grey placeholder",
+    tuple(px[18 + 32, 32]) != (60, 60, 60) and px[18:18 + 64, :64].std() > 10)
 key = read(KEY)
 chk("...with a key: 24 top and 24 random tiles",
     sorted({s: sum(1 for k in key if k["strip"] == s)
@@ -294,14 +350,10 @@ run(K, [])
 chk("deterministic: a second run writes the same af_scores.csv", sha(SCORES), first)
 
 print("--- counts_unchanged ---")
-meas = os.path.join(RES, "roi_measurements.csv")
-corr = os.path.join(RES, "roi_corrected.csv")
 chk("roi_corrected.csv exists in this fixture (a paired no-primary control)",
     os.path.exists(corr))
-before = (sha(meas), sha(corr))
-run(K, [])
-chk("roi_measurements.csv and roi_corrected.csv byte-identical after 06k",
-    (sha(meas), sha(corr)), before)
+chk("roi_nuclei, roi_measurements, roi_corrected and both cut files byte-identical "
+    "after 06k (hashed before its first run)", [sha(p) for p in UNTOUCHED], before)
 
 print("--- sheet_has_without_flagged ---")
 import openpyxl  # noqa: E402

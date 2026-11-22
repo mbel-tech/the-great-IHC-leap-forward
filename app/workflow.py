@@ -1770,6 +1770,10 @@ NOT_TRACKED = {
     "positivity.cut_k": "05c reads it only to colour its overlay crops; 06a's cuts "
                         "are what count, and 06i redraws every crop whose cut "
                         "differs from 06a's",
+    "positivity.cut_k_source": "06c reads it only to say on the Reagent controls "
+                               "sheet that a k was applied after unblinding; the "
+                               "apply that writes it changes positivity.cut_k too, "
+                               "which is tracked",
 }
 
 

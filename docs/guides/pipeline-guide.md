@@ -1413,6 +1413,16 @@ thresholds each marker was measured with and refuses to add sections measured wi
 to those already in the results; changing the setting mid-study means re-measuring that marker with
 *Redo finished sections*.
 
+**Held to the reagent controls, for a marker segmented on itself (provisional).** When such a marker
+(PCNA) has a confirmed no-primary reagent control paired with a stained section — by the operator, on
+the same file or from the same animal, never study-wide — the model is also run over the controls'
+regions, each stretched to its stained pair's range as 05c detects it, and counted at the same cuts. A
+cut is admissible when the controls' detections per mm² are at most `positivity.fp_target` times the
+stained sample's. The chosen cut is kept if it is admissible; otherwise it moves **up** to the lowest
+admissible cut above it, and with none it is kept with the reason "no admissible threshold; kept". The
+table and the record (`detection.auto.<marker>.constraint`) go in the report. Without such a control
+nothing here changes.
+
 A **poor** verdict means dim nuclei will be missed whatever the settings, so in the app *Run all
 remaining* stops after the check instead of going on into hours of detection, and says which marker
 and why. This is a pause, not a failure: the report (*Open report*) and the tuned setting are kept,
@@ -1609,6 +1619,23 @@ constant multiplier and barely moves the group contrast — **it is a reporting 
 one.** What it changes is whether a density can honestly be quoted as cells per square millimetre at
 all.
 
+**With reagent controls.** Confirmed reagent controls are kept out of every table above and reported
+on their own (`results/reagent_controls.csv`, each control's own cut and the k it was formed at in
+`results/reagent_control_cuts.csv`). With a no-primary control measured the step also:
+
+- **checks k** (`results/reagent_cut_check.csv`, provisional): for each marker and each k from 2.0 to
+  5.0 in steps of 0.5, the share of the controls' ROI nuclei called positive by each control's own cut at
+  that k, with a Wilson 95% interval, beside the stained sections' leave-one-disc-out rate at the same k.
+  It suggests the smallest k that meets `positivity.fp_target`, and none from fewer than
+  `positivity.fp_min_nuclei` control nuclei. It never changes the cut: a suggestion is applied only by
+  the operator, from the Results screen.
+- **corrects the rate** (`results/roi_corrected.csv`, provisional): per stained section, marker and
+  region, the raw rate beside a Rogan-Gladen correction for the paired controls' false-positive rate,
+  (p − f) / (1 − f), assuming sensitivity 1, with a Monte-Carlo interval. The controls are the
+  operator's pairing, else the same file, else the same animal, never study-wide; a section pinned only to
+  controls not measured yet is blank ("paired control not measured yet"). `roi_measurements.csv` is not
+  changed by any of it.
+
 Alongside the per-region table, the step writes a detector specificity table, one row per section and
 marker, carrying the background count, area, false-positive count and rate, the background level and
 spread, and the cut applied — so the threshold used on each section and the evidence for it travel
@@ -1756,6 +1783,14 @@ not re-derive any number. Buildable part-way through a run.
 for now; see 06e), because one row here is one animal — the unit the
 treatment comparison is made on. The pooling happens in this stage and is weighted by area
 measured: an animal's nuclei summed over its discs, over the area those discs covered.
+
+**With reagent controls, more sheets (all provisional where they say so).** A *Reagent controls*
+sheet carries 06a's report and, below it, the k check as a *Cut check* block. Its header states the k
+06a formed the cuts at, says when `positivity.cut_k` has changed since ("rebuild results"), and says
+when a k was applied after unblinding. A *corrected_rate* sheet shows 06a's corrected rate beside the
+raw one, per section, marker and region, never pooled to the animal. After 06k, an *af_flag* sheet
+shows per animal, marker and region the positive rate without the flagged nuclei beside the raw rate.
+Each of these is blank, with a note, where its number cannot be given, never 0.
 
 ## 06d  Spreadsheet — per slide {#stage-excel_slide}
 

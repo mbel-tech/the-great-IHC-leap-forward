@@ -714,6 +714,36 @@ measures the batch and not the reagent. The 06c workbook carries the table as a 
 sheet; with a no-primary control reported, its limitation text points there instead of saying that
 absolute rates are not defensible.
 
+*The k check (provisional).* With a no-primary control measured, stage 06a tests the positivity cut's
+multiplier against the no-primary controls, per marker, at each k of the grid {2.0, 2.5, 3.0, 3.5, 4.0,
+4.5, 5.0} (`results/reagent_cut_check.csv`). At each k every control section's ROI nuclei are counted
+against its own cut, median + k × 1.4826 × MAD of its own background-disc nuclei (a control with fewer
+than 5 usable background nuclei has no cut and is left out, named), and the counts are pooled over the
+control sections into a false-positive rate with a Wilson 95% score interval (z = 1.96). Beside it is the
+stained sections' leave-one-disc-out rate at the same k, pooled, as an in-study comparison; at the k in
+force the stage says whether that rate falls inside the controls' interval. The suggested k is the
+smallest k on the grid whose control rate (the point estimate) is at most `positivity.fp_target` (0.01 by
+default). There is no rate, and so no suggestion, when the controls have fewer than
+`positivity.fp_min_nuclei` (50) ROI nuclei in all, and none for a marker segmented on its own channel,
+which has no fraction; when no k meets the target the rows say so. The check never changes the cut. The
+operator applies a suggestion in the app, which records the checksum of the check it was taken from in
+`positivity.cut_k_source` and refuses when the check has changed since it was shown; after the
+unblinding step it asks for a typed confirmation and records that the multiplier was changed after
+unblinding. Every cut stays relative to its section's own background: k is the only thing the controls
+inform.
+
+*The admissibility constraint on a marker segmented on its own channel (provisional).* For such a marker
+(PCNA in the LS study) the detection threshold, not a cut on a nuclear stain, decides what is counted, so
+stage 05b holds its chosen StarDist probability cut to the no-primary controls. Each control paired with a
+stained section (the operator's pairing, the same file or the same animal, never study-wide) is read in
+its ROI windows at the range of that stained section, as detection reads it, and the model's objects
+are counted at every cut of the tuning grid on the controls and on the stained sample alike. A cut is
+admissible when the controls' objects per mm² are at most `positivity.fp_target` times the stained
+sample's; with no stained objects nothing is admissible. The plateau-chosen cut is kept when admissible;
+otherwise the lowest admissible cut above it is taken (a higher cut keeps fewer objects on both), and with
+none the chosen cut is kept and the record says so. The densities, the controls used and those skipped,
+with the reason, are recorded with the tuned setting. Without a usable control the tuning is unchanged.
+
 *Corrected positive rate (provisional).* With a no-primary control measured, stage 06a also writes
 `results/roi_corrected.csv`: for each stained section, marker and region, the raw positive rate pooled
 over the section's ROIs, beside a corrected rate. The correction is Rogan–Gladen,

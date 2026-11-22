@@ -273,6 +273,10 @@ Changing the resolution or brightness makes the next run redraw the pictures.
 | StarDist: overlap threshold | Empty (0.3) | Not tuned. Raise it only if touching nuclei are merged in the check pictures. |
 | Threshold: MAD multiplier | 3 | Only for markers counted on their own channel (not nuclei); see (i) |
 | Threshold: minimum object area (µm²) | 5 | As above |
+| Reagent-control false-positive target | 0.01 | Only with no-primary reagent controls. The share of control nuclei the cut may call positive (0.01 is 1 in 100, between 0.001 and 0.2). The reagent k check (stage 06a) suggests the smallest multiplier that meets it, and for a marker counted on its own channel 05b holds its detection threshold to it (see *PCNA: counted on its own channel*). It never changes a cut by itself. |
+| Reagent-control minimum nuclei | 50 | Only with reagent controls. With fewer control nuclei than this, a false-positive rate is left blank with a note, never 0, and the k check suggests no multiplier. |
+
+Below the settings the card shows **the positivity cut multiplier for each marker**, read-only: k in *background median + k × spread* of each section's own background discs (see *How "positive" is decided*), 3 by default, with a row for every marker and one for "every marker (*)". It cannot be typed into here, so a stray keystroke can never move every cut in the study. It is changed only on purpose, with **Use the suggested multiplier…** on the Results screen (section 8).
 
 Markers whose nuclei are found on their own channel (PCNA in the LS study) are set on the **Microscope and channels** card, under **Find nuclei**. You no longer edit `config.json` by hand for this.
 
@@ -531,6 +535,8 @@ In the PCNA (AF488) scans, the DAPI plane is just noise at full resolution, so t
 - **Brightness is scaled once per section.** All of a section's regions and background discs share one intensity range before StarDist sees them, so a bright proliferative zone cannot hide dim nuclei. The range used is recorded in `results/roi_normalisation.csv`.
 - **The Abercrombie correction uses the size of the positive nuclei**, the ones actually counted.
 
+**With a no-primary reagent control.** When the study has a confirmed no-primary control for PCNA, on the same slide file or from the same animal as a stained section (or paired with one in the reagent-controls list), 05b also runs the model over the control's regions, seen at its stained section's brightness range, at the same probability cuts. A cut is allowed only when the control's false detections per mm² are at most the *Reagent-control false-positive target* times the stained sections' detections per mm². If the tuned cut is not allowed, 05b moves it up to the lowest allowed cut above it; if none is, it keeps the cut and says so. The report (`qc/detection_tuning.md`) shows the table, and the record is provisional. Without such a control nothing changes.
+
 **Before the full PCNA run, do a pilot.** This route has been tested on synthetic data only.
 
 1. Turn on the study setting (see *Nucleus detection* in section 4).
@@ -548,6 +554,8 @@ Each section's own background discs set its cut: the background median plus thre
 Two densities are reported side by side: all nuclei, and positive nuclei. Both are divided by the region's area on the slide. Counts are also corrected for nuclei cut across two sections (the Abercrombie correction), using the nucleus size measured in that region. Raw and corrected numbers are both kept.
 
 For PCNA, only the positive density is reported; see *PCNA: counted on its own channel* above.
+
+The *three* is the multiplier k, set per marker (`positivity.cut_k`, shown read-only on Set up > Nucleus detection). With no-primary reagent controls measured, this stage also checks it against them; see *Choosing the multiplier from the reagent controls* in section 8.
 
 **What good looks like.** The check pictures show nuclei outlined one by one, with few red ones. The false-positive rate is low and similar across animals.
 
@@ -590,10 +598,21 @@ Pressing **Run** on *Join the experiment (06b, marked ⚠ unblinds; its button r
 - **Size.** Each whole-scene picture is roughly 100 to 500 MB, so a study's can fill tens of GB. Turn on **Skip the whole-scene pictures** to draw only the region and background-disc pictures, or set **Only the first N scenes of each marker** for a trial. Open the scene pictures in Fiji; many photo viewers refuse images that size.
 - **Older studies.** For sections measured before the outlines were saved, the first run re-runs StarDist once, which takes about as long as detection did. After that, redraws are fast.
 
+### Choosing the multiplier from the reagent controls
+
+With a no-primary reagent control measured, 06a tests the positivity cut's multiplier k against it (`results/reagent_cut_check.csv`, and a *Cut check* block on the **Reagent controls** sheet). For each marker and each k from 2.0 to 5.0 in steps of 0.5 it gives the share of control nuclei called positive by each control's own cut at that k, with a 95% interval. The **suggested** k is the smallest that meets the *Reagent-control false-positive target*. No k is suggested when the controls have fewer nuclei than the *Reagent-control minimum nuclei*, when no k meets the target, or for a marker counted on its own channel. All of this is provisional until it has been validated on a study with known controls.
+
+The Results screen shows a **Reagent k check (provisional)** panel: each marker's suggested k against the k in force. **Use the suggested multiplier…** applies the chosen marker's suggestion, after asking. The question names the suggested k and the k in force. Nothing changes the multiplier by itself; the button is the only way. It is greyed out, with the reason, when no marker has a suggestion that differs from the one in force. Applying it puts the dataset (06a) and the results out of date, so build the results again.
+
+- **Set the multiplier before you unblind (06b).** A cut moved once the groups are known could follow them. Once 06b has run, the button asks you to type `apply after unblinding` before it changes anything, and the change is recorded as made after unblinding (`positivity.cut_k_source`; the **Reagent controls** sheet then says "k for <marker> was changed after unblinding").
+- **If the check has changed since the page was shown** (the hourly refresh rebuilds it), the button refuses with *the cut check changed since it was shown - reopen the page*, and nothing is changed. The panel reads the check again when the screen is refreshed (for example when the project is opened again); look at the new suggestion there before you decide.
+- **The Reagent controls sheet states the k 06a used.** If the multiplier has changed since, it says "k for <marker> changed since 06a ran ... - rebuild results".
+
 ### Before you unblind
 
 - **The sampling workbook.** Unless you choose another in the Unblind box, 06b looks for `large scale exp sampling data.xlsx` in the slides folder. Its header must match what the stage expects; if it does not, the stage names the mismatched columns.
 - **Check measurement is finished**, or decide consciously to look at a partial result. The spreadsheets can be rebuilt at any time, including while detection runs.
+- **Settle the positivity multiplier** if the study has no-primary reagent controls (see *Choosing the multiplier from the reagent controls*, above): apply the suggestion, or decide not to, before 06b.
 - **Look at the coverage sheet** in `roi_dataset.xlsx`. Some animals may have few measurable sections because of saturation; note this before comparing groups.
 
 ### The figures
@@ -603,6 +622,10 @@ Pressing **Run** on *Join the experiment (06b, marked ⚠ unblinds; its button r
 **What not to claim.** There are no no-primary controls in the LS dataset, so absolute statements like "30% of cells are positive" are not supported. Comparisons between groups at matched brain levels are.
 
 **If the study has reagent controls.** A reagent control is a slide or section stained without the primary antibody (or with the secondary only), with an isotype IgG instead, with a pre-adsorbed antibody, or unstained. Confirmed ones are kept out of every group comparison and reported on their own, in the **Reagent controls** sheet of `roi_dataset.xlsx` and in `results/reagent_controls.csv`. For each marker and region the sheet gives the share of nuclei the positivity rule calls positive on the control under its own cut (the rule's false-positive rate where there is no specific signal), beside the stained sections of the same marker and region. It also gives the control's level against theirs, scored against each stained section's own cut, with the median and the lowest-to-highest range shown. The level comparison is left blank, with a note, when the control has no stained section on its file or from its animal to be compared with, because across batches it measures the batch and not the reagent. With a no-primary reagent control reported, read an absolute positivity rate against the control's rate, not as zero background. A study without controls is as above, and a background disc is never a negative control. Reagent controls are measured first in detection, so a stopped run still reports them. A confirmed control with nothing measured yet for a marker is still listed, with blank numbers and a note saying why (no ROIs placed on it yet, or not reached by detection), and it does not count as a no-primary control for the limitation text until it is measured. The stained sections a control is compared with are those with ROIs placed: on the same slide file first, then from the same animal, then the whole study.
+
+**The corrected_rate sheet (provisional).** With a no-primary reagent control measured, `roi_dataset.xlsx` has a **corrected_rate** sheet (from `results/roi_corrected.csv`): per stained section, marker and region, the raw `frac_positive` beside `frac_positive_corrected` and its 95% interval. The correction takes out the no-primary controls' false-positive rate, (raw − f) / (1 − f). It assumes every truly positive nucleus is called positive, so it is a lower-bound adjustment, and the sheet's header says so. The controls used are the ones you paired with the section in the reagent-controls list, else those on the same slide file, else those from the same animal; never the whole study. A row is blank, with a note, when the rate cannot be given: no control to pair with, too few control nuclei, a raw rate at or below the control's, or a paired control not measured yet ("paired control not measured yet"). For PCNA, which has no fraction, the positive density less the controls' is given instead. The raw numbers are never changed.
+
+**The af_flag sheet (provisional).** On request, two Measure stages flag nuclei that look like the reagent controls' false positives: *Per-nucleus shape and texture* (06l) and then *Autofluorescence flag* (06k). 06k needs at least 200 above-cut nuclei on unstained controls (flag `af_suspect`) or else on no-primary ones (flag `control_like`) for a marker. `roi_dataset.xlsx` then has an **af_flag** sheet: per animal, marker and region, the raw positive rate beside the rate with the flagged nuclei taken out of both the count and the total. It is a flag only; no count changes. The row is blank, with a note, when a section has not been scored, when 06l's features are out of date ("06l features out of date - run 06l"), when the reagent controls have changed since 06k ran ("control set changed - run 06k"), or when the positivity cut has changed since ("flags older than the cut - run 06k"). It stays provisional until it has been checked on a study with known controls: you hand-label the review strip `qc/af_review.png`, and the flag must be right at least 8 times in 10 at a score of 0.5.
 
 ## 9. Extras: instrument characterisation and All stages
 

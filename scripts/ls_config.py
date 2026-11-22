@@ -899,8 +899,11 @@ note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
         note="{by: default} until a multiplier is applied, then one record per "
              "marker: {<marker>: {by: operator | controls, at, check}}. `check` "
              "is the sha256 of the results/reagent_cut_check.csv a suggestion "
-             "was taken from. A record the app writes; no stage reads it.",
-        consumers=["app"]),
+             "was taken from; `after_unblinding: true` when it was applied "
+             "through the typed confirmation after 06b. A record the app "
+             "writes; 06c states every marker applied after unblinding on the "
+             "Reagent controls sheet.",
+        consumers=["06c", "app"]),
 
     Key("positivity.fp_min_nuclei", "int",
         "The fewest reagent-control nuclei a false-positive rate is given for; "

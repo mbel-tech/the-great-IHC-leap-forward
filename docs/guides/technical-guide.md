@@ -1860,7 +1860,12 @@ Stage `roi_dataset`. Turns the per-nucleus rows into per-ROI numbers. Still blin
   `controls_for`, the report's pairing tiers from the stained section's side (operator, same file,
   same animal; never study-wide; a control whose operator pin takes effect for the marker is used
   only for what it is paired with; a pin that resolves to nothing for the marker is ignored, as in
-  `reagent_controls.csv`). Blank, with a note, when it cannot be given. A marker segmented on its own channel gets
+  `reagent_controls.csv`). The operator tier is looked for over every confirmed control, measured or
+  not: a section pinned only to no_primary controls not measured yet is blank, with the note "paired
+  control not measured yet" (`fp_rate_source` `operator: <uids> (not measured yet)`), never corrected
+  by a fallback tier; of a pin's controls only the measured ones are used. The default tiers skip a
+  control not measured yet, so a measured one further out still corrects the section. Blank, with a
+  note, when it cannot be given. A marker segmented on its own channel gets
   `positive_density_per_mm2` (pooled as sum(n_positive × each row's Abercrombie factor) / area) less the
   controls' instead, in the `positive_density_*` columns, with no minimum object count (only control ROI
   area, all regions when the region has none). With no measured no_primary
@@ -4746,7 +4751,7 @@ The corrected positive rate, provisional until validated on a study with known c
 | `positive_density_corrected_hi` | float | per mm2 | Upper end of that interval. |
 | `fp_rate` | float | fraction | f: the paired no_primary controls' ROI nuclei above each control's own cut, pooled, in the same region (or all regions, see fp_rate_source). Blank under positivity.fp_min_nuclei nuclei, or for a marker segmented on its own channel. |
 | `fp_rate_n` | int |  | The control nuclei (own-channel markers: objects) f or the control density is over. |
-| `fp_rate_source` | text |  | The pairing tier (operator, same_file, same_animal) and the controls used, then the region, or `all regions` when the region had fewer than positivity.fp_min_nuclei control nuclei (own-channel markers: no control ROI area in the region); a paired control with no cut of its own is named as left out. `none: no same-slide or same-animal control` when there is none. |
+| `fp_rate_source` | text |  | The pairing tier (operator, same_file, same_animal) and the controls used, then the region, or `all regions` when the region had fewer than positivity.fp_min_nuclei control nuclei (own-channel markers: no control ROI area in the region); a paired control with no cut of its own is named as left out. `none: no same-slide or same-animal control` when there is none. `operator: <uids> (not measured yet)` when the operator pinned the section only to no_primary controls not measured yet: the row is blank, its note "paired control not measured yet". |
 | `correction_note` | text |  | Why a value is blank; for a marker segmented on its own channel, that its density is corrected instead and the controls' positive density. |
 
 #### `results/roi_geometry_changed.csv`

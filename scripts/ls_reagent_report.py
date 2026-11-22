@@ -629,6 +629,10 @@ SEED = 20261121
 CORRECTION_TIERS = ("operator", "same_file", "same_animal")
 
 NO_PAIR_SOURCE = "none: no same-slide or same-animal control"
+#: The tier a stained section gets when the operator pinned it only to
+#: no_primary controls not measured yet (06a's corrected_report), and its note.
+PAIRED_UNMEASURED = "operator_unmeasured"
+PAIRED_UNMEASURED_NOTE = "paired control not measured yet"
 AT_OR_BELOW = "at or below the reagent control's false-positive rate"
 DENSITY_AT_OR_BELOW = ("at or below the reagent control's positive density: no "
                        "density correction")
@@ -847,6 +851,14 @@ def corrected_rows(stained, control_nuclei, cuts, control_sets,
                          "so no fraction and no false-positive rate; the positive density "
                          "is corrected instead")
         tier, uids = control_sets.get((uid, mk), ("none", []))
+        if tier == PAIRED_UNMEASURED:
+            # Pinned by the operator, only to controls with nothing measured:
+            # blank until they are, never a fallback tier's rate instead.
+            row["fp_rate_source"] = "operator: " + ", ".join(uids) + " (not measured yet)"
+            notes.append(PAIRED_UNMEASURED_NOTE)
+            row["correction_note"] = "; ".join(notes)
+            out.append(row)
+            continue
         if tier == "none" or not uids:
             row["fp_rate_source"] = NO_PAIR_SOURCE
             row["correction_note"] = "; ".join(notes)

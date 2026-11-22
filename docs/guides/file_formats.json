@@ -6571,7 +6571,7 @@
      "name": "fp_rate_source",
      "type": "text",
      "units": "",
-     "meaning": "The pairing tier (operator, same_file, same_animal) and the controls used, then the region, or `all regions` when the region had fewer than positivity.fp_min_nuclei control nuclei (own-channel markers: no control ROI area in the region); a paired control with no cut of its own is named as left out. `none: no same-slide or same-animal control` when there is none."
+     "meaning": "The pairing tier (operator, same_file, same_animal) and the controls used, then the region, or `all regions` when the region had fewer than positivity.fp_min_nuclei control nuclei (own-channel markers: no control ROI area in the region); a paired control with no cut of its own is named as left out. `none: no same-slide or same-animal control` when there is none. `operator: <uids> (not measured yet)` when the operator pinned the section only to no_primary controls not measured yet: the row is blank, its note \"paired control not measured yet\"."
     },
     {
      "name": "correction_note",

@@ -566,6 +566,74 @@ finally:
     G6C.NUCLEI_CSV, G6C.MEAS_CSV, G6C.G5.all_boxes = saved
 chk("no roi_corrected.csv: no sheet", name in openpyxl.load_workbook(xlsx).sheetnames, False)
 
+print("--- an operator pin to a control not measured yet ---")
+# A1_s02_sc02: a confirmed pERK no_primary control on A1's second file, boxed by
+# 05a but not detected yet. A1_s02_sc01 (stained, same file) is corrected today
+# by the same-animal control A1_s01_sc02, measured.
+LATE = "A1_s02_sc02"
+
+
+def write_manifest(rows):
+    with open(os.path.join(mdir, "manifest_scenes.csv"), "w", newline="",
+              encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=["scene_uid", "file", "animal", "marker_channel"])
+        w.writeheader()
+        for uid, f, a in rows:
+            w.writerow({"scene_uid": uid, "file": f, "animal": a, "marker_channel": "pERK"})
+
+
+def run_late(paired_with):
+    """06a with LATE confirmed (and boxed, not measured): roi_corrected.csv's rows."""
+    ltmp = tempfile.mkdtemp(prefix="corr_late_")
+    lnpath, lbpath = write_fixture(ltmp, DATA)
+    with open(lbpath, newline="", encoding="utf-8") as fh:
+        brows = list(csv.DictReader(fh))
+    brows += [dict(b, scene_uid=LATE) for b in brows
+              if (b["scene_uid"], b["marker"]) == ("A1_s02_sc01", "pERK")]
+    with open(lbpath, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=BOX_COLS)
+        w.writeheader()
+        w.writerows(brows)
+    block = {"declared": "yes",
+             "scenes": dict(RC_BLOCK["scenes"], **{LATE: {
+                 "kind": "no_primary", "markers": ["pERK"], "source": "manual"}})}
+    if paired_with:
+        block["paired_with"] = paired_with
+    write_manifest(MANIFEST + [(LATE, "A1_2.czi", "A1")])
+    G6A.CONFIG["reagent_controls"] = block
+    try:
+        code, out = run_06a(ltmp, lnpath, lbpath)
+    finally:
+        G6A.CONFIG["reagent_controls"] = RC_BLOCK
+        write_manifest(MANIFEST)
+    assert code == 0, out
+    return read(os.path.join(ltmp, "roi_corrected.csv")), read(
+        os.path.join(ltmp, "reagent_controls.csv"))
+
+
+late_corr, late_rep = run_late(None)
+chk("(the late control is reported as not measured)",
+    [r["note"].startswith(RR.NOT_MEASURED) for r in late_rep if r["scene_uid"] == LATE],
+    [True])
+lc = one(late_corr, "A1_s02_sc01")
+chk("no pin: a same-file control not measured yet does not hide the measured "
+    "same-animal one", (lc["fp_rate_source"].startswith("same_animal: A1_s01_sc02"),
+                        approx(lc["frac_positive_corrected"], round(0.3 / 0.9, 4))),
+    (True, True))
+late_corr, _r = run_late({LATE: ["A1_s02_sc01"]})
+lc = one(late_corr, "A1_s02_sc01")
+chk("operator pin to a control not measured yet: the corrected row is blank",
+    (lc["frac_positive_corrected"], lc["fp_rate"]), ("", ""))
+chk("...with the note 'paired control not measured yet'",
+    "paired control not measured yet" in lc["correction_note"], True)
+chk("...the source names the pinned control, not a fallback",
+    (lc["fp_rate_source"].startswith("operator: " + LATE),
+     "same_animal" in lc["fp_rate_source"]), (True, False))
+chk("...the raw rate is still there", lc["frac_positive"], "0.4")
+lo = one(late_corr, "A1_s01_sc01")
+chk("...another section keeps its own same-file control",
+    lo["fp_rate_source"].startswith("same_file: A1_s01_sc02"), True)
+
 print()
 print("ALL PASS" if not fails else f"{fails} FAILED")
 sys.exit(1 if fails else 0)

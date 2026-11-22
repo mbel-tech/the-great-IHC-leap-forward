@@ -623,13 +623,24 @@ def corrected_report(lookup, rc_nuc, rc_cuts, rows, st_areas, st_pab, rc_areas,
         s["pos"] = "" if (s["pos"] == "" or r["n_positive"] == "") else s["pos"] + r["n_positive"]
         s["own"] = s["own"] or bool(r["denominator_withheld_reason"])
     # Every confirmed control stays in the lookup, so pairing_for never takes
-    # one for a stained section; a no_primary one not measured yet is left out,
-    # having nothing to give.
-    pair_lookup = {k: v for k, v in lookup.items()
-                   if k in np_lookup or (v or {}).get("kind") != "no_primary"}
-    cache = {}
-    sets = {(u, m): RR.controls_for(u, m, pair_lookup, scene_rows, CONFIG, boxed, cache)
-            for u, m in {(k[0], k[1]) for k in stained}}
+    # one for a stained section. The operator's pin is looked for over all of
+    # them: a section pinned to a control not measured yet is blank, saying
+    # so (RR.PAIRED_UNMEASURED), never corrected by a fallback tier instead.
+    # The default tiers see a no_primary control not measured yet as a
+    # control with nothing to give (`unmeasured` is not no_primary), so a
+    # measured one further out still corrects the section, as before.
+    unmeasured = {k: dict(v or {}, kind="unmeasured") for k, v in lookup.items()
+                  if k not in np_lookup and (v or {}).get("kind") == "no_primary"}
+    default_lookup = {**lookup, **unmeasured}
+    cache, cache_d, sets = {}, {}, {}
+    for u, m in {(k[0], k[1]) for k in stained}:
+        tier, got = RR.controls_for(u, m, lookup, scene_rows, CONFIG, boxed, cache)
+        if tier == "operator":
+            done = [c for c in got if (c, m) in np_lookup]
+            sets[(u, m)] = ("operator", done) if done else (RR.PAIRED_UNMEASURED, got)
+        else:
+            sets[(u, m)] = RR.controls_for(u, m, default_lookup, scene_rows, CONFIG,
+                                           boxed, cache_d)
     return RR.corrected_rows(stained, rc_nuc, rc_cuts, sets, fp_min_nuclei=FP_MIN_NUCLEI,
                              control_areas={k: v for k, v in rc_areas.items()
                                             if (k[0], k[1]) in np_lookup},

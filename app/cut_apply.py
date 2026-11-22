@@ -8,6 +8,12 @@ positivity.cut_k[marker] to that k and records where it came from in
 positivity.cut_k_source[marker] = {"by": "controls", "check": <sha256 of the
 csv>, "at": <time>}, the decision itself attributed to "cut check".
 
+**What was shown is what is applied.** The hourly 06e loop can rewrite the
+check between the page showing it and the click. The caller passes the k it
+showed and the checksum of the check it showed it from (cut_check_view's
+"ks" and "sha"); apply refuses when either differs from the file now, so a k
+the operator never saw is never applied.
+
 **The blinding guard.** A multiplier that is applied must be fixed before
 unblinding. Once 06b has written its join (any of its outputs is under
 out_root), apply refuses unless the operator types CONFIRM_TEXT, so a cut
@@ -31,6 +37,8 @@ CONFIRM_TEXT = "apply after unblinding"
 BY = "cut check"
 #: positivity.cut_k_source[marker]["by"] for a k taken from the check.
 SOURCE = "controls"
+#: The refusal when the check is not the one the page showed.
+CHANGED = "the cut check changed since it was shown - reopen the page"
 
 
 def check_path(out_root):
@@ -95,6 +103,12 @@ def summary(out_root, cfg):
     """[(marker, suggested k or None, k in force, why not)] for the Results page,
     in the check's marker order; [] without a check file."""
     rows, _sha = read_check(out_root)
+    return summary_of(rows, cfg)
+
+
+def summary_of(rows, cfg):
+    """summary() of check rows already read (read_check), so a caller can keep
+    the checksum of exactly the rows it shows."""
     if not rows:
         return []
     out = []
@@ -106,8 +120,12 @@ def summary(out_root, cfg):
     return out
 
 
-def apply_suggested_k(project, out_root, marker, confirm_text=None):
+def apply_suggested_k(project, out_root, marker, confirm_text=None, *, shown_k, shown_sha):
     """Set positivity.cut_k[marker] to the check's suggested k. -> (applied, message).
+
+    `shown_k` and `shown_sha` are the suggested k the page showed for the
+    marker and the checksum of the check it showed (cut_check_view's "ks" and
+    "sha"): a file that is not that one now is refused (CHANGED).
 
     Every refusal comes before anything is written, so a refused apply leaves
     the config and its decision log as they were."""
@@ -117,9 +135,13 @@ def apply_suggested_k(project, out_root, marker, confirm_text=None):
     if rows is None:
         return False, (f"no {RR.CUT_CHECK_CSV} under {out_root or '(no output folder)'}: "
                        "run the dataset step (06a) with a no-primary reagent control measured")
+    if sha != shown_sha:
+        return False, CHANGED
     k, why = suggestion(rows, marker)
     if k is None:
         return False, why
+    if shown_k is None or k != float(shown_k):
+        return False, CHANGED
     if unblinded(out_root) and (confirm_text or "").strip() != CONFIRM_TEXT:
         return False, ("this study is already unblinded (06b has joined the groups). "
                        "A multiplier should be fixed before unblinding; to apply it "

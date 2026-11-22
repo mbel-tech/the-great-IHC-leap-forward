@@ -2854,7 +2854,13 @@ layout skips, and `manual` for one the app cannot run here) and the plan for **R
 **Applying the reagent k check.** Results shows `results/reagent_cut_check.csv` as each marker's suggested
 multiplier against the one in force (`workflow.cut_check_view`, provisional), with a **Use the suggested
 multiplier…** button, disabled with the reason when no marker has a suggestion to apply.
-`app/cut_apply.py` (`apply_suggested_k(project, out_root, marker, confirm_text)`) sets
+Both confirmation dialogs name the marker's suggested k and the k in force. The page keeps what it showed
+(`cut_check_view`'s `ks`, `now` and `sha`, the checksum of the check those were read from) and the
+button hands that k and checksum to
+`app/cut_apply.py` (`apply_suggested_k(project, out_root, marker, confirm_text, *, shown_k, shown_sha)`),
+which refuses with "the cut check changed since it was shown - reopen the page" when the file's checksum
+or the marker's suggested k is not the one shown (the hourly 06e loop can rewrite the check between the
+two). Otherwise it sets
 `positivity.cut_k[marker]` to the suggested k and `positivity.cut_k_source[marker]` to
 `{"by": "controls", "check": <sha256 of the csv>, "at": <time>}`, the decision recorded as by
 `cut check`. Once any of 06b's outputs (`results/roi_dataset.csv`, `results/animal_metadata.csv`) exists

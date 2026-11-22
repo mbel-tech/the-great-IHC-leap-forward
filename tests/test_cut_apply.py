@@ -83,12 +83,25 @@ def out_root(name, suggest=True):
 
 import cut_apply as CA                                          # noqa: E402
 
+
+def seen(root, marker="pERK"):
+    """(k, sha) of the check as a page would have shown it: the marker's
+    suggested k and the checksum of the bytes it was read from."""
+    rows, sha = CA.read_check(root)
+    return (CA.suggestion(rows, marker)[0] if rows else None), sha
+
+
+def apply(project, root, marker, confirm=None, shown=None):
+    k, sha = shown if shown is not None else seen(root, marker)
+    return CA.apply_suggested_k(project, root, marker, confirm, shown_k=k, shown_sha=sha)
+
+
 # ============================================================ apply_suggested_k
 print("--- apply_suggested_k ---")
 ROOT = out_root("o_apply")
 csv_path = os.path.join(ROOT, "results", RR.CUT_CHECK_CSV)
 project = LP.Project.open(STUDY.path)
-ok, msg = CA.apply_suggested_k(project, ROOT, "pERK", None)
+ok, msg = apply(project, ROOT, "pERK")
 chk("apply_writes_k_and_source: applied", ok, True)
 chk("...cut_k['pERK'] is the suggested k", (project.get("positivity.cut_k") or {}).get("pERK"),
     3.5)
@@ -105,7 +118,7 @@ chk("...the decision is recorded by the cut check",
     ["cut check"])
 chk("...the config still validates", project.validate()[0], [])
 chk("...the message names the marker and k", "pERK" in msg and "3.5" in msg, True)
-ok2, msg2 = CA.apply_suggested_k(project, ROOT, "PCNA", None)
+ok2, msg2 = apply(project, ROOT, "PCNA")
 chk("a marker with no suggestion: refused", ok2, False)
 
 print("--- apply_after_unblinding_requires_confirmation ---")
@@ -117,20 +130,54 @@ chk("...and not on a study 06b has not run on", CA.unblinded(ROOT), False)
 project = LP.Project.open(STUDY.path)
 before = (project.get("positivity.cut_k"), project.get("positivity.cut_k_source"),
           len(project.block.get("decisions", [])))
-ok, msg = CA.apply_suggested_k(project, ROOT_B, "pERK", None)
+ok, msg = apply(project, ROOT_B, "pERK")
 chk("apply_after_unblinding_requires_confirmation: refused without it", ok, False)
 chk("...says the study is unblinded and what to type",
     "unblind" in msg and CA.CONFIRM_TEXT in msg, True)
 chk("...config unchanged", (project.get("positivity.cut_k"),
                             project.get("positivity.cut_k_source"),
                             len(project.block.get("decisions", []))), before)
-ok, _ = CA.apply_suggested_k(project, ROOT_B, "pERK", "apply after unblindng")
+ok, _ = apply(project, ROOT_B, "pERK", "apply after unblindng")
 chk("...a mistyped confirmation is refused", ok, False)
-ok, _ = CA.apply_suggested_k(project, ROOT_B, "pERK", "apply after unblinding")
+ok, _ = apply(project, ROOT_B, "pERK", "apply after unblinding")
 chk("...'apply after unblinding' succeeds", ok, True)
 chk("...and writes the k", (project.get("positivity.cut_k") or {}).get("pERK"), 3.5)
-ok, msg = CA.apply_suggested_k(project, os.path.join(STUDY.root, "nowhere"), "pERK", None)
+ok, msg = apply(project, os.path.join(STUDY.root, "nowhere"), "pERK")
 chk("no check file: refused", ok, False)
+
+print("--- apply_refuses_a_check_changed_since_shown ---")
+ROOT_C = out_root("o_changed")
+shown = seen(ROOT_C)
+chk("(the page was shown k 3.5)", shown[0], 3.5)
+# The hourly 06e loop rewrites the check between the page and the click: the
+# suggestion is now 4.0, a k the operator never saw.
+moved = check_rows()
+moved[3]["suggested"], moved[4]["suggested"] = 0, 1
+write_csv(os.path.join(ROOT_C, "results", RR.CUT_CHECK_CSV), moved, RR.CUT_CHECK_COLUMNS)
+project = LP.Project.open(STUDY.path)
+before = (project.get("positivity.cut_k"), project.get("positivity.cut_k_source"),
+          len(project.block.get("decisions", [])))
+ok, msg = apply(project, ROOT_C, "pERK", shown=shown)
+chk("a new suggestion since shown: refused", ok, False)
+chk("...saying the check changed and to reopen the page",
+    "changed since it was shown" in msg and "reopen the page" in msg, True)
+chk("...config unchanged", (project.get("positivity.cut_k"),
+                            project.get("positivity.cut_k_source"),
+                            len(project.block.get("decisions", []))), before)
+# The same suggested k, but the table under it is not the one shown.
+write_csv(os.path.join(ROOT_C, "results", RR.CUT_CHECK_CSV), check_rows(),
+          RR.CUT_CHECK_COLUMNS + ["extra"])
+ok, msg = apply(project, ROOT_C, "pERK", shown=(3.5, shown[1]))
+chk("the same k from a different table: refused too",
+    (ok, "changed since it was shown" in msg), (False, True))
+chk("...config unchanged", (project.get("positivity.cut_k"),
+                            project.get("positivity.cut_k_source"),
+                            len(project.block.get("decisions", []))), before)
+try:
+    CA.apply_suggested_k(project, ROOT_C, "pERK", None)
+    chk("apply without the k and checksum shown is not possible", False)
+except TypeError:
+    chk("apply without the k and checksum shown is not possible", True)
 
 print("--- the config warns on a cut_k key that is not a marker ---")
 cfg = {"acquisition": {"layout": "paired", "markers": ["pERK", "PCNA"]},
@@ -215,6 +262,8 @@ chk("...suggested k against the k in force",
 chk("...the button is enabled", results.cut_btn.isEnabled(), True)
 results.cut_btn.click()
 chk("...clicking asks first", len(asked), 1)
+chk("...the question names the suggested k and the k in force",
+    ("suggested k 3.5" in asked[0], "k in force now is 3" in asked[0]), (True, True))
 chk("...and applies", (project.get("positivity.cut_k") or {}).get("pERK"), 3.5)
 chk("...signals the window", len(applied), 1)
 results.show_cut_check(ROOT, project)
@@ -227,8 +276,28 @@ asked.clear()
 results.cut_btn.click()
 chk("after 06b: the operator types the confirmation", len(typed), 1)
 chk("...the prompt says the study is unblinded", "unblind" in typed[0], True)
+chk("...and names the suggested k and the k in force",
+    ("suggested k 3.5" in typed[0], "k in force now is 3" in typed[0]), (True, True))
 chk("...and the typed text applies it", (project.get("positivity.cut_k") or {}).get("pERK"),
     3.5)
+
+
+print("--- the page refuses a check rewritten after it was shown ---")
+project = LP.Project.open(STUDY.path)
+ROOT_D = out_root("o_page_changed")
+results.show_cut_check(ROOT_D, project)
+moved = check_rows()
+moved[3]["suggested"], moved[4]["suggested"] = 0, 1
+write_csv(os.path.join(ROOT_D, "results", RR.CUT_CHECK_CSV), moved, RR.CUT_CHECK_COLUMNS)
+before = (project.get("positivity.cut_k"), project.get("positivity.cut_k_source"))
+asked.clear()
+results.cut_btn.click()
+chk("the click is refused with a warning to reopen the page",
+    any("changed since it was shown" in a for a in asked), True)
+chk("...the question named the k shown, 3.5, not the 4 now in the file",
+    "suggested k 3.5" in asked[0], True)
+chk("...config unchanged",
+    (project.get("positivity.cut_k"), project.get("positivity.cut_k_source")), before)
 
 
 def teardown():

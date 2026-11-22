@@ -371,6 +371,7 @@ class StageListScreen(QWidget):
         self.cut_box.setVisible(False)
         layout.addWidget(self.cut_box)
         self._cut_root = None
+        self._cut_view = None
 
     def show_cut_check(self, out_root, project):
         """The k check panel, from results/reagent_cut_check.csv and the k in
@@ -381,6 +382,9 @@ class StageListScreen(QWidget):
         self._project, self._cut_root = project, out_root
         cfg = project.cfg if project is not None else {}
         view = W.cut_check_view(out_root, cfg) if out_root else None
+        # What the button applies is what this shows: the k and the check's
+        # checksum as read now, never the file again at the click.
+        self._cut_view = view
         self.cut_box.setVisible(view is not None)
         if view is None:
             return
@@ -407,26 +411,29 @@ class StageListScreen(QWidget):
         import cut_apply as CA
         from PySide6.QtWidgets import QInputDialog
         marker = self.cut_marker.currentText()
-        if not marker or self._project is None:
+        view = self._cut_view or {}
+        if not marker or self._project is None or marker not in view.get("ks", {}):
             return False
+        k, now = view["ks"][marker], view["now"].get(marker)
         confirm = None
         if CA.unblinded(self._cut_root):
             text, ok = QInputDialog.getText(
                 self, "Already unblinded",
                 "This study is already unblinded: 06b has joined the groups. A cut "
                 "multiplier should be fixed before unblinding, and changing it now is "
-                f"recorded as such.\n\nTo apply the suggested k for {marker} anyway, "
-                f"type: {CA.CONFIRM_TEXT}")
+                f"recorded as such.\n\nFor {marker}: suggested k {k:g}, k in force now "
+                f"is {now:g}. To apply the suggested k anyway, type: {CA.CONFIRM_TEXT}")
             if not ok:
                 return False
             confirm = text
         elif QMessageBox.question(
                 self, "Use the suggested multiplier",
                 f"Set the positivity cut multiplier for {marker} to the reagent k check's "
-                "suggestion? The dataset and the results will be out of date and need "
-                "running again.") != QMessageBox.Yes:
+                f"suggested k {k:g}? The k in force now is {now:g}. The dataset and the "
+                "results will be out of date and need running again.") != QMessageBox.Yes:
             return False
-        ok, msg = CA.apply_suggested_k(self._project, self._cut_root, marker, confirm)
+        ok, msg = CA.apply_suggested_k(self._project, self._cut_root, marker, confirm,
+                                       shown_k=k, shown_sha=view.get("sha"))
         if not ok:
             QMessageBox.warning(self, "Multiplier not changed", msg)
             return False

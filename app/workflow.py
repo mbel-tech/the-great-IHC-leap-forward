@@ -2266,9 +2266,13 @@ def cut_check_view(out_root, cfg):
     results/reagent_cut_check.csv: {"lines": [one per marker, suggested k
     against the k in force], "markers": [markers whose suggestion differs from
     the k in force, which the button can apply], "why": why the button cannot
-    apply anything, or ""}. Provisional, as the check is."""
+    apply anything, or "", "ks": {marker: suggested k}, "now": {marker: k in
+    force}, "sha": the checksum of the check these were read from}. The apply
+    is handed "ks" and "sha" (cut_apply.apply_suggested_k), so it applies only
+    what was shown. Provisional, as the check is."""
     import cut_apply as CA                  # numpy, through ls_overlay: only when asked
-    rows = CA.summary(out_root, cfg)
+    check, sha = CA.read_check(out_root)
+    rows = CA.summary_of(check, cfg)
     if not rows:
         return None
     lines, markers, whys = [], [], []
@@ -2283,7 +2287,9 @@ def cut_check_view(out_root, cfg):
             lines.append(f"{mk}: suggested k {k:g}, k in force {now:g}")
             markers.append(mk)
     return {"lines": lines, "markers": markers,
-            "why": "" if markers else "; ".join(whys)}
+            "why": "" if markers else "; ".join(whys),
+            "ks": {mk: k for mk, k, _n, _w in rows if k is not None},
+            "now": {mk: now for mk, _k, now, _w in rows}, "sha": sha}
 
 
 def notices(screen_sid, study):

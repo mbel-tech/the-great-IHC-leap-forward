@@ -1412,6 +1412,94 @@ def drive_drop_check():
                 [k for k in base_art if got.get(k) != base_art[k]], [])
             for u in secs:
                 os.remove(os.path.join(mask_dir, f"{u}_artifact.npy"))
+
+            print()
+            print("--- 05c: out_root drops between sections ---")
+            # The tables 05c appends to are on out_root. A handle opened before
+            # a drop is dead after it on Windows even with the drive back, so
+            # a run that held its handles for the whole run failed at the next
+            # commit. Here every handle 05c opens for writing under out_root
+            # refuses to write once a wait has ended since it was opened, as a
+            # vanished volume's do; the drop comes while section 2 is read,
+            # after section 1 is committed.
+            import builtins
+            real_open = builtins.open
+
+            class DeadAfterDrop:
+                def __init__(self, fh):
+                    self._fh, self._gen = fh, len(DR.PAUSES)
+
+                def _live(self):
+                    if len(DR.PAUSES) > self._gen:
+                        raise OSError(116, "Stale file handle", self._fh.name)
+
+                def write(self, s):
+                    self._live()
+                    return self._fh.write(s)
+
+                def flush(self):
+                    self._live()
+                    return self._fh.flush()
+
+                def fileno(self):
+                    self._live()
+                    return self._fh.fileno()
+
+                def __getattr__(self, name):
+                    return getattr(self._fh, name)
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *exc):
+                    self._fh.close()
+                    return False
+
+            def guarded_open(path, mode="r", *a, **kw):
+                fh = real_open(path, mode, *a, **kw)
+                if any(c in mode for c in "aw+") and \
+                        os.path.abspath(str(path)).startswith(out_root + os.sep):
+                    return DeadAfterDrop(fh)
+                return fh
+
+            odrop = {"at": (0, 400), "thread": None}
+            real_read = Doc.read
+
+            def read_dropping_out_root(self, **kw):
+                key = (int(kw["plane"]["C"]), int(kw["roi"][0]))
+                if odrop["at"] == key:
+                    odrop["at"] = None
+                    os.rename(out_root, out_root + ".gone")
+                    # The read blocks while the drive is away, as a real one does.
+                    time.sleep(0.4)
+                    os.rename(out_root + ".gone", out_root)
+                return real_read(self, **kw)
+
+            os.environ["LS_WATCH"] = os.pathsep.join([src, out_root])
+            clear()
+            Doc.read = read_dropping_out_root
+            M.open = guarded_open
+            try:
+                rc, text = run05c()
+            finally:
+                Doc.read = real_read
+                del M.open
+                os.environ["LS_WATCH"] = src
+            chk("the out_root drop fired", odrop["at"], None)
+            chk("05c exits zero", rc, 0)
+            chk("...after waiting for the drive", "@@drive back" in text, True)
+            got = snap()
+            chk("...writes the same files", sorted(got), sorted(base))
+            chk("...byte for byte as an undropped run",
+                [k for k in base if got.get(k) != base[k]], [])
+            chk("...no nucleus twice",
+                dups(M.NUCLEI_CSV, "scene_uid", "roi_index", "nucleus_id"), 0)
+            chk("...no section logged done twice",
+                len(M.read_done_log(M.DONE_LOG, marker) or ()), len(secs))
+            with open(M.DONE_LOG, newline="", encoding="utf-8") as fh:
+                logged = [r[1] for r in csv.reader(fh) if r and r[1] != "*"]
+            chk("...the done log has one line per section", sorted(logged), sorted(secs))
+            chk("...no .tmp or .part left", tmp_left(), [])
         finally:
             DR.POLL = saved_poll
             for k, v in saved_env.items():
@@ -1424,6 +1512,62 @@ def drive_drop_check():
 print()
 print("--- the drive drops while 05c measures ---")
 drive_drop_check()
+
+
+def table_retry_check():
+    """A Table append that fails half way is retried without a torn or doubled row."""
+    tmp = tempfile.mkdtemp(prefix="ls5ct_")
+    try:
+        path = os.path.join(tmp, "t.csv")
+        t = G5C.Table(path, "w", ["a", "b"])
+        t.start()
+        t.add([["1", "x"]])
+        import builtins
+        real_open = builtins.open
+        failed = []
+
+        class HalfThenFail:
+            def __init__(self, fh):
+                self._fh = fh
+
+            def write(self, s):
+                if not failed:
+                    failed.append(s)
+                    self._fh.write(s[:len(s) // 2])
+                    self._fh.flush()
+                    raise OSError(5, "Input/output error", path)
+                return self._fh.write(s)
+
+            def __getattr__(self, name):
+                return getattr(self._fh, name)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                self._fh.close()
+                return False
+
+        def flaky_open(p, mode="r", *a, **kw):
+            fh = real_open(p, mode, *a, **kw)
+            return HalfThenFail(fh) if mode == "a" else fh
+        G5C.open = flaky_open
+        try:
+            t.add([["2", "yy"], ["3", "zzz"]])
+        finally:
+            del G5C.open
+        with open(path, "rb") as fh:
+            got = fh.read()
+        chk("a half-written append failed once", len(failed), 1)
+        chk("...and the retry left each row once, whole", got,
+            b"a,b\r\n1,x\r\n2,yy\r\n3,zzz\r\n")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+print()
+print("--- a 05c table append retried after failing half way ---")
+table_retry_check()
 
 
 def main():

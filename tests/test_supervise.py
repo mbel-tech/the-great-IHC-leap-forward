@@ -378,8 +378,73 @@ try:
     reset()
     SV.child_argv = lambda sid, study, argv: child("say('fine'); sys.exit(0)")
     chk("ok", r.run(Reader()).ok, True)
+
+    print("--- Ctrl+C in a supervised run through the Runner ---")
+    import _thread                                              # noqa: E402
+    reset()
+    SV.child_argv = lambda sid, study, argv: child(
+        "say('@@drive lost /x | slide 6')\n"
+        "for _ in range(300):\n    say('tick'); time.sleep(0.05)")
+    t = later(1.0, _thread.interrupt_main)
+    try:
+        res = r.run(Reader())
+    except KeyboardInterrupt:
+        res = None
+    t.join()
+    chk("an interrupted result, with its pause, for the parent to record",
+        (res.interrupted, res.ok, [p["label"] for p in res.pauses]) if res else None,
+        (True, False, ["slide 6"]))
+    chk("...recorded as stopped while the drive was disconnected",
+        res.record_error() if res else None, SV.STOPPED_IN_PAUSE)
 finally:
     SV.child_argv = real_argv
+
+print("--- Ctrl+C in a supervised run keeps the pauses so far ---")
+import _thread                                                  # noqa: E402
+
+reset()
+procs = []
+t = later(1.0, _thread.interrupt_main)
+try:
+    rc, pauses, tail, lines = run(child(
+        "say('@@drive lost /x | slide 1'); say('@@drive back 0.2'); "
+        "say('@@drive lost /x | slide 2')\n"
+        "for _ in range(300):\n    say('tick'); time.sleep(0.05)"),
+        on_proc=lambda p: procs.append(p) if p is not None else None)
+    escaped = False
+except KeyboardInterrupt:
+    rc, pauses, tail, escaped = None, [], "", True
+t.join()
+chk("Ctrl+C while the child streams: not raised out of run_child", escaped, False)
+chk("...rc 130", rc, 130)
+chk("...both pauses kept, the open one closed",
+    [p["label"] for p in pauses], ["slide 1", "slide 2"])
+chk("...the child is ended", bool(procs) and procs[0].poll() is not None, True)
+
+reset()
+drop()
+t = later(0.6, _thread.interrupt_main)
+try:
+    rc, pauses, tail, lines = run(child("say('@@drive lost /x | slide 4'); sys.exit(3)"))
+    escaped = False
+except KeyboardInterrupt:
+    rc, pauses, tail, escaped = None, [], "", True
+t.join()
+restore()
+chk("Ctrl+C while the supervisor waits for the drive: not raised", escaped, False)
+chk("...rc 130, the pause kept", (rc, [p["label"] for p in pauses]), (130, ["slide 4"]))
+chk("...told as a stop during a wait for the drive", tail, SV.STOPPED_IN_PAUSE)
+
+reset()
+t = later(1.0, _thread.interrupt_main)
+try:
+    rc, pauses, tail, lines = run(child(
+        "say('working')\nfor _ in range(300):\n    say('tick'); time.sleep(0.05)"))
+except KeyboardInterrupt:
+    rc, tail = None, ""
+t.join()
+chk("Ctrl+C with the drive there: 130, stopped by Ctrl+C", (rc, tail),
+    (130, SV.STOPPED_CTRL_C))
 
 print("--- inside the child (LS_CHILD=1) a reader stage runs in-process ---")
 scripts = os.path.join(TMP, "scripts")

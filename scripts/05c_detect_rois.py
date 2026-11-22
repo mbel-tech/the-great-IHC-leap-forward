@@ -1646,8 +1646,86 @@ def record_done(fh, marker, uid, fp=""):
 
     The fingerprint is a third column, so every reader of the log that takes
     r[0] and r[1] (06a, the app) reads it as it always did."""
-    csv.writer(fh).writerow([marker, uid] + ([fp] if fp else []))
+    csv.writer(fh).writerow(done_row(marker, uid, fp))
     fh.flush()
+
+
+def done_row(marker, uid, fp=""):
+    """The done log's line for `uid` (record_done's)."""
+    return [marker, uid] + ([fp] if fp else [])
+
+
+class Table:
+    """One CSV main() appends to a section at a time, through a dropping drive.
+
+    The tables are on out_root, on the USB drive that drops. A handle held for
+    the whole run is dead after a drop on Windows even once the drive is back,
+    so the next section's commit failed and the run ended as a failure. So no
+    handle outlives a write: each `add` opens the file, appends, flushes,
+    fsyncs and closes it, through `IO.retry`, which waits for a drive that is
+    gone (no limit, Stop ends it) and backs off on anything else.
+
+    A retried append must not add its rows twice, or half a row and then the
+    row: the size the file had before the first attempt is kept, and each
+    later attempt cuts the file back to it first. The bytes are the ones the
+    old open-for-the-run handles wrote - the same csv writer, `newline=""`,
+    UTF-8, the header only on a file this run starts.
+
+    `mode` is what the run-long handle was opened with: "w" (a new file: the
+    header goes first) or "a". `start()` does at run start what that open did
+    (a "w" truncates and writes the header; an "a" creates an empty file
+    that is not there); a table made lazily - the normalisation and
+    background records - skips `start()`, and its first `add` does it.
+    """
+
+    def __init__(self, path, mode, header=None, begin=None):
+        self.path, self.header, self.begin = path, header, begin
+        self.fresh = mode == "w"            # header (or `begin`) still to write
+
+    def _open_new(self, rows):
+        with open(self.path, "w", newline="", encoding="utf-8") as fh:
+            if self.begin is not None:
+                self.begin(fh)
+            elif self.header is not None:
+                csv.writer(fh).writerow(self.header)
+            csv.writer(fh).writerows(rows)
+            fh.flush()
+            os.fsync(fh.fileno())
+
+    def start(self):
+        """At run start, what opening the file for the run did."""
+        def go():
+            if self.fresh:
+                self._open_new([])
+            else:
+                with open(self.path, "a", newline="", encoding="utf-8"):
+                    pass
+        IO.retry(go, self.path, 5)
+        self.fresh = False
+
+    def add(self, rows, fsync=True):
+        """Append `rows`, once, the file closed again after."""
+        rows = list(rows)
+        if not rows and not self.fresh:
+            return
+        mark = [None]
+
+        def go():
+            if self.fresh:
+                self._open_new(rows)
+                return
+            if mark[0] is None:
+                mark[0] = os.path.getsize(self.path)
+            elif os.path.getsize(self.path) > mark[0]:
+                with open(self.path, "r+b") as raw:      # an attempt that half-wrote
+                    raw.truncate(mark[0])
+            with open(self.path, "a", newline="", encoding="utf-8") as fh:
+                csv.writer(fh).writerows(rows)
+                fh.flush()
+                if fsync:
+                    os.fsync(fh.fileno())
+        IO.retry(go, self.path, 5)
+        self.fresh = False
 
 
 #: The columns of a box that decide what a section's rows are: the rectangle
@@ -2503,7 +2581,8 @@ def main():
     if norm_exists:
         check_norm_header()
         drop_rows(NORM_CSV, args.marker, redo)
-    nfh = nw = None
+    # Made on the first section with rows, and not before (see Table).
+    norm_t = None
     no_norm = []
 
     # The measured-geometry record, by the same rule as the normalisation
@@ -2512,47 +2591,39 @@ def main():
     if geo_exists:
         check_header(GEOMETRY_CSV, GEOMETRY_COLUMNS)
         drop_rows(GEOMETRY_CSV, args.marker, redo)
-    gfh = open(GEOMETRY_CSV, "a" if geo_exists else "w", newline="",
-               encoding="utf-8")
-    gw = csv.writer(gfh)
-    if not geo_exists:
-        gw.writerow(GEOMETRY_COLUMNS)
+    # Every table below is opened, appended to and closed again per section
+    # (Table): a handle held for the run is dead after the drive drops.
+    geo_t = Table(GEOMETRY_CSV, "a" if geo_exists else "w", GEOMETRY_COLUMNS)
+    geo_t.start()
 
     # The box status record, by the same rule again.
     status_exists = os.path.exists(STATUS_CSV)
     if status_exists:
         check_header(STATUS_CSV, STATUS_COLUMNS)
         drop_rows(STATUS_CSV, args.marker, redo)
-    sfh = open(STATUS_CSV, "a" if status_exists else "w", newline="",
-               encoding="utf-8")
-    sw = csv.writer(sfh)
-    if not status_exists:
-        sw.writerow(STATUS_COLUMNS)
+    status_t = Table(STATUS_CSV, "a" if status_exists else "w", STATUS_COLUMNS)
+    status_t.start()
     total_unseg = 0
 
-    fh = open(NUCLEI_CSV, "a" if exists else "w", newline="", encoding="utf-8")
-    w = csv.writer(fh)
-    dfh = open(DONE_LOG, "a" if exists else "w", newline="", encoding="utf-8")
-    if not exists:
-        start_done_log(dfh, args.marker)
-    if not exists:
-        w.writerow(COLUMNS)
+    nuclei_t = Table(NUCLEI_CSV, "a" if exists else "w", COLUMNS)
+    # The done log is started (its `marker,*` line) when roi_nuclei.csv is.
+    done_t = Table(DONE_LOG, "a" if exists else "w",
+                   begin=lambda f: start_done_log(f, args.marker))
+    done_t.start()
+    nuclei_t.start()
 
-    # Opened on the first ROI that fails the check and not before - see
+    # Made on the first ROI that fails the check and not before - see
     # BACKGROUND_CSV for why an empty one would be a claim rather than a file.
-    bfh = bgw = None
+    bg_t = None
 
-    # Opened only when something in this run has a partner, so a study that
+    # Made only when something in this run has a partner, so a study that
     # cannot co-localise has no such file to explain. An EMPTY one would read
     # as "nothing overlaps", which is a different claim from "the question
     # does not apply to this layout".
-    cfh = cw = None
+    coloc_t = None
     if coloc_wanted:
-        cfh = open(COLOC_CSV, "a" if coloc_exists else "w", newline="",
-                   encoding="utf-8")
-        cw = csv.writer(cfh)
-        if not coloc_exists:
-            cw.writerow(COLOC_COLUMNS)
+        coloc_t = Table(COLOC_CSV, "a" if coloc_exists else "w", COLOC_COLUMNS)
+        coloc_t.start()
 
     px_area = BASE_PX_UM ** 2
     min_area_px = min_area_px_for()
@@ -2808,18 +2879,14 @@ def main():
             # nuclei - a section that is not done and is redone, outlines, record
             # and all - never nuclei with no record or no outlines.
             save_outlines(args.marker, uid, outlines)
-            gw.writerows(geometry_rows(uid, by_sec[uid]))
-            gfh.flush()
+            geo_t.add(geometry_rows(uid, by_sec[uid]))
             # With the geometry and before the nuclei, for the same reason:
             # never nuclei whose boxes say nothing about themselves.
-            sw.writerows(status_rows(uid, by_sec[uid], not_segmented, Minv,
+            status_t.add(status_rows(uid, by_sec[uid], not_segmented, Minv,
                                      tis, tis_ov, art, art_ov))
-            sfh.flush()
             total_unseg += len(not_segmented)
-            w.writerows(rows)
-            fh.flush()
-            # On disk before the section is logged as whole - see DONE_LOG.
-            os.fsync(fh.fileno())
+            # On disk (fsync) before the section is logged as whole - see DONE_LOG.
+            nuclei_t.add(rows)
             # A section with rows is done. So is one MEASURED and found empty -
             # it writes no rows, and without the entry the resume took it for
             # unmeasured and measured it again every run, and 06a, which reads
@@ -2829,33 +2896,24 @@ def main():
             # does not count it. (Its geometry row alone says nothing: one is
             # written for a section cut off before this line, too.)
             if rows or not any(u == uid for u, _, _ in no_norm):
-                record_done(dfh, args.marker, uid, box_fingerprint(by_sec[uid], g))
+                done_t.add([done_row(args.marker, uid, box_fingerprint(by_sec[uid], g))])
             if norm_rows:
-                if nfh is None:
-                    os.makedirs(RESULTS, exist_ok=True)
-                    nfh = open(NORM_CSV, "a" if norm_exists else "w", newline="",
-                               encoding="utf-8")
-                    nw = csv.writer(nfh)
-                    if not norm_exists:
-                        nw.writerow(NORM_COLUMNS)
-                nw.writerows(norm_rows)
-                nfh.flush()
+                if norm_t is None:
+                    IO.retry(lambda: os.makedirs(RESULTS, exist_ok=True), RESULTS, 5)
+                    norm_t = Table(NORM_CSV, "a" if norm_exists else "w", NORM_COLUMNS)
+                norm_t.add(norm_rows)
             if bg_rows:
-                if bfh is None:
-                    os.makedirs(os.path.dirname(BACKGROUND_CSV), exist_ok=True)
-                    bfh = open(BACKGROUND_CSV, "a" if bg_exists else "w",
-                               newline="", encoding="utf-8")
-                    bgw = csv.writer(bfh)
-                    if not bg_exists:
-                        bgw.writerow(BACKGROUND_COLUMNS)
-                bgw.writerows(bg_rows)
-                bfh.flush()
+                if bg_t is None:
+                    bg_dir = os.path.dirname(BACKGROUND_CSV)
+                    IO.retry(lambda: os.makedirs(bg_dir, exist_ok=True), bg_dir, 5)
+                    bg_t = Table(BACKGROUND_CSV, "a" if bg_exists else "w",
+                                 BACKGROUND_COLUMNS)
+                bg_t.add(bg_rows)
                 total_bg += len(bg_rows)
-            if cw is not None:
-                # Flushed with the measurements, section by section, so a run that
+            if coloc_t is not None:
+                # Written with the measurements, section by section, so a run that
                 # stops half way leaves the two files describing the same sections.
-                cw.writerows(coloc_rows)
-                cfh.flush()
+                coloc_t.add(coloc_rows)
                 total_rel += len(coloc_rows)
             # The crops share one brightness stretch over every box of the
             # section, as 06i's do - the boxes too small to segment included,
@@ -2908,16 +2966,6 @@ def main():
         elif drawer is not None:
             # The normal end, or a crash: what is queued is drawn first.
             drawer.close()
-    fh.close()
-    gfh.close()
-    sfh.close()
-    dfh.close()
-    if cfh is not None:
-        cfh.close()
-    if bfh is not None:
-        bfh.close()
-    if nfh is not None:
-        nfh.close()
     print(f"\n{total_nuc} nuclei -> {NUCLEI_CSV}")
     if drawer is not None:
         print(drawer.summary())

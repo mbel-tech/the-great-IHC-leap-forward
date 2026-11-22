@@ -123,6 +123,53 @@ chk("no history has no length", PR.last_took(None, "detect"), None)
 chk("the row's words", PR.last_run_words({"runs": runs}, "detect"), "Last run took 3 h 12 min")
 chk("a run under a minute is not worth a line", PR.last_run_words({"runs": runs}, "other"), "")
 
+# ---------------------------------------------------------------- a dropped drive, flagged
+BANNER = ("Slides drive disconnected (E:\\Slides). Paused at LS53_1a scene 3 - will resume "
+          "automatically when it is back. If it comes back under another drive letter, stop "
+          "the run and fix the study's folders.")
+f = PR.DriveFlag()
+chk("a new flag waits for 10 s", f.after, 10.0)
+chk("nothing is due before a drop", f.due(100.0), False)
+chk("a drop is new the first time", f.lost(0.0, "E:\\Slides", "LS53_1a scene 3"), True)
+chk("...not due at 9.9 s", f.due(9.9), False)
+chk("...due at 10 s", f.due(10.0), True)
+chk("the banner's words", f.flag(), BANNER)
+chk("...and once flagged it is no longer due", (f.flagged, f.due(20.0)), (True, False))
+chk("a second lost during the same drop is not new",
+    f.lost(12.0, "E:\\Slides", "LS53_1a scene 4"), False)
+chk("...but the label follows the newest", f.label, "LS53_1a scene 4")
+f.notified = True
+chk("back says how long and what is redone",
+    f.back(134.0, 134.0), ("drive back after 2 min, redoing LS53_1a scene 4", True, True))
+chk("...and the drop is over", (f.since, f.flagged, f.notified, f.due(500.0)), (None, False, False, False))
+
+f = PR.DriveFlag()
+f.lost(0.0, "E:\\Slides", "LS1 s1")
+chk("a short drop comes back unflagged", f.back(3.0, None), ("drive back after 3 s, redoing LS1 s1", False, False))
+chk("a back with no lost before it is harmless", PR.DriveFlag().back(5.0, 42.0),
+    ("drive back after 42 s", False, False))
+
+f = PR.DriveFlag()
+f.lost(0.0, "E:\\Slides", "LS1 s1")
+f.flag()
+chk("a stage that ends mid-drop says it was flagged", f.ended(), True)
+chk("...and clears it", (f.since, f.flagged, f.due(99.0)), (None, False, False))
+chk("ending with no drop is a no-op", PR.DriveFlag().ended(), False)
+f = PR.DriveFlag()
+f.after = 0
+f.lost(5.0, "E:\\Slides", "LS1 s1")
+chk("a zero wait is due at once", f.due(5.0), True)
+chk("no drop has no time left", PR.DriveFlag().left(0.0), None)
+
+
+def _left():
+    g = PR.DriveFlag()
+    g.lost(0.0, "E:", "x")
+    return g.left(2.5)
+
+
+chk("seconds left before the flag is due", _left(), 7.5)
+
 print()
 print(f"{len(failures)} failure(s)" if failures else "all passed")
 sys.exit(1 if failures else 0)

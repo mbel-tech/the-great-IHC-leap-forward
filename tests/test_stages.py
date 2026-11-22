@@ -347,6 +347,16 @@ for _name, _text in (("06i docstring", _doc06i), ("stage blurb", _do.blurb if _d
     chk(f"{_name}: --no-scenes / skip whole-scene pictures",
         "--no-scenes" in _flat or "Skip the whole-scene pictures" in _flat)
 
+# 04o (--source czi, the default) and 05a --verify decode CZI pixels. A native
+# crash as the slides drive drops would take the window with them, so their
+# stages name the reader and the runner sends them to the supervised child.
+print("--- stages that decode CZI pixels run in the supervised child ---")
+sys.path.insert(0, os.path.join(REPO, "app"))
+import runner as _RN                                          # noqa: E402
+for _sid in ("rgb_perk", "rgb_pcna", "roi_geometry_verify"):
+    chk(f"{_sid} reads pixels with pylibCZIrw", S.BY_ID[_sid].reader, "pylibCZIrw")
+    chk("...so it runs in the child", S.BY_ID[_sid].reader in _RN.CHILD_READERS, True)
+
 print()
 print("ALL PASS" if not failures else f"{len(failures)} FAILED")
 sys.exit(1 if failures else 0)

@@ -14,11 +14,11 @@ import os
 import time
 
 from PySide6.QtCore import QObject, Qt, QThread, QTimer, QUrl, Signal
-from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
+from PySide6.QtGui import QAction, QDesktopServices, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel, QListWidgetItem, QMainWindow,
-    QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QStackedWidget, QTextBrowser,
-    QVBoxLayout, QWidget)
+    QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QStackedWidget, QSystemTrayIcon,
+    QTextBrowser, QVBoxLayout, QWidget)
 
 import ls_project as LP
 import progress as PR
@@ -76,6 +76,19 @@ class ActivityDrawer(QFrame):
         self.setObjectName("drawer")
         lay = QVBoxLayout(self)
         lay.setContentsMargins(10, 4, 10, 4)
+        # A slides drive that has been gone for a while (show_drive_lost).
+        self.banner = QLabel("")
+        self.banner.setObjectName("driveBanner")
+        self.banner.setAccessibleName("Drive disconnected")
+        self.banner.setWordWrap(True)
+        self.banner.setStyleSheet(
+            f"background:{T.WARN_BG}; color:{T.WARN}; border:1px solid {T.WARN_LINE};"
+            " border-radius:6px; padding:6px 8px; font-weight:600;")
+        self.banner.setVisible(False)
+        lay.addWidget(self.banner)
+        # The Stop button as it was before a drop turned it into "Stop now":
+        # (text, visible); None while no drop is flagged.
+        self._stop_saved = None
         top = QHBoxLayout()
         self.state = QLabel("Idle")
         f = self.state.font()
@@ -144,6 +157,29 @@ class ActivityDrawer(QFrame):
         self.bar.setVisible(False)
         self.count.setVisible(False)
 
+    def drive_flagged(self):
+        return self._stop_saved is not None
+
+    def show_drive_lost(self, folder, label):
+        """The amber banner, and Stop offered as "Stop now" while it is up."""
+        self.banner.setText(PR.drive_lost_words(folder, label))
+        self.banner.setVisible(True)
+        if self._stop_saved is None:
+            self._stop_saved = (self.stop_btn.text(), self.stop_btn.isVisibleTo(self))
+        self.stop_btn.setText("Stop now")
+        self.stop_btn.setVisible(True)
+        self.stop_btn.setEnabled(True)
+
+    def clear_drive(self):
+        """Take the banner down and put Stop back as it was. A no-op with none up."""
+        self.banner.setVisible(False)
+        if self._stop_saved is None:
+            return
+        text, visible = self._stop_saved
+        self._stop_saved = None
+        self.stop_btn.setText(text)
+        self.stop_btn.setVisible(visible)
+
     def append(self, text):
         self.log.appendPlainText(text)
         tail = (text or "").strip().splitlines()
@@ -170,6 +206,7 @@ class MainWindow(QMainWindow):
         # The open project: the study config plus the app's record of working on it.
         # Held in memory; stages read the saved file, so a run saves it first.
         self.session = ProjectSession(LP.Project.open(self.config_path), self)
+        self.session.log.connect(self._log)
         self.session.idle_for = self._idle_for     # Save As / a moved out_root wait for a running stage
         self._pending_log = []
         for key, _old, new in self.session.project.reanchored:
@@ -194,6 +231,13 @@ class MainWindow(QMainWindow):
         # Set when the window was asked to close mid-run: it closes once the
         # running stage has finished, never while its thread is still writing.
         self._close_when_idle = False
+        # A dropped slides drive: flagged (banner, notification, Stop now) once
+        # it has been gone for _drive.after seconds; see _drive_line.
+        self._drive = PR.DriveFlag()
+        self._drive_timer = QTimer(self)
+        self._drive_timer.setSingleShot(True)
+        self._drive_timer.timeout.connect(self._drive_due)
+        self._tray = None               # made on the first notification
         self.tutorial = None            # the TutorialController while the tutorial runs
 
         self.resize(1400, 900)
@@ -270,7 +314,7 @@ class MainWindow(QMainWindow):
 
         # ---- the activity drawer -------------------------------------------
         self.drawer = ActivityDrawer()
-        self.drawer.stop_btn.clicked.connect(self._request_stop)
+        self.drawer.stop_btn.clicked.connect(self._stop_clicked)
         self.log = self.drawer.log
 
         body = QWidget()
@@ -1013,8 +1057,26 @@ class MainWindow(QMainWindow):
             self._options_changed(sid, values)
         return True
 
+    def _stop_clicked(self):
+        """Stop after this stage; during a flagged drop, stop now."""
+        if self.drawer.drive_flagged():
+            self._stop_now()
+        else:
+            self._request_stop()
+
+    def _stop_now(self):
+        """End the stage that is waiting for the drive. It is recorded as failed
+        ("stopped while the drive was disconnected"), and nothing after it runs."""
+        self._stop_requested = True
+        self.drawer.stop_btn.setEnabled(False)
+        self.drawer.state.setText(self.drawer.state.text() + " - stopping now")
+        self.runner.stop()
+
     def _request_stop(self):
         self._stop_requested = True
+        if self.drawer.drive_flagged():
+            # Stop now stays on offer while the stage waits for the drive.
+            return
         self.drawer.stop_btn.setEnabled(False)
         self.drawer.state.setText(self.drawer.state.text() + " - stopping after this stage")
 
@@ -1084,6 +1146,14 @@ class MainWindow(QMainWindow):
 
     def _stage_line(self, line):
         """A line from the running stage: to the log, and to the bars if it is a count."""
+        at = (line or "").find(PR.DRIVE_MARK)
+        if at >= 0:
+            # A marker can arrive glued after a `\r 12/454` counter: the counter
+            # is an ordinary line, the marker never reaches the log as text.
+            if line[:at].strip():
+                self._stage_line(line[:at])
+            self._drive_line(PR.parse_drive(line[at:]))
+            return
         p = PR.parse(line)
         if p is None or not p.hidden:
             self._log(line)
@@ -1091,6 +1161,66 @@ class MainWindow(QMainWindow):
         if p is not None and current is not None:
             self.drawer.show_progress(p)
             self._row_progress(current.sid, p)
+
+    def _drive_line(self, drive):
+        """`@@drive lost` starts the wait before flagging; `@@drive back` ends the drop."""
+        if drive is None:
+            return
+        now = self.drawer.clock()
+        if drive[0] == "lost":
+            new = self._drive.lost(now, drive[1], drive[2])
+            if self._drive.flagged:
+                # Same drop, newer label: the words only. Stop stays as it is
+                # (disabled once Stop now was pressed).
+                self.drawer.banner.setText(PR.drive_lost_words(drive[1], drive[2]))
+            elif new:
+                self._drive_timer.start(int(1000 * self._drive.left(now)))
+            return
+        self._drive_timer.stop()
+        line, flagged, notified = self._drive.back(now, drive[1])
+        if flagged:
+            self._clear_drive()
+        self._log(line)
+        if notified:
+            self._notify("Drive back - resuming", line)
+
+    def _drive_due(self):
+        now = self.drawer.clock()
+        left = self._drive.left(now)
+        if left is None:
+            return
+        if left > 0:
+            # A coarse timer can fire a little early.
+            self._drive_timer.start(max(1, int(1000 * left)))
+            return
+        self._drive.flag()
+        self.drawer.show_drive_lost(self._drive.folder, self._drive.label)
+        self._drive.notified = self._notify(
+            "Slides drive disconnected",
+            f"{self._drive.folder}: paused at {self._drive.label} - will resume automatically")
+
+    def _clear_drive(self):
+        self.drawer.clear_drive()
+        if self._stop_requested:
+            self.drawer.stop_btn.setEnabled(False)
+
+    def _end_drive(self):
+        """The stage ended, the drive back or not: no wait, no banner."""
+        self._drive_timer.stop()
+        self._drive.ended()
+        self._clear_drive()
+
+    def _notify(self, title, body):
+        """A system notification; whether one was shown (no system tray, none)."""
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            return False
+        if self._tray is None:
+            path = os.path.join(T.ASSETS, "icon.ico")
+            self._tray = QSystemTrayIcon(QIcon(path) if os.path.exists(path) else T.app_icon(),
+                                         self)
+            self._tray.show()
+        self._tray.showMessage(title, body, QSystemTrayIcon.Warning)
+        return True
 
     def _row_progress(self, sid, p):
         """The same count on the running stage's own row, wherever it is listed.
@@ -1113,10 +1243,14 @@ class MainWindow(QMainWindow):
         self._thread.wait()
         self._thread = None
         self.drawer.stop_progress()
+        # Before anything below can open a box (and its event loop let the
+        # wait fire after the stage is over).
+        self._end_drive()
         problem = self.session.record_run(st.sid, res.ok, getattr(self, "_run_started", None),
                                           now_iso(), options=getattr(self, "_run_values", None),
                                           inputs=getattr(self, "_run_inputs", None),
-                                          pauses=res.pauses, error=res.record_error())
+                                          pauses=res.pauses, error=res.record_error(),
+                                          title=st.title)
         if problem:
             self._log(f"could not record the run in the project: {problem}")
         self.stage_finished.emit(st.sid, bool(res.ok))
@@ -1205,5 +1339,32 @@ class MainWindow(QMainWindow):
         if not self.session.confirm_discard(self, "close"):
             e.ignore()
             return
+        if not self._pending_records_ok():
+            e.ignore()
+            return
         self.server.stop()
         super().closeEvent(e)
+
+    def _pending_records_ok(self):
+        """False if the window must stay open: run records are still waiting for the drive.
+
+        Closing loses them, and without a run's record its partial outputs can read as Done.
+        One try is made first (the drive may be back before the timer ticked).
+        """
+        if not self.session.pending_runs():
+            return True
+        self.session._record_pending()
+        n = self.session.pending_runs()
+        if not n:
+            return True
+        box = QMessageBox(
+            QMessageBox.Warning, "Run records not written",
+            "%d run record%s could not be written because the drive the study is on is "
+            "disconnected.\n\nClosing now loses %s, so the history of the steps would not show "
+            "%s." % (n, "" if n == 1 else "s", "it" if n == 1 else "them",
+                     "that run" if n == 1 else "those runs"), parent=self)
+        wait = box.addButton("Wait for the drive", QMessageBox.AcceptRole)
+        anyway = box.addButton("Close anyway", QMessageBox.DestructiveRole)
+        box.setDefaultButton(wait)
+        box.exec()
+        return box.clickedButton() is anyway

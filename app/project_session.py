@@ -13,7 +13,7 @@ changes is not what a stage would see, and running one asks to save first.
 import os
 from datetime import datetime, timezone
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 import ls_bundle as LB
@@ -23,12 +23,17 @@ import ls_project as LP
 BTN = QMessageBox
 
 
+#: How often runs waiting for a disconnected drive are tried again.
+RETRY_MS = 2000
+
+
 class ProjectSession(QObject):
     changed = Signal()             # anything the title or menus show
     dirtyChanged = Signal(bool)
     saved = Signal()
     opened = Signal(str)           # a different project is now the open one
     reloaded = Signal(str)         # the same file read again, replacing what was in memory
+    log = Signal(str)              # a line for the window's log (a run record that was dropped)
 
     def __init__(self, project, parent=None):
         super().__init__(parent)
@@ -39,6 +44,13 @@ class ProjectSession(QObject):
         # a saved change of out_root re-roots the curator, both under a stage still writing; the
         # session asks here so every way of saving (menu, Ctrl+S, the save-before prompts) is held.
         self.idle_for = lambda action: True
+        # Runs that ended while the drive the study file is on was gone: (project, args),
+        # recorded from a timer once it is back. The wait is never done here - this runs
+        # on the window's thread, and a wait with no limit would freeze it.
+        self._pending = []
+        self._retry = QTimer(self)
+        self._retry.setInterval(RETRY_MS)
+        self._retry.timeout.connect(self._record_pending)
         if project.path:
             LC.remember_project(project.path)
 
@@ -419,15 +431,53 @@ class ProjectSession(QObject):
     # ---- the run history ----------------------------------------------------------
 
     def record_run(self, stage, ok, started, ended, options=None, inputs=None,
-                   pauses=None, error=None):
-        """Append to the run history. Returns an error message, or None."""
+                   pauses=None, error=None, title=None):
+        """Append to the run history. Returns an error message, or None.
+
+        Never waits for the drive (the window's thread would freeze): if the drive the study
+        file is on is disconnected, the run is kept and recorded from a timer once it is back,
+        and the message says so. Runs still waiting when the window closes are not recorded.
+        """
+        kw = dict(options=options, inputs=inputs, pauses=pauses, error=error)
+        item = (self.project, (stage, ok, started, ended), kw, title or stage)
+        if any(p[0] is self.project for p in self._pending):
+            # Older runs of this study are still waiting: queue behind them, so the history
+            # stays in the order the runs happened.
+            self._pending.append(item)
+            self._retry.start()
+            return ("the drive it is on is disconnected; the run is recorded when the drive "
+                    "is back")
         try:
-            self.project.record_run(stage, ok, started, ended, options=options, inputs=inputs,
-                                    pauses=pauses, error=error)
+            self.project.record_run(stage, ok, started, ended, wait=False, **kw)
+        except LP.DriveGone:
+            self._pending.append(item)
+            self._retry.start()
+            return ("the drive it is on is disconnected; the run is recorded when the drive "
+                    "is back")
         except LP.ProjectError as exc:
             return str(exc)
         self.changed.emit()
         return None
+
+    def pending_runs(self):
+        """How many runs are waiting for the drive to be recorded."""
+        return len(self._pending)
+
+    def _record_pending(self):
+        """The timer: record what was waiting, in order, while the drive is back."""
+        while self._pending:
+            project, args, kw, title = self._pending[0]
+            try:
+                project.record_run(*args, wait=False, **kw)
+            except LP.DriveGone:
+                return                  # still gone: try again on the next tick
+            except (LP.ProjectError, OSError) as exc:
+                # Not the drive: dropped, not retried for ever, but never silently.
+                self.log.emit("could not record the run of %s in the study: %s" % (title, exc))
+            self._pending.pop(0)
+            if project is self.project:
+                self.changed.emit()
+        self._retry.stop()
 
 
 def now_iso():

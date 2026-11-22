@@ -657,7 +657,18 @@ python -m app --run prepare  D:\LS-analysis\study.json
 python -m app --run measure  D:\LS-analysis\study.json
 ```
 
-It makes the same plan as that screen's **Run all remaining**, with the Options saved in the study and Redo where a stage is out of date, prints each stage's output as it comes, and records each run in the study as the window does. It stops at the first failure, and at the same hold the window stops at (a *poor* signal check before detection). It never unblinds. It ends with 0 when every planned stage ran, 1 when one failed or a hold stopped it, and 2 when the screen or the study file is not there.
+To run or list a single stage:
+
+```
+python -m app --list  D:\LS-analysis\study.json
+python -m app --stage overviews D:\LS-analysis\study.json --opt limit=3
+```
+
+The full walk-through, with every option, the exit codes, a batch-file example and troubleshooting, is the [command-line guide](command-line-guide.md) (and its PDF).
+
+`--list` shows every stage with its state. `--stage` does what the stage's **Run** button does, with the Options saved in the study and `--opt key=value` on top, and records the run. It refuses a stage the window would hold (its needs not done) with the window's reason and exit status 2; `--force` only overrides the window's waits (earlier stages not done, for example). A stage the study does not use, one the app does not run, a curator stage (its page path is printed, to open in a browser) and an unblinding without `--unblind` are refused whatever you add. The installed Windows app has the same as `ihc` (`ihc --list study.json`). An app updated from inside itself writes `ihc.cmd` on its next start; typing `ihc` from any folder needs *Add the ihc command to PATH* in the installer, or the install folder added to Path by hand.
+
+`--run` makes the same plan as that screen's **Run all remaining**, with the Options saved in the study and Redo where a stage is out of date, prints each stage's output as it comes, and records each run in the study as the window does. It stops at the first failure, and at the same hold the window stops at (a *poor* signal check before detection). It never unblinds. It ends with 0 when every planned stage ran, 1 when one failed or a hold stopped it, and 2 when the screen or the study file is not there.
 
 ## 10. Troubleshooting and safe re-runs
 
@@ -671,6 +682,10 @@ It makes the same plan as that screen's **Run all remaining**, with the Options 
 - **After changing a setting** that no Out of date row picks up (stages before *Place the ROIs on the slide*), re-run the stages that read it with **Redo … already done** switched on in Options. The setting's (i) says which stages read it. Then switch Redo off again.
 - **Nothing is deleted.** Excluded sections can be reinstated in the ROI curator's Review. Repair tools back up the results file before changing it.
 - **Stop cleanly** with **Stop after this stage** on the status bar, rather than closing the app mid-stage.
+
+### If the drive drops
+
+The slides or output drive can vanish for a while, for example a USB lead or a network share. The steps that read slides wait for it instead of failing, and so do their writes to the output folder and the record of the run. After 10 seconds an amber banner and a notification say which folder is unreachable and which step is paused. When the drive is back the run carries on by itself, redoing only the section or file it was on. To give up, press **Stop now** on the banner (Ctrl+C at a terminal); the run is recorded as stopped while the drive was disconnected, and running it again skips what is done. If the drive returns under a different letter it cannot be found: stop, correct the folder in Set up, and run again.
 
 ### Common problems
 

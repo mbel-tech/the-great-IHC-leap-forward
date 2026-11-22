@@ -616,6 +616,44 @@ def result_text(mode, outcome, old, new, root):
 
 # ---------------------------------------------------------------- the helper process
 
+CONSOLE_LAUNCHER = "ihc.cmd"
+CONSOLE_LAUNCHER_TEXT = '@"%~dp0runtime\\python.exe" -m app %*'
+
+
+def ensure_console_launcher(root, platform=None):
+    """Write ihc.cmd beside the runtime of an installed Windows copy when it is missing or differs.
+
+    build.ps1 writes it, but a copy updated from inside the app never saw the
+    installer that carries it. Atomic (temp file, then replace); a read-only
+    folder or any other OSError is logged and ignored. Returns True when it
+    wrote the file.
+    """
+    if (platform or sys.platform) != "win32":
+        return False
+    if not os.path.exists(os.path.join(root, "runtime", "python.exe")):
+        return False
+    path = os.path.join(root, CONSOLE_LAUNCHER)
+    tmp = path + ".tmp"
+    try:
+        try:
+            with open(path, encoding="ascii") as fh:
+                if fh.read().strip() == CONSOLE_LAUNCHER_TEXT:
+                    return False
+        except OSError:
+            pass
+        with open(tmp, "w", encoding="ascii", newline="\r\n") as fh:
+            fh.write(CONSOLE_LAUNCHER_TEXT + "\n")
+        os.replace(tmp, path)
+        return True
+    except (OSError, UnicodeError) as e:
+        _log(root, f"could not write {CONSOLE_LAUNCHER}: {e}")
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        return False
+
+
 def _log(root, text):
     try:
         os.makedirs(os.path.join(root, "updates"), exist_ok=True)

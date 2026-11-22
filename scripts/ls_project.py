@@ -81,6 +81,50 @@ class ProjectConflict(ProjectError):
     """The file on disk changed since this project last read or wrote it."""
 
 
+class DriveGone(ProjectError):
+    """The drive the project file is on is disconnected; nothing was written."""
+
+
+def _drive():
+    """The one ls_drive (scripts/ls_io keeps it), or None if it cannot be loaded.
+
+    Imported on first use, so a checkout without it records runs as before."""
+    try:
+        import ls_io
+        return ls_io.drive_module()
+    except Exception:                                       # noqa: BLE001
+        return None
+
+
+def _record_folders(path):
+    """What a run record waits for: the folder the study file is in.
+
+    Usually out_root, on the drive that drops. Not out_root itself when the
+    file is elsewhere: a study whose out_root was never made (its first stage
+    failed early) would wait for ever for a folder that is not coming."""
+    return [os.path.dirname(os.path.abspath(path))]
+
+
+def record_run_at(path, stage, ok, started, ended, **kw):
+    """`Project.open(path).record_run(...)`, waiting for a dropped drive first.
+
+    The command line's way to record: the file cannot even be opened while
+    the drive it is on is gone, so the wait comes before the open as well as
+    inside `record_run`. Raises `ls_drive.Stopped` on the stop file, and a
+    ProjectError for anything that is not the drive.
+    """
+    drv = _drive()
+    folders = _record_folders(path)
+    while True:
+        if drv is not None:
+            drv.wait_for_drive("record the run of %s" % stage, paths=folders)
+        try:
+            return Project.open(path).record_run(stage, ok, started, ended, **kw)
+        except (ProjectError, OSError):
+            if drv is None or drv.reachable(folders)[0]:
+                raise
+
+
 def _now():
     return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
 
@@ -959,7 +1003,7 @@ class Project:
     # ---- the run history ------------------------------------------------------
 
     def record_run(self, stage, ok, started, ended, options=None, inputs=None,
-                   pauses=None, error=None):
+                   pauses=None, error=None, wait=True):
         """Append a run to `project.runs` on disk and in memory, saving nothing else.
 
         Stages read the file from disk, so a run is always of what is on disk; the
@@ -972,6 +1016,14 @@ class Project:
         `pauses` are the waits for a dropped drive during the run (`[{at, seconds,
         folder, label}]`, app/supervise.py); `error` is why a run failed, when that
         is worth keeping (a stop while the drive was disconnected).
+
+        The file is usually in out_root, on the USB drive that drops, so the
+        record waits for the file's folder to be there (ls_drive, no limit;
+        the stop file named by LS_STOP_FILE raises `Stopped`) and is read and
+        written again if the drive goes during it. With `wait=False` it never
+        waits: a drive gone raises DriveGone and nothing changes - for the
+        window, which must not block (app/project_session.py keeps the run and
+        tries again from a timer).
         """
         rec = {"stage": stage, "started": started, "ended": ended, "ok": bool(ok),
                "config_sha": None, "code": code_version()}
@@ -983,7 +1035,29 @@ class Project:
             rec["pauses"] = [dict(p) for p in pauses]
         if error:
             rec["error"] = str(error)
+        drv = _drive() if self.path else None
+        if drv is None:
+            return self._record(rec)
+        folders = _record_folders(self.path)
+        while True:
+            if not drv.reachable(folders)[0]:
+                if not wait:
+                    raise DriveGone("%s: the drive it is on is disconnected; the run is "
+                                    "not recorded yet" % self.path)
+                drv.wait_for_drive("record the run of %s" % stage, paths=folders)
+            try:
+                return self._record(rec, drv, folders)
+            except (ProjectError, OSError):
+                if drv.reachable(folders)[0]:
+                    raise
+                # The drive went during the record: read and write it again.
+
+    def _record(self, rec, drv=None, folders=None):
+        """record_run's read-append-write, once."""
+        rec = dict(rec)
         if not self.path or not os.path.exists(self.path):
+            if drv is not None and not drv.reachable(folders)[0]:
+                raise DriveGone("%s: the drive it is on is disconnected" % self.path)
             rec["config_sha"] = self.config_sha()
             self.block.setdefault("runs", []).append(rec)
             _cap(self.block)

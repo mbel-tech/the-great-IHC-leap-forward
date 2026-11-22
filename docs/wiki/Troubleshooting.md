@@ -16,6 +16,7 @@
 | Red rows on the Slides tab | File names do not fit the naming pattern | Fix the pattern with **Set up from an example…** on *Slide file names*, or rename the files |
 | Fewer sections than expected | Unmatched file names, or an incomplete copy | Check the Slides tab and the 00b result |
 | Run all remaining stops at a stage | That stage failed, or it waits for a curator | Read the screen's note and **Show log**. A waiting stage names the curator to export. |
+| An amber banner says a drive is not reachable | The slides or output drive dropped (a loose USB lead, the disk sleeping, a network share timing out) | Nothing to press: the step is paused, and carries on by itself, redoing only the section it was on, when the drive is back. Reconnect it. To give up, press **Stop now** on the banner (Ctrl+C at a terminal). If it comes back under a different drive letter it is not found: stop, correct the folder in Set up, and run again, which skips what is done |
 | A stage fails with *N section(s) NOT MASKED / MEASURED / BUILT / PLACED …* | The stage could not do some sections it was asked to (an overview missing, no tissue outline, a region whose angle no longer matches). What it could do is kept | **Show log** names the sections and why. Fix the cause and press **Run** again |
 | "Finish Set up" on the Next up card | A required setting is empty | The card names each Set up card and the settings it lacks |
 | A curator's decisions are ignored | It was not exported | Open the curator and press Export, or **Done: export and go to Measure** |

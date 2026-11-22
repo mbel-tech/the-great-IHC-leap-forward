@@ -662,7 +662,7 @@ STAGES = [
                 "advanced to the same fraction, spread across each brain."),
 
     Stage("rgb_perk", "04o  Colour composites - pERK", "Normalisation and curation",
-          script="04o_section_rgb.py",
+          script="04o_section_rgb.py", reader="pylibCZIrw",
           argv=["--marker", "{marker0}", "--all", "--thumbs"],
           # Per-marker directories in every layout - see "sections_rgb" in
           # ls_paths. Built from the section directory with "_rgb" on the end,
@@ -674,7 +674,7 @@ STAGES = [
                 "thumbnails of them for the Review grid in the same run."),
 
     Stage("rgb_pcna", "04o  Colour composites - PCNA", "Normalisation and curation",
-          script="04o_section_rgb.py",
+          script="04o_section_rgb.py", reader="pylibCZIrw",
           argv=["--marker", "{marker1}", "--all", "--thumbs"],
           outputs=[Art("sections_rgb", 1), Art("sections_rgb_thumb", 1)],
           needs=["reformat_pcna_final"],
@@ -723,7 +723,7 @@ STAGES = [
 
     # ---- Quantification (blind) --------------------------------------------
     Stage("roi_geometry_verify", "05a  Verify the inverse transform", "Quantification",
-          script="05a_roi_geometry.py", argv=["--verify"],
+          script="05a_roi_geometry.py", argv=["--verify"], reader="pylibCZIrw",
           outputs=[],
           needs=["reformat_perk_final"],
           blurb="Pushes coordinate planes through the real reformat and compares "

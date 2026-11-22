@@ -216,6 +216,7 @@ try:
     chk("...old file untouched", open(ip, "rb").read(), before)
     chk("...no .tmp litter", os.path.exists(ip + ".tmp"), False)
     # A drop during the encode itself waits, then succeeds.
+    saved_poll, saved_watch = drv.POLL, os.environ.get("LS_WATCH")
     drv.POLL = 0.05
     os.environ["LS_WATCH"] = vol
     os.rename(vol, gone)
@@ -234,7 +235,11 @@ try:
         IO.save_image(np.zeros((4, 4), np.uint8), os.path.join(vol, "w.png"))
     finally:
         Image.Image.save = real
-        os.environ.pop("LS_WATCH", None)
+        drv.POLL = saved_poll
+        if saved_watch is None:
+            os.environ.pop("LS_WATCH", None)
+        else:
+            os.environ["LS_WATCH"] = saved_watch
     chk("save_image waits out a drop during encode",
         (first["n"], os.path.exists(os.path.join(vol, "w.png")),
          os.path.exists(os.path.join(vol, "w.png.tmp"))), (2, True, False))

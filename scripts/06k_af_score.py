@@ -53,7 +53,14 @@ Writes:
   results/af_scored_sections.csv  the stained sections scored, per marker, with
                                   how many above-cut nuclei and how many
                                   flagged: 06c reads it to tell a section with
-                                  no flagged nucleus from one never scored
+                                  no flagged nucleus from one never scored;
+                                  with the cut each was scored against, and
+                                  the controls trained on with theirs (role),
+                                  so 06c can tell flags older than the cut
+  results/af_gate.csv             per marker, its above-cut unstained and
+                                  no_primary control nuclei and what it was
+                                  trained on (blank: below the gate), so 06c
+                                  can say why a marker has no rows
   qc/af_review.png                per marker, the 24 highest-scoring stained
                                   nuclei and 24 drawn at random (seed 20261121)
                                   as 64 px crops of the marker channel
@@ -69,6 +76,7 @@ Run:  python 06k_af_score.py
 
 import argparse
 import array
+import collections
 import csv
 import importlib.util
 import os
@@ -96,13 +104,15 @@ FEATURES_CSV = os.path.join(RESULTS, "nucleus_features.csv")
 DONE_CSV = os.path.join(RESULTS, "nucleus_features_done.csv")
 SCORES_CSV = os.path.join(RESULTS, "af_scores.csv")
 SECTIONS_CSV = os.path.join(RESULTS, "af_scored_sections.csv")
+GATE_CSV = os.path.join(RESULTS, "af_gate.csv")
 REVIEW_PNG = os.path.join(QC, "af_review.png")
 REVIEW_CSV = os.path.join(QC, "af_review.csv")
 
 COLUMNS = ["scene_uid", "marker", "roi_index", "nucleus_id", "af_score", "flag_name",
            "flagged", "trained_on"]
-SECTION_COLUMNS = ["scene_uid", "marker", "n_scored", "n_flagged", "flag_name",
-                   "trained_on"]
+SECTION_COLUMNS = ["scene_uid", "marker", "role", "cut", "n_scored", "n_flagged",
+                   "flag_name", "trained_on"]
+GATE_COLUMNS = ["marker", "n_unstained", "n_no_primary", "trained_on"]
 REVIEW_COLUMNS = ["marker", "strip", "position", "scene_uid", "roi_index", "nucleus_id",
                   "af_score", "flagged", "flag_name", "trained_on", "operator_label"]
 
@@ -382,7 +392,7 @@ def draw_strip(blocks):
 
 def remove_outputs():
     gone = []
-    for p in (SCORES_CSV, SECTIONS_CSV, REVIEW_PNG, REVIEW_CSV):
+    for p in (SCORES_CSV, SECTIONS_CSV, GATE_CSV, REVIEW_PNG, REVIEW_CSV):
         if os.path.exists(p):
             os.remove(p)
             gone.append(os.path.basename(p))
@@ -396,7 +406,9 @@ def main(argv=None):
     for path, what in ((NUCLEI_CSV, "05c_detect_rois.py"), (CUTS_CSV, "06a_roi_dataset.py"),
                        (DONE_CSV, "06l_nucleus_features.py")):
         if not os.path.exists(path):
-            print(f"no {path} - run {what} first. Nothing written.")
+            gone = remove_outputs()
+            print(f"no {path} - run {what} first. Nothing written"
+                  + (f"; removed the earlier {', '.join(gone)}" if gone else "") + ".")
             return 1
     cuts = read_cuts(CUTS_CSV)
     rc_cuts = read_cuts(RC_CUTS_CSV)
@@ -426,11 +438,14 @@ def main(argv=None):
                      - set(by_marker)):
         by_marker[mk] = {"unstained": [], "no_primary": [], "stained": []}
 
-    scored, sec_rows, info = [], [], {}
+    scored, sec_rows, info, gate_rows = [], [], {}, []
     for mk in sorted(by_marker):
         g = by_marker[mk]
         n = {kind: len(g[kind]) for kind in FLAG_NAMES}
         kind = choose(n)
+        gate_rows.append({"marker": mk, "n_unstained": n["unstained"],
+                          "n_no_primary": n["no_primary"],
+                          "trained_on": kind if kind and g["stained"] else ""})
         if kind is None:
             print(f"{mk}: not scored - {n['unstained']} above-cut nuclei on unstained "
                   f"reagent controls and {n['no_primary']} on no_primary ones (featured "
@@ -455,11 +470,20 @@ def main(argv=None):
             t = per.setdefault((k[0], k[1]), [0, 0])
             t[0] += 1
             t[1] += s >= FLAG_AT
+        # The cut each section was scored against, and each control trained
+        # on: 06c blanks a row whose flags were made under another cut.
         stained_secs = {s for s in featured if s[1] == mk and s not in kinds}
         for u, m in sorted(stained_secs, key=lambda s: NM.natural_key(s[0])):
             t = per.get((u, m), [0, 0])
-            sec_rows.append({"scene_uid": u, "marker": m, "n_scored": t[0],
+            sec_rows.append({"scene_uid": u, "marker": m, "role": "stained",
+                             "cut": repr(all_cuts[(u, m)]), "n_scored": t[0],
                              "n_flagged": t[1], "flag_name": flag, "trained_on": kind})
+        used = collections.Counter((k[0], k[1]) for k, _c in g[kind])
+        for u, m in sorted({s for s in featured if s[1] == mk and kinds.get(s) == kind},
+                           key=lambda s: NM.natural_key(s[0])):
+            sec_rows.append({"scene_uid": u, "marker": m, "role": "control",
+                             "cut": repr(all_cuts[(u, m)]), "n_scored": used[(u, m)],
+                             "n_flagged": "", "flag_name": flag, "trained_on": kind})
 
     if not scored:
         gone = remove_outputs()
@@ -473,6 +497,7 @@ def main(argv=None):
             for k, s in sorted(scored, key=lambda t: _order(t[0]))]
     IO.atomic_write_csv(SCORES_CSV, rows, COLUMNS)
     IO.atomic_write_csv(SECTIONS_CSV, sec_rows, SECTION_COLUMNS)
+    IO.atomic_write_csv(GATE_CSV, gate_rows, GATE_COLUMNS)
     print(f"{len(rows)} stained nuclei scored -> {SCORES_CSV}")
 
     # The review strip, after the CSVs: a crop that cannot be read is grey.

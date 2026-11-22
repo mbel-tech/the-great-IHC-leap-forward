@@ -5485,7 +5485,7 @@
     "af_scored_sections.csv"
    ],
    "writer": "06k_af_score.py",
-   "what": "Every stained section x marker 06k scored, including those with no nucleus above the cut, so 06c can tell a section with no flagged nucleus from one never scored. Written and removed with af_scores.csv.",
+   "what": "Every section x marker 06k scored (role `stained`, including those with no nucleus above the cut), so 06c can tell a section with no flagged nucleus from one never scored, and every reagent control it trained on (role `control`). Each with the cut it was scored or trained against: 06c blanks a row whose sections' or controls' cut is no longer 06a's. Written and removed with af_scores.csv.",
    "readers": [
     "06c_excel_dataset.py"
    ],
@@ -5504,16 +5504,28 @@
      "meaning": "The marker, as roi_nuclei.csv names it."
     },
     {
+     "name": "role",
+     "type": "text",
+     "units": "",
+     "meaning": "`stained` (a section scored) or `control` (a reagent control trained on)."
+    },
+    {
+     "name": "cut",
+     "type": "float",
+     "units": "grey value",
+     "meaning": "The cut 06k counted above-cut nuclei against: positivity_cuts.csv's for a stained section, reagent_control_cuts.csv's for a control (full precision, as 06a wrote it)."
+    },
+    {
      "name": "n_scored",
      "type": "int",
      "units": "count",
-     "meaning": "Above-cut ROI nuclei of the section scored."
+     "meaning": "Above-cut ROI nuclei of the section scored (stained) or trained on (control)."
     },
     {
      "name": "n_flagged",
      "type": "int",
      "units": "count",
-     "meaning": "Of those, flagged (score >= 0.5)."
+     "meaning": "Of those, flagged (score >= 0.5). Blank for a control."
     },
     {
      "name": "flag_name",
@@ -5526,6 +5538,44 @@
      "type": "text",
      "units": "",
      "meaning": "As in af_scores.csv."
+    }
+   ]
+  },
+  {
+   "path": "results/af_gate.csv",
+   "names": [
+    "af_gate.csv"
+   ],
+   "writer": "06k_af_score.py",
+   "what": "06k's training gate, per marker with reagent controls or above-cut nuclei: how many above-cut unstained and no_primary reagent-control nuclei (featured sections) it had, and what it trained on - blank when below 200 of either kind, so 06c's af_flag header says why that marker has no rows. Written and removed with af_scores.csv.",
+   "readers": [
+    "06c_excel_dataset.py"
+   ],
+   "columns_from": "06k_af_score.py:GATE_COLUMNS",
+   "columns": [
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker."
+    },
+    {
+     "name": "n_unstained",
+     "type": "int",
+     "units": "count",
+     "meaning": "Above-cut ROI nuclei on unstained reagent controls, featured sections only."
+    },
+    {
+     "name": "n_no_primary",
+     "type": "int",
+     "units": "count",
+     "meaning": "The same on no_primary reagent controls."
+    },
+    {
+     "name": "trained_on",
+     "type": "text",
+     "units": "",
+     "meaning": "`unstained`, `no_primary`, or blank when not scored (below 200 of either kind, or no stained above-cut nucleus)."
     }
    ]
   },

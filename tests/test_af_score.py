@@ -325,7 +325,7 @@ lo = np.mean([s for s, n in spots if n < 4])
 chk("autofluorescence-like stained nuclei score higher than stain-like ones", hi > lo)
 secs = read(SECTIONS)
 chk("the scored sections are listed (06c reads them)",
-    sorted((r["scene_uid"], r["marker"]) for r in secs or []),
+    sorted((r["scene_uid"], r["marker"]) for r in secs or [] if r["role"] == "stained"),
     [(u, "AF568") for u in STAINED])
 chk("the review strip is drawn", os.path.exists(PNG))
 from PIL import Image  # noqa: E402
@@ -381,32 +381,100 @@ chk("the section not yet scored blanks the rate, with a note",
     (dm["frac_positive_without_flagged"] in (None, ""), "not scored" in (dm["note"] or "")),
     (True, True))
 # With every stained section scored, the rate is (positives - flagged) / (n - flagged).
-saved_meas = G6C.MEAS_CSV
-sub = os.path.join(tempfile.mkdtemp(prefix="af_meas_"), "roi_measurements.csv")
-keep_rows = [r for r in read(meas) if r["scene_uid"] != UNFEATURED]
-with open(sub, "w", newline="", encoding="utf-8") as fh:
-    w = csv.DictWriter(fh, fieldnames=list(keep_rows[0]))
-    w.writeheader()
-    w.writerows(keep_rows)
-for name in ("af_scores.csv", "af_scored_sections.csv"):
-    with open(os.path.join(RES, name), "rb") as a, \
-            open(os.path.join(os.path.dirname(sub), name), "wb") as b:
-        b.write(a.read())
-G6C.MEAS_CSV = sub
-try:
-    code6c, out6c = run(G6C, ["--out", xlsx])
-finally:
-    G6C.MEAS_CSV = saved_meas
-wb = openpyxl.load_workbook(xlsx)
-vals = [[c.value for c in row] for row in wb[G6C.AF_SHEET].iter_rows()]
-body = [dict(zip(head, v)) for v in vals[vals.index(head) + 1:] if v and v[0]]
-dm = [b for b in body if b["ROI"] == "Dm"][0]
+
+
+def sub_sheet(extra_meas=(), extra_gate=()):
+    """06c over a copy of results/ without the unfeatured section (plus
+    `extra_meas` rows, and `extra_gate` rows in af_gate.csv): (header lines, Dm row)."""
+    d = tempfile.mkdtemp(prefix="af_meas_")
+    sub = os.path.join(d, "roi_measurements.csv")
+    keep_rows = [r for r in read(meas) if r["scene_uid"] != UNFEATURED] + list(extra_meas)
+    with open(sub, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=list(read(meas)[0]))
+        w.writeheader()
+        w.writerows(keep_rows)
+    for name in ("af_scores.csv", "af_scored_sections.csv", "af_gate.csv",
+                 "positivity_cuts.csv", "reagent_control_cuts.csv"):
+        with open(os.path.join(RES, name), "rb") as a, \
+                open(os.path.join(d, name), "wb") as b:
+            b.write(a.read())
+    if extra_gate:
+        with open(os.path.join(d, "af_gate.csv"), "a", newline="", encoding="utf-8") as fh:
+            w = csv.DictWriter(fh, fieldnames=K.GATE_COLUMNS)
+            w.writerows(extra_gate)
+    saved = G6C.MEAS_CSV
+    G6C.MEAS_CSV = sub
+    try:
+        code, out = run(G6C, ["--out", xlsx])
+        assert code == 0, out
+    finally:
+        G6C.MEAS_CSV = saved
+    v = [[c.value for c in row] for row in openpyxl.load_workbook(xlsx)[G6C.AF_SHEET].iter_rows()]
+    lines = " ".join(str(x[0]) for x in v[:v.index(head)] if x and isinstance(x[0], str))
+    b = [dict(zip(head, x)) for x in v[v.index(head) + 1:] if x and x[0]]
+    return lines, [r for r in b if r["ROI"] == "Dm"][0]
+
+
+lines, dm = sub_sheet()
 n_flag = sum(1 for r in rows if r["flagged"] == "1")
 chk("n_flagged is the flagged nuclei of the region", dm["n_flagged"], n_flag)
 chk("frac_positive_without_flagged = (n_positive - flagged) / (n_nuclei - flagged)",
     dm["frac_positive_without_flagged"],
     round((dm["n_positive"] - n_flag) / (dm["n_nuclei"] - n_flag), 4))
 chk("...and below the raw rate", dm["frac_positive_without_flagged"] < dm["frac_positive"])
+
+
+print("--- 06c and 06k name the same files ---")
+chk("06c reads the files 06k writes",
+    (G6C.AF_SCORES, G6C.AF_SECTIONS, G6C.AF_GATE),
+    tuple(os.path.basename(p) for p in (K.SCORES_CSV, K.SECTIONS_CSV, K.GATE_CSV)))
+
+print("--- a section measured empty counts as scored, with 0 flagged ---")
+empty = dict(read(meas)[0], scene_uid="A1_s01_sc06", n_nuclei="0", n_positive="0")
+empty = {k: (v if k not in ("n_nuclei", "n_positive") else "0") for k, v in empty.items()}
+empty["roi_kind"], empty["region"], empty["roi_index"] = "roi", "Dm", "1"
+_l, dm_e = sub_sheet(extra_meas=[empty])
+chk("...the rate is still given, unchanged",
+    (dm_e["frac_positive_without_flagged"], dm_e["note"] or ""),
+    (dm["frac_positive_without_flagged"], ""))
+
+print("--- a marker below the gate is named on the sheet ---")
+gate = read(K.GATE_CSV)
+chk("06k records each marker's counts and what it trained on",
+    [(r["marker"], r["n_unstained"], r["n_no_primary"], r["trained_on"]) for r in gate],
+    [("AF568", "250", "300", "unstained")])
+lines_g, _dm = sub_sheet(extra_gate=[{"marker": "AF488", "n_unstained": 12,
+                                       "n_no_primary": 34, "trained_on": ""}])
+chk("...and the sheet header says the unscored one was not scored, and why",
+    "AF488 not scored: 12 unstained / 34 no_primary < 200" in lines_g)
+
+print("--- flags older than the cut are not used ---")
+secs = read(SECTIONS)
+cuts_now = {(r["scene_uid"], r["marker"]): r["cut"]
+            for r in read(os.path.join(RES, "positivity_cuts.csv"))}
+chk("af_scored_sections records the cut each stained section was scored against",
+    all(r["cut"] == cuts_now[(r["scene_uid"], r["marker"])]
+        for r in secs if r["role"] == "stained"))
+rc_now = {(r["scene_uid"], r["marker"]): r["cut"]
+          for r in read(os.path.join(RES, "reagent_control_cuts.csv"))}
+chk("...and the cut of each control it trained on",
+    sorted((r["scene_uid"], r["cut"] == rc_now[(r["scene_uid"], r["marker"])])
+           for r in secs if r["role"] == "control"), [(CTL_U, True)])
+G6A.CONFIG.setdefault("positivity", {})
+_saved_k = G6A.CONFIG["positivity"].get("cut_k")
+G6A.CONFIG["positivity"]["cut_k"] = {"*": 4.0}
+try:
+    assert run(G6A)[0] == 0
+finally:
+    if _saved_k is None:
+        G6A.CONFIG["positivity"].pop("cut_k", None)
+    else:
+        G6A.CONFIG["positivity"]["cut_k"] = _saved_k
+_l, dm_s = sub_sheet()
+chk("cut_k changed and 06a rerun, 06k not: the row is blank, never a number",
+    dm_s["frac_positive_without_flagged"] in (None, ""))
+chk("...with the note", "flags older than the cut - run 06k" in (dm_s["note"] or ""))
+assert run(G6A)[0] == 0
 
 print("--- unstained below the gate: no_primary ---")
 code, out = scenario(150, 300)
@@ -430,6 +498,15 @@ chk("...and the stage says it did nothing (non-zero)", code != 0)
 code6c, _ = run(G6C, ["--out", xlsx])
 chk("06c without af_scores.csv: no af_flag sheet",
     G6C.AF_SHEET in openpyxl.load_workbook(xlsx).sheetnames, False)
+
+print("--- a missing input removes the earlier outputs too ---")
+scenario(250, 300)
+chk("(outputs there first)", os.path.exists(SCORES))
+os.remove(os.path.join(RES, "nucleus_features_done.csv"))
+code, out = run(K, [])
+chk("no done log: exit 1 and every earlier output removed",
+    (code, [os.path.exists(p) for p in (SCORES, SECTIONS, K.GATE_CSV, PNG, KEY)]),
+    (1, [False] * 5))
 
 print()
 print("ALL PASS" if not fails else f"{fails} FAILED")

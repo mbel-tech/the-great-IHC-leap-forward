@@ -1906,9 +1906,12 @@ Stage `excel_sample`. The analysis table as a workbook, one row per ROI per anim
   `results/af_scored_sections.csv`, an `af_flag` sheet: per sample, marker and region of a scored marker,
   by_roi's raw `frac_positive` beside `frac_positive_without_flagged` = (n_positive - n_flagged) /
   (n_nuclei - n_flagged), each flagged nucleus placed by its disc's row in `roi_measurements.csv`, under a
-  header that says provisional and states the validation criterion. Blank, with a `note`, when any of the
-  row's sections is not in `af_scored_sections.csv`, when there is no raw rate, or when more are flagged
-  than positive (flags older than the counts). `write_workbook` takes an optional third item per sheet, the lines above the table, and a
+  header that says provisional and states the validation criterion, and names each marker
+  `af_gate.csv` says was not scored, with its counts. Blank, with a `note`, when there is no raw rate, when
+  any of the row's sections is not in `af_scored_sections.csv` (a section 06a measured empty counts as
+  scored, none flagged), when a cut recorded there - the section's, or a control the marker trained on -
+  is not the cut in `positivity_cuts.csv` / `reagent_control_cuts.csv` now ("flags older than the cut -
+  run 06k"), or when more are flagged than positive. `write_workbook` takes an optional third item per sheet, the lines above the table, and a
   fourth, more tables below it (`[(lines, rows)]`).
 - **How:** groups 06a's rows. Withheld values (no cut, no denominator, Abercrombie not applied) are blank,
   with the reason carried from 06a. Reagent-control boxes are left out of `planned` and `coverage`. The
@@ -2020,13 +2023,17 @@ Each of the latter gets `af_score`, flagged at >= 0.5 (`af_suspect` when trained
   marker_cv, marker_spots and, under multiplex, the other marker (06l's `other_marker`) in spreads above its
   own discs.
 - **Writes:** `results/af_scores.csv` (`COLUMNS`), `results/af_scored_sections.csv` (every stained section
-  x marker scored, with counts: 06c tells "none flagged" from "not scored" by it), then
+  x marker scored, with counts, and every control trained on, each with the cut it was counted against:
+  06c tells "none flagged" from "not scored" by it, and blanks a row whose cut has changed since),
+  `results/af_gate.csv` (per marker, the unstained and no_primary counts and what it trained on), then
   `qc/af_review.csv` and `qc/af_review.png`: per marker the 24 highest scores and 24 drawn at random
   (seed 20261121) as 64 px crops of the marker plane (05c's `plane_index_for`, read through 06l's loaded
   05c); a crop that cannot be read is grey.
 - **Gate:** a marker below 200 of either kind is not scored, and the counts are printed. When no marker
   is scored, nothing is written, the outputs of an earlier run are removed (a stale file would have 06c
-  subtract flags this study no longer supports) and it exits 1.
+  subtract flags this study no longer supports) and it exits 1: not enough control nuclei to train, not a
+  crash. A missing input (roi_nuclei.csv, positivity_cuts.csv, nucleus_features_done.csv) also removes the
+  earlier outputs and exits 1.
 - `roi_nuclei.csv`, `roi_measurements.csv` and `roi_corrected.csv` are never written.
 
 ### `06l_nucleus_features.py`
@@ -4444,7 +4451,7 @@ The autofluorescence flag: one row per above-cut ROI nucleus of a stained sectio
 
 #### `results/af_scored_sections.csv`
 
-Every stained section x marker 06k scored, including those with no nucleus above the cut, so 06c can tell a section with no flagged nucleus from one never scored. Written and removed with af_scores.csv.
+Every section x marker 06k scored (role `stained`, including those with no nucleus above the cut), so 06c can tell a section with no flagged nucleus from one never scored, and every reagent control it trained on (role `control`). Each with the cut it was scored or trained against: 06c blanks a row whose sections' or controls' cut is no longer 06a's. Written and removed with af_scores.csv.
 
 - **Written by:** 06k_af_score.py
 - **Read by:** 06c_excel_dataset.py
@@ -4453,10 +4460,26 @@ Every stained section x marker 06k scored, including those with no nucleus above
 |------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `marker` | text |  | The marker, as roi_nuclei.csv names it. |
-| `n_scored` | int | count | Above-cut ROI nuclei of the section scored. |
-| `n_flagged` | int | count | Of those, flagged (score >= 0.5). |
+| `role` | text |  | `stained` (a section scored) or `control` (a reagent control trained on). |
+| `cut` | float | grey value | The cut 06k counted above-cut nuclei against: positivity_cuts.csv's for a stained section, reagent_control_cuts.csv's for a control (full precision, as 06a wrote it). |
+| `n_scored` | int | count | Above-cut ROI nuclei of the section scored (stained) or trained on (control). |
+| `n_flagged` | int | count | Of those, flagged (score >= 0.5). Blank for a control. |
 | `flag_name` | text |  | As in af_scores.csv. |
 | `trained_on` | text |  | As in af_scores.csv. |
+
+#### `results/af_gate.csv`
+
+06k's training gate, per marker with reagent controls or above-cut nuclei: how many above-cut unstained and no_primary reagent-control nuclei (featured sections) it had, and what it trained on - blank when below 200 of either kind, so 06c's af_flag header says why that marker has no rows. Written and removed with af_scores.csv.
+
+- **Written by:** 06k_af_score.py
+- **Read by:** 06c_excel_dataset.py
+
+| Column | Type | Units | Meaning |
+|------------|------|------|---------------------------|
+| `marker` | text |  | The marker. |
+| `n_unstained` | int | count | Above-cut ROI nuclei on unstained reagent controls, featured sections only. |
+| `n_no_primary` | int | count | The same on no_primary reagent controls. |
+| `trained_on` | text |  | `unstained`, `no_primary`, or blank when not scored (below 200 of either kind, or no stained above-cut nucleus). |
 
 #### `qc/af_review.csv`
 
@@ -4605,7 +4628,7 @@ Per section and marker: how many of that marker's background-disc nuclei land ab
 The exact cut per section and marker, at full precision, so 06i draws the same calls 06a counted.
 
 - **Written by:** 06a_roi_dataset.py
-- **Read by:** 06i_detection_overlays.py, 06k_af_score.py
+- **Read by:** 06c_excel_dataset.py, 06i_detection_overlays.py, 06k_af_score.py
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|

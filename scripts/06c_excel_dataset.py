@@ -299,9 +299,12 @@ def _corrected_sheet():
 
 #: The sheet 06k's autofluorescence flag is shown on, when it wrote af_scores.csv.
 AF_SHEET = "af_flag"
-#: 06k's files, beside MEAS_CSV (06k_af_score.SCORES_CSV / SECTIONS_CSV).
+#: 06k's files, beside MEAS_CSV (06k_af_score.SCORES_CSV / SECTIONS_CSV / GATE_CSV).
 AF_SCORES = "af_scores.csv"
 AF_SECTIONS = "af_scored_sections.csv"
+AF_GATE = "af_gate.csv"
+#: The note on a row whose flags were scored under a cut 06a no longer uses.
+AF_STALE = "flags older than the cut - run 06k"
 
 AF_LINES = (
     "Positive rate without flagged nuclei (provisional until validated on a study with "
@@ -314,8 +317,8 @@ AF_LINES = (
     "both) and flags it at a score of 0.5. frac_positive_without_flagged = (n_positive - "
     "n_flagged) / (n_nuclei - n_flagged): the flagged nuclei leave the count and the "
     "denominator alike.",
-    "A blank is a rate that cannot be given, never 0; the note says why (a section not "
-    "scored yet, no raw rate, or flags older than the counts).",
+    "A blank is a rate that cannot be given, never 0; the note says why (no raw rate, a "
+    "section not scored yet, or flags scored under a cut 06a no longer uses).",
 )
 
 
@@ -323,16 +326,48 @@ def _af_sheet(meas, by_roi, sec_by):
     """The af_flag sheet from 06k's af_scores.csv and af_scored_sections.csv
     beside MEAS_CSV, or None when 06k wrote none. One row per by_roi row of a
     scored marker (sample x marker x region): its raw rate, then the rate
-    without the flagged nuclei."""
+    without the flagged nuclei.
+
+    A row is blank with a note when it has no raw rate, when one of its
+    sections was not scored (a section 06a measured empty counts as scored,
+    with none flagged), or when a cut 06k scored or trained against is not the
+    cut in positivity_cuts.csv / reagent_control_cuts.csv now. The header
+    names every marker 06k did not score, with its control counts."""
     base = os.path.dirname(MEAS_CSV)
     spath, cpath = os.path.join(base, AF_SCORES), os.path.join(base, AF_SECTIONS)
     if not (os.path.exists(spath) and os.path.exists(cpath)):
         return None
     secs = G5.load_csv(cpath)
-    scored = {(r["scene_uid"], r["marker"]) for r in secs}
+    stained = [r for r in secs if r.get("role", "stained") == "stained"]
+    scored = {(r["scene_uid"], r["marker"]) for r in stained}
     how = {r["marker"]: (r["flag_name"], r["trained_on"]) for r in secs}
     if not how:
         return None
+
+    def cuts_of(name):
+        path = os.path.join(base, name)
+        return ({(r["scene_uid"], r["marker"]): r["cut"] for r in G5.load_csv(path)}
+                if os.path.exists(path) else {})
+
+    def same(a, b):
+        try:
+            return b is not None and float(a) == float(b)
+        except (TypeError, ValueError):
+            return False
+
+    now = {"stained": cuts_of("positivity_cuts.csv"),
+           "control": cuts_of("reagent_control_cuts.csv")}
+    stale = {(r["scene_uid"], r["marker"]) for r in secs
+             if not same(r.get("cut"), now.get(r.get("role", "stained"), {}).get(
+                 (r["scene_uid"], r["marker"])))}
+    stale_markers = {m for (u, m) in stale
+                     if any(r["role"] == "control" for r in secs
+                            if (r["scene_uid"], r["marker"]) == (u, m))}
+    # Measured and found empty: nothing there to flag, so scored with 0.
+    n_sec = collections.Counter()
+    for r in meas:
+        n_sec[(r["scene_uid"], r["marker"])] += int(r["n_nuclei"] or 0)
+    empty = {k for k, v in n_sec.items() if v == 0}
     # A flagged nucleus's region and animal are its disc's, as 06a wrote it.
     disc = {(r["scene_uid"], r["marker"], r["roi_index"]): r for r in meas}
     flagged = collections.Counter()
@@ -349,16 +384,19 @@ def _af_sheet(meas, by_roi, sec_by):
             continue
         key = (b["sample"], mk, b["ROI"])
         uids = sec_by.get(key, set())
-        missing = sorted(u for u in uids if (u, mk) not in scored)
+        missing = sorted(u for u in uids if (u, mk) not in scored and (u, mk) not in empty)
+        old = sorted(u for u in uids if (u, mk) in stale)
         n, npos, raw = b["n_nuclei"], b["n_positive"], b["frac_positive"]
         nf = flagged[key]
         rate, note = "", ""
-        if missing:
+        if raw == "" or npos == "":
+            note = "no raw rate on this row, so none without the flagged nuclei"
+        elif missing:
             note = (f"not scored: {len(missing)} of {len(uids)} section(s) have no "
                     f"autofluorescence score (06l features missing, or 06k not run since; "
                     f"e.g. {missing[0]})")
-        elif raw == "" or npos == "":
-            note = "no raw rate on this row, so none without the flagged nuclei"
+        elif old or mk in stale_markers:
+            note = AF_STALE
         elif nf > npos:
             note = (f"{nf} flagged but {npos} positive: af_scores.csv is older than "
                     f"roi_measurements.csv - run 06k again")
@@ -370,14 +408,21 @@ def _af_sheet(meas, by_roi, sec_by):
             "sample": b["sample"], "marker": mk, "ROI": b["ROI"],
             "treatment": b["treatment"], "n_nuclei": n, "n_positive": npos,
             "frac_positive": raw, "frac_positive_without_flagged": rate,
-            "n_flagged": nf if not missing else "",
+            "n_flagged": nf if rate != "" else "",
             "n_positive_without_flagged": (npos - nf) if rate != "" else "",
             "n_sections": len(uids), "n_sections_scored": len(uids) - len(missing),
             "flag_name": how[mk][0], "trained_on": how[mk][1], "note": note,
         })
     if not rows:
         return None
-    return (AF_SHEET, rows, list(AF_LINES))
+    lines = list(AF_LINES)
+    gpath = os.path.join(base, AF_GATE)
+    for g in (G5.load_csv(gpath) if os.path.exists(gpath) else []):
+        if not g.get("trained_on"):
+            lines.append(f"{g['marker']} not scored: {g['n_unstained']} unstained / "
+                         f"{g['n_no_primary']} no_primary < 200 above-cut reagent-control "
+                         f"nuclei (06k's training gate), so it has no row here.")
+    return (AF_SHEET, rows, lines)
 
 
 def _rc_sheet(rc_rows):

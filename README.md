@@ -199,6 +199,33 @@ bash scripts/run_all.sh                # or: bash scripts/run_all.sh from 9
 
 Every stage is resumable — re-running skips completed work.
 
+Without the window, `python -m app --list study.json` shows each stage's state, and
+`python -m app --stage <id> study.json [--opt key=value] [--force] [--unblind]` runs one
+stage exactly as its Run button does and records it in the study (`--run <screen>` runs a
+screen's Run all remaining). Exit status: 0 ran, 1 failed, 2 refused, 130 Ctrl+C.
+
+```bash
+python -m app --list D:\LS-analysis\study.json
+python -m app --stage overviews D:\LS-analysis\study.json --opt limit=3
+```
+
+`--list` prints each stage's id, group, title and state. `--stage` refuses (exit 2, with the window's
+reason) a stage the window would hold, such as one whose earlier stages are not done; `--force` overrides
+only those waits. A stage the study does not use, one the app does not run, a curator stage (its page
+path is printed instead, to open in a browser) and an unblinding without `--unblind` are refused
+whatever you add. In the installed Windows app the same thing is `ihc --list study.json`: an app updated
+from inside itself writes `ihc.cmd` on its next start, and typing `ihc` from any folder needs the
+installer's *Add the ihc command to PATH* task (or the install folder added to Path by hand).
+
+**If the slides or output drive drops.** The stages that read slides wait instead of failing, and so
+do their writes to the output folder (and the run record in the study file). After 10 seconds the window shows an amber banner and a
+notification saying which folder is unreachable and which step is paused; on a terminal the same
+appears as one line, and another when the drive is back. When the drive reappears the run carries on by
+itself, redoing only the section or file it was on, so nothing needs pressing. To give up instead, press
+**Stop now** on the banner (or Ctrl+C at a terminal); the run is recorded as stopped while the drive was
+disconnected. If the drive comes back under a different letter, the wait cannot find it: stop, change the
+folder in Set up, and run again, which skips what is done.
+
 | Stage | Script | What it does |
 |---|---|---|
 | 0 | `00_manifest.py` | Parses all CZI headers **without extracting**, reconstructs the slide layout, renders slide maps under five candidate mounting conventions |
@@ -760,12 +787,13 @@ Code, plus the atlas plates in `atlas/` (salmon and Wullimann; cite both, see
 [How to cite](#how-to-cite)) and the citation metadata in `CITATION.cff`. No imaging data, and
 nothing derived from it, is committed.
 
-Four documents, answering four different questions:
+Five documents, answering five different questions:
 
 | Question | Document |
 |---|---|
 | How do I install, run or change this? | this README |
 | I am new: how do I use the app, screen by screen? | `docs/guides/user-guide.md` |
+| How do I run the steps from a command prompt, or in a script? | `docs/guides/command-line-guide.md` (also as a PDF beside it) |
 | What happens to a brain section, step by step, in plain language? | `docs/guides/pipeline-guide.md` |
 | What is the Methods section, with citations and the measured numbers? | `docs/guides/pipeline-methods.md` |
 

@@ -86,7 +86,7 @@ def _report(exc_type, exc, tb):
 def main():
     sys.excepthook = _report
     # No window, so no Qt: it runs where there is no display.
-    if "--run" in sys.argv:
+    if any(a in sys.argv for a in ("--run", "--stage", "--list", "--help", "-h")):
         import headless
         return headless.main(sys.argv)
     try:
@@ -119,6 +119,13 @@ def main():
 
     if _recover_interrupted_update():
         return 0
+
+    if not FROZEN:
+        try:                    # an in-app update never ran the installer that carries ihc.cmd
+            import update_apply
+            update_apply.ensure_console_launcher(REPO)
+        except Exception:       # noqa: BLE001 - never blocks start
+            pass
 
     _mac_menu_name("The Great IHC Leap Forward")
     _windows_app_id()

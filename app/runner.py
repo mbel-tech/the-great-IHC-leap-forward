@@ -16,6 +16,11 @@ runs as a child process of this same interpreter, `python -m app --stage <id>
 it dies while the drive is gone. Inside that child (env `LS_CHILD=1`) the stage
 runs in-process as before.
 
+A stage run in this process can wait for the drive too (an ls_io write on
+out_root); its `@@drive` lines are read by the supervisor's own parser
+(supervise._Run), so those waits reach `StageResult.pauses` and the run
+history as a child's do.
+
 Two things the stages already do that this has to respect:
 
   * Several of them `raise SystemExit(message)` on bad input - `analysis_uids`
@@ -48,8 +53,17 @@ import supervise as SV
 CHILD_READERS = ("pylibCZIrw", "czifile")
 
 
+def _is_stopped(exc):
+    """Whether `exc` is ls_drive.Stopped (the one module ls_io keeps)."""
+    try:
+        return isinstance(exc, SV._drive_module().Stopped)
+    except Exception:                                       # noqa: BLE001
+        return False
+
+
 class StageResult:
-    def __init__(self, sid, ok, seconds, output, error=None, pauses=None):
+    def __init__(self, sid, ok, seconds, output, error=None, pauses=None,
+                 stopped=False, interrupted=False):
         self.sid = sid
         self.ok = ok
         self.seconds = seconds
@@ -57,10 +71,17 @@ class StageResult:
         self.error = error
         # Waits for a dropped drive: [{at, seconds, folder, label}].
         self.pauses = list(pauses or [])
+        # Stopped while waiting for the drive (ls_drive.Stopped); ended by Ctrl+C.
+        self.stopped = bool(stopped)
+        self.interrupted = bool(interrupted)
 
     def record_error(self):
         """What the run history keeps of a failure: its first line, short. None if ok."""
-        if self.ok or not self.error:
+        if self.ok:
+            return None
+        if self.stopped:
+            return SV.STOPPED_IN_PAUSE
+        if not self.error:
             return None
         first = str(self.error).strip().splitlines()
         return first[0][:300] if first else None
@@ -279,6 +300,33 @@ class Runner:
 
     # ---- running ----------------------------------------------------------
 
+    @contextlib.contextmanager
+    def _watching(self):
+        """LS_WATCH set to the study's source_dir and out_root for one run.
+
+        ls_drive takes the folders to watch from LS_WATCH, else from the study
+        file - which normally lives IN out_root and so cannot be read once the
+        drive has gone. Named here, before the run and while the file can be
+        read, neither the stage, nor a supervised child (it inherits this
+        environment), nor the supervisor's own look at the drive has to read
+        it mid-drop. An LS_WATCH already set is left as it is.
+        """
+        if os.environ.get("LS_WATCH"):
+            yield
+            return
+        try:
+            folders = SV._drive_module().config_folders(self.config_path)
+        except Exception:                                   # noqa: BLE001
+            folders = []
+        if not folders:
+            yield
+            return
+        os.environ["LS_WATCH"] = os.pathsep.join(folders)
+        try:
+            yield
+        finally:
+            os.environ.pop("LS_WATCH", None)
+
     def run(self, stage, on_line=None, extra_argv=()):
         """Run one stage to completion. Returns a StageResult; never raises.
 
@@ -286,6 +334,10 @@ class Runner:
         several of them rewrite the same index files, so two at once would be a
         race with the user's data on the losing side.
         """
+        with self._watching():
+            return self._run(stage, on_line, extra_argv)
+
+    def _run(self, stage, on_line, extra_argv):
         # A callable is asked (05c: can this interpreter import StarDist?); the
         # function itself is truthy, and read as the answer it refused 05c always.
         why = stage.cli_only() if callable(stage.cli_only) else stage.cli_only
@@ -301,11 +353,32 @@ class Runner:
             return self._run_child(stage, on_line, list(stage.argv) + list(extra_argv))
 
         argv = [stage.script] + self.expand_argv(list(stage.argv) + list(extra_argv))
-        tee = _Tee(on_line)
+        # The stage's `@@drive` lines, read by the supervisor's own parser, so
+        # a wait in this process is in the result's pauses as a child's is.
+        drive = SV._Run(on_line)
+        tee = _Tee(drive.line)
         t0 = time.time()
 
+        def done(res):
+            drive.finish()
+            drive.close_quietly()       # a loss still open ends with the stage
+            res.pauses = drive.pauses
+            return res
+
+        # A stage run here can wait for a dropped drive too (ls_io.retry on
+        # out_root); Stop reaches that wait through its own LS_STOP_FILE. In
+        # the supervised child the supervisor's stop file is already set, and
+        # is the one that counts.
+        own_stop = not os.environ.get("LS_CHILD")
+        if own_stop:
+            with self._stop_lock:
+                self._starting, self._stop_pending = True, False
         with self._lock:
             old_argv, old_cwd = sys.argv, os.getcwd()
+            if own_stop:
+                old_stop = os.environ.get("LS_STOP_FILE")
+                stop_file = self._new_stop_file()
+                os.environ["LS_STOP_FILE"] = stop_file
             try:
                 mod = self.load(stage.script)
                 sys.argv = argv
@@ -329,9 +402,9 @@ class Runner:
                     said = [ln.strip() for ln in tee.text().splitlines() if ln.strip()]
                     msg = rc if isinstance(rc, str) else (
                         said[-1] if said else f"stage exited with status {rc}")
-                    return StageResult(stage.sid, False, time.time() - t0,
-                                       tee.text(), msg)
-                return StageResult(stage.sid, True, time.time() - t0, tee.text())
+                    return done(StageResult(stage.sid, False, time.time() - t0,
+                                            tee.text(), msg))
+                return done(StageResult(stage.sid, True, time.time() - t0, tee.text()))
 
             except SystemExit as e:
                 # argparse exits 0 for --help; a stage exits non-zero, or with a
@@ -340,17 +413,31 @@ class Runner:
                 tee.flush()
                 code = e.code
                 if code in (0, None):
-                    return StageResult(stage.sid, True, time.time() - t0, tee.text())
+                    return done(StageResult(stage.sid, True, time.time() - t0, tee.text()))
                 msg = code if isinstance(code, str) else f"stage exited with status {code}"
-                return StageResult(stage.sid, False, time.time() - t0, tee.text(), msg)
+                return done(StageResult(stage.sid, False, time.time() - t0, tee.text(), msg))
 
             except BaseException as e:                      # noqa: BLE001
                 tee.flush()
+                if _is_stopped(e):
+                    return done(StageResult(stage.sid, False, time.time() - t0, tee.text(),
+                                            SV.STOPPED_IN_PAUSE, stopped=True))
+                if isinstance(e, KeyboardInterrupt) and drive.open is not None:
+                    # Ctrl+C during a wait for the drive: a stop in a pause.
+                    return done(StageResult(stage.sid, False, time.time() - t0, tee.text(),
+                                            SV.STOPPED_IN_PAUSE, interrupted=True))
                 detail = "".join(traceback.format_exception(type(e), e, e.__traceback__))
-                return StageResult(stage.sid, False, time.time() - t0,
-                                   tee.text(), f"{type(e).__name__}: {e}\n\n{detail}")
+                return done(StageResult(stage.sid, False, time.time() - t0,
+                                        tee.text(), f"{type(e).__name__}: {e}\n\n{detail}",
+                                        interrupted=isinstance(e, KeyboardInterrupt)))
 
             finally:
+                if own_stop:
+                    if old_stop is None:
+                        os.environ.pop("LS_STOP_FILE", None)
+                    else:
+                        os.environ["LS_STOP_FILE"] = old_stop
+                    self._drop_stop_file(stop_file)
                 sys.argv = old_argv
                 try:
                     os.chdir(old_cwd)
@@ -380,41 +467,61 @@ class Runner:
         with self._stop_lock:
             self._starting, self._stop_pending = True, False
         with self._lock:
-            fd, stop_file = tempfile.mkstemp(prefix="ls-stop-", suffix=".flag")
-            os.close(fd)
-            os.remove(stop_file)          # its existence is the request
-            with self._stop_lock:
-                self._stop_file = stop_file
-                self._starting = False
-                if self._stop_pending:
-                    open(stop_file, "w").close()
-                    self._stop_pending = False
+            stop_file = self._new_stop_file()
             t0 = time.time()
             try:
                 rc, pauses, tail = SV.run_child(
                     SV.child_argv(stage.sid, self.config_path, argv), line, stop_file,
-                    env={"LS_CONFIG": self.config_path}, cwd=SV.APP_PARENT, on_proc=track)
+                    # LS_SCRIPTS: the child loads the stage from the same
+                    # scripts folder this runner does.
+                    env={"LS_CONFIG": self.config_path, "LS_SCRIPTS": self.scripts_dir},
+                    cwd=SV.APP_PARENT, on_proc=track)
             except BaseException as e:                      # noqa: BLE001
                 detail = "".join(traceback.format_exception(type(e), e, e.__traceback__))
                 return StageResult(stage.sid, False, time.time() - t0, "".join(out),
-                                   f"{type(e).__name__}: {e}\n\n{detail}")
+                                   f"{type(e).__name__}: {e}\n\n{detail}",
+                                   interrupted=isinstance(e, KeyboardInterrupt))
             finally:
                 self._proc = None
-                with self._stop_lock:
-                    self._stop_file = None
-                try:
-                    os.remove(stop_file)
-                except OSError:
-                    pass
+                self._drop_stop_file(stop_file)
+            # A stop during a wait for the drive is the supervisor's own verdict
+            # (the stop file was there and the drive was out): it says so with
+            # STOPPED_IN_PAUSE, never from the child's text alone.
             return StageResult(stage.sid, rc == 0, time.time() - t0, "".join(out),
-                               None if rc == 0 else tail, pauses)
+                               None if rc == 0 else tail, pauses,
+                               stopped=(rc == 1 and tail == SV.STOPPED_IN_PAUSE),
+                               interrupted=(rc == 130))
+
+    def _new_stop_file(self):
+        """A fresh stop-file name for the run starting now (the file itself is
+        absent: its existence is the request), with a stop that came while the
+        run was starting honoured at once. Called holding self._lock."""
+        fd, stop_file = tempfile.mkstemp(prefix="ls-stop-", suffix=".flag")
+        os.close(fd)
+        os.remove(stop_file)
+        with self._stop_lock:
+            self._stop_file = stop_file
+            self._starting = False
+            if self._stop_pending:
+                open(stop_file, "w").close()
+                self._stop_pending = False
+        return stop_file
+
+    def _drop_stop_file(self, stop_file):
+        with self._stop_lock:
+            self._stop_file = None
+        try:
+            os.remove(stop_file)
+        except OSError:
+            pass
 
     def stop(self):
-        """Ask a stage running as a child to stop now.
+        """Ask the running stage to stop now.
 
-        Creates the stop file - a wait for the drive, the child's or the
-        supervisor's, ends on it - and terminates the child. A stage running
-        in this process is not affected.
+        Creates the run's stop file - a wait for the drive ends on it, in a
+        child, its supervisor or a stage run in this process - and terminates
+        the child if there is one. A stage in this process that is not waiting
+        for the drive is not affected until it next waits.
         """
         with self._stop_lock:
             stop_file, proc = self._stop_file, self._proc

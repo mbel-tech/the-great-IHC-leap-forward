@@ -45,6 +45,20 @@ kept when the app is replaced with a newer one.
 - Detection runs on the CPU, as on Windows (stock TensorFlow does not use the
   Apple GPU).
 
+## Running from a terminal
+
+There is no `ihc` command on the Mac. To run or list stages without the window,
+use the app's bundled Python from the app's `Resources` folder (the same folder
+`The Great IHC Leap Forward` starts it in):
+
+    cd "/Applications/The Great IHC Leap Forward.app/Contents/Resources"
+    runtime/bin/python3 -m app --list ~/study/study.json
+    runtime/bin/python3 -m app --stage overviews ~/study/study.json --opt limit=3
+
+The launcher `Contents/MacOS/The Great IHC Leap Forward` takes the same
+arguments (`"/Applications/The Great IHC Leap Forward.app/Contents/MacOS/The Great IHC Leap Forward" --list study.json`).
+Exit status: 0 ran, 1 failed or stopped, 2 refused, 130 Ctrl+C.
+
 ## Making a release
 
 The same tag that builds the Windows installer builds the Mac app: the

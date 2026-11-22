@@ -9,6 +9,27 @@ where things landed, not which plausible-looking route was tried and abandoned, 
 
 ---
 
+## 2026-11-21 - Single stages from the command line; steps wait out a dropped drive
+
+**Changed:** `python -m app --stage <id> <study.json>` runs one stage as the window's Run button does (saved
+options, Redo when out of date, run recorded) and refuses, with the window's reason and exit 2, what the
+window would hold unless `--force`; `--list` prints every stage's state. The stages that read slides
+(00, 00b, 01, 01l, 05b, 05c, 06i and others) pause when a drive drops and carry on when it is back, redoing
+only the unit they were on; so do the writes to the output folder that go through `ls_io` (the atomic CSV,
+JSON and image writes), 05c's tables and the run record in the study file; stages that read CZI pixels run in a supervised child process so
+a native crash on a lost drive cannot close the window. The window shows an amber banner and a notification
+after 10 s, with Stop now; a terminal prints a line when it pauses and when it resumes. The Windows bundle
+gains `ihc.cmd` (console Python, so exit codes reach the prompt) and an optional, unticked installer task
+that adds the install folder to the user's Path.
+
+**Why:** an overnight run on a USB or network drive that vanished for seconds ended as a failed stage or a
+closed window, and a single stage could only be run from the window.
+
+**Cost / limits:** a drive that returns under a different letter is not found; the run has to be stopped and
+the folder corrected. The in-app updater does not carry `ihc.cmd` (it is written by the build, not part of the
+repository), so the app writes it itself at start-up on an installed Windows copy when it is missing or
+differs (`update_apply.ensure_console_launcher`); adding it to PATH still needs the installer task. The Mac app has no launcher; the docs give the bundled Python's path.
+
 ## 2026-11-20 - Reagent controls: final review fixes
 
 **Changed:** a confirmed reagent control can no longer silently vanish. 02 carries a control scan as its

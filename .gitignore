@@ -77,6 +77,9 @@ docs/*.docx
 docs/*.pdf
 docs/guides/*.docx
 docs/guides/*.pdf
+# ...except the command-line guide, kept as a PDF to hand out; rebuild it with
+# python docs/make_command_line_pdf.py whenever the .md changes.
+!docs/guides/command-line-guide.pdf
 
 # Compiled binaries (the venv itself is covered by work/ above)
 *.pyd

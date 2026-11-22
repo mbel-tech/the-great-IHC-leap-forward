@@ -196,6 +196,224 @@ with tempfile.TemporaryDirectory() as tmp:
         run._config_changed(), True)
 
 
+# ------------------------------------------------- Stop during a wait for the drive, in process
+# A stage run in this process can wait for a dropped drive too (ls_io.retry ->
+# ls_drive.wait_for_drive on out_root). Stop has to reach it: the runner gives
+# every run its own stop file through LS_STOP_FILE, and Runner.stop creates it.
+import shutil                                               # noqa: E402
+import threading                                            # noqa: E402
+import time                                                 # noqa: E402
+
+with tempfile.TemporaryDirectory() as tmp:
+    cfg_path = os.path.join(tmp, "config.json")
+    with open(cfg_path, "w", encoding="utf-8") as fh:
+        json.dump({"out_root": os.path.join(tmp, "out")}, fh)
+    scripts = os.path.join(tmp, "scripts")
+    os.makedirs(scripts)
+    watch = os.path.join(tmp, "drive")
+    os.makedirs(watch)
+    seen = {}
+    with open(os.path.join(scripts, "96_waits.py"), "w", encoding="utf-8") as fh:
+        fh.write("import os, sys\n"
+                 f"sys.path.insert(0, {os.path.join(REPO, 'scripts')!r})\n"
+                 "import ls_io\n"
+                 "def main():\n"
+                 "    ls_io.drive_module().POLL = 0.05\n"
+                 "    print('stopfile=' + os.environ.get('LS_STOP_FILE', ''))\n"
+                 "    ls_io.atomic_write_csv(os.path.join(os.environ['LS_WATCH'], 'x.csv'),"
+                 " [], ['a'])\n"
+                 "    return 0\n")
+
+    class Waits:
+        sid, title, script, cli_only, argv = "waits", "Waits", "96_waits.py", None, []
+
+    r = R.Runner(scripts, cfg_path)
+    before_watch = os.environ.get("LS_WATCH")
+    before_stop = os.environ.pop("LS_STOP_FILE", None)
+    os.environ["LS_WATCH"] = watch
+    shutil.move(watch, watch + "-gone")             # the drive is unplugged
+    lines = []
+    out = {}
+
+    def go():
+        out["res"] = r.run(Waits(), on_line=lines.append)
+
+    th = threading.Thread(target=go, daemon=True)
+    t0 = time.time()
+    th.start()
+    # No chk() while the stage runs: its stdout is redirected into the stage's log.
+    end = time.time() + 10
+    while not any("@@drive lost" in ln for ln in lines) and time.time() < end:
+        time.sleep(0.02)
+    waiting = any("@@drive lost" in ln for ln in lines)
+    stop_file = next((ln.split("=", 1)[1] for ln in lines if ln.startswith("stopfile=")), "")
+    existed = os.path.exists(stop_file) if stop_file else None
+    r.stop()
+    th.join(10)
+    hung = th.is_alive()
+    if hung:                                        # unstick it, or the rest blocks on the lock
+        shutil.move(watch + "-gone", watch)
+        th.join(10)
+        shutil.move(watch, watch + "-gone")
+    chk("the in-process stage is waiting for the drive", waiting, True)
+    chk("...with a stop file named for it that does not exist yet",
+        (bool(stop_file), existed), (True, False))
+    chk("Stop ends it promptly", (hung, time.time() - t0 < 10), (False, True))
+    res = out.get("res")
+    chk("...as a stopped run", (res.ok, res.stopped) if res else None, (False, True))
+    chk("...with the stopped text",
+        (res.error, res.record_error()) if res else None,
+        ("stopped while the drive was disconnected",) * 2)
+    chk("...with the pause it was stopped in recorded",
+        [(p["folder"], p["seconds"] >= 0) for p in res.pauses] if res else None,
+        [(watch, True)])
+    chk("the stop file is cleaned up", os.path.exists(stop_file), False)
+    chk("LS_STOP_FILE is put back as it was", os.environ.get("LS_STOP_FILE"), None)
+    shutil.move(watch + "-gone", watch)
+    if before_watch is None:
+        os.environ.pop("LS_WATCH", None)
+    else:
+        os.environ["LS_WATCH"] = before_watch
+    if before_stop is not None:
+        os.environ["LS_STOP_FILE"] = before_stop
+
+    # A stop that comes before the run has its file is not lost.
+    os.environ["LS_WATCH"] = watch
+    shutil.move(watch, watch + "-gone")
+    out.clear()
+    r._lock.acquire()                               # another stage still has the runner
+    th = threading.Thread(target=go, daemon=True)
+    th.start()
+    time.sleep(0.2)                                 # this run is starting, its file not named
+    r.stop()
+    r._lock.release()
+    th.join(10)
+    hung = th.is_alive()
+    if hung:
+        shutil.move(watch + "-gone", watch)
+        th.join(10)
+        shutil.move(watch, watch + "-gone")
+    res = out.get("res")
+    chk("a stop asked for as the run starts still stops it",
+        (hung, res.stopped if res else None), (False, True))
+    shutil.move(watch + "-gone", watch)
+    os.environ.pop("LS_WATCH", None)
+    if before_watch is not None:
+        os.environ["LS_WATCH"] = before_watch
+
+    # A wait in this process that ends with the drive back is in the result's
+    # pauses, as a supervised child's is: the run history records it.
+    os.environ["LS_WATCH"] = watch
+    shutil.move(watch, watch + "-gone")
+    threading.Timer(0.4, lambda: shutil.move(watch + "-gone", watch)).start()
+    out.clear()
+    lines.clear()
+    go()
+    res = out.get("res")
+    chk("an in-process wait that ends: the run is ok", res.ok if res else None, True)
+    chk("...and its pause is recorded",
+        [(p["folder"], p["seconds"] >= 0.2, sorted(p)) for p in res.pauses] if res else None,
+        [(watch, True, ["at", "folder", "label", "seconds"])])
+    chk("...the marker lines still reach the log",
+        [ln.split()[1] for ln in lines if ln.startswith("@@drive")], ["lost", "back"])
+    os.environ.pop("LS_WATCH", None)
+    if before_watch is not None:
+        os.environ["LS_WATCH"] = before_watch
+
+    # Ctrl+C during an in-process wait for the drive: recorded as a stop in a
+    # pause, with the pause, and marked interrupted (the command line's 130).
+    import _thread
+    os.environ["LS_WATCH"] = watch
+    shutil.move(watch, watch + "-gone")
+    t = threading.Timer(0.6, _thread.interrupt_main)
+    t.start()
+    try:
+        res = r.run(Waits(), on_line=lambda ln: None)
+    except KeyboardInterrupt:
+        res = None
+    t.join()
+    shutil.move(watch + "-gone", watch)
+    chk("Ctrl+C in an in-process wait: interrupted, stopped in a pause",
+        (res.interrupted, res.record_error(), len(res.pauses)) if res else None,
+        (True, "stopped while the drive was disconnected", 1))
+    os.environ.pop("LS_WATCH", None)
+    if before_watch is not None:
+        os.environ["LS_WATCH"] = before_watch
+
+    # In the supervised child, the supervisor's stop file is the one that counts.
+    os.environ["LS_CHILD"] = "1"
+    os.environ["LS_STOP_FILE"] = os.path.join(tmp, "supervisor.flag")
+    with open(os.path.join(scripts, "95_env.py"), "w", encoding="utf-8") as fh:
+        fh.write("import os\ndef main():\n"
+                 "    print('stopfile=' + os.environ.get('LS_STOP_FILE', ''))\n    return 0\n")
+
+    class Env:
+        sid, title, script, cli_only, argv = "env", "Env", "95_env.py", None, []
+
+    got = []
+    r.run(Env(), on_line=got.append)
+    chk("...a child run keeps the supervisor's LS_STOP_FILE",
+        got[:1], ["stopfile=" + os.path.join(tmp, "supervisor.flag")])
+    os.environ.pop("LS_CHILD", None)
+    os.environ.pop("LS_STOP_FILE", None)
+
+# The study's folders reach ls_drive as LS_WATCH for the length of a run, in
+# this process and in a supervised child, so a drive that drops with study.json
+# on it is still seen to have dropped (the config cannot be read mid-drop).
+with tempfile.TemporaryDirectory() as tmp:
+    src, out_root = os.path.join(tmp, "slides"), os.path.join(tmp, "out")
+    os.makedirs(src)
+    os.makedirs(out_root)
+    cfg_path = os.path.join(out_root, "study.json")
+    with open(cfg_path, "w", encoding="utf-8") as fh:
+        json.dump({"source_dir": src, "out_root": out_root}, fh)
+    scripts = os.path.join(tmp, "scripts")
+    os.makedirs(scripts)
+    with open(os.path.join(scripts, "94_watch.py"), "w", encoding="utf-8") as fh:
+        fh.write("import os\ndef main():\n"
+                 "    print('watch=' + os.environ.get('LS_WATCH', ''))\n    return 0\n")
+
+    class Watch:
+        sid, title, script, cli_only, argv = "watch", "Watch", "94_watch.py", None, []
+
+    before_watch = os.environ.pop("LS_WATCH", None)
+    r = R.Runner(scripts, cfg_path)
+    got = []
+    r.run(Watch(), on_line=got.append)
+    chk("an in-process run sees the study's folders as LS_WATCH",
+        got[:1], ["watch=" + os.pathsep.join([src, out_root])])
+    chk("...and LS_WATCH is put back after it", os.environ.get("LS_WATCH"), None)
+
+    seen = {}
+    real_run_child = R.SV.run_child
+
+    def fake_run_child(argv, on_line, stop_file, **kw):
+        seen["watch"] = os.environ.get("LS_WATCH")
+        seen["env"] = dict(kw.get("env") or {})
+        return 0, [], ""
+    R.SV.run_child = fake_run_child
+
+    class Reader:
+        sid, title, script, cli_only, argv = "watch", "Watch", "94_watch.py", None, []
+        reader = "pylibCZIrw"
+    try:
+        r.run(Reader())
+    finally:
+        R.SV.run_child = real_run_child
+    chk("a supervised run's parent watches the study's folders",
+        seen.get("watch"), os.pathsep.join([src, out_root]))
+    chk("...and LS_WATCH is put back after it", os.environ.get("LS_WATCH"), None)
+
+    os.environ["LS_WATCH"] = os.path.join(tmp, "mine")
+    got = []
+    r.run(Watch(), on_line=got.append)
+    chk("an LS_WATCH already set is left as it is",
+        (got[:1], os.environ.get("LS_WATCH")),
+        (["watch=" + os.path.join(tmp, "mine")], os.path.join(tmp, "mine")))
+    os.environ.pop("LS_WATCH", None)
+    if before_watch is not None:
+        os.environ["LS_WATCH"] = before_watch
+
 print()
 print("ALL PASS" if not failures else f"{len(failures)} FAILED")
 sys.exit(1 if failures else 0)

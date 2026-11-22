@@ -754,13 +754,13 @@ The full table, generated from the code:
 | `reformat_perk_final` | 04a Reformat pERK - masked and censored | Normalisation and curation | `04a_reformat.py` | artifact_perk, censor_perk | `index {marker0}`, `sections {marker0}` | none |  | yes |
 | `sections_dataset` | 04m Every pERK section and its fate | Normalisation and curation | `04m_sections_dataset.py` | reformat_perk_final | `sections_dataset {marker0}` | none |  | yes |
 | `worklist` | 04n Order the ROI queue | Normalisation and curation | `04n_roi_worklist.py` | reformat_perk_final, sections_dataset | `reformatted/roi_worklist.csv` | none |  | yes |
-| `rgb_perk` | 04o Colour composites - pERK | Normalisation and curation | `04o_section_rgb.py` | reformat_perk_final | `sections_rgb {marker0}`, `sections_rgb_thumb {marker0}` | none |  | yes |
-| `rgb_pcna` | 04o Colour composites - PCNA | Normalisation and curation | `04o_section_rgb.py` | reformat_pcna_final | `sections_rgb {marker1}`, `sections_rgb_thumb {marker1}` | none |  | yes |
+| `rgb_perk` | 04o Colour composites - pERK | Normalisation and curation | `04o_section_rgb.py` | reformat_perk_final | `sections_rgb {marker0}`, `sections_rgb_thumb {marker0}` | pylibCZIrw |  | yes |
+| `rgb_pcna` | 04o Colour composites - PCNA | Normalisation and curation | `04o_section_rgb.py` | reformat_pcna_final | `sections_rgb {marker1}`, `sections_rgb_thumb {marker1}` | pylibCZIrw |  | yes |
 | `provenance` | 04p Trace every scanned section | Normalisation and curation | `04p_section_provenance.py` | reformat_pcna_final, reformat_perk_final | `reformatted/section_provenance.csv`, `tissue` | none |  | yes |
 | `roi_curator` | 04l ROI curator | Normalisation and curation | `04l_roi_curator.py` | worklist, rgb_perk, rgb_pcna, atlas_rebuild | `reformatted/roi_curator.html` | none | person | yes |
 | `import_curation` | 04q Import the curator's exports | Normalisation and curation | `04q_import_curation.py` | roi_curator | `curation/ls_roi_curator_v1.json` | none |  | yes |
 | `level_curator` | 04k Level curator (superseded) | Normalisation and curation | `04k_level_curator.py` | reformat_pcna_final, atlas_extract | `reformatted/level_curator.html` | none | person | yes |
-| `roi_geometry_verify` | 05a Verify the inverse transform | Quantification | `05a_roi_geometry.py` | reformat_perk_final | none | none |  | yes |
+| `roi_geometry_verify` | 05a Verify the inverse transform | Quantification | `05a_roi_geometry.py` | reformat_perk_final | none | pylibCZIrw |  | yes |
 | `roi_geometry` | 05a Place the ROIs on the slide | Quantification | `05a_roi_geometry.py` | roi_curator | `roi_geometry {marker0}`, `roi_boxes {marker0}` | none |  | yes |
 | `tune_detection` | 05b Check signal quality and tune detection | Quantification | `05b_tune_detection.py` | roi_geometry | `qc/detection_tuning.md` | pylibCZIrw |  | yes |
 | `detect` | 05c Detect and measure nuclei | Quantification | `05c_detect_rois.py` | roi_geometry, tune_detection | `results/roi_nuclei.csv` | pylibCZIrw |  | from source only (needs StarDist) |
@@ -814,7 +814,13 @@ death by a signal, while a watched folder is unreachable means the supervisor wa
 starts the stage again with the same argv, and its resumability skips what is done; a child that keeps dying without printing anything is restarted at most 5 times in a row. With the drive there, that death is an
 ordinary failure. `Runner.stop()` creates the stop file (`LS_STOP_FILE`) and ends the child; a stop
 during a pause is recorded as a failed run, "stopped while the drive was disconnected", with its pauses.
-Inside the child (`LS_CHILD=1`) the stage runs in-process as above.
+Inside the child (`LS_CHILD=1`) the stage runs in-process as above. A stage run in the app's own process
+can wait for the drive too (an `ls_io` write on `out_root`); its `@@drive` lines are read by the same
+parser, so its waits are recorded as `pauses` the same way. For every run the runner sets `LS_WATCH` to the
+study's `source_dir` and `out_root` (unless it is already set), because the study file usually lives in
+`out_root` and cannot be read while the drive is gone; `ls_drive` also remembers the folders a study file
+named and keeps using them while it cannot be read. Ctrl+C during a wait for the drive is recorded as
+"stopped while the drive was disconnected", with exit status 130.
 
 Stages read the study file **at import** into module-level constants. The runner therefore hashes the
 study file (without its `project` and `curation` blocks, which change on every run and every curation
@@ -834,6 +840,22 @@ runs each stage with the options saved in the study, adds Redo when a stage is o
 each run in the study file. It stops at the first failure and at any hold the window would stop at (the
 weak-signal check before detection). It exits 0 when every planned stage ran, 1 when one failed or a
 hold stopped it, and 2 for an unknown screen or a missing study file. Unblinding is never on the plan.
+
+`python -m app --stage <id> <study.json> [--opt key=value]... [--force] [--unblind]` runs one stage as
+the window's Run button does: the study's saved options, Redo when the stage is out of date, the run
+recorded. It refuses (exit 2, nothing run or recorded) a stage whose needs are not done (the window's
+reason), unless `--force`; `--force` overrides only that. A stage the study does not use, one the app does
+not run, a curator page (its path is printed instead) and an unblinding without `--unblind` are refused
+regardless.
+`--list <study.json>` prints id, group, title and state. Exit status: 0 ran, 1 failed or stopped, 2
+refused, 130 Ctrl+C. On a terminal a drive loss prints one line naming the folder and the step, and one
+when it is back; the marker lines are hidden. The Windows bundle's `ihc.cmd` is
+`runtime\python.exe -m app %*`, the console interpreter, so the output and the exit status reach the
+prompt; the installer can put the install folder on the user's Path (task *Add the ihc command to
+PATH*). An install updated in-app never ran the installer, so `update_apply.ensure_console_launcher`
+writes `ihc.cmd` at start-up (installed Windows copy only; atomic; an unwritable folder is logged and
+ignored). The Mac app has no launcher of its own; it is run as
+`<app>/Contents/Resources/runtime/bin/python3 -m app` from `Contents/Resources`.
 
 ### 5.5 The study file and settings
 
@@ -878,7 +900,10 @@ sets, overrides, ROI geometry, results tables and workbooks) are written to `<pa
 and swapped in with `os.replace`, which is atomic on Windows and POSIX when both are on one drive (`ls_io.py` for CSVs and
 text, `ls_jsonio.py` for JSON). `ls_io` makes five attempts with about 15 seconds of waiting between them (1, 2, 4 and 8 s), because the
 operator's USB drive has been seen to vanish for seconds at a time; after that the error is raised, not
-swallowed. Some older writers still open their file directly: `00c`, `01b`, `01e`, `01g`, `04a3b`,
+swallowed, unless a watched folder is gone: then it waits for the drive with no time limit (`ls_drive.py`;
+Stop or Ctrl+C ends the wait), and a wait does not use up an attempt. 05c's tables, which it appends to,
+are opened, written, fsynced and closed again for each section through the same wait, and the run record
+in the study file waits for the folder the file is in. Some older writers still open their file directly: `00c`, `01b`, `01e`, `01g`, `04a3b`,
 `04a_atlas_extract`, `04a_reformat`'s lost-sections list, `05b`, `04k`, `04l`, `04q` and `04x`; 05c appends
 to its tables rather than replacing them.
 `tests/test_atomic_stage_writes.py` checks that a failure at the swap leaves the previous manifest,

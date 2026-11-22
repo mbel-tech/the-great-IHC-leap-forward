@@ -12,6 +12,24 @@ run it, and start **The Great IHC Leap Forward** from the Start menu. Installing
 one over it upgrades in place. Studies and settings live in
 `%USERPROFILE%\.ls-pipeline` and survive upgrades and uninstalling.
 
+## The ihc command
+
+The install folder holds `ihc.cmd`, which runs the app without its window and
+keeps the console, so output and exit status reach the prompt:
+
+    ihc --list D:\LS-analysis\study.json
+    ihc --stage overviews D:\LS-analysis\study.json --opt limit=3
+
+Exit status: 0 ran, 1 failed or stopped, 2 refused, 130 Ctrl+C. It is
+`runtime\python.exe -m app %*`. The installer has an unticked task, **Add the
+ihc command to PATH**, which appends the install folder to the user's own `Path`
+(no administrator rights, no duplicates) and takes it out again on uninstall;
+open a new terminal after installing. Without it, run `ihc.cmd` by its full
+path, or add the install folder to your Path by hand. A copy updated from
+inside the app has no installer run behind it: the app writes `ihc.cmd` on its
+next start, but putting it on PATH needs the installer task or the manual step. If a slides or output drive drops, a step waits and carries on by itself
+when it is back (Ctrl+C stops it).
+
 ## Updates from inside the app
 
 An installed copy checks GitHub for a newer release each time it starts (quietly;
@@ -76,6 +94,7 @@ artifact without releasing.
 |---|---|
 | `runtime\` | python.org embeddable Python 3.13 and its `site-packages` |
 | `app\`, `scripts\`, `analysis\` | the repository, unchanged |
+| `ihc.cmd`, `The Great IHC Leap Forward.cmd` | the console and window launchers |
 | `R\` | R and ggplot2, ggtext, lmerTest, emmeans, multcomp, officer, readxl |
 | `keras\` | StarDist `2D_versatile_fluo`, so the first Measure run needs no network |
 

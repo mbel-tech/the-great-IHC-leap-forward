@@ -496,7 +496,15 @@ class Opt:
         """The value as this option's type, or ValueError."""
         if self.kind == "bool":
             if isinstance(value, str):
-                return value.strip().lower() in ("1", "true", "yes", "on")
+                word = value.strip().lower()
+                if word in ("1", "true", "yes", "on"):
+                    return True
+                if word in ("", "0", "false", "no", "off"):
+                    return False
+                # A typo such as "ture" used to read as off, silently: a
+                # --opt force=ture on the command line ran without the redo
+                # it asked for.
+                raise ValueError(f"{self.label}: say true or false, not {value!r}")
             return bool(value)
         if value is None or value == "":
             return None
@@ -1401,32 +1409,54 @@ def run_plan(screen_sid, study, include_curator_pages=True):
         if (st.done(study.out_root, study.names) and not outdated(st, study)
                 and not incomplete(st, study)):
             continue
-        waits = None
-        for need in st.needs:
-            n = S.BY_ID.get(need)
-            if n is None:
-                continue
-            if need in held:
-                waits = held[need]
-                break
-            n_ok, _ = applies(n, study)
-            if not n_ok:
-                continue
-            if n.operator and not decided(need, study):
-                waits = need
-                break
-            # An out-of-date need this plan does not run (05c where StarDist is
-            # missing) holds what is made from it, as a missing one does.
-            if need not in planned and (not n.done(study.out_root, study.names)
-                                        or outdated(n, study) or incomplete(n, study)):
-                waits = need
-                break
+        waits = waits_for(st, study, planned, held)
         if waits:
             held[st.sid] = waits
             continue
         plan.append(st.sid)
         planned.add(st.sid)
     return plan, held
+
+
+def waits_for(st, study, planned=(), held=None):
+    """The stage id `st` waits for, or None: run_plan's hold, for one stage.
+
+    A need waits when it is a curator whose decisions are not exported yet, or
+    when it is not done, out of date or only partly done and not `planned`
+    ahead of `st`. A need held itself (`held`, run_plan's {id: what it waits
+    for}) passes its wait on. Needs this study does not use never hold.
+    """
+    held = held or {}
+    for need in st.needs:
+        n = S.BY_ID.get(need)
+        if n is None:
+            continue
+        if need in held:
+            return held[need]
+        n_ok, _ = applies(n, study)
+        if not n_ok:
+            continue
+        if n.operator and not decided(need, study):
+            return need
+        # An out-of-date need this plan does not run (05c where StarDist is
+        # missing) holds what is made from it, as a missing one does.
+        if need not in planned and (not n.done(study.out_root, study.names)
+                                    or outdated(n, study) or incomplete(n, study)):
+            return need
+    return None
+
+
+def waiting_words(need, study):
+    """What a held stage says it is waiting on: your export, or a stage to finish."""
+    n = S.BY_ID.get(need)
+    if n is not None and n.operator:
+        if need == "roi_curator":
+            return "Waiting for your ROI export"
+        return f"Waiting for your export from {display_title(n, study)}"
+    if need == "detect":
+        return "Needs detection to finish first"
+    return (f"Needs {display_title(n, study)} to finish first" if n is not None
+            else "Waiting for an earlier stage")
 
 
 def progress(screen_sid, study):

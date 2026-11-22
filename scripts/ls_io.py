@@ -9,9 +9,12 @@ beside the target and `os.replace` swaps them in as one step.
 The retry came from 01k_saturation_raw.py. The D: volume does not merely drop
 writes - it goes away: a dropout on 2026-09-01 killed 01k and 01g within nine
 minutes of each other, both with `FileNotFoundError` on a path that exists,
-which is what a vanished volume looks like from inside `open()`. Five attempts
-over ~31 s; if the drive is still gone after that it is not a blip, and the
-exception propagates rather than being swallowed.
+which is what a vanished volume looks like from inside `open()`. A failure
+while a watched folder (ls_drive) is gone is the drive, not a blip: `retry`
+waits for it with no time limit and tries again, and that wait does not use
+up an attempt. Any other failure gets five attempts, about 15 s of backing
+off between them (1, 2, 4, 8 s); after that the exception propagates rather
+than being swallowed.
 
 Imported by path, like every other cross-script import here:
 

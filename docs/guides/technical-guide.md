@@ -2876,8 +2876,9 @@ two); after any refusal the panel reads the check again, so the next click asks 
 Otherwise it sets
 `positivity.cut_k[marker]` to the suggested k and `positivity.cut_k_source[marker]` to
 `{"by": "controls", "check": <sha256 of the csv>, "at": <time>}`, the decision recorded as by
-`cut check`. Once any of 06b's outputs (`results/roi_dataset.csv`, `results/animal_metadata.csv`) exists
-the study is unblinded, and it refuses unless the operator types `apply after unblinding`; a k applied
+`cut check`. Once any of 06b's outputs (`results/roi_dataset.csv`, `results/animal_metadata.csv`) exists,
+or the project's `groups.by_animal` is non-empty (06c's treatment column, `resolve_groups`, already shows
+the groups then; only its emptiness is checked, never a label), the study is unblinded, and it refuses unless the operator types `apply after unblinding`; a k applied
 that way adds `"after_unblinding": true` to the record, and 06c's "Reagent controls" sheet says so. Every refusal
 comes before anything is written. The change puts 06a and the results out of date (they track
 `positivity.cut_k`), never detection.
@@ -4715,7 +4716,7 @@ Each measured reagent control's own cut (per section and marker, at full precisi
 
 #### `results/reagent_cut_check.csv`
 
-The k check, provisional until validated on a study with known controls: the positivity cut's multiplier k tested against the no-primary reagent controls, per marker and k on the grid 2.0-5.0. Each control's ROI nuclei are counted against its own cut at k (median + k x 1.4826 x MAD of its own background-disc nuclei), beside the stained sections' leave-one-disc-out rate at the same k. isotype, preadsorbed and unstained controls are not used. Written only when a no_primary control is measured; otherwise a previous file is removed. It never changes positivity.cut_k: a suggested k is applied only by the operator, with the Results page's "Use the suggested multiplier" button (app/cut_apply.py), which records the file's sha256 in positivity.cut_k_source and asks for a typed confirmation once 06b has unblinded the study. 06c adds it to the "Reagent controls" sheet as a provisional "Cut check" block.
+The k check, provisional until validated on a study with known controls: the positivity cut's multiplier k tested against the no-primary reagent controls, per marker and k on the grid 2.0-5.0. Each control's ROI nuclei are counted against its own cut at k (median + k x 1.4826 x MAD of its own background-disc nuclei), beside the stained sections' leave-one-disc-out rate at the same k. isotype, preadsorbed and unstained controls are not used. Written only when a no_primary control is measured; otherwise a previous file is removed. It never changes positivity.cut_k: a suggested k is applied only by the operator, with the Results page's "Use the suggested multiplier" button (app/cut_apply.py), which records the file's sha256 in positivity.cut_k_source and asks for a typed confirmation once the study is unblinded (06b has run, or groups.by_animal is filled). 06c adds it to the "Reagent controls" sheet as a provisional "Cut check" block.
 
 - **Written by:** 06a_roi_dataset.py
 - **Read by:** 06c_excel_dataset.py, the app

@@ -16,7 +16,9 @@ the operator never saw is never applied.
 
 **The blinding guard.** A multiplier that is applied must be fixed before
 unblinding. Once 06b has written its join (any of its outputs is under
-out_root), apply refuses unless the operator types CONFIRM_TEXT, so a cut
+out_root), or once the project's groups.by_animal is filled (06c then shows
+the groups whether or not 06b has run), apply refuses unless the operator
+types CONFIRM_TEXT, so a cut
 moved after the groups are known is a deliberate, typed act, and stays on the
 record: cut_k_source[marker] then also carries "after_unblinding": true, which
 06c states on the "Reagent controls" sheet.
@@ -33,7 +35,7 @@ import ls_project as LP
 import ls_reagent_report as RR
 import stages as S
 
-#: What the operator types to apply a multiplier after 06b has run.
+#: What the operator types to apply a multiplier once the study is unblinded.
 CONFIRM_TEXT = "apply after unblinding"
 #: The decision record's `by` (ls_project.Project.set).
 BY = "cut check"
@@ -47,8 +49,14 @@ def check_path(out_root):
     return os.path.join(out_root or "", "results", RR.CUT_CHECK_CSV)
 
 
-def unblinded(out_root):
-    """Whether 06b (join_sampling), the unblinding join, has written anything."""
+def unblinded(out_root, project=None):
+    """Whether the groups are known: 06b (join_sampling), the unblinding join,
+    has written anything, or `project`'s groups.by_animal is filled."""
+    # Emptiness only: no label or group is read, iterated or logged. A filled
+    # by_animal is enough because 06c's treatment column (resolve_groups)
+    # shows the groups from it even before 06b has run.
+    if project is not None and bool(project.get("groups.by_animal")):
+        return True
     if not out_root:
         return False
     return any(os.path.exists(os.path.join(out_root, *p.split("/")))
@@ -144,9 +152,10 @@ def apply_suggested_k(project, out_root, marker, confirm_text=None, *, shown_k, 
         return False, why
     if shown_k is None or k != float(shown_k):
         return False, CHANGED
-    after = unblinded(out_root)
+    after = unblinded(out_root, project)
     if after and (confirm_text or "").strip() != CONFIRM_TEXT:
-        return False, ("this study is already unblinded (06b has joined the groups). "
+        return False, ("this study is already unblinded (06b has joined the groups, "
+                       "or groups.by_animal is filled). "
                        "A multiplier should be fixed before unblinding; to apply it "
                        f"anyway, type \"{CONFIRM_TEXT}\"")
     table = project.get("positivity.cut_k")

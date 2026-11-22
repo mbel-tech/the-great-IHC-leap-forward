@@ -1787,7 +1787,7 @@ measured: an animal's nuclei summed over its discs, over the area those discs co
 **With reagent controls, more sheets (all provisional where they say so).** A *Reagent controls*
 sheet carries 06a's report and, below it, the k check as a *Cut check* block. Its header states the k
 06a formed the cuts at, says when `positivity.cut_k` has changed since ("rebuild results"), and says
-when a k was applied after unblinding. A *corrected_rate* sheet shows 06a's corrected rate beside the
+when a k was applied after unblinding (once 06b had run or `groups.by_animal` was filled). A *corrected_rate* sheet shows 06a's corrected rate beside the
 raw one, per section, marker and region, never pooled to the animal. After 06k, an *af_flag* sheet
 shows per animal, marker and region the positive rate without the flagged nuclei beside the raw rate.
 Each of these is blank, with a note, where its number cannot be given, never 0.

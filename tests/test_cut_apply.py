@@ -325,6 +325,70 @@ chk("a second click asks about the k now shown, 4",
 chk("...and applies it", (project.get("positivity.cut_k") or {}).get("pERK"), 4.0)
 
 
+# ================================== groups.by_animal filled counts as unblinded
+# (operator ruling 2026-11-22). 06c's treatment column shows the groups as soon
+# as groups.by_animal is filled, whether or not 06b has run. The labels below
+# are placeholders and are never printed: only bools are compared.
+print("--- a filled groups.by_animal is unblinded too, without 06b ---")
+ROOT_G = out_root("o_groups")
+chk("(no 06b output under this root)", CA.unblinded(ROOT_G), False)
+project = LP.Project.open(STUDY.path)
+project.set("groups.by_animal", {"X1": "gA", "X2": "gB"}, by="test", record=False)
+chk("unblinded() with the project: a filled by_animal counts",
+    CA.unblinded(ROOT_G, project), True)
+before = (project.get("positivity.cut_k"), project.get("positivity.cut_k_source"),
+          len(project.block.get("decisions", [])))
+ok, msg = apply(project, ROOT_G, "pERK")
+chk("by_animal filled, no 06b: the plain apply is refused", ok, False)
+chk("...says the study is unblinded and what to type",
+    "unblind" in msg and CA.CONFIRM_TEXT in msg, True)
+chk("...config unchanged", (project.get("positivity.cut_k"),
+                            project.get("positivity.cut_k_source"),
+                            len(project.block.get("decisions", []))), before)
+ok, _ = apply(project, ROOT_G, "pERK", CA.CONFIRM_TEXT)
+chk("...the typed text applies it", ok, True)
+chk("...and the provenance says after unblinding",
+    ((project.get("positivity.cut_k_source") or {}).get("pERK") or {}).get("after_unblinding"),
+    True)
+
+for label, prep in (("empty", lambda p: p.set("groups.by_animal", {}, record=False)),
+                    ("absent", lambda p: p.unset("groups.by_animal", record=False)),
+                    ("no groups block", lambda p: p.unset("groups", record=False))):
+    project = LP.Project.open(STUDY.path)
+    prep(project)
+    chk(f"by_animal {label}, no 06b: not unblinded", CA.unblinded(ROOT_G, project), False)
+    ok, _ = apply(project, ROOT_G, "pERK")
+    chk("...the plain apply works", ok, True)
+    chk("...and is not marked after unblinding",
+        "after_unblinding" in ((project.get("positivity.cut_k_source") or {}).get("pERK") or {}),
+        False)
+
+print("--- the page asks for the typed text when by_animal is filled ---")
+project = LP.Project.open(STUDY.path)
+project.set("groups.by_animal", {"X1": "gA"}, by="test", record=False)
+ROOT_GP = out_root("o_groups_page")
+results.show_cut_check(ROOT_GP, project)
+asked.clear()
+typed.clear()
+results.cut_btn.click()
+chk("by_animal filled, no 06b: the operator types the confirmation", len(typed), 1)
+chk("...no plain Yes/No question", len(asked), 0)
+chk("...the prompt says the study is unblinded", bool(typed) and "unblind" in typed[0], True)
+chk("...the typed text applies it, recorded as after unblinding",
+    ((project.get("positivity.cut_k") or {}).get("pERK"),
+     ((project.get("positivity.cut_k_source") or {}).get("pERK") or {}).get("after_unblinding")),
+    (3.5, True))
+project = LP.Project.open(STUDY.path)
+project.set("groups.by_animal", {}, record=False)
+results.show_cut_check(out_root("o_groups_page_empty"), project)
+asked.clear()
+typed.clear()
+results.cut_btn.click()
+chk("by_animal empty, no 06b: the plain question, nothing typed", (len(asked), len(typed)),
+    (1, 0))
+chk("...and applies", (project.get("positivity.cut_k") or {}).get("pERK"), 3.5)
+
+
 def teardown():
     """Take every Qt object down while the application still exists."""
     for w in QApplication.topLevelWidgets():

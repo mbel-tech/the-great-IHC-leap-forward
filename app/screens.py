@@ -416,10 +416,11 @@ class StageListScreen(QWidget):
             return False
         k, now = view["ks"][marker], view["now"].get(marker)
         confirm = None
-        if CA.unblinded(self._cut_root):
+        if CA.unblinded(self._cut_root, self._project):
             text, ok = QInputDialog.getText(
                 self, "Already unblinded",
-                "This study is already unblinded: 06b has joined the groups. A cut "
+                "This study is already unblinded: the groups are assigned (06b has "
+                "joined them, or groups.by_animal is filled). A cut "
                 "multiplier should be fixed before unblinding, and changing it now is "
                 f"recorded as such.\n\nFor {marker}: suggested k {k:g}, k in force now "
                 f"is {now:g}. To apply the suggested k anyway, type: {CA.CONFIRM_TEXT}")

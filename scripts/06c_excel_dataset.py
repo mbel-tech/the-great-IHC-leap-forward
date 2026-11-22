@@ -298,11 +298,12 @@ def _k_changed_lines(markers):
 
 def _after_unblinding_lines():
     """One line per marker whose k was applied through the typed confirmation
-    after 06b (positivity.cut_k_source[marker]["after_unblinding"], set by
-    app/cut_apply.py), for the "Reagent controls" sheet's header."""
+    after unblinding - 06b had run or groups.by_animal was filled
+    (positivity.cut_k_source[marker]["after_unblinding"], set by
+    app/cut_apply.py) - for the "Reagent controls" sheet's header."""
     src = (CONFIG.get("positivity") or {}).get("cut_k_source")
     src = src if isinstance(src, dict) else {}
-    return [f"k for {m} was changed after unblinding (06b had joined the groups when the "
+    return [f"k for {m} was changed after unblinding (groups were assigned when the "
             f"reagent k check's suggestion was applied)."
             for m in sorted(src) if isinstance(src[m], dict) and src[m].get("after_unblinding")]
 

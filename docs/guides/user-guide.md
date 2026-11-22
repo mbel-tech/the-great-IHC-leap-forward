@@ -604,7 +604,7 @@ With a no-primary reagent control measured, 06a tests the positivity cut's multi
 
 The Results screen shows a **Reagent k check (provisional)** panel: each marker's suggested k against the k in force. **Use the suggested multiplier…** applies the chosen marker's suggestion, after asking. The question names the suggested k and the k in force. Nothing changes the multiplier by itself; the button is the only way. It is greyed out, with the reason, when no marker has a suggestion that differs from the one in force. Applying it puts the dataset (06a) and the results out of date, so build the results again.
 
-- **Set the multiplier before you unblind (06b).** A cut moved once the groups are known could follow them. Once 06b has run, the button asks you to type `apply after unblinding` before it changes anything, and the change is recorded as made after unblinding (`positivity.cut_k_source`; the **Reagent controls** sheet then says "k for <marker> was changed after unblinding").
+- **Set the multiplier before you unblind (06b, or filling in the groups).** A cut moved once the groups are known could follow them. Once 06b has run, or once the groups are filled in (`groups.by_animal`, which the dataset workbook's treatment column already shows), the button asks you to type `apply after unblinding` before it changes anything, and the change is recorded as made after unblinding (`positivity.cut_k_source`; the **Reagent controls** sheet then says "k for <marker> was changed after unblinding").
 - **If the check has changed since the page was shown** (the hourly refresh rebuilds it), the button refuses with *the cut check changed since it was shown - reopen the page*, and nothing is changed. The panel then reads the check again and shows its new suggestion; look at it before you press the button again.
 - **The Reagent controls sheet states the k 06a used.** If the multiplier has changed since, it says "k for <marker> changed since 06a ran ... - rebuild results".
 
@@ -612,7 +612,7 @@ The Results screen shows a **Reagent k check (provisional)** panel: each marker'
 
 - **The sampling workbook.** Unless you choose another in the Unblind box, 06b looks for `large scale exp sampling data.xlsx` in the slides folder. Its header must match what the stage expects; if it does not, the stage names the mismatched columns.
 - **Check measurement is finished**, or decide consciously to look at a partial result. The spreadsheets can be rebuilt at any time, including while detection runs.
-- **Settle the positivity multiplier** if the study has no-primary reagent controls (see *Choosing the multiplier from the reagent controls*, above): apply the suggestion, or decide not to, before 06b.
+- **Settle the positivity multiplier** if the study has no-primary reagent controls (see *Choosing the multiplier from the reagent controls*, above): apply the suggestion, or decide not to, before 06b and before the groups are filled in.
 - **Look at the coverage sheet** in `roi_dataset.xlsx`. Some animals may have few measurable sections because of saturation; note this before comparing groups.
 
 ### The figures

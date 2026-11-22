@@ -900,7 +900,8 @@ note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
              "marker: {<marker>: {by: operator | controls, at, check}}. `check` "
              "is the sha256 of the results/reagent_cut_check.csv a suggestion "
              "was taken from; `after_unblinding: true` when it was applied "
-             "through the typed confirmation after 06b. A record the app "
+             "through the typed confirmation once the study was unblinded "
+             "(06b had run, or groups.by_animal was filled). A record the app "
              "writes; 06c states every marker applied after unblinding on the "
              "Reagent controls sheet.",
         consumers=["06c", "app"]),

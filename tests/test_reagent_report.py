@@ -427,10 +427,12 @@ chk("stained_positive_per_mm2 over the paired sections, by the same factor",
     (p9["stained_positive_per_mm2_min"], p9["stained_positive_per_mm2_max"]),
     (str(round(2 * AB / 3.141592653589793, 1)),) * 2)
 rcc = read(os.path.join(tmp, "reagent_control_cuts.csv"))
-chk("reagent_control_cuts.csv: each control's own cut, positivity_cuts' columns",
+chk("reagent_control_cuts.csv: each control's own cut, positivity_cuts' columns and k",
     (pairs(rcc), list(rcc[0])),
     ([("LS45_s09_sc01", "pERK"), ("RC1_s01_sc01", "PCNA"), ("RC1_s01_sc01", "pERK")],
-     G6A.CUTS_COLUMNS))
+     G6A.CUTS_COLUMNS + ["k"]))
+chk("...k is the multiplier 06a formed each cut at",
+    sorted({(r["marker"], r.get("k")) for r in rcc}), [("PCNA", "3.0"), ("pERK", "3.0")])
 chk("...at full precision (repr)", float([r for r in rcc if r["scene_uid"] == "LS45_s09_sc01"]
                                         [0]["cut"]), 100.0)
 
@@ -579,6 +581,32 @@ chk("coverage holds no control-only animal",
 chk("coverage counts the partial control only for its stained marker",
     sorted((r[0], r[1], r[5]) for r in list(wb["coverage"].iter_rows(values_only=True))[1:]),
     [("LS45", "PCNA", 2), ("LS45", "pERK", 2)])
+print("--- the sheet states the k 06a used ---")
+chk("the header states 06a's k", "here PCNA 3.0, pERK 3.0" in head, True)
+chk("...and no change note while the config agrees", "changed since 06a ran" in head, False)
+pos = G6C.CONFIG.setdefault("positivity", {})
+saved_k = pos.get("cut_k")
+pos["cut_k"] = {"*": 3.0, "pERK": 4.0}          # changed after 06a ran
+G6C.NUCLEI_CSV, G6C.MEAS_CSV = npath, os.path.join(tmp, "roi_measurements.csv")
+G6C.G5.all_boxes = lambda: G6C.G5.load_csv(bpath)
+xlsx_k = os.path.join(tmp, "k_changed.xlsx")
+try:
+    with contextlib.redirect_stdout(io.StringIO()):
+        G6C.main(["--out", xlsx_k])
+finally:
+    G6C.NUCLEI_CSV, G6C.MEAS_CSV, G6C.G5.all_boxes = saved
+    if saved_k is None:
+        pos.pop("cut_k", None)
+    else:
+        pos["cut_k"] = saved_k
+cells_k = list(openpyxl.load_workbook(xlsx_k)["Reagent controls"].iter_rows(values_only=True))
+head_k = " ".join(str(row[0]) for row in cells_k if row and row[0]
+                  and not str(row[0]).startswith("scene_uid"))
+chk("cut_k changed after 06a: the header still states the k 06a used",
+    "here PCNA 3.0, pERK 3.0" in head_k, True)
+chk("...with a note that the k changed since 06a ran",
+    "k for pERK changed since 06a ran" in head_k and "rebuild results" in head_k, True)
+chk("...for the changed marker only", "k for PCNA changed" in head_k, False)
 print("--- 06d coverage ---")
 G6D = load_stage("06d_excel_by_slide.py", name="lsstage_06d_rr")
 saved_d = (G6D.G6C.MEAS_CSV, G6D.G5.all_boxes)

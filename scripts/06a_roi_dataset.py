@@ -121,6 +121,10 @@ SPEC_CSV = os.path.join(RESULTS, "detector_specificity.csv")
 #: the table they always have.
 CUTS_CSV = os.path.join(RESULTS, "positivity_cuts.csv")
 CUTS_COLUMNS = ["scene_uid", "marker", "cut"]
+#: reagent_control_cuts.csv: a control's own cut and the k it was formed at
+#: (positivity.cut_k for the marker when 06a ran), so 06c states the k the
+#: report was made with, not one set since. positivity_cuts.csv is unchanged.
+RC_CUTS_COLUMNS = CUTS_COLUMNS + ["k"]
 #: The same, for reagent-control sections (their own cut), which never enter
 #: positivity_cuts.csv. 06i reads both.
 RC_CUTS_CSV = os.path.join(RESULTS, "reagent_control_cuts.csv")
@@ -1207,8 +1211,9 @@ def main(argv=None):
     rc_cuts_csv = os.path.join(os.path.dirname(MEAS_CSV), os.path.basename(RC_CUTS_CSV))
     for path, data, cols in ((rc_csv, rc_rows, RR.COLUMNS),
                              (rc_cuts_csv,
-                              [{"scene_uid": u, "marker": m, "cut": repr(c)}
-                               for (u, m), c in sorted(rc_cuts.items())], CUTS_COLUMNS),
+                              [{"scene_uid": u, "marker": m, "cut": repr(c),
+                                "k": repr(float(LO.cut_k(CONFIG, m)))}
+                               for (u, m), c in sorted(rc_cuts.items())], RC_CUTS_COLUMNS),
                              (kc_csv, kc_rows, RR.CUT_CHECK_COLUMNS),
                              (corr_csv, corr_rows, RR.ROI_CORRECTED_COLUMNS)):
         if data:

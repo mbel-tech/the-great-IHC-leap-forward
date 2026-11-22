@@ -6351,12 +6351,13 @@
     "reagent_control_cuts.csv"
    ],
    "writer": "06a_roi_dataset.py",
-   "what": "Each measured reagent control's own cut (per section and marker, at full precision), from its own background discs by the same rule. Kept apart from positivity_cuts.csv, which lists stained sections only; 06i reads both so a control is drawn by its own cut. Removed when no control is measured.",
+   "what": "Each measured reagent control's own cut (per section and marker, at full precision), from its own background discs by the same rule, with the k it was formed at. Kept apart from positivity_cuts.csv, which lists stained sections only; 06i reads both so a control is drawn by its own cut. 06c states the k 06a used on the Reagent controls sheet, and says when positivity.cut_k has changed since. Removed when no control is measured.",
    "readers": [
+    "06c_excel_dataset.py",
     "06i_detection_overlays.py",
     "06k_af_score.py"
    ],
-   "columns_from": "06a_roi_dataset.py:CUTS_COLUMNS",
+   "columns_from": "06a_roi_dataset.py:RC_CUTS_COLUMNS",
    "columns": [
     {
      "name": "scene_uid",
@@ -6375,6 +6376,12 @@
      "type": "float",
      "units": "grey value",
      "meaning": "The cut, as Python's repr of the float."
+    },
+    {
+     "name": "k",
+     "type": "float",
+     "units": "",
+     "meaning": "The multiplier the cut was formed at (median + k x 1.4826 x MAD): positivity.cut_k for the marker when 06a ran, as Python's repr of the float. 06c states it on the Reagent controls sheet and says when the config's k is not this one."
     }
    ]
   },

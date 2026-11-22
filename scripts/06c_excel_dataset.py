@@ -259,11 +259,41 @@ def _cell(v):
     return float(v) if "." in v else int(v)
 
 
+def _ks_06a():
+    """{marker: the k 06a formed the reagent controls' cuts at}, from the k
+    column of reagent_control_cuts.csv beside MEAS_CSV; {} without the file or
+    the column (written before 06a recorded it: the k used is not known)."""
+    path = os.path.join(os.path.dirname(MEAS_CSV), AF_RC_CUTS)
+    out = {}
+    for r in (G5.load_csv(path) if os.path.exists(path) else []):
+        try:
+            out[r["marker"]] = float(r["k"])
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
+
 def _cut_ks(rc_rows):
     """{marker: the k its cut is formed at} for the reagent-control sheet's
-    header, so it states the multiplier in force (positivity.cut_k)."""
-    return {m: LO.cut_k(CONFIG, m) for m in sorted({r.get("marker") or "" for r in rc_rows})
-            if m}
+    header: the k 06a used (_ks_06a), so it states the multiplier the rows
+    were made with; positivity.cut_k for a marker 06a recorded none for."""
+    used = _ks_06a()
+    return {m: used.get(m, LO.cut_k(CONFIG, m))
+            for m in sorted({r.get("marker") or "" for r in rc_rows}) if m}
+
+
+def _k_changed_lines(markers):
+    """One line per marker whose positivity.cut_k is not the k 06a used: the
+    sheet's numbers are 06a's, and the results need rebuilding."""
+    used = _ks_06a()
+    out = []
+    for m in sorted(markers):
+        now = LO.cut_k(CONFIG, m)
+        if m in used and float(now) != used[m]:
+            out.append(f"k for {m} changed since 06a ran (06a used {used[m]:g}; "
+                       f"positivity.cut_k is now {float(now):g}) - rebuild results: the "
+                       f"numbers on this sheet are at {used[m]:g}.")
+    return out
 
 
 def _after_unblinding_lines():
@@ -467,7 +497,8 @@ def _rc_sheet(rc_rows):
     kc_path = os.path.join(os.path.dirname(MEAS_CSV), RR.CUT_CHECK_CSV)
     kc_rows = G5.load_csv(kc_path) if os.path.exists(kc_path) else []
     sheet = ("Reagent controls", [{k: _cell(v) for k, v in r.items()} for r in rc_rows],
-             RR.sheet_header(rc_rows, _cut_ks(rc_rows)) + _after_unblinding_lines())
+             RR.sheet_header(rc_rows, _cut_ks(rc_rows)) + _after_unblinding_lines()
+             + _k_changed_lines({r.get("marker") or "" for r in rc_rows + kc_rows} - {""}))
     if kc_rows:
         sheet += ([(list(CUT_CHECK_LINES) + [RR.cut_rule_text(_cut_ks(kc_rows))],
                     [{k: _cell(v) for k, v in r.items()} for r in kc_rows])],)

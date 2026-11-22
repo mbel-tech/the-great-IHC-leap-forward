@@ -1821,8 +1821,8 @@ Stage `roi_dataset`. Turns the per-nucleus rows into per-ROI numbers. Still blin
 - **Reads:** `results/roi_nuclei.csv`, the done log, the ROI boxes and geometry.
 - **Writes:** `results/roi_measurements.csv`, `results/positivity_cuts.csv`,
   `results/detector_specificity.csv` and `results/roi_geometry_changed.csv`; and
-  `results/reagent_controls.csv` and `results/reagent_control_cuts.csv` (each control's own cut, never in
-  `positivity_cuts.csv`) when a measured section is a confirmed reagent control; and
+  `results/reagent_controls.csv` and `results/reagent_control_cuts.csv` (each control's own cut and the k it
+  was formed at, `RC_CUTS_COLUMNS`, never in `positivity_cuts.csv`) when a measured section is a confirmed reagent control; and
   `results/reagent_cut_check.csv` and `results/roi_corrected.csv` when a no_primary one is measured.
 - **How:** **positivity cut** per section and marker from that section's background discs:
   median + k × 1.4826 × MAD (k = `positivity.cut_k` for the marker, 3 by default), needing at least 5 background nuclei (else no cut, and positives are blank,
@@ -1902,7 +1902,10 @@ Stage `excel_sample`. The analysis table as a workbook, one row per ROI per anim
   `by_section` and `coverage`, written with openpyxl (bold header, frozen first row, sized columns),
   and a `Reagent controls` sheet when 06a's `results/reagent_controls.csv` has rows: the same table
   under a plain-language header (what A and B mean, isotype rows test the antibody and no-primary rows
-  the secondary, a background disc is not a reagent control), with one line per marker whose
+  the secondary, a background disc is not a reagent control). The k it states is the one 06a formed the
+  controls' cuts at (the `k` column of `reagent_control_cuts.csv`; the config's for a marker without
+  one), with a line per marker whose `positivity.cut_k` is not that k now ("k for <marker> changed since
+  06a ran ... - rebuild results"), and one line per marker whose
   `positivity.cut_k_source` entry has `after_unblinding` ("k for <marker> was changed after
   unblinding"). When 06a wrote
   `results/reagent_cut_check.csv`, the same sheet carries it below as a `Cut check` block, labelled
@@ -4694,16 +4697,17 @@ The reagent controls, measured: one row per reagent-control section x marker x r
 
 #### `results/reagent_control_cuts.csv`
 
-Each measured reagent control's own cut (per section and marker, at full precision), from its own background discs by the same rule. Kept apart from positivity_cuts.csv, which lists stained sections only; 06i reads both so a control is drawn by its own cut. Removed when no control is measured.
+Each measured reagent control's own cut (per section and marker, at full precision), from its own background discs by the same rule, with the k it was formed at. Kept apart from positivity_cuts.csv, which lists stained sections only; 06i reads both so a control is drawn by its own cut. 06c states the k 06a used on the Reagent controls sheet, and says when positivity.cut_k has changed since. Removed when no control is measured.
 
 - **Written by:** 06a_roi_dataset.py
-- **Read by:** 06i_detection_overlays.py, 06k_af_score.py
+- **Read by:** 06c_excel_dataset.py, 06i_detection_overlays.py, 06k_af_score.py
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
 | `cut` | float | grey value | The cut, as Python's repr of the float. |
+| `k` | float |  | The multiplier the cut was formed at (median + k x 1.4826 x MAD): positivity.cut_k for the marker when 06a ran, as Python's repr of the float. 06c states it on the Reagent controls sheet and says when the config's k is not this one. |
 
 #### `results/reagent_cut_check.csv`
 

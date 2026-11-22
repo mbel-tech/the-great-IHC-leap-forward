@@ -436,6 +436,10 @@ class StageListScreen(QWidget):
                                        shown_k=k, shown_sha=view.get("sha"))
         if not ok:
             QMessageBox.warning(self, "Multiplier not changed", msg)
+            # Read the check again: after "changed since it was shown" the
+            # panel then shows the check as it is, and the next click asks
+            # about that one rather than being refused for good.
+            self.show_cut_check(self._cut_root, self._project)
             return False
         self.cut_k_applied.emit(msg)
         self.show_cut_check(self._cut_root, self._project)

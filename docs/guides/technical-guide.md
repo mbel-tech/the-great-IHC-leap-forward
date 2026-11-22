@@ -2872,7 +2872,8 @@ button hands that k and checksum to
 `app/cut_apply.py` (`apply_suggested_k(project, out_root, marker, confirm_text, *, shown_k, shown_sha)`),
 which refuses with "the cut check changed since it was shown - reopen the page" when the file's checksum
 or the marker's suggested k is not the one shown (the hourly 06e loop can rewrite the check between the
-two). Otherwise it sets
+two); after any refusal the panel reads the check again, so the next click asks about what it now shows.
+Otherwise it sets
 `positivity.cut_k[marker]` to the suggested k and `positivity.cut_k_source[marker]` to
 `{"by": "controls", "check": <sha256 of the csv>, "at": <time>}`, the decision recorded as by
 `cut check`. Once any of 06b's outputs (`results/roi_dataset.csv`, `results/animal_metadata.csv`) exists

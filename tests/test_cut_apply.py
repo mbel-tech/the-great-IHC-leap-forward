@@ -316,6 +316,13 @@ chk("...the question named the k shown, 3.5, not the 4 now in the file",
     "suggested k 3.5" in asked[0], True)
 chk("...config unchanged",
     (project.get("positivity.cut_k"), project.get("positivity.cut_k_source")), before)
+chk("...and the panel now shows the check as it is: suggested k 4",
+    "suggested k 4, k in force 3" in results.cut_text.text(), True)
+asked.clear()
+results.cut_btn.click()
+chk("a second click asks about the k now shown, 4",
+    bool(asked) and "suggested k 4?" in asked[0], True)
+chk("...and applies it", (project.get("positivity.cut_k") or {}).get("pERK"), 4.0)
 
 
 def teardown():

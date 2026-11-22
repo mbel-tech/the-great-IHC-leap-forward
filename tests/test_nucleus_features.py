@@ -302,10 +302,26 @@ run()
 chk("a re-run with nothing changed reads no pixels", READS, [])
 snapshot = digest(M.FEATURES_CSV)
 
+print("--- fingerprints_now() is what a run logs (06k reads it) ---")
+
+
+def done_log():
+    return {(r["marker"], r["scene_uid"]): r["fingerprint"] for r in read_rows(M.DONE_CSV)}
+
+
+with contextlib.redirect_stdout(io.StringIO()):
+    now = M.fingerprints_now()
+chk("after a run, the done log is fingerprints_now() for every section",
+    done_log(), {k: v for k, v in now.items() if k[0] == MARKER})
+
 print("--- a section whose outlines changed is read again, alone ---")
 u2 = UIDS[2]
 D5.save_outlines(MARKER, u2, {1: (LABELS, 10, 20), 2: (LABELS, 200, 20)})
 os.utime(D5.outline_path(MARKER, u2), ns=(1, 1))
+with contextlib.redirect_stdout(io.StringIO()):
+    now = M.fingerprints_now()
+chk("...re-detected, before 06l runs: its done line no longer matches fingerprints_now()",
+    sorted(u for (m, u), fp in done_log().items() if now.get((m, u)) != fp), [u2])
 del READS[:]
 run()
 chk("...only that section is read", scenes_read(), [SCENE[u2]])

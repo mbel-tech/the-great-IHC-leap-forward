@@ -310,6 +310,11 @@ AF_CUTS = "positivity_cuts.csv"
 AF_RC_CUTS = "reagent_control_cuts.csv"
 #: The note on a row whose flags were scored under a cut 06a no longer uses.
 AF_STALE = "flags older than the cut - run 06k"
+#: af_scored_sections.csv's role for a stained section 06k skipped because its
+#: 06l features were computed before 05c re-detected it (06k_af_score), and the
+#: note on a row with one.
+AF_FEATURES_ROLE = "features_out_of_date"
+AF_FEATURES_STALE = "06l features out of date - run 06l"
 
 AF_LINES = (
     "Positive rate without flagged nuclei (provisional until validated on a study with "
@@ -323,7 +328,8 @@ AF_LINES = (
     "n_flagged) / (n_nuclei - n_flagged): the flagged nuclei leave the count and the "
     "denominator alike.",
     "A blank is a rate that cannot be given, never 0; the note says why (no raw rate, a "
-    "section not scored yet, or flags scored under a cut 06a no longer uses).",
+    "section not scored yet, a section whose 06l features are out of date, or flags "
+    "scored under a cut 06a no longer uses).",
 )
 
 
@@ -345,6 +351,9 @@ def _af_sheet(meas, by_roi, sec_by):
     secs = G5.load_csv(cpath)
     stained = [r for r in secs if r.get("role", "stained") == "stained"]
     scored = {(r["scene_uid"], r["marker"]) for r in stained}
+    feats_old = {(r["scene_uid"], r["marker"]) for r in secs
+                 if r.get("role") == AF_FEATURES_ROLE}
+    secs = [r for r in secs if r.get("role") != AF_FEATURES_ROLE]
     how = {r["marker"]: (r["flag_name"], r["trained_on"]) for r in secs}
     if not how:
         return None
@@ -397,6 +406,10 @@ def _af_sheet(meas, by_roi, sec_by):
         rate, note = "", ""
         if raw == "" or npos == "":
             note = "no raw rate on this row, so none without the flagged nuclei"
+        elif any((u, mk) in feats_old for u in missing):
+            of = [u for u in missing if (u, mk) in feats_old]
+            note = (f"not scored: {AF_FEATURES_STALE} ({len(of)} of {len(uids)} "
+                    f"section(s), e.g. {of[0]})")
         elif missing:
             note = (f"not scored: {len(missing)} of {len(uids)} section(s) have no "
                     f"autofluorescence score (06l features missing, or 06k not run since; "

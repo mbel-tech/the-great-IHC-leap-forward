@@ -5485,7 +5485,7 @@
     "af_scored_sections.csv"
    ],
    "writer": "06k_af_score.py",
-   "what": "Every section x marker 06k scored (role `stained`, including those with no nucleus above the cut), so 06c can tell a section with no flagged nucleus from one never scored, and every reagent control it trained on (role `control`). Each with the cut it was scored or trained against: 06c blanks a row whose sections' or controls' cut is no longer 06a's. Written and removed with af_scores.csv.",
+   "what": "Every section x marker 06k scored (role `stained`, including those with no nucleus above the cut), so 06c can tell a section with no flagged nucleus from one never scored, and every reagent control it trained on (role `control`); a stained section of a scored marker skipped because its 06l features are out of date (its done line's fingerprint is not 06l's now) is listed with role `features_out_of_date`, so 06c says \"06l features out of date - run 06l\". Each with the cut it was scored or trained against: 06c blanks a row whose sections' or controls' cut is no longer 06a's. Written and removed with af_scores.csv.",
    "readers": [
     "06c_excel_dataset.py"
    ],
@@ -5507,7 +5507,7 @@
      "name": "role",
      "type": "text",
      "units": "",
-     "meaning": "`stained` (a section scored) or `control` (a reagent control trained on)."
+     "meaning": "`stained` (a section scored), `control` (a reagent control trained on) or `features_out_of_date` (a stained section skipped: 06l's features of it are older than its detection; n_scored and n_flagged blank)."
     },
     {
      "name": "cut",

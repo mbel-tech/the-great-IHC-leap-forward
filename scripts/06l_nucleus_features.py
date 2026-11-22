@@ -412,6 +412,14 @@ def plan(args):
     return out, gone
 
 
+def fingerprints_now():
+    """{(marker, uid): fingerprint} as plan() works them out now, for every
+    marker with boxes: what a section's done line must carry for its rows to
+    be current. 06k reads it, so it never joins features 06l would drop."""
+    work, _gone = plan(argparse.Namespace(marker=None))
+    return {(m, u): fp for m, _b, _g, secs in work for u, fp in secs}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--marker", choices=G5.MARKERS,

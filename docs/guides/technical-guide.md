@@ -1909,7 +1909,8 @@ Stage `excel_sample`. The analysis table as a workbook, one row per ROI per anim
   header that says provisional and states the validation criterion, and names each marker
   `af_gate.csv` says was not scored, with its counts. Blank, with a `note`, when there is no raw rate, when
   any of the row's sections is not in `af_scored_sections.csv` (a section 06a measured empty counts as
-  scored, none flagged; empty means no nucleus in its ROIs), when a cut recorded there - the section's, or a control the marker trained on -
+  scored, none flagged; empty means no nucleus in its ROIs; one listed as `features_out_of_date` says
+  "06l features out of date - run 06l"), when a cut recorded there - the section's, or a control the marker trained on -
   is not the cut in `positivity_cuts.csv` / `reagent_control_cuts.csv` now ("flags older than the cut -
   run 06k"), or when more are flagged than positive. `write_workbook` takes an optional third item per sheet, the lines above the table, and a
   fourth, more tables below it (`[(lines, rows)]`).
@@ -2014,9 +2015,14 @@ Each of the latter gets `af_score`, flagged at >= 0.5 (`af_suspect` when trained
   controls' kinds (`ls_reagent_report.study_lookup`, the entry's `kind`; isotype and preadsorbed never
   used), 06l's `nucleus_features_done.csv` and `nucleus_features.csv`. "Above the cut" is
   `ls_overlay.is_positive` against that section's cut.
-- **Featured sections only:** a section is used when 06l's done log lists it and every above-cut nucleus
-  has a feature row; the others are counted and named ("N section(s) skipped as not yet featured"). The
-  gate counts after that.
+- **Featured sections only:** a section is used when 06l's done log lists it with the fingerprint 06l
+  gives it now (`06l_nucleus_features.fingerprints_now`, 06l's own `plan` and `fingerprint`) and every
+  above-cut nucleus has a feature row; the others are counted and named ("N section(s) skipped as not yet
+  featured"). A done line with another fingerprint is out of date - 05c re-detected or 05a re-boxed the
+  section since 06l ran, so its nucleus ids may name other nuclei - and is never joined; it is named
+  separately ("skipped as their 06l features are out of date"), and a stained section of a scored marker
+  skipped so is listed in `af_scored_sections.csv` with role `features_out_of_date`. The gate counts
+  after that.
 - **Features** (`ls_af_model.features_matrix`), section-relative: size, roundness, solidity, DAPI as a
   robust z within the section, marker_median in spreads above the section's own discs
   (`ls_overlay.background_stats`, recomputed here for stained and control sections alike), p90 / median,
@@ -4452,7 +4458,7 @@ The autofluorescence flag: one row per above-cut ROI nucleus of a stained sectio
 
 #### `results/af_scored_sections.csv`
 
-Every section x marker 06k scored (role `stained`, including those with no nucleus above the cut), so 06c can tell a section with no flagged nucleus from one never scored, and every reagent control it trained on (role `control`). Each with the cut it was scored or trained against: 06c blanks a row whose sections' or controls' cut is no longer 06a's. Written and removed with af_scores.csv.
+Every section x marker 06k scored (role `stained`, including those with no nucleus above the cut), so 06c can tell a section with no flagged nucleus from one never scored, and every reagent control it trained on (role `control`); a stained section of a scored marker skipped because its 06l features are out of date (its done line's fingerprint is not 06l's now) is listed with role `features_out_of_date`, so 06c says "06l features out of date - run 06l". Each with the cut it was scored or trained against: 06c blanks a row whose sections' or controls' cut is no longer 06a's. Written and removed with af_scores.csv.
 
 - **Written by:** 06k_af_score.py
 - **Read by:** 06c_excel_dataset.py
@@ -4461,7 +4467,7 @@ Every section x marker 06k scored (role `stained`, including those with no nucle
 |------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `marker` | text |  | The marker, as roi_nuclei.csv names it. |
-| `role` | text |  | `stained` (a section scored) or `control` (a reagent control trained on). |
+| `role` | text |  | `stained` (a section scored), `control` (a reagent control trained on) or `features_out_of_date` (a stained section skipped: 06l's features of it are older than its detection; n_scored and n_flagged blank). |
 | `cut` | float | grey value | The cut 06k counted above-cut nuclei against: positivity_cuts.csv's for a stained section, reagent_control_cuts.csv's for a control (full precision, as 06a wrote it). |
 | `n_scored` | int | count | Above-cut ROI nuclei of the section scored (stained) or trained on (control). |
 | `n_flagged` | int | count | Of those, flagged (score >= 0.5). Blank for a control. |

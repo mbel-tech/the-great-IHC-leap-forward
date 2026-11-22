@@ -1669,7 +1669,9 @@ brightness against the section's other nuclei, the nucleus's size and shape, how
 (from 06l), and with several markers on one scan the other marker's level above its own discs. The model
 is a logistic regression with balanced classes, and a nucleus is flagged at a score of 0.5.
 
-Only sections 06l has finished are used; the others are counted and listed as not yet featured. The
+Only sections 06l has finished are used, and only while what 06l measured them from is still current:
+a section detected again since 06l ran is skipped as out of date until 06l runs again (the spreadsheet
+says "06l features out of date - run 06l"). The others are counted and listed as not yet featured. The
 per-sample spreadsheet (06c) then has an `af_flag` sheet: per animal, marker and region, the raw positive
 rate and beside it the rate with the flagged nuclei taken out, blank with a note wherever a section is not
 scored or the positivity cut has changed since the flag was made (run this step again), and a line naming

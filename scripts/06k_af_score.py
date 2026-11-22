@@ -39,8 +39,14 @@ by.
 
 ONLY FEATURED SECTIONS. A section counts as featured when 06l logged it in
 nucleus_features_done.csv - the features CSV existing says nothing about which
-sections it holds - and every above-cut nucleus of it has a row there. The
-others are skipped, counted and said; the gate counts after that.
+sections it holds - with the fingerprint 06l would give it now
+(06l_nucleus_features.fingerprints_now, 06l's own function), and every
+above-cut nucleus of it has a row there. A done line whose fingerprint is not
+today's is out of date: 05c re-detected or 05a re-boxed the section since 06l
+ran, and its nucleus ids may now name other nuclei, so its features are never
+joined. The others are skipped, counted and said; the gate counts after that.
+A stained section of a scored marker skipped as out of date is listed in
+af_scored_sections.csv with role `features_out_of_date`, so 06c can say so.
 
 GATE. Below GATE above-cut nuclei of either kind for a marker, nothing is
 written for it and the stage says how many there were. When no marker is
@@ -56,7 +62,9 @@ Writes:
                                   no flagged nucleus from one never scored;
                                   with the cut each was scored against, and
                                   the controls trained on with theirs (role),
-                                  so 06c can tell flags older than the cut
+                                  so 06c can tell flags older than the cut;
+                                  and the stained sections skipped because
+                                  their 06l features are out of date
   results/af_gate.csv             per marker, its above-cut unstained and
                                   no_primary control nuclei and what it was
                                   trained on (blank: below the gate), so 06c
@@ -140,9 +148,10 @@ _L6 = []
 
 
 def stage_06l():
-    """06l loaded once, on first use: its other_marker() rule and, through it,
-    05c's plane choice and 05a's geometry. Not at import - a paired study with
-    no review strip to draw never needs them."""
+    """06l loaded once, on first use: its fingerprint of a section's features
+    (fingerprints_now), its other_marker() rule and, through it, 05c's plane
+    choice and 05a's geometry. Not at import: a run refused for a missing input
+    never needs it."""
     if not _L6:
         spec = importlib.util.spec_from_file_location(
             "_l6_for_06k", os.path.join(_HERE, "06l_nucleus_features.py"))
@@ -172,12 +181,22 @@ def read_cuts(path):
 
 
 def read_done():
-    """{(scene_uid, marker)} 06l logged as written whole."""
+    """{(scene_uid, marker): fingerprint} 06l logged as written whole, the last
+    line for a section winning (as 06l reads it)."""
     if not os.path.exists(DONE_CSV):
-        return set()
+        return {}
     with open(DONE_CSV, newline="", encoding="utf-8") as fh:
-        return {(r["scene_uid"], r["marker"]) for r in csv.DictReader(fh)
-                if r.get("scene_uid") and r.get("marker")}
+        return {(r["scene_uid"], r["marker"]): r.get("fingerprint") or ""
+                for r in csv.DictReader(fh) if r.get("scene_uid") and r.get("marker")}
+
+
+def current_done(done):
+    """(current, out of date): the done keys whose fingerprint is the one 06l
+    gives the section now, and the rest. A marker 06l cannot fingerprint (its
+    boxes are gone) has none current: 06l would drop its features too."""
+    now = stage_06l().fingerprints_now() if done else {}
+    cur = {k for k, fp in done.items() if fp and now.get((k[1], k[0])) == fp}
+    return cur, set(done) - cur
 
 
 def control_kinds():
@@ -418,10 +437,18 @@ def main(argv=None):
     all_cuts = {**cuts, **{k: v for k, v in rc_cuts.items() if k in kinds}}
     cand, stats, sections = scan_nuclei(all_cuts, kinds)
 
-    done = read_done()
+    done, out_of_date = current_done(read_done())
+    stale_feats = sorted((k for k in sections if k in out_of_date),
+                         key=lambda k: (k[1], NM.natural_key(k[0])))
+    if stale_feats:
+        print(f"{len(stale_feats)} section(s) skipped as their 06l features are out of "
+              f"date: re-detected or re-boxed since 06l ran, so their nucleus ids may "
+              f"name other nuclei - run 06l_nucleus_features.py (e.g. "
+              f"{stale_feats[0][1]} {stale_feats[0][0]})")
     featured = {k for k in sections if k in done}
     featured -= join_features(cand, featured)
-    skipped = sorted(sections - featured, key=lambda k: (k[1], NM.natural_key(k[0])))
+    skipped = sorted(sections - featured - set(stale_feats),
+                     key=lambda k: (k[1], NM.natural_key(k[0])))
     if skipped:
         print(f"{len(skipped)} section(s) skipped as not yet featured: no complete "
               f"line in nucleus_features_done.csv - run 06l_nucleus_features.py "
@@ -482,6 +509,10 @@ def main(argv=None):
             sec_rows.append({"scene_uid": u, "marker": m, "role": "stained",
                              "cut": repr(all_cuts[(u, m)]), "n_scored": t[0],
                              "n_flagged": t[1], "flag_name": flag, "trained_on": kind})
+        for u, m in [s for s in stale_feats if s[1] == mk and s not in kinds]:
+            sec_rows.append({"scene_uid": u, "marker": m, "role": "features_out_of_date",
+                             "cut": repr(all_cuts[(u, m)]), "n_scored": "",
+                             "n_flagged": "", "flag_name": flag, "trained_on": kind})
         used = collections.Counter((k[0], k[1]) for k, _c in g[kind])
         for u, m in sorted({s for s in featured if s[1] == mk and kinds.get(s) == kind},
                            key=lambda s: NM.natural_key(s[0])):

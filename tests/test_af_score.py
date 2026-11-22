@@ -12,6 +12,7 @@ labelled provisional.
     python tests/test_af_score.py
 """
 
+import argparse
 import contextlib
 import csv
 import hashlib
@@ -159,7 +160,7 @@ def write_study(n_unstained, n_no_primary):
     Stained: 200 stain-like and 40 autofluorescence-like above the cut, 60 below.
     """
     r = np.random.default_rng(20261121)
-    nuc, feats, boxes, done = [], [], [], []
+    nuc, feats, boxes = [], [], []
     plan = {CTL_U: (0, n_unstained), CTL_N: (0, n_no_primary)}
     for u in STAINED + [UNFEATURED]:
         plan[u] = (200, 40)
@@ -195,21 +196,40 @@ def write_study(n_unstained, n_no_primary):
                           "solidity": round(f["solidity"], 4),
                           "marker_cv": round(f["marker_cv"], 4),
                           "marker_spots": f["marker_spots"], "other_marker_median": ""})
-        if u != UNFEATURED:
-            done.append({"marker": "AF568", "scene_uid": u, "fingerprint": "x"})
+    G5L.use_marker("AF568")
     for path, cols, rows in ((os.path.join(RES, "roi_nuclei.csv"), NUC_COLS, nuc),
                              (BPATH, BOX_COLS, boxes),
+                             # 06l reads the marker's own box file for its fingerprint.
+                             (G5L.BOX_CSV, BOX_COLS, boxes),
                              (os.path.join(RES, "nucleus_features.csv"),
                               ["scene_uid", "marker", "roi_index", "nucleus_id", "roundness",
                                "solidity", "marker_cv", "marker_spots",
                                "other_marker_median"],
-                              [f for f in feats if f["scene_uid"] != UNFEATURED]),
-                             (os.path.join(RES, "nucleus_features_done.csv"),
-                              ["marker", "scene_uid", "fingerprint"], done)):
+                              [f for f in feats if f["scene_uid"] != UNFEATURED])):
         with open(path, "w", newline="", encoding="utf-8") as fh:
             w = csv.DictWriter(fh, fieldnames=cols)
             w.writeheader()
             w.writerows(rows)
+    # The done log as 06l writes it: each featured section with 06l's own
+    # fingerprint of what its rows were computed from.
+    write_done(u for u in ALL if u != UNFEATURED)
+
+
+def fingerprints_06l():
+    """{(marker, uid): fingerprint} by 06l's own plan(), as a run would log them."""
+    with contextlib.redirect_stdout(io.StringIO()):
+        work, _gone = K.stage_06l().plan(argparse.Namespace(marker=None))
+    return {(m, u): fp for m, _b, _g, secs in work for u, fp in secs}
+
+
+def write_done(uids):
+    fps = fingerprints_06l()
+    with open(os.path.join(RES, "nucleus_features_done.csv"), "w", newline="",
+              encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=["marker", "scene_uid", "fingerprint"])
+        w.writeheader()
+        w.writerows({"marker": "AF568", "scene_uid": u,
+                     "fingerprint": fps[("AF568", u)]} for u in uids)
 
 
 G5.all_boxes = lambda: G5.load_csv(BPATH)
@@ -498,6 +518,41 @@ chk("cut_k changed and 06a rerun, 06k not: the row is blank, never a number",
     dm_s["frac_positive_without_flagged"] in (None, ""))
 chk("...with the note", "flags older than the cut - run 06k" in (dm_s["note"] or ""))
 assert run(G6A)[0] == 0
+
+print("--- 06l features out of date are not joined ---")
+# 06l has run: the done log carries its fingerprints. Then 05c re-detects
+# STAINED[0] and its nuclei come back renumbered - the same ids, so every id
+# still has a features row, but not its own nucleus's - and 06a runs; 06l does
+# not. Joined by id, the wrong nuclei's features would be scored, silently.
+assert run(K, [])[0] == 0
+npath = os.path.join(RES, "roi_nuclei.csv")
+nrows = read(npath)
+ids = [r["nucleus_id"] for r in nrows if r["scene_uid"] == STAINED[0] and r["roi_kind"] == "roi"]
+it = iter(ids[::-1])
+for r in nrows:
+    if r["scene_uid"] == STAINED[0] and r["roi_kind"] == "roi":
+        r["nucleus_id"] = next(it)
+with open(npath, "w", newline="", encoding="utf-8") as fh:
+    w = csv.DictWriter(fh, fieldnames=list(nrows[0]))
+    w.writeheader()
+    w.writerows(nrows)
+assert run(G6A)[0] == 0
+code, out = run(K, [])
+chk("06k still runs on the other sections", code, 0)
+chk("the renumbered section is not scored",
+    STAINED[0] in {r["scene_uid"] for r in read(SCORES) or []}, False)
+chk("...nor listed as a scored section",
+    [r["scene_uid"] for r in read(SECTIONS) or []
+     if r["role"] == "stained" and r["scene_uid"] == STAINED[0]], [])
+chk("...the other stained section still is",
+    STAINED[1] in {r["scene_uid"] for r in read(SCORES) or []}, True)
+chk("...and the stage says its 06l features are out of date",
+    "out of date" in out and "06l_nucleus_features.py" in out and STAINED[0] in out)
+_l, dm_o = sub_sheet()
+chk("06c: the row is blank, never a number",
+    dm_o["frac_positive_without_flagged"] in (None, ""))
+chk("...with the note that 06l's features are out of date",
+    "06l features out of date - run 06l" in (dm_o["note"] or ""), True)
 
 print("--- unstained below the gate: no_primary ---")
 code, out = scenario(150, 300)

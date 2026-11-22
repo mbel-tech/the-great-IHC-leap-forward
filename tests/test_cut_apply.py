@@ -113,6 +113,7 @@ with open(csv_path, "rb") as fh:
 chk("...the check sha is the file's", (src.get("pERK") or {}).get("check"), sha)
 chk("...and when", bool((src.get("pERK") or {}).get("at")), True)
 chk("...no flat 'by' beside the marker entries", "by" in src, False)
+chk("...before unblinding: not marked as after it", "after_unblinding" in src["pERK"], False)
 chk("...the decision is recorded by the cut check",
     [d["by"] for d in project.block.get("decisions", []) if d["key"] == "positivity.cut_k"],
     ["cut check"])
@@ -142,6 +143,10 @@ chk("...a mistyped confirmation is refused", ok, False)
 ok, _ = apply(project, ROOT_B, "pERK", "apply after unblinding")
 chk("...'apply after unblinding' succeeds", ok, True)
 chk("...and writes the k", (project.get("positivity.cut_k") or {}).get("pERK"), 3.5)
+chk("apply_after_unblinding_is_recorded: cut_k_source says so",
+    ((project.get("positivity.cut_k_source") or {}).get("pERK") or {}).get("after_unblinding"),
+    True)
+chk("...and the config still validates", project.validate()[0], [])
 ok, msg = apply(project, os.path.join(STUDY.root, "nowhere"), "pERK")
 chk("no check file: refused", ok, False)
 
@@ -205,11 +210,21 @@ write_csv(npath, [], ["scene_uid", "marker"])
 saved = (G6C.NUCLEI_CSV, G6C.MEAS_CSV)
 G6C.NUCLEI_CSV, G6C.MEAS_CSV = npath, os.path.join(tmp, "roi_measurements.csv")
 xlsx = os.path.join(tmp, "roi_dataset.xlsx")
+pos = G6C.CONFIG.setdefault("positivity", {})
+saved_src = pos.get("cut_k_source")
+# pERK's k applied through the typed confirmation, PCNA's before unblinding.
+pos["cut_k_source"] = {
+    "pERK": {"by": "controls", "check": "ab", "at": "t", "after_unblinding": True},
+    "PCNA": {"by": "controls", "check": "cd", "at": "t"}}
 try:
     with contextlib.redirect_stdout(io.StringIO()):
         code = G6C.main(["--out", xlsx])
 finally:
     G6C.NUCLEI_CSV, G6C.MEAS_CSV = saved
+    if saved_src is None:
+        pos.pop("cut_k_source", None)
+    else:
+        pos["cut_k_source"] = saved_src
 chk("06c runs", code, 0)
 import openpyxl                                                 # noqa: E402
 ws = openpyxl.load_workbook(xlsx)["Reagent controls"]
@@ -223,6 +238,9 @@ chk("...a table headed by CUT_CHECK_COLUMNS",
 krows = [r for r in cells[hdr[0] + 1:] if r and r[0] == "pERK"] if hdr else []
 chk("...one row per k", [r[1] for r in krows], list(RR.K_GRID))
 chk("...the suggested row is marked", [r[1] for r in krows if r[10] == 1], [3.5])
+chk("sheet_says_k_changed_after_unblinding: one line for pERK",
+    "k for pERK was changed after unblinding" in text, True)
+chk("...none for PCNA, applied before", "k for PCNA was changed" in text, False)
 chk("...the reagent-control table is still there",
     any(r and r[0] == "scene_uid" for r in cells), True)
 

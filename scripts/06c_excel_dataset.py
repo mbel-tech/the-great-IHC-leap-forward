@@ -266,6 +266,17 @@ def _cut_ks(rc_rows):
             if m}
 
 
+def _after_unblinding_lines():
+    """One line per marker whose k was applied through the typed confirmation
+    after 06b (positivity.cut_k_source[marker]["after_unblinding"], set by
+    app/cut_apply.py), for the "Reagent controls" sheet's header."""
+    src = (CONFIG.get("positivity") or {}).get("cut_k_source")
+    src = src if isinstance(src, dict) else {}
+    return [f"k for {m} was changed after unblinding (06b had joined the groups when the "
+            f"reagent k check's suggestion was applied)."
+            for m in sorted(src) if isinstance(src[m], dict) and src[m].get("after_unblinding")]
+
+
 #: Above the k check's table on the "Reagent controls" sheet.
 CUT_CHECK_LINES = (
     "Cut check (provisional until validated on a study with known controls): the "
@@ -456,7 +467,7 @@ def _rc_sheet(rc_rows):
     kc_path = os.path.join(os.path.dirname(MEAS_CSV), RR.CUT_CHECK_CSV)
     kc_rows = G5.load_csv(kc_path) if os.path.exists(kc_path) else []
     sheet = ("Reagent controls", [{k: _cell(v) for k, v in r.items()} for r in rc_rows],
-             RR.sheet_header(rc_rows, _cut_ks(rc_rows)))
+             RR.sheet_header(rc_rows, _cut_ks(rc_rows)) + _after_unblinding_lines())
     if kc_rows:
         sheet += ([(list(CUT_CHECK_LINES) + [RR.cut_rule_text(_cut_ks(kc_rows))],
                     [{k: _cell(v) for k, v in r.items()} for r in kc_rows])],)

@@ -1897,7 +1897,9 @@ Stage `excel_sample`. The analysis table as a workbook, one row per ROI per anim
   `by_section` and `coverage`, written with openpyxl (bold header, frozen first row, sized columns),
   and a `Reagent controls` sheet when 06a's `results/reagent_controls.csv` has rows: the same table
   under a plain-language header (what A and B mean, isotype rows test the antibody and no-primary rows
-  the secondary, a background disc is not a reagent control). When 06a wrote
+  the secondary, a background disc is not a reagent control), with one line per marker whose
+  `positivity.cut_k_source` entry has `after_unblinding` ("k for <marker> was changed after
+  unblinding"). When 06a wrote
   `results/reagent_cut_check.csv`, the same sheet carries it below as a `Cut check` block, labelled
   provisional. When 06a wrote `results/roi_corrected.csv`, a `corrected_rate` sheet carries it: the raw
   `frac_positive` beside `frac_positive_corrected` and its interval, per section, marker and region (its own
@@ -2864,7 +2866,8 @@ two). Otherwise it sets
 `positivity.cut_k[marker]` to the suggested k and `positivity.cut_k_source[marker]` to
 `{"by": "controls", "check": <sha256 of the csv>, "at": <time>}`, the decision recorded as by
 `cut check`. Once any of 06b's outputs (`results/roi_dataset.csv`, `results/animal_metadata.csv`) exists
-the study is unblinded, and it refuses unless the operator types `apply after unblinding`. Every refusal
+the study is unblinded, and it refuses unless the operator types `apply after unblinding`; a k applied
+that way adds `"after_unblinding": true` to the record, and 06c's "Reagent controls" sheet says so. Every refusal
 comes before anything is written. The change puts 06a and the results out of date (they track
 `positivity.cut_k`), never detection.
 

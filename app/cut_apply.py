@@ -17,7 +17,9 @@ the operator never saw is never applied.
 **The blinding guard.** A multiplier that is applied must be fixed before
 unblinding. Once 06b has written its join (any of its outputs is under
 out_root), apply refuses unless the operator types CONFIRM_TEXT, so a cut
-moved after the groups are known is a deliberate, typed act.
+moved after the groups are known is a deliberate, typed act, and stays on the
+record: cut_k_source[marker] then also carries "after_unblinding": true, which
+06c states on the "Reagent controls" sheet.
 
 No Qt here: the Results page (screens.StageListScreen) asks, and this decides.
 """
@@ -142,7 +144,8 @@ def apply_suggested_k(project, out_root, marker, confirm_text=None, *, shown_k, 
         return False, why
     if shown_k is None or k != float(shown_k):
         return False, CHANGED
-    if unblinded(out_root) and (confirm_text or "").strip() != CONFIRM_TEXT:
+    after = unblinded(out_root)
+    if after and (confirm_text or "").strip() != CONFIRM_TEXT:
         return False, ("this study is already unblinded (06b has joined the groups). "
                        "A multiplier should be fixed before unblinding; to apply it "
                        f"anyway, type \"{CONFIRM_TEXT}\"")
@@ -155,6 +158,8 @@ def apply_suggested_k(project, out_root, marker, confirm_text=None, *, shown_k, 
     source = {m: dict(v) for m, v in (source or {}).items()
               if isinstance(v, dict)} if isinstance(source, dict) else {}
     source[marker] = {"by": SOURCE, "check": sha, "at": LP._now()}
+    if after:
+        source[marker]["after_unblinding"] = True
     try:
         project.set("positivity.cut_k", table, by=BY)
         project.set("positivity.cut_k_source", source, by=BY)

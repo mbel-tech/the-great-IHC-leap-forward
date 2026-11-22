@@ -356,6 +356,9 @@ AF_STALE = "flags older than the cut - run 06k"
 #: note on a row with one.
 AF_FEATURES_ROLE = "features_out_of_date"
 AF_FEATURES_STALE = "06l features out of date - run 06l"
+#: The note on a row of a marker whose reagent-control set is not the one 06k
+#: trained with (af_gate.csv's control_set against reagent_controls.csv now).
+AF_CONTROLS_CHANGED = "control set changed - run 06k"
 
 AF_LINES = (
     "Positive rate without flagged nuclei (provisional until validated on a study with "
@@ -369,8 +372,8 @@ AF_LINES = (
     "n_flagged) / (n_nuclei - n_flagged): the flagged nuclei leave the count and the "
     "denominator alike.",
     "A blank is a rate that cannot be given, never 0; the note says why (no raw rate, a "
-    "section not scored yet, a section whose 06l features are out of date, or flags "
-    "scored under a cut 06a no longer uses).",
+    "section not scored yet, a section whose 06l features are out of date, a reagent-"
+    "control set changed since 06k ran, or flags scored under a cut 06a no longer uses).",
 )
 
 
@@ -424,6 +427,18 @@ def _af_sheet(meas, by_roi, sec_by):
         n_sec[(r["scene_uid"], r["marker"])] += (int(r["n_nuclei"] or 0)
                                                  if r["roi_kind"] == "roi" else 0)
     empty = {k for k, v in n_sec.items() if v == 0}
+    # The control set each marker was trained with (06k's af_gate.csv) against
+    # the one reagent_controls.csv lists now: a section confirmed as a control,
+    # or one no longer a control, since 06k ran changes what was flagged.
+    gpath = os.path.join(base, AF_GATE)
+    gate = G5.load_csv(gpath) if os.path.exists(gpath) else []
+    rpath = os.path.join(base, RR.REPORT_CSV)
+    ctl_now = {}
+    for r in (G5.load_csv(rpath) if os.path.exists(rpath) else []):
+        ctl_now.setdefault(r.get("marker") or "", set()).add((r["scene_uid"], r.get("kind")))
+    ctl_changed = {g["marker"] for g in gate
+                   if (g.get("control_set") or "")
+                   != RR.control_set_hash(ctl_now.get(g["marker"], ()))}
     # A flagged nucleus's region and animal are its disc's, as 06a wrote it.
     disc = {(r["scene_uid"], r["marker"], r["roi_index"]): r for r in meas}
     flagged = collections.Counter()
@@ -455,6 +470,8 @@ def _af_sheet(meas, by_roi, sec_by):
             note = (f"not scored: {len(missing)} of {len(uids)} section(s) have no "
                     f"autofluorescence score (06l features missing, or 06k not run since; "
                     f"e.g. {missing[0]})")
+        elif mk in ctl_changed:
+            note = AF_CONTROLS_CHANGED
         elif old or mk in stale_markers:
             note = AF_STALE
         elif nf > npos:
@@ -476,8 +493,7 @@ def _af_sheet(meas, by_roi, sec_by):
     if not rows:
         return None
     lines = list(AF_LINES)
-    gpath = os.path.join(base, AF_GATE)
-    for g in (G5.load_csv(gpath) if os.path.exists(gpath) else []):
+    for g in gate:
         if g.get("trained_on"):
             continue
         if g.get("reason") == "no_stained":

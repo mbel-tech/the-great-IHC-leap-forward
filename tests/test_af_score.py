@@ -414,7 +414,8 @@ def sub_sheet(extra_meas=(), extra_gate=(), extra_nuclei=()):
         w.writeheader()
         w.writerows(keep_rows)
     for name in ("af_scores.csv", "af_scored_sections.csv", "af_gate.csv",
-                 "positivity_cuts.csv", "reagent_control_cuts.csv"):
+                 "positivity_cuts.csv", "reagent_control_cuts.csv",
+                 "reagent_controls.csv"):
         with open(os.path.join(RES, name), "rb") as a, \
                 open(os.path.join(d, name), "wb") as b:
             b.write(a.read())
@@ -517,6 +518,26 @@ _l, dm_s = sub_sheet()
 chk("cut_k changed and 06a rerun, 06k not: the row is blank, never a number",
     dm_s["frac_positive_without_flagged"] in (None, ""))
 chk("...with the note", "flags older than the cut - run 06k" in (dm_s["note"] or ""))
+assert run(G6A)[0] == 0
+
+print("--- a changed control set blanks the flags ---")
+assert run(K, [])[0] == 0
+gate_c = read(K.GATE_CSV)
+chk("af_gate.csv records the control set each marker was trained with",
+    all(r.get("control_set") for r in gate_c) and bool(gate_c), True)
+_l, dm_c = sub_sheet()
+chk("...the same set in reagent_controls.csv: the rate is given",
+    (dm_c["frac_positive_without_flagged"] not in (None, ""), dm_c["note"] or ""), (True, ""))
+_scenes = G6A.CONFIG["reagent_controls"]["scenes"]
+_scenes[STAINED[1]] = {"kind": "no_primary", "markers": [], "source": "manual"}
+try:
+    assert run(G6A)[0] == 0
+    _l, dm_c = sub_sheet()
+finally:
+    del _scenes[STAINED[1]]
+chk("one more control confirmed after 06k (06a rerun): the row is blank",
+    dm_c["frac_positive_without_flagged"] in (None, ""))
+chk("...with the note", "control set changed - run 06k" in (dm_c["note"] or ""), True)
 assert run(G6A)[0] == 0
 
 print("--- 06l features out of date are not joined ---")

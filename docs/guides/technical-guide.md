@@ -1922,7 +1922,8 @@ Stage `excel_sample`. The analysis table as a workbook, one row per ROI per anim
   scored, none flagged; empty means no nucleus in its ROIs; one listed as `features_out_of_date` says
   "06l features out of date - run 06l"), when a cut recorded there - the section's, or a control the marker trained on -
   is not the cut in `positivity_cuts.csv` / `reagent_control_cuts.csv` now ("flags older than the cut -
-  run 06k"), or when more are flagged than positive. `write_workbook` takes an optional third item per sheet, the lines above the table, and a
+  run 06k"), when the marker's `control_set` in `af_gate.csv` is not the hash of the controls
+  `reagent_controls.csv` lists now ("control set changed - run 06k"; checked before the cut), or when more are flagged than positive. `write_workbook` takes an optional third item per sheet, the lines above the table, and a
   fourth, more tables below it (`[(lines, rows)]`).
 - **How:** groups 06a's rows. Withheld values (no cut, no denominator, Abercrombie not applied) are blank,
   with the reason carried from 06a. Reagent-control boxes are left out of `planned` and `coverage`. The
@@ -2042,7 +2043,8 @@ Each of the latter gets `af_score`, flagged at >= 0.5 (`af_suspect` when trained
   x marker scored, with counts, and every control trained on, each with the cut it was counted against:
   06c tells "none flagged" from "not scored" by it, and blanks a row whose cut has changed since),
   `results/af_gate.csv` (per marker, the unstained and no_primary counts, what it trained on and, when
-  not scored, why: `below_gate` or `no_stained`), then
+  not scored, why: `below_gate` or `no_stained`; and `control_set`, `ls_reagent_report.control_set_hash`
+  of the (scene_uid, kind) of every confirmed reagent control of the marker), then
   `qc/af_review.csv` and `qc/af_review.png`: per marker the 24 highest scores and 24 drawn at random
   (seed 20261121) as 64 px crops of the marker plane (05c's `plane_index_for`, read through 06l's loaded
   05c); a crop that cannot be read is grey.
@@ -4493,7 +4495,7 @@ Every section x marker 06k scored (role `stained`, including those with no nucle
 
 #### `results/af_gate.csv`
 
-06k's training gate, per marker with reagent controls or above-cut nuclei: how many above-cut unstained and no_primary reagent-control nuclei (featured sections) it had, and what it trained on - blank when below 200 of either kind, so 06c's af_flag header says why that marker has no rows. Written and removed with af_scores.csv.
+06k's training gate, per marker with reagent controls or above-cut nuclei: how many above-cut unstained and no_primary reagent-control nuclei (featured sections) it had, and what it trained on - blank when below 200 of either kind, so 06c's af_flag header says why that marker has no rows - and a hash of its reagent-control set, so 06c can tell flags made before a control was confirmed or removed. Written and removed with af_scores.csv.
 
 - **Written by:** 06k_af_score.py
 - **Read by:** 06c_excel_dataset.py
@@ -4505,6 +4507,7 @@ Every section x marker 06k scored (role `stained`, including those with no nucle
 | `n_no_primary` | int | count | The same on no_primary reagent controls. |
 | `trained_on` | text |  | `unstained`, `no_primary`, or blank when not scored (below 200 of either kind, or no stained above-cut nucleus). |
 | `reason` | text |  | Why the marker was not scored: `below_gate` (fewer than 200 above-cut nuclei of either kind) or `no_stained` (past the gate, but no featured stained nucleus above the cut). Blank when scored. |
+| `control_set` | text |  | A hash of the reagent controls 06k treated as controls for the marker: their scene_uid and kind (`ls_reagent_report.control_set_hash`, 16 hex digits). 06c works it out again from reagent_controls.csv and blanks the marker's af_flag rows, with the note `control set changed - run 06k`, when the two differ. |
 
 #### `qc/af_review.csv`
 

@@ -5547,7 +5547,7 @@
     "af_gate.csv"
    ],
    "writer": "06k_af_score.py",
-   "what": "06k's training gate, per marker with reagent controls or above-cut nuclei: how many above-cut unstained and no_primary reagent-control nuclei (featured sections) it had, and what it trained on - blank when below 200 of either kind, so 06c's af_flag header says why that marker has no rows. Written and removed with af_scores.csv.",
+   "what": "06k's training gate, per marker with reagent controls or above-cut nuclei: how many above-cut unstained and no_primary reagent-control nuclei (featured sections) it had, and what it trained on - blank when below 200 of either kind, so 06c's af_flag header says why that marker has no rows - and a hash of its reagent-control set, so 06c can tell flags made before a control was confirmed or removed. Written and removed with af_scores.csv.",
    "readers": [
     "06c_excel_dataset.py"
    ],
@@ -5582,6 +5582,12 @@
      "type": "text",
      "units": "",
      "meaning": "Why the marker was not scored: `below_gate` (fewer than 200 above-cut nuclei of either kind) or `no_stained` (past the gate, but no featured stained nucleus above the cut). Blank when scored."
+    },
+    {
+     "name": "control_set",
+     "type": "text",
+     "units": "",
+     "meaning": "A hash of the reagent controls 06k treated as controls for the marker: their scene_uid and kind (`ls_reagent_report.control_set_hash`, 16 hex digits). 06c works it out again from reagent_controls.csv and blanks the marker's af_flag rows, with the note `control set changed - run 06k`, when the two differ."
     }
    ]
   },

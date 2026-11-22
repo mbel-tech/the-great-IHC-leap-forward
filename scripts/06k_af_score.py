@@ -68,7 +68,13 @@ Writes:
   results/af_gate.csv             per marker, its above-cut unstained and
                                   no_primary control nuclei and what it was
                                   trained on (blank: below the gate), so 06c
-                                  can say why a marker has no rows
+                                  can say why a marker has no rows; and a
+                                  hash of the reagent controls it treated as
+                                  controls for the marker (control_set,
+                                  ls_reagent_report.control_set_hash of their
+                                  scene_uid and kind), so 06c can tell flags
+                                  made before a control was confirmed or
+                                  removed
   qc/af_review.png                per marker, the 24 highest-scoring stained
                                   nuclei and 24 drawn at random (seed 20261121)
                                   as 64 px crops of the marker channel
@@ -120,7 +126,8 @@ COLUMNS = ["scene_uid", "marker", "roi_index", "nucleus_id", "af_score", "flag_n
            "flagged", "trained_on"]
 SECTION_COLUMNS = ["scene_uid", "marker", "role", "cut", "n_scored", "n_flagged",
                    "flag_name", "trained_on"]
-GATE_COLUMNS = ["marker", "n_unstained", "n_no_primary", "trained_on", "reason"]
+GATE_COLUMNS = ["marker", "n_unstained", "n_no_primary", "trained_on", "reason",
+                "control_set"]
 REVIEW_COLUMNS = ["marker", "strip", "position", "scene_uid", "roi_index", "nucleus_id",
                   "af_score", "flagged", "flag_name", "trained_on", "operator_label"]
 
@@ -470,7 +477,9 @@ def main(argv=None):
         g = by_marker[mk]
         n = {kind: len(g[kind]) for kind in FLAG_NAMES}
         kind = choose(n)
-        gate_rows.append({"marker": mk, "n_unstained": n["unstained"],
+        gate_rows.append({"control_set": RR.control_set_hash(
+                              (u, kd) for (u, m), kd in kinds.items() if m == mk),
+                          "marker": mk, "n_unstained": n["unstained"],
                           "n_no_primary": n["no_primary"],
                           "trained_on": kind if kind and g["stained"] else "",
                           # Why not scored: below the training gate, or past it

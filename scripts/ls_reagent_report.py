@@ -20,6 +20,8 @@ Which sections are controls is decided from config (ls_reagent_controls), never
 from a file name or the manifest's display-only column. This reads no group key.
 """
 
+import hashlib
+import json
 import math
 import os
 import statistics as st
@@ -92,6 +94,16 @@ def study_lookup(config):
 def study_rows(config):
     """The manifest, one row per scene x marker, multiplex-aware."""
     return RC.manifest_rows(config, study_markers(config))
+
+
+def control_set_hash(pairs):
+    """A marker's reagent-control set, hashed: the sorted distinct (scene_uid,
+    kind) pairs, a missing kind as "". 06k records it per marker in af_gate.csv
+    from the confirmed lookup; 06c works it out again from reagent_controls.csv
+    (one row or more per control, every confirmed one, measured or not) and
+    blanks the flags when the two differ."""
+    items = sorted({(str(u), str(k or "")) for u, k in pairs})
+    return hashlib.sha1(json.dumps(items).encode("utf-8")).hexdigest()[:16]
 
 
 def drop_controls(rows, lookup):

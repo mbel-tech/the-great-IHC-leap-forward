@@ -1647,6 +1647,34 @@ the nucleus's own median and spread.
 It reads one section at a time and can be stopped; the next run reads only what is left, or a section
 whose detection has changed since.
 
+## 06k  Autofluorescence flag {#stage-af_score}
+
+*`scripts/06k_af_score.py` → `results/af_scores.csv`* · run on request · provisional
+
+A flag, and nothing more: no count, rate or density changes. It asks, for every nucleus of a stained
+section that is above its section's cut, how much it looks like the nuclei that are above the cut on the
+study's reagent controls — sections with no specific stain, whose "positive" nuclei can only be
+autofluorescence or stray secondary antibody.
+
+It learns from one kind of control per marker. Unstained controls come first: with at least 200 of their
+nuclei above the cut it learns from those alone, and the flag is called `af_suspect` (autofluorescent).
+Otherwise it learns from the no-primary controls, also at least 200, and the flag is called
+`control_like`. The two kinds are never pooled, and isotype and pre-adsorbed controls are not used. With
+fewer than 200 of either kind it writes nothing and says how many it had.
+
+What it compares is relative to each section, so a brighter or darker batch of animals cannot look like
+autofluorescence: the marker level in spreads above the section's own background discs, the DAPI
+brightness against the section's other nuclei, the nucleus's size and shape, how grainy its stain is
+(from 06l), and with several markers on one scan the other marker's level above its own discs. The model
+is a logistic regression with balanced classes, and a nucleus is flagged at a score of 0.5.
+
+Only sections 06l has finished are used; the others are counted and listed as not yet featured. The
+per-sample spreadsheet (06c) then has an `af_flag` sheet: per animal, marker and region, the raw positive
+rate and beside it the rate with the flagged nuclei taken out, blank with a note wherever a section is not
+scored. `qc/af_review.png` shows the 24 highest-scoring nuclei and 24 at random for each marker, and
+`qc/af_review.csv` says which nucleus each picture is, with an empty column to label them by hand. The
+flag stays a flag until that labelling, on a study with known controls, shows a precision of at least 0.8.
+
 
 \newpage
 

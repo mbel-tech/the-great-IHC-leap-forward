@@ -67,8 +67,8 @@ A key marked *required* has to be present before any stage will run.
 | `positivity.cut_k_source` | raw | `{"by": "default"}` | `app` | Where positivity.cut_k came from: the default, the operator, or the reagent-control check, and when. |
 | `positivity.fp_min_nuclei` | int | `50` | `06a`, `app` | The fewest reagent-control nuclei a false-positive rate is given for; below it the rate is left blank with a note, never 0. |
 | `reagent_controls.declared` | str | `"no"` | `01m`, `app` | Whether this study has reagent controls: no, yes, or unsure. |
-| `reagent_controls.files` | raw | `{}` | `00`, `01`, `01b`, `01d`, `01m`, `02`, `04b`, `04c`, `04k`, `04n`, `05b`, `05c`, `06a`, `06c`, `06d`, `app` | Slide files confirmed as reagent controls, by file name. |
-| `reagent_controls.scenes` | raw | `{}` | `00`, `01`, `01b`, `01d`, `01m`, `02`, `04b`, `04c`, `04k`, `04n`, `05b`, `05c`, `06a`, `06c`, `06d`, `app` | Scenes confirmed as reagent controls, by scene uid. |
+| `reagent_controls.files` | raw | `{}` | `00`, `01`, `01b`, `01d`, `01m`, `02`, `04b`, `04c`, `04k`, `04n`, `05b`, `05c`, `06a`, `06c`, `06d`, `06k`, `app` | Slide files confirmed as reagent controls, by file name. |
+| `reagent_controls.scenes` | raw | `{}` | `00`, `01`, `01b`, `01d`, `01m`, `02`, `04b`, `04c`, `04k`, `04n`, `05b`, `05c`, `06a`, `06c`, `06d`, `06k`, `app` | Scenes confirmed as reagent controls, by scene uid. |
 | `reagent_controls.paired_with` | raw | `{}` | `05b`, `05c`, `06a`, `app` | Which stained scenes or files each reagent control is compared with. |
 | `reagent_controls.rejected` | list_str | `[]` | `00`, `01m`, `app` | Scenes or files the operator said are NOT reagent controls. |
 | `reagent_controls.extra_patterns` | raw | `[]` | `00`, `app` | Lab-specific file-name patterns that mark a reagent control. |

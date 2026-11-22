@@ -183,6 +183,17 @@ chk("...a finished run with sections not done says how many",
     W.shortfall("nucleus_features", "  4 section(s) read\n2 section(s) not done (listed "
                 "above)\n"), "2 sections not done")
 
+print("--- 06k autofluorescence flag: on Measure, on request only ---")
+chk("the flag is a stage", "af_score" in S.BY_ID)
+chk("...run by hand, never by Run all remaining", "af_score" in W.BY_HAND)
+chk("...shown on Measure", "af_score" in W.SCREENS["measure"].stage_ids(), True)
+chk("...right after the nucleus features in the stage list",
+    [st.sid for st in S.STAGES].index("af_score")
+    == [st.sid for st in S.STAGES].index("nucleus_features") + 1)
+chk("...made from 06a's dataset and 06l's features", S.BY_ID["af_score"].made_from,
+    ["roi_dataset", "nucleus_features"])
+chk("...with plain words", bool(W.PLAIN.get("af_score", "").strip()))
+
 print("--- 06i detection overlays: a Results button, on request only ---")
 chk("overlays are a stage", "detection_overlays" in S.BY_ID)
 chk("...run by hand, never by Run all remaining", "detection_overlays" in W.BY_HAND)

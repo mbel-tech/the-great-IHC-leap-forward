@@ -177,6 +177,10 @@ MEASURE = Screen(
          "For the autofluorescence check only, on request: the shape of every nucleus "
          "found and how grainy its stain is. Reads the slides again, never redetects.",
          ["nucleus_features"]),
+        ("Autofluorescence flag",
+         "On request, with reagent controls: flags positive nuclei that look like the "
+         "controls' false positives. A flag only, provisional; no count changes.",
+         ["af_score"]),
         ("Repairs for older results",
          "Only for a results file written by an older version of the pipeline. "
          "Each one that changes a file backs it up first.",
@@ -259,8 +263,9 @@ VIEW_ONLY = {"scene_renders", "detection_overlays"}
 #: Backfills a later stage asks for, run on request: each re-reads the slides
 #: for every measured section, which a study that will never use the result
 #: should not pay for on every Run all remaining. 06l's features are read by the
-#: autofluorescence score only.
-ON_REQUEST = {"nucleus_features"}
+#: autofluorescence score only, and that score (06k) needs reagent controls a
+#: study may not have.
+ON_REQUEST = {"nucleus_features", "af_score"}
 
 #: Never planned by Run all remaining.
 BY_HAND = REPAIRS | VIEW_ONLY | ON_REQUEST
@@ -405,6 +410,12 @@ PLAIN = {
                         "its marker stain is, for the check that flags autofluorescence. "
                         "It does not look for nuclei again and does not change the "
                         "nucleus table; it can be stopped and picks up where it was.",
+    "af_score": "Learns, from the reagent controls, what a false-positive nucleus looks "
+                "like (unstained controls first, else no-primary ones) and flags the "
+                "positive nuclei of stained sections that look like one. Nothing is "
+                "counted differently: the spreadsheet shows the rate without them beside "
+                "the raw rate, as provisional, and a strip of pictures is drawn for "
+                "checking the flag by eye.",
     "join_sampling": "Unblinds: joins each animal to its treatment group from the sampling "
                      "workbook.",
     "excel_sample": "The spreadsheet with one row per region per animal."

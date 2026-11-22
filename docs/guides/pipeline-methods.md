@@ -731,6 +731,30 @@ count (a good control has few objects). A control the operator pairs is used onl
 is paired with. The raw values are not changed. The 06c workbook
 shows it on a "corrected_rate" sheet.
 
+*Reagent controls in detection: the autofluorescence flag (provisional).* Stage 06k flags nuclei of
+stained sections that look like the nuclei a reagent control calls positive; it changes no count. Per
+marker it fits a positive-unlabelled logistic regression: the labelled class is the nuclei above their own
+section's cut on the study's unstained controls, which can only be autofluorescence, when there are at
+least 200 of them; otherwise those on the no-primary controls (autofluorescence or non-specific secondary
+binding), also at least 200. The two kinds are never pooled, isotype and pre-adsorbed controls are not
+used, and below 200 of either kind nothing is fitted. The unlabelled class is the above-cut nuclei of the
+stained sections. Every feature is relative to the nucleus's own section, so the batch difference in
+background between animals cannot enter: the marker median in spreads (1.4826 × MAD) above the section's
+own background discs, the DAPI mean as a robust z among the section's nuclei, the nucleus's area,
+equivalent diameter, roundness and solidity, the ratio of its marker p90 to its median, the coefficient
+of variation of the marker above the region's own background and its count of bright spots (stage 06l,
+which re-reads the saved outlines and never segments again), and, for several markers on one scan, the
+other marker's median in spreads above its own discs. The features are standardised, the classes weighted
+equally, and the L2-penalised model fitted by iteratively reweighted least squares in NumPy from a zero
+start, so it is deterministic. A stained nucleus is flagged at a score of 0.5, as `af_suspect` when the
+model was trained on unstained controls and `control_like` when on no-primary ones. The 06c workbook
+shows, per animal, marker and region, the positive rate with the flagged nuclei left out of both the
+count and the denominator, beside the raw rate, on an `af_flag` sheet. *Validation criterion.* The flag
+stays a flag until it has been validated on a study with known controls: the operator hand-labels the
+review strip (the 24 highest-scoring stained nuclei and 24 drawn at random, per marker), and the flag
+must reach a precision of at least 0.8 at a score of 0.5 on that strip. Until then nothing is censored by
+it, and its rate is reported as provisional.
+
 # 13. Blinding
 
 No stage described in this document reads the treatment group. Every intermediate file is keyed

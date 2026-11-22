@@ -816,6 +816,23 @@ STAGES = [
                 "Never runs StarDist; roi_nuclei.csv is unchanged. For the "
                 "autofluorescence score. Resumable per section."),
 
+    Stage("af_score", "06k  Autofluorescence flag", "Quantification",
+          script="06k_af_score.py", reader="pylibCZIrw",
+          outputs=["results/af_scores.csv"],
+          needs=["roi_dataset", "nucleus_features"],
+          # 06a's cuts and nuclei, 06l's features. The confirmed reagent
+          # controls decide which sections are the labelled class.
+          made_from=["roi_dataset", "nucleus_features"],
+          settings=["reagent_controls.files", "reagent_controls.scenes"],
+          blurb="A flag only, provisional: scores each above-cut nucleus of a stained "
+                "section by how much it looks like the above-cut nuclei of the "
+                "unstained reagent controls (else the no-primary ones, never both; at "
+                "least 200 per marker), by a logistic regression on section-relative "
+                "size, shape, DAPI, marker level and texture. No count changes; 06c "
+                "shows the positive rate without the flagged nuclei beside the raw one. "
+                "Draws a review strip of 24 top and 24 random nuclei for hand-labelling. "
+                "The pixels read are for the strip only."),
+
     # ---- Beyond blinding ----------------------------------------------------
     Stage("join_sampling", "06b  Join the experiment", "Beyond blinding",
           script="06b_join_sampling.py", unblinds=True,

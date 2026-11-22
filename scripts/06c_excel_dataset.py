@@ -71,6 +71,15 @@ grain the operator chose, so it is its own sheet rather than columns on
 `by_roi`, which is per animal; nothing is pooled to the animal here. The
 other sheets are unchanged, with or without it.
 
+**The autofluorescence flag.** When 06k wrote `results/af_scores.csv` and
+`results/af_scored_sections.csv`, an "af_flag" sheet: per sample, marker and
+region of a scored marker, by_roi's raw `frac_positive` with
+`frac_positive_without_flagged` right beside it - (n_positive - n_flagged) /
+(n_nuclei - n_flagged) - under a header that says provisional and states the
+validation criterion. A row any of whose sections 06k did not score is blank
+with a note, never the raw rate passed off as "none flagged". No count on any
+other sheet changes.
+
 **What "total tissue area" means here.** It is the area of the ROI discs
 themselves, mapped onto the slide and summed - not the whole section, and not a
 mask-derived tissue fraction. The operator places discs inside tissue, so the
@@ -286,6 +295,89 @@ def _corrected_sheet():
     return (CORRECTED_SHEET,
             [{c: _cell(r.get(c, "")) for c in RR.ROI_CORRECTED_COLUMNS} for r in rows],
             RR.corrected_sheet_header())
+
+
+#: The sheet 06k's autofluorescence flag is shown on, when it wrote af_scores.csv.
+AF_SHEET = "af_flag"
+#: 06k's files, beside MEAS_CSV (06k_af_score.SCORES_CSV / SECTIONS_CSV).
+AF_SCORES = "af_scores.csv"
+AF_SECTIONS = "af_scored_sections.csv"
+
+AF_LINES = (
+    "Positive rate without flagged nuclei (provisional until validated on a study with "
+    "known controls: the operator hand-labels qc/af_review.png and the flag must reach a "
+    "precision of at least 0.8 at a score of 0.5). A flag only: no count is changed, and "
+    "frac_positive is by_roi's raw rate.",
+    "06k scores each above-cut nucleus of a stained section by how much it looks like the "
+    "above-cut nuclei of the study's reagent controls (unstained ones when there are at "
+    "least 200 per marker, flag af_suspect; else no-primary ones, flag control_like; never "
+    "both) and flags it at a score of 0.5. frac_positive_without_flagged = (n_positive - "
+    "n_flagged) / (n_nuclei - n_flagged): the flagged nuclei leave the count and the "
+    "denominator alike.",
+    "A blank is a rate that cannot be given, never 0; the note says why (a section not "
+    "scored yet, no raw rate, or flags older than the counts).",
+)
+
+
+def _af_sheet(meas, by_roi, sec_by):
+    """The af_flag sheet from 06k's af_scores.csv and af_scored_sections.csv
+    beside MEAS_CSV, or None when 06k wrote none. One row per by_roi row of a
+    scored marker (sample x marker x region): its raw rate, then the rate
+    without the flagged nuclei."""
+    base = os.path.dirname(MEAS_CSV)
+    spath, cpath = os.path.join(base, AF_SCORES), os.path.join(base, AF_SECTIONS)
+    if not (os.path.exists(spath) and os.path.exists(cpath)):
+        return None
+    secs = G5.load_csv(cpath)
+    scored = {(r["scene_uid"], r["marker"]) for r in secs}
+    how = {r["marker"]: (r["flag_name"], r["trained_on"]) for r in secs}
+    if not how:
+        return None
+    # A flagged nucleus's region and animal are its disc's, as 06a wrote it.
+    disc = {(r["scene_uid"], r["marker"], r["roi_index"]): r for r in meas}
+    flagged = collections.Counter()
+    for r in G5.load_csv(spath):
+        if r.get("flagged") != "1":
+            continue
+        d = disc.get((r["scene_uid"], r["marker"], r["roi_index"]))
+        if d is not None and d["roi_kind"] == "roi":
+            flagged[(d["animal"], d["marker"], d["region"])] += 1
+    rows = []
+    for b in by_roi:
+        mk = b["marker"]
+        if mk not in how:
+            continue
+        key = (b["sample"], mk, b["ROI"])
+        uids = sec_by.get(key, set())
+        missing = sorted(u for u in uids if (u, mk) not in scored)
+        n, npos, raw = b["n_nuclei"], b["n_positive"], b["frac_positive"]
+        nf = flagged[key]
+        rate, note = "", ""
+        if missing:
+            note = (f"not scored: {len(missing)} of {len(uids)} section(s) have no "
+                    f"autofluorescence score (06l features missing, or 06k not run since; "
+                    f"e.g. {missing[0]})")
+        elif raw == "" or npos == "":
+            note = "no raw rate on this row, so none without the flagged nuclei"
+        elif nf > npos:
+            note = (f"{nf} flagged but {npos} positive: af_scores.csv is older than "
+                    f"roi_measurements.csv - run 06k again")
+        elif n - nf <= 0:
+            note = "no nucleus left once the flagged ones are taken out"
+        else:
+            rate = round((npos - nf) / (n - nf), 4)
+        rows.append({
+            "sample": b["sample"], "marker": mk, "ROI": b["ROI"],
+            "treatment": b["treatment"], "n_nuclei": n, "n_positive": npos,
+            "frac_positive": raw, "frac_positive_without_flagged": rate,
+            "n_flagged": nf if not missing else "",
+            "n_positive_without_flagged": (npos - nf) if rate != "" else "",
+            "n_sections": len(uids), "n_sections_scored": len(uids) - len(missing),
+            "flag_name": how[mk][0], "trained_on": how[mk][1], "note": note,
+        })
+    if not rows:
+        return None
+    return (AF_SHEET, rows, list(AF_LINES))
 
 
 def _rc_sheet(rc_rows):
@@ -636,6 +728,9 @@ def main(argv=None):
     corrected = _corrected_sheet()
     if corrected:
         sheets.append(corrected)
+    af = _af_sheet(meas, by_roi, sec_by)
+    if af:
+        sheets.append(af)
     if rc_rows:
         sheets.append(_rc_sheet(rc_rows))
     write_workbook(args.out, sheets)
@@ -645,6 +740,7 @@ def main(argv=None):
     print(f"  sheets: by_roi, by_disc ({len(by_disc)}), "
           f"by_section ({len(by_section)}), coverage"
           + (f", {CORRECTED_SHEET} ({len(corrected[1])})" if corrected else "")
+          + (f", {AF_SHEET} ({len(af[1])}, provisional)" if af else "")
           + (f", Reagent controls ({len(rc_rows)})" if rc_rows else ""))
     print(f"  {RR.limitation_text(rc_rows)}")
     # Sections, not by_section rows: under `multiplex` a section has a row per

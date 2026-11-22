@@ -191,7 +191,7 @@ class Key:
 #: Which sections are reagent controls (`files`, `scenes`): every stage that leaves
 #: them out of something, or puts them first.
 _RC_CONSUMERS = ["00", "01", "01b", "01d", "01m", "02", "04b", "04c", "04k", "04n", "05b",
-                 "05c", "06a", "06c", "06d", "app"]
+                 "05c", "06a", "06c", "06d", "06k", "app"]
 #: The other reagent_controls keys are each read by fewer stages, and some only to
 #: print a warning (`declared` and `rejected` in 05b/05c, `rejected` and
 #: `extra_patterns` in 00's name check): a warning changes no output, so those

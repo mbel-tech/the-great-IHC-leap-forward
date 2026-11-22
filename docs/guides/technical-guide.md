@@ -330,6 +330,9 @@ Detection takes hours; finished sections are kept, so a stopped run resumes.
   positive, for checking by eye.
 - **06l** (on request, from the Measure screen) adds the shape and marker texture of every detected
   nucleus to `nucleus_features.csv`, from the outlines 05c saved, for the autofluorescence score.
+- **06k** (on request, from the Measure screen) flags above-cut nuclei of stained sections that look like
+  the reagent controls' above-cut nuclei (`af_scores.csv`), a flag only and provisional; 06c shows the
+  positive rate without them beside the raw one.
 - **R statistics and figures** (`analysis/`, switched off in the app for now and run by hand). With one row
   per animal the model is ordinary least squares, `lm(value ~ group)`; given a table with several rows per
   animal it fits a mixed model with a random intercept per animal instead (`lmerTest::lmer`), so sections
@@ -770,6 +773,7 @@ The full table, generated from the code:
 | `detect` | 05c Detect and measure nuclei | Quantification | `05c_detect_rois.py` | roi_geometry, tune_detection | `results/roi_nuclei.csv` | pylibCZIrw |  | from source only (needs StarDist) |
 | `roi_dataset` | 06a Per-ROI dataset | Quantification | `06a_roi_dataset.py` | detect | `results/roi_measurements.csv`, `results/detector_specificity.csv` | none |  | yes |
 | `nucleus_features` | 06l Per-nucleus shape and texture | Quantification | `06l_nucleus_features.py` | detect | `results/nucleus_features.csv` | pylibCZIrw |  | yes |
+| `af_score` | 06k Autofluorescence flag | Quantification | `06k_af_score.py` | roi_dataset, nucleus_features | `results/af_scores.csv` | pylibCZIrw |  | yes |
 | `join_sampling` | 06b Join the experiment | Beyond blinding | `06b_join_sampling.py` | roi_dataset | `results/roi_dataset.csv`, `results/animal_metadata.csv` | none |  | yes |
 | `excel_sample` | 06c Spreadsheet - per sample | Beyond blinding | `06c_excel_dataset.py` | roi_dataset | `results/roi_dataset.xlsx` | none |  | yes |
 | `excel_slide` | 06d Spreadsheet - per slide | Beyond blinding | `06d_excel_by_slide.py` | roi_dataset | `results/roi_dataset_by_slide.xlsx` | none |  | yes |
@@ -1898,7 +1902,13 @@ Stage `excel_sample`. The analysis table as a workbook, one row per ROI per anim
   provisional. When 06a wrote `results/roi_corrected.csv`, a `corrected_rate` sheet carries it: the raw
   `frac_positive` beside `frac_positive_corrected` and its interval, per section, marker and region (its own
   sheet, because `by_roi` is per animal and nothing is pooled to the animal), under a header stating the
-  sensitivity-1 assumption and that it is provisional. `write_workbook` takes an optional third item per sheet, the lines above the table, and a
+  sensitivity-1 assumption and that it is provisional. When 06k wrote `results/af_scores.csv` and
+  `results/af_scored_sections.csv`, an `af_flag` sheet: per sample, marker and region of a scored marker,
+  by_roi's raw `frac_positive` beside `frac_positive_without_flagged` = (n_positive - n_flagged) /
+  (n_nuclei - n_flagged), each flagged nucleus placed by its disc's row in `roi_measurements.csv`, under a
+  header that says provisional and states the validation criterion. Blank, with a `note`, when any of the
+  row's sections is not in `af_scored_sections.csv`, when there is no raw rate, or when more are flagged
+  than positive (flags older than the counts). `write_workbook` takes an optional third item per sheet, the lines above the table, and a
   fourth, more tables below it (`[(lines, rows)]`).
 - **How:** groups 06a's rows. Withheld values (no cut, no denominator, Abercrombie not applied) are blank,
   with the reason carried from 06a. Reagent-control boxes are left out of `planned` and `coverage`. The
@@ -1987,6 +1997,38 @@ counts by eye.
   section's boxes or its scene picture are read, it waits for the drive (`ls_drive`) and reads them again,
   the CZI opened afresh; a read that fails with the drive there lists the section not drawn, as before.
 
+### `06k_af_score.py`
+
+Stage `af_score` (Quantification, run on request). The autofluorescence flag: a positive-unlabelled
+logistic regression (`ls_af_model`) per marker, labelled class the above-cut ROI nuclei of the study's
+**unstained** reagent controls when there are at least `GATE` (200) of them, else of its **no_primary**
+controls (at least 200), never pooled; unlabelled class the above-cut ROI nuclei of stained sections.
+Each of the latter gets `af_score`, flagged at >= 0.5 (`af_suspect` when trained on unstained,
+`control_like` on no_primary). A flag only: no count, rate or density is changed anywhere.
+
+- **Reads:** `roi_nuclei.csv` (one pass; artifact and off-tissue rows left out, as in 06a), 06a's
+  `positivity_cuts.csv` (stained) and `reagent_control_cuts.csv` (each control's own cut), the confirmed
+  controls' kinds (`ls_reagent_report.study_lookup`, the entry's `kind`; isotype and preadsorbed never
+  used), 06l's `nucleus_features_done.csv` and `nucleus_features.csv`. "Above the cut" is
+  `ls_overlay.is_positive` against that section's cut.
+- **Featured sections only:** a section is used when 06l's done log lists it and every above-cut nucleus
+  has a feature row; the others are counted and named ("N section(s) skipped as not yet featured"). The
+  gate counts after that.
+- **Features** (`ls_af_model.features_matrix`), section-relative: size, roundness, solidity, DAPI as a
+  robust z within the section, marker_median in spreads above the section's own discs
+  (`ls_overlay.background_stats`, recomputed here for stained and control sections alike), p90 / median,
+  marker_cv, marker_spots and, under multiplex, the other marker (06l's `other_marker`) in spreads above its
+  own discs.
+- **Writes:** `results/af_scores.csv` (`COLUMNS`), `results/af_scored_sections.csv` (every stained section
+  x marker scored, with counts: 06c tells "none flagged" from "not scored" by it), then
+  `qc/af_review.csv` and `qc/af_review.png`: per marker the 24 highest scores and 24 drawn at random
+  (seed 20261121) as 64 px crops of the marker plane (05c's `plane_index_for`, read through 06l's loaded
+  05c); a crop that cannot be read is grey.
+- **Gate:** a marker below 200 of either kind is not scored, and the counts are printed. When no marker
+  is scored, nothing is written, the outputs of an earlier run are removed (a stale file would have 06c
+  subtract flags this study no longer supports) and it exits 1.
+- `roi_nuclei.csv`, `roi_measurements.csv` and `roi_corrected.csv` are never written.
+
 ### `06l_nucleus_features.py`
 
 Stage `nucleus_features` (Quantification, run on request). Shape and marker texture of every nucleus in
@@ -2066,6 +2108,17 @@ channel is comes from `ls_channels`. Used by every stage whose pixels reach a re
 Shared module, no Qt. `flatten()` turns a CZI's metadata tree into path and value pairs, and `combine()`
 says per path what the study's files hold (the same everywhere, or differing). The app's "What the slides
 say" window shows the result.
+
+### `ls_af_model.py`
+
+Shared module, NumPy only (scikit-learn is not a dependency): the autofluorescence model for 06k.
+`fit(X, y, l2=1.0, seed=20261121)` standardises each column (NaN imputed by the column mean, so 0 once
+standardised; a column blank or constant throughout is dropped and recorded in `keep`), weights the two
+classes to equal total weight, and solves the L2-penalised logistic regression (no penalty on the
+intercept) by IRLS from zero, so it is deterministic; the seed is recorded with the model. `predict`
+applies the same columns, means and spreads. `features_matrix(rows, section_stats)` builds the `FEATURES`
+columns from merged roi_nuclei.csv and nucleus_features.csv rows: blank cells are NaN, never 0, and a
+spread of 0 or a section without statistics leaves the relative feature blank. Reads no study file.
 
 ### `ls_atlas.py`
 
@@ -2545,6 +2598,7 @@ straight from `sys.argv`) without running it. A script with no options says "(no
 | `06i_detection_overlays.py` | `--force` | off | redraw sections whose inputs have not changed (and the crops 05c drew) |
 | `06i_detection_overlays.py` | `--workers` | `0` | whole-scene pictures drawn at once, each only when there is memory for it (default 0: half the cores, at most 4 - <DEFAULT_WORKERS> here) |
 | `06j_backfill_roi_area.py` | (none) |  |  |
+| `06k_af_score.py` | (none) |  |  |
 | `06l_nucleus_features.py` | `--marker` |  | only this marker (default: every marker with boxes) Choices: G5.MARKERS. |
 | `06l_nucleus_features.py` | `--limit` | `0` | read at most N sections this run; run again to go on |
 | `06l_nucleus_features.py` | `--force` | off | read sections again even when their features are current. A section's old rows are dropped before it is read: one that then fails is left with none (absent, not stale) |
@@ -2555,6 +2609,7 @@ straight from `sys.argv`) without running it. A script with no options says "(no
 | `czi_probe.py` | (none) |  |  |
 | `czi_read.py` | (none) |  |  |
 | `czi_report.py` | (none) |  |  |
+| `ls_af_model.py` | (none) |  |  |
 | `ls_atlas.py` | `--rehash` | off | delete the fingerprint cache first, so every plate is re-hashed from bytes rather than answered from the cache. |
 | `ls_atlas_imagej.py` | `src` |  | folder of plate images, each with its ROI Manager .zip beside it |
 | `ls_atlas_imagej.py` | `--name` |  | import it into the active study under this name (lower-case letters, digits, _) |
@@ -4181,7 +4236,7 @@ One row per sampled crop: the signal statistics 05b's verdict is made from (summ
 One row per detected nucleus in every region and background disc. About 900,000 rows on the LS study; appended section by section so a stopped run resumes.
 
 - **Written by:** 05c_detect_rois.py (06f, 06g and 06h repair it in place)
-- **Read by:** 04p_section_provenance.py, 06a_roi_dataset.py, 06c_excel_dataset.py, 06f_recensor_nuclei.py, 06g_flag_off_tissue.py, 06h_backfill_provenance.py
+- **Read by:** 04p_section_provenance.py, 06a_roi_dataset.py, 06c_excel_dataset.py, 06f_recensor_nuclei.py, 06g_flag_off_tissue.py, 06h_backfill_provenance.py, 06k_af_score.py
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
@@ -4342,7 +4397,7 @@ Every detected nucleus's outline, so 06i can draw them and 06l measure their sha
 Shape and marker texture of every nucleus in roi_nuclei.csv, one row per roi_nuclei.csv row and keyed as it is, for the autofluorescence score (06k). Computed from the outlines 05c saved and the marker plane re-read under them; StarDist is never run again and roi_nuclei.csv is never written. Appended one section at a time; a section is current while its line in nucleus_features_done.csv carries today's fingerprint. A section with no saved outlines has no rows. Provisional until the Task 8 validation.
 
 - **Written by:** 06l_nucleus_features.py
-- **Read by:** a person
+- **Read by:** 06k_af_score.py
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
@@ -4361,13 +4416,76 @@ Shape and marker texture of every nucleus in roi_nuclei.csv, one row per roi_nuc
 06l's resume log: one line per section whose rows in nucleus_features.csv were written whole, appended after them. A section is read again when its fingerprint no longer matches (outlines re-saved, boxes moved, other nuclei in roi_nuclei.csv, a new feature version); its rows are dropped first.
 
 - **Written by:** 06l_nucleus_features.py
-- **Read by:** 06l_nucleus_features.py
+- **Read by:** 06l_nucleus_features.py, 06k_af_score.py
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
 | `marker` | text |  | The marker. |
 | `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `fingerprint` | text |  | Hash of what the section's features were computed from: the feature version and spot k, the outline file's size and mtime, its (roi_index, nucleus_id) list, its box rectangles, its CZI file and scene, and the planes read. |
+
+#### `results/af_scores.csv`
+
+The autofluorescence flag: one row per above-cut ROI nucleus of a stained section that 06k scored, keyed as roi_nuclei.csv is. A flag only - no count anywhere changes. Written only for markers with at least 200 above-cut nuclei on unstained reagent controls (else no-primary ones) in sections 06l has featured; removed when no marker is scored. Provisional until validated (hand-labelled review strip, precision >= 0.8 at score 0.5).
+
+- **Written by:** 06k_af_score.py
+- **Read by:** 06c_excel_dataset.py
+
+| Column | Type | Units | Meaning |
+|------------|------|------|---------------------------|
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
+| `marker` | text |  | The marker, as roi_nuclei.csv names it. |
+| `roi_index` | int |  | The box, 1-based, as in roi_nuclei.csv. |
+| `nucleus_id` | int |  | The nucleus's label in its box, as in roi_nuclei.csv. |
+| `af_score` | float |  | 0-1, rounded to 4 decimals: the logistic model's probability that this nucleus belongs to the reagent-control class (ls_af_model), from section-relative size, shape, DAPI, marker level and texture. |
+| `flag_name` | text |  | `af_suspect` (trained on unstained controls: autofluorescent) or `control_like` (trained on no-primary controls: looks like a reagent-control false positive). |
+| `flagged` | int |  | 1 when af_score (as written) >= 0.5, else 0. |
+| `trained_on` | text |  | The kind of reagent control the marker's model was trained on: `unstained` or `no_primary`, never both. |
+
+#### `results/af_scored_sections.csv`
+
+Every stained section x marker 06k scored, including those with no nucleus above the cut, so 06c can tell a section with no flagged nucleus from one never scored. Written and removed with af_scores.csv.
+
+- **Written by:** 06k_af_score.py
+- **Read by:** 06c_excel_dataset.py
+
+| Column | Type | Units | Meaning |
+|------------|------|------|---------------------------|
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
+| `marker` | text |  | The marker, as roi_nuclei.csv names it. |
+| `n_scored` | int | count | Above-cut ROI nuclei of the section scored. |
+| `n_flagged` | int | count | Of those, flagged (score >= 0.5). |
+| `flag_name` | text |  | As in af_scores.csv. |
+| `trained_on` | text |  | As in af_scores.csv. |
+
+#### `qc/af_review.csv`
+
+The key to qc/af_review.png: which nucleus each tile is, for the operator to hand-label (the validation of the flag). Rewritten every run, so labels belong in a copy.
+
+- **Written by:** 06k_af_score.py
+- **Read by:** a person
+
+| Column | Type | Units | Meaning |
+|------------|------|------|---------------------------|
+| `marker` | text |  | The marker. |
+| `strip` | text |  | `top` (the highest af_score) or `random` (drawn with seed 20261121 from the rest). |
+| `position` | int |  | The tile's place in its row, 1-based from the left. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
+| `roi_index` | int |  | As in af_scores.csv. |
+| `nucleus_id` | int |  | As in af_scores.csv. |
+| `af_score` | float |  | As in af_scores.csv. |
+| `flagged` | int |  | As in af_scores.csv. |
+| `flag_name` | text |  | As in af_scores.csv. |
+| `trained_on` | text |  | As in af_scores.csv. |
+| `operator_label` | text |  | Blank: for the operator's call (autofluorescent / control-like or not) when validating the flag. |
+
+#### `qc/af_review.png`
+
+The autofluorescence flag's review strip: per marker, the 24 highest-scoring stained nuclei and 24 at random, for hand-labelling against qc/af_review.csv.
+
+- **Written by:** 06k_af_score.py
+- **Read by:** a person
+- **Format:** RGB PNG, 24 x 64 px wide: per marker a title band and a row of 64 px crops of the marker channel centred on each nucleus (05c's plane, stretched p1-p99.8 per crop), its score under it; a crop that could not be read (no slide drive) is grey and says `no image`.
 
 #### `detection_overlays/index.csv`
 
@@ -4487,7 +4605,7 @@ Per section and marker: how many of that marker's background-disc nuclei land ab
 The exact cut per section and marker, at full precision, so 06i draws the same calls 06a counted.
 
 - **Written by:** 06a_roi_dataset.py
-- **Read by:** 06i_detection_overlays.py
+- **Read by:** 06i_detection_overlays.py, 06k_af_score.py
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
@@ -4534,7 +4652,7 @@ The reagent controls, measured: one row per reagent-control section x marker x r
 Each measured reagent control's own cut (per section and marker, at full precision), from its own background discs by the same rule. Kept apart from positivity_cuts.csv, which lists stained sections only; 06i reads both so a control is drawn by its own cut. Removed when no control is measured.
 
 - **Written by:** 06a_roi_dataset.py
-- **Read by:** 06i_detection_overlays.py
+- **Read by:** 06i_detection_overlays.py, 06k_af_score.py
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
@@ -4628,7 +4746,7 @@ roi_measurements.csv with the animal's metadata columns added to every row.
 
 #### `results/roi_dataset.xlsx`
 
-The analysis table: sheet `by_roi`, one row per region per animal (the animal is the unit for statistics). Also `by_disc` (every region placement), `by_section` (how much of each animal is measured) and `coverage` (what is still missing). The columns below are `by_roi`'s.
+The analysis table: sheet `by_roi`, one row per region per animal (the animal is the unit for statistics). Also `by_disc` (every region placement), `by_section` (how much of each animal is measured) and `coverage` (what is still missing). With 06k's `af_scores.csv`, an `af_flag` sheet too: per sample, marker and region the raw `frac_positive` and beside it `frac_positive_without_flagged` = (n_positive - n_flagged) / (n_nuclei - n_flagged), provisional, blank with a `note` where a section is not scored. The columns below are `by_roi`'s.
 
 - **Written by:** 06c_excel_dataset.py
 - **Read by:** a person

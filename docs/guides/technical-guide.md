@@ -4678,7 +4678,7 @@ The reagent controls, measured: one row per reagent-control section x marker x r
 | `file` | text |  | The CZI file the section is on, from the manifest. |
 | `kind` | text |  | The reagent-control kind confirmed in Set up: `no_primary`, `unstained`, `isotype`, `preadsorbed` or `other`. |
 | `marker` | text |  | The marker this row is a reagent control for. A multiplex scene that is a control for one marker is stained, and in roi_measurements.csv, for the others. |
-| `region` | text |  | The atlas region of the control's ROI discs. |
+| `region` | text |  | The atlas region of the control's ROI discs. Blank on the one row of a control measured with no ROI region to report. |
 | `pairing` | text |  | Which stained sections it is compared with: `operator` (reagent_controls.paired_with), `same_file`, `same_animal`, or `study_wide` (every stained section of the marker). |
 | `n_nuclei` | integer | count | Kept nuclei in the control's ROI discs in this region (artifact and off-tissue dropped, as in 06a). |
 | `n_positive` | integer | count | A: nuclei the positivity rule calls positive under the control's OWN per-section cut (censored counts as positive). Blank when the control has fewer than 5 usable background-disc nuclei. |
@@ -4697,7 +4697,7 @@ The reagent controls, measured: one row per reagent-control section x marker x r
 | `pct_above_paired_cut` | number | % | B: the control's ROI nuclei scored against EACH paired stained section's own cut; the median across those sections. Never a pooled cut. Empty under study_wide pairing and for an own-channel marker. |
 | `pct_above_paired_cut_min` | number | % | B: the lowest of those per-section scores. |
 | `pct_above_paired_cut_max` | number | % | B: the highest of those per-section scores. |
-| `note` | text |  | Why a column is blank or empty: no own cut, no denominator, paired sections not measured yet, or study-wide pairing (batch). A confirmed reagent control with nothing measured for that marker gets one row, every measure blank, its note `confirmed reagent control, not measured yet: <why>` (no 05a ROIs, or not detected by 05c yet). |
+| `note` | text |  | Why a column is blank or empty: no own cut, no denominator, paired sections not measured yet, or study-wide pairing (batch). A confirmed reagent control with nothing measured for that marker gets one row, every measure blank, its note `confirmed reagent control, not measured yet: <why>` (no 05a ROIs, or not detected by 05c yet). One measured with no nucleus and no usable area in its ROIs also gets one row, region blank, its note `measured, but no ROI region to report: ...`. So every confirmed control has a row; 06c checks 06k's control-set hash against these rows' scene_uid and kind. |
 
 #### `results/reagent_control_cuts.csv`
 

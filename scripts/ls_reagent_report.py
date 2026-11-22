@@ -70,6 +70,9 @@ CONTROL_TEXT = (
 
 #: The note on a confirmed reagent control 06a has nothing measured for yet.
 NOT_MEASURED = "confirmed reagent control, not measured yet"
+#: The note on the one row of a measured control with no ROI region to report.
+NO_ROI_REGION = ("measured, but no ROI region to report: no nucleus and no usable area "
+                 "in its ROIs (none placed, or none segmented)")
 
 BATCH_NOTE = ("study-wide pairing: no stained section on the same file or animal, so "
               "the level comparison (B) would cross batches and measure the batch, "
@@ -282,6 +285,16 @@ def report_rows(control_nuclei, stained_nuclei, cuts, pairing, meta=None, areas=
         info = meta.get((uid, mk), {})
         cut = cuts.get((uid, mk))
         own = own_by.get(mk, False)
+        if not regions[(uid, mk)]:
+            # Measured with nothing in its ROIs: still one row, so a confirmed
+            # control never just disappears (06c checks 06k's control set
+            # against this file's sections and kinds).
+            row = dict.fromkeys(COLUMNS, "")
+            row.update({"scene_uid": uid, "file": info.get("file", ""),
+                        "kind": info.get("kind", ""), "marker": mk, "pairing": kind,
+                        "note": NO_ROI_REGION})
+            out.append(row)
+            continue
         for rg in sorted(regions[(uid, mk)]):
             vals = ctl.get((uid, mk, rg)) or _Vals()
             n = len(vals.v)

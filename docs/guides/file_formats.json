@@ -6233,7 +6233,7 @@
      "name": "region",
      "type": "text",
      "units": "",
-     "meaning": "The atlas region of the control's ROI discs."
+     "meaning": "The atlas region of the control's ROI discs. Blank on the one row of a control measured with no ROI region to report."
     },
     {
      "name": "pairing",
@@ -6347,7 +6347,7 @@
      "name": "note",
      "type": "text",
      "units": "",
-     "meaning": "Why a column is blank or empty: no own cut, no denominator, paired sections not measured yet, or study-wide pairing (batch). A confirmed reagent control with nothing measured for that marker gets one row, every measure blank, its note `confirmed reagent control, not measured yet: <why>` (no 05a ROIs, or not detected by 05c yet)."
+     "meaning": "Why a column is blank or empty: no own cut, no denominator, paired sections not measured yet, or study-wide pairing (batch). A confirmed reagent control with nothing measured for that marker gets one row, every measure blank, its note `confirmed reagent control, not measured yet: <why>` (no 05a ROIs, or not detected by 05c yet). One measured with no nucleus and no usable area in its ROIs also gets one row, region blank, its note `measured, but no ROI region to report: ...`. So every confirmed control has a row; 06c checks 06k's control-set hash against these rows' scene_uid and kind."
     }
    ]
   },

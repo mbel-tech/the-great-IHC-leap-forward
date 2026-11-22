@@ -111,6 +111,20 @@ chk("no own cut: n_positive blank, not 0", (r["n_positive"], r["pct_positive"]),
 chk("...and the note says why", "background" in r["note"], True)
 chk("...B is still scored against the paired cut", r["pct_above_paired_cut"], 100.0)
 
+# A measured control with no ROI region to report - its nuclei all in its
+# background discs, its ROI boxes unsegmented - must not drop out: 06k's
+# control-set hash is checked against this file's (scene_uid, kind) pairs.
+print("--- a measured control with no ROI region still has a row ---")
+bg_only = RR.report_rows([nuc("E", "background", 100)] * 10, stained,
+                         {("E", "pERK"): 100.0, ("S1", "pERK"): 150.0},
+                         {("E", "pERK"): ("same_file", ["S1"])},
+                         meta={("E", "pERK"): {"file": "E_1.czi", "kind": "no_primary"}})
+chk("one row for it", [(r["scene_uid"], r["marker"], r["kind"]) for r in bg_only],
+    [("E", "pERK", "no_primary")])
+chk("...with no region and every measure blank, the note saying why",
+    (bg_only[0]["region"], bg_only[0]["n_nuclei"], bg_only[0]["pct_positive"],
+     "no ROI region" in bg_only[0]["note"]) if bg_only else None, ("", "", "", True))
+
 # ------------------------------------------------- B: each paired cut, not pooled
 print("--- paired_each_cut ---")
 ctl = ([nuc("C", "background", 100)] * 10
@@ -390,6 +404,10 @@ spec = read(os.path.join(tmp, "detector_specificity.csv"))
 cutsf = read(os.path.join(tmp, "positivity_cuts.csv"))
 rep = read(os.path.join(tmp, "reagent_controls.csv"))
 pairs = lambda rows: sorted({(r["scene_uid"], r["marker"]) for r in rows})  # noqa: E731
+chk("every confirmed control is in reagent_controls.csv, with its kind (06k's "
+    "control-set hash is checked against it)",
+    sorted({(r["scene_uid"], r["marker"], r["kind"]) for r in rep}),
+    sorted((u, m, (e or {}).get("kind", "")) for (u, m), e in RR.study_lookup(G6A.CONFIG).items()))
 chk("the partial control's PCNA rows are in roi_measurements.csv",
     ("LS45_s09_sc01", "PCNA") in pairs(meas), True)
 chk("...and its pERK rows are not", ("LS45_s09_sc01", "pERK") in pairs(meas), False)

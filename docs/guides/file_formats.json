@@ -4692,8 +4692,8 @@
     "detection_tuning.csv"
    ],
    "writer": "05b_tune_detection.py",
-   "what": "One row per sampled crop: the signal statistics 05b's verdict is made from (summary and chosen cut in `qc/detection_tuning.md`).",
-   "columns_from": "05b_tune_detection.py:COLUMNS",
+   "what": "One row per sampled crop: the signal statistics 05b's verdict is made from (summary and chosen cut in `qc/detection_tuning.md`). The last four columns are written only when the PCNA reagent-control constraint ran.",
+   "columns_from": "05b_tune_detection.py:ALL_COLUMNS",
    "columns": [
     {
      "name": "marker",
@@ -4778,6 +4778,30 @@
      "type": "float",
      "units": "",
      "meaning": "Share of the crop at the clip ceiling."
+    },
+    {
+     "name": "control_density",
+     "type": "float",
+     "units": "objects/mm²",
+     "meaning": "Only when the PCNA reagent-control constraint ran for some marker (else the column is absent). StarDist objects per mm² on the paired no-primary controls' ROI central windows, each at its stained pair's intensity range, at the marker's final cut; the same on every row of the marker, blank for a marker it did not run for. Provisional."
+    },
+    {
+     "name": "stained_density",
+     "type": "float",
+     "units": "objects/mm²",
+     "meaning": "Only with control_density. Objects per mm² on the stained sample's windows at the same cut."
+    },
+    {
+     "name": "admissible",
+     "type": "text",
+     "units": "",
+     "meaning": "Only with control_density. `yes` when control_density ≤ positivity.fp_target × stained_density at the final cut, else `no` (no grid point was admissible and the cut was kept)."
+    },
+    {
+     "name": "constraint_moved_from",
+     "type": "float",
+     "units": "",
+     "meaning": "Only with control_density. The cut the plateau rule chose (0.479071 = the model default) when the constraint moved it to the lowest admissible grid point above; blank when it did not move."
     }
    ]
   },
@@ -5000,6 +5024,12 @@
      "type": "int",
      "units": "",
      "meaning": "Boxes the range was taken over."
+    },
+    {
+     "name": "range_from",
+     "type": "text",
+     "units": "",
+     "meaning": "Whose range it is: `own` (the section's own boxes), or, for a no-primary reagent control of the marker, the stained scene_uid it is paired with (operator, same file or same animal; never study-wide), whose range it borrows. A file from before the column is backfilled `own`."
     }
    ]
   },
@@ -5278,11 +5308,373 @@
    "path": "detection_outlines/<marker>/<scene_uid>.npz",
    "names": [],
    "writer": "05c_detect_rois.py",
-   "what": "Every detected nucleus's outline, so 06i can draw them without detecting again.",
+   "what": "Every detected nucleus's outline, so 06i can draw them and 06l measure their shape without detecting again.",
    "format": "Compressed NumPy archive: `roiNN` (uint32 label image of box NN, 0 = background) and `roiNN_origin` (the box's CZI x, y).",
    "readers": [
-    "06i_detection_overlays.py"
+    "06i_detection_overlays.py",
+    "06l_nucleus_features.py"
    ],
+   "columns": []
+  },
+  {
+   "path": "results/nucleus_features.csv",
+   "names": [
+    "nucleus_features.csv"
+   ],
+   "writer": "06l_nucleus_features.py",
+   "what": "Shape and marker texture of every nucleus in roi_nuclei.csv, one row per roi_nuclei.csv row and keyed as it is, for the autofluorescence score (06k). Computed from the outlines 05c saved and the marker plane re-read under them; StarDist is never run again and roi_nuclei.csv is never written. Appended one section at a time; a section is current while its line in nucleus_features_done.csv carries today's fingerprint. A section with no saved outlines has no rows. Provisional until the Task 8 validation.",
+   "readers": [
+    "06k_af_score.py"
+   ],
+   "columns_from": "06l_nucleus_features.py:COLUMNS",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker whose nucleus this is, as roi_nuclei.csv names it."
+    },
+    {
+     "name": "roi_index",
+     "type": "int",
+     "units": "",
+     "meaning": "The box, 1-based, as in roi_nuclei.csv."
+    },
+    {
+     "name": "nucleus_id",
+     "type": "int",
+     "units": "",
+     "meaning": "The nucleus's label in its box's saved outlines, as in roi_nuclei.csv."
+    },
+    {
+     "name": "roundness",
+     "type": "float",
+     "units": "",
+     "meaning": "4 pi A / P^2 of the nucleus's mask (skimage perimeter), capped at 1. About 0.9 for a filled disc. Blank for an object with no perimeter."
+    },
+    {
+     "name": "solidity",
+     "type": "float",
+     "units": "",
+     "meaning": "Pixel area over the pixels whose centres lie in the convex hull of its pixel centres: 1.0 for a digital disc of any size."
+    },
+    {
+     "name": "marker_cv",
+     "type": "float",
+     "units": "",
+     "meaning": "sd of the marker inside the nucleus / max(mean - b, s), b and s the median and 1.4826 x MAD of the box's pixels in no nucleus: a coefficient of variation above the box's non-nuclear pixels, unchanged by an offset or a gain. Blank when the box has no such pixels, or the nucleus is not above them and they are flat."
+    },
+    {
+     "name": "marker_spots",
+     "type": "int",
+     "units": "count",
+     "meaning": "Local maxima of the marker inside the nucleus (8 neighbours, a plateau counted once) above its own median + 3 x 1.4826 x MAD. Unchanged by an offset or a gain."
+    },
+    {
+     "name": "other_marker_median",
+     "type": "float",
+     "units": "grey value",
+     "meaning": "Under multiplex, the other marker's median inside the nucleus (the first other marker of the declared order on another plane). Blank under paired."
+    }
+   ]
+  },
+  {
+   "path": "results/nucleus_features_done.csv",
+   "names": [
+    "nucleus_features_done.csv"
+   ],
+   "writer": "06l_nucleus_features.py",
+   "what": "06l's resume log: one line per section whose rows in nucleus_features.csv were written whole, appended after them. A section is read again when its fingerprint no longer matches (outlines re-saved, boxes moved, other nuclei in roi_nuclei.csv, a new feature version); its rows are dropped first.",
+   "readers": [
+    "06l_nucleus_features.py",
+    "06k_af_score.py"
+   ],
+   "columns_from": "06l_nucleus_features.py:DONE_COLUMNS",
+   "columns": [
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker."
+    },
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "fingerprint",
+     "type": "text",
+     "units": "",
+     "meaning": "Hash of what the section's features were computed from: the feature version and spot k, the outline file's size and mtime, its (roi_index, nucleus_id) list, its box rectangles, its CZI file and scene, and the planes read."
+    }
+   ]
+  },
+  {
+   "path": "results/af_scores.csv",
+   "names": [
+    "af_scores.csv"
+   ],
+   "writer": "06k_af_score.py",
+   "what": "The autofluorescence flag: one row per above-cut ROI nucleus of a stained section that 06k scored, keyed as roi_nuclei.csv is. A flag only - no count anywhere changes. Written only for markers with at least 200 above-cut nuclei on unstained reagent controls (else no-primary ones) in sections 06l has featured; removed when no marker is scored. Provisional until validated (hand-labelled review strip, precision >= 0.8 at score 0.5).",
+   "readers": [
+    "06c_excel_dataset.py"
+   ],
+   "columns_from": "06k_af_score.py:COLUMNS",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker, as roi_nuclei.csv names it."
+    },
+    {
+     "name": "roi_index",
+     "type": "int",
+     "units": "",
+     "meaning": "The box, 1-based, as in roi_nuclei.csv."
+    },
+    {
+     "name": "nucleus_id",
+     "type": "int",
+     "units": "",
+     "meaning": "The nucleus's label in its box, as in roi_nuclei.csv."
+    },
+    {
+     "name": "af_score",
+     "type": "float",
+     "units": "",
+     "meaning": "0-1, rounded to 4 decimals: the logistic model's probability that this nucleus belongs to the reagent-control class (ls_af_model), from section-relative size, shape, DAPI, marker level and texture."
+    },
+    {
+     "name": "flag_name",
+     "type": "text",
+     "units": "",
+     "meaning": "`af_suspect` (trained on unstained controls: autofluorescent) or `control_like` (trained on no-primary controls: looks like a reagent-control false positive)."
+    },
+    {
+     "name": "flagged",
+     "type": "int",
+     "units": "",
+     "meaning": "1 when af_score (as written) >= 0.5, else 0."
+    },
+    {
+     "name": "trained_on",
+     "type": "text",
+     "units": "",
+     "meaning": "The kind of reagent control the marker's model was trained on: `unstained` or `no_primary`, never both."
+    }
+   ]
+  },
+  {
+   "path": "results/af_scored_sections.csv",
+   "names": [
+    "af_scored_sections.csv"
+   ],
+   "writer": "06k_af_score.py",
+   "what": "Every section x marker 06k scored (role `stained`, including those with no nucleus above the cut), so 06c can tell a section with no flagged nucleus from one never scored, and every reagent control it trained on (role `control`); a stained section of a scored marker skipped because its 06l features are out of date (its done line's fingerprint is not 06l's now) is listed with role `features_out_of_date`, so 06c says \"06l features out of date - run 06l\". Each with the cut it was scored or trained against: 06c blanks a row whose sections' or controls' cut is no longer 06a's. Written and removed with af_scores.csv.",
+   "readers": [
+    "06c_excel_dataset.py"
+   ],
+   "columns_from": "06k_af_score.py:SECTION_COLUMNS",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker, as roi_nuclei.csv names it."
+    },
+    {
+     "name": "role",
+     "type": "text",
+     "units": "",
+     "meaning": "`stained` (a section scored), `control` (a reagent control trained on) or `features_out_of_date` (a stained section skipped: 06l's features of it are older than its detection; n_scored and n_flagged blank)."
+    },
+    {
+     "name": "cut",
+     "type": "float",
+     "units": "grey value",
+     "meaning": "The cut 06k counted above-cut nuclei against: positivity_cuts.csv's for a stained section, reagent_control_cuts.csv's for a control (full precision, as 06a wrote it)."
+    },
+    {
+     "name": "n_scored",
+     "type": "int",
+     "units": "count",
+     "meaning": "Above-cut ROI nuclei of the section scored (stained) or trained on (control)."
+    },
+    {
+     "name": "n_flagged",
+     "type": "int",
+     "units": "count",
+     "meaning": "Of those, flagged (score >= 0.5). Blank for a control."
+    },
+    {
+     "name": "flag_name",
+     "type": "text",
+     "units": "",
+     "meaning": "As in af_scores.csv."
+    },
+    {
+     "name": "trained_on",
+     "type": "text",
+     "units": "",
+     "meaning": "As in af_scores.csv."
+    }
+   ]
+  },
+  {
+   "path": "results/af_gate.csv",
+   "names": [
+    "af_gate.csv"
+   ],
+   "writer": "06k_af_score.py",
+   "what": "06k's training gate, per marker with reagent controls or above-cut nuclei: how many above-cut unstained and no_primary reagent-control nuclei (featured sections) it had, and what it trained on - blank when below 200 of either kind, so 06c's af_flag header says why that marker has no rows - and a hash of its reagent-control set, so 06c can tell flags made before a control was confirmed or removed. Written and removed with af_scores.csv.",
+   "readers": [
+    "06c_excel_dataset.py"
+   ],
+   "columns_from": "06k_af_score.py:GATE_COLUMNS",
+   "columns": [
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker."
+    },
+    {
+     "name": "n_unstained",
+     "type": "int",
+     "units": "count",
+     "meaning": "Above-cut ROI nuclei on unstained reagent controls, featured sections only."
+    },
+    {
+     "name": "n_no_primary",
+     "type": "int",
+     "units": "count",
+     "meaning": "The same on no_primary reagent controls."
+    },
+    {
+     "name": "trained_on",
+     "type": "text",
+     "units": "",
+     "meaning": "`unstained`, `no_primary`, or blank when not scored (below 200 of either kind, or no stained above-cut nucleus)."
+    },
+    {
+     "name": "reason",
+     "type": "text",
+     "units": "",
+     "meaning": "Why the marker was not scored: `below_gate` (fewer than 200 above-cut nuclei of either kind) or `no_stained` (past the gate, but no featured stained nucleus above the cut). Blank when scored."
+    },
+    {
+     "name": "control_set",
+     "type": "text",
+     "units": "",
+     "meaning": "A hash of the reagent controls 06k treated as controls for the marker: their scene_uid and kind (`ls_reagent_report.control_set_hash`, 16 hex digits). 06c works it out again from reagent_controls.csv and blanks the marker's af_flag rows, with the note `control set changed - run 06k`, when the two differ."
+    }
+   ]
+  },
+  {
+   "path": "qc/af_review.csv",
+   "names": [
+    "af_review.csv"
+   ],
+   "writer": "06k_af_score.py",
+   "what": "The key to qc/af_review.png: which nucleus each tile is, for the operator to hand-label (the validation of the flag). Rewritten every run, so labels belong in a copy.",
+   "readers": [],
+   "columns_from": "06k_af_score.py:REVIEW_COLUMNS",
+   "columns": [
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker."
+    },
+    {
+     "name": "strip",
+     "type": "text",
+     "units": "",
+     "meaning": "`top` (the 24 highest af_score, for orientation) or `random_flagged` (up to 24 drawn with seed 20261121 from the flagged nuclei, af_score >= 0.5, not in the top; all of them when fewer are left). Precision at 0.5 is measured on the `random_flagged` rows (operator ruling 2026-11-22)."
+    },
+    {
+     "name": "position",
+     "type": "int",
+     "units": "",
+     "meaning": "The tile's place in its row, 1-based from the left."
+    },
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "roi_index",
+     "type": "int",
+     "units": "",
+     "meaning": "As in af_scores.csv."
+    },
+    {
+     "name": "nucleus_id",
+     "type": "int",
+     "units": "",
+     "meaning": "As in af_scores.csv."
+    },
+    {
+     "name": "af_score",
+     "type": "float",
+     "units": "",
+     "meaning": "As in af_scores.csv."
+    },
+    {
+     "name": "flagged",
+     "type": "int",
+     "units": "",
+     "meaning": "As in af_scores.csv."
+    },
+    {
+     "name": "flag_name",
+     "type": "text",
+     "units": "",
+     "meaning": "As in af_scores.csv."
+    },
+    {
+     "name": "trained_on",
+     "type": "text",
+     "units": "",
+     "meaning": "As in af_scores.csv."
+    },
+    {
+     "name": "operator_label",
+     "type": "text",
+     "units": "",
+     "meaning": "Blank: for the operator's call (autofluorescent / control-like or not) when validating the flag."
+    }
+   ]
+  },
+  {
+   "path": "qc/af_review.png",
+   "names": [],
+   "writer": "06k_af_score.py",
+   "what": "The autofluorescence flag's review strip: per marker, the 24 highest-scoring stained nuclei (for orientation) and 24 drawn at random from the flagged nuclei not among them (all of them, and the title says so, when fewer are left), for hand-labelling against qc/af_review.csv.",
+   "format": "RGB PNG, 24 x 64 px wide: per marker a title band and a row of 64 px crops of the marker channel centred on each nucleus (05c's plane, stretched p1-p99.8 per crop), its score under it; a crop that could not be read (no slide drive) is grey and says `no image`.",
    "columns": []
   },
   {
@@ -5841,7 +6233,7 @@
      "name": "region",
      "type": "text",
      "units": "",
-     "meaning": "The atlas region of the control's ROI discs."
+     "meaning": "The atlas region of the control's ROI discs. Blank on the one row of a control measured with no ROI region to report."
     },
     {
      "name": "pairing",
@@ -5955,7 +6347,7 @@
      "name": "note",
      "type": "text",
      "units": "",
-     "meaning": "Why a column is blank or empty: no own cut, no denominator, paired sections not measured yet, or study-wide pairing (batch). A confirmed reagent control with nothing measured for that marker gets one row, every measure blank, its note `confirmed reagent control, not measured yet: <why>` (no 05a ROIs, or not detected by 05c yet)."
+     "meaning": "Why a column is blank or empty: no own cut, no denominator, paired sections not measured yet, or study-wide pairing (batch). A confirmed reagent control with nothing measured for that marker gets one row, every measure blank, its note `confirmed reagent control, not measured yet: <why>` (no 05a ROIs, or not detected by 05c yet). One measured with no nucleus and no usable area in its ROIs also gets one row, region blank, its note `measured, but no ROI region to report: ...`. So every confirmed control has a row; 06c checks 06k's control-set hash against these rows' scene_uid and kind."
     }
    ]
   },
@@ -5965,11 +6357,13 @@
     "reagent_control_cuts.csv"
    ],
    "writer": "06a_roi_dataset.py",
-   "what": "Each measured reagent control's own cut (per section and marker, at full precision), from its own background discs by the same rule. Kept apart from positivity_cuts.csv, which lists stained sections only; 06i reads both so a control is drawn by its own cut. Removed when no control is measured.",
+   "what": "Each measured reagent control's own cut (per section and marker, at full precision), from its own background discs by the same rule, with the k it was formed at. Kept apart from positivity_cuts.csv, which lists stained sections only; 06i reads both so a control is drawn by its own cut. 06c states the k 06a used on the Reagent controls sheet, and says when positivity.cut_k has changed since. Removed when no control is measured.",
    "readers": [
-    "06i_detection_overlays.py"
+    "06c_excel_dataset.py",
+    "06i_detection_overlays.py",
+    "06k_af_score.py"
    ],
-   "columns_from": "06a_roi_dataset.py:CUTS_COLUMNS",
+   "columns_from": "06a_roi_dataset.py:RC_CUTS_COLUMNS",
    "columns": [
     {
      "name": "scene_uid",
@@ -5988,6 +6382,215 @@
      "type": "float",
      "units": "grey value",
      "meaning": "The cut, as Python's repr of the float."
+    },
+    {
+     "name": "k",
+     "type": "float",
+     "units": "",
+     "meaning": "The multiplier the cut was formed at (median + k x 1.4826 x MAD): positivity.cut_k for the marker when 06a ran, as Python's repr of the float. 06c states it on the Reagent controls sheet and says when the config's k is not this one."
+    }
+   ]
+  },
+  {
+   "path": "results/reagent_cut_check.csv",
+   "names": [
+    "reagent_cut_check.csv"
+   ],
+   "writer": "06a_roi_dataset.py",
+   "what": "The k check, provisional until validated on a study with known controls: the positivity cut's multiplier k tested against the no-primary reagent controls, per marker and k on the grid 2.0-5.0. Each control's ROI nuclei are counted against its own cut at k (median + k x 1.4826 x MAD of its own background-disc nuclei), beside the stained sections' leave-one-disc-out rate at the same k. isotype, preadsorbed and unstained controls are not used. Written only when a no_primary control is measured; otherwise a previous file is removed. It never changes positivity.cut_k: a suggested k is applied only by the operator, with the Results page's \"Use the suggested multiplier\" button (app/cut_apply.py), which records the file's sha256 in positivity.cut_k_source and asks for a typed confirmation once the study is unblinded (06b has run, or groups.by_animal is filled). 06c adds it to the \"Reagent controls\" sheet as a provisional \"Cut check\" block.",
+   "readers": [
+    "06c_excel_dataset.py",
+    "the app"
+   ],
+   "columns_from": "ls_reagent_report.py:CUT_CHECK_COLUMNS",
+   "columns": [
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye name, as declared in the study."
+    },
+    {
+     "name": "k",
+     "type": "float",
+     "units": "",
+     "meaning": "The multiplier the cut is formed at for this row."
+    },
+    {
+     "name": "n_control_sections",
+     "type": "int",
+     "units": "",
+     "meaning": "no_primary control sections with a cut of their own (at least 5 usable background nuclei) counted at this k."
+    },
+    {
+     "name": "n_control_nuclei",
+     "type": "int",
+     "units": "",
+     "meaning": "Their ROI nuclei, censored included: the rate's denominator."
+    },
+    {
+     "name": "control_fp",
+     "type": "float",
+     "units": "fraction",
+     "meaning": "Control ROI nuclei called positive (above their own section's cut at k, or censored) over n_control_nuclei, pooled over control sections. Blank when there are fewer than positivity.fp_min_nuclei such nuclei (the note gives the count), or for a marker segmented on its own channel."
+    },
+    {
+     "name": "control_fp_lo",
+     "type": "float",
+     "units": "fraction",
+     "meaning": "Lower end of the Wilson 95% interval on control_fp."
+    },
+    {
+     "name": "control_fp_hi",
+     "type": "float",
+     "units": "fraction",
+     "meaning": "Upper end of the Wilson 95% interval on control_fp."
+    },
+    {
+     "name": "disc_fp",
+     "type": "float",
+     "units": "fraction",
+     "meaning": "The stained sections' background discs, leave-one-disc-out at k (the rule of detector_specificity.csv's loo_ columns), pooled over sections. Blank under positivity.fp_min_nuclei nuclei, or with no section of two discs of 5 usable nuclei."
+    },
+    {
+     "name": "disc_fp_n",
+     "type": "int",
+     "units": "",
+     "meaning": "The nuclei disc_fp is over; blank with it."
+    },
+    {
+     "name": "meets_target",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 when control_fp <= positivity.fp_target, else 0; blank when control_fp is."
+    },
+    {
+     "name": "suggested",
+     "type": "0/1",
+     "units": "",
+     "meaning": "1 on the smallest k that meets the target, 0 on the others; blank when there is no rate."
+    },
+    {
+     "name": "note",
+     "type": "text",
+     "units": "",
+     "meaning": "Why something is blank or left out: a control with too few background nuclei for a cut (named), no control rate, own-channel marker, no disc rate, or `no k on the grid meets the target`."
+    }
+   ]
+  },
+  {
+   "path": "results/roi_corrected.csv",
+   "names": [
+    "roi_corrected.csv"
+   ],
+   "writer": "06a_roi_dataset.py",
+   "what": "The corrected positive rate, provisional until validated on a study with known controls: one row per stained section, marker and region, the raw pooled rate beside a Rogan-Gladen correction for the paired no-primary reagent controls' false-positive rate, (p - f) / (1 - f), with a 95% interval (4000 Monte-Carlo draws of Jeffreys posteriors for p and f, seed 20261121). It assumes sensitivity 1 (every truly positive nucleus is called positive), so it is a lower-bound adjustment. The controls are reagent_controls.csv's pairing tiers turned round, from the stained section's side (ls_reagent_report.controls_for): no_primary controls the operator's paired_with pairs with the section, else those on its file, else those of its animal; never study-wide. A control whose operator pin takes effect for the marker (pairing_for gives it operator pairing) is used only for the sections it is paired with; a pin to another marker's section, or to a name not in the manifest, is ignored, as in reagent_controls.csv. isotype, preadsorbed and unstained controls are not used. A marker segmented on its own channel gets its positive density corrected instead (positive_density_*), with no minimum object count. roi_measurements.csv is unchanged. Written only when a no_primary control is measured; otherwise a previous file is removed. 06c shows it as the \"corrected_rate\" sheet.",
+   "readers": [
+    "06c_excel_dataset.py"
+   ],
+   "columns_from": "ls_reagent_report.py:ROI_CORRECTED_COLUMNS",
+   "columns": [
+    {
+     "name": "scene_uid",
+     "type": "text",
+     "units": "",
+     "meaning": "One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`."
+    },
+    {
+     "name": "marker",
+     "type": "text",
+     "units": "",
+     "meaning": "The marker's dye name, as declared in the study."
+    },
+    {
+     "name": "region",
+     "type": "text",
+     "units": "",
+     "meaning": "The atlas region the section's ROIs are pooled over."
+    },
+    {
+     "name": "n_nuclei",
+     "type": "int",
+     "units": "",
+     "meaning": "ROI nuclei of the section in the region, summed over its ROIs, as roi_measurements.csv counts them."
+    },
+    {
+     "name": "n_positive",
+     "type": "int",
+     "units": "",
+     "meaning": "Of those, positive under the section's own cut; blank when any of its ROIs had no cut."
+    },
+    {
+     "name": "frac_positive",
+     "type": "float",
+     "units": "fraction",
+     "meaning": "The raw pooled rate, n_positive / n_nuclei; blank with no cut, no nuclei, or for a marker segmented on its own channel."
+    },
+    {
+     "name": "frac_positive_corrected",
+     "type": "float",
+     "units": "fraction",
+     "meaning": "(frac_positive - fp_rate) / (1 - fp_rate). Blank, never 0, when it cannot be given: at or below the control's rate, no pairable control, no control with a cut, fewer than positivity.fp_min_nuclei control nuclei, or a marker segmented on its own channel (positive_density_corrected then carries the correction)."
+    },
+    {
+     "name": "frac_positive_corrected_lo",
+     "type": "float",
+     "units": "fraction",
+     "meaning": "Lower end of the 95% interval: the 2.5th percentile of the Monte-Carlo corrected draws, clipped to [0, 1]."
+    },
+    {
+     "name": "frac_positive_corrected_hi",
+     "type": "float",
+     "units": "fraction",
+     "meaning": "Upper end: the 97.5th percentile, clipped to [0, 1]; 1 where every stained nucleus is positive."
+    },
+    {
+     "name": "positive_density_per_mm2",
+     "type": "float",
+     "units": "per mm2",
+     "meaning": "For a marker segmented on its own channel only: positive objects per mm2 of usable ROI area, Abercrombie-corrected, pooled as sum(n_positive x each ROI row's factor) / total area, as roi_measurements.csv's positive_density_per_mm2. Blank for other markers or with no cut."
+    },
+    {
+     "name": "positive_density_corrected",
+     "type": "float",
+     "units": "per mm2",
+     "meaning": "positive_density_per_mm2 less the paired no_primary controls' positive density (each control's objects above its own cut, by the factor reagent_controls.csv's positive_per_mm2 uses, over their usable ROI area in the region, or all their regions when the region has none). No minimum object count. Blank, never 0, when at or below the control's, with no paired control or control area, or for other markers."
+    },
+    {
+     "name": "positive_density_corrected_lo",
+     "type": "float",
+     "units": "per mm2",
+     "meaning": "Lower end of the 95% interval from Poisson rates (Gamma(k + 0.5) Monte-Carlo draws for both counts), clipped at 0."
+    },
+    {
+     "name": "positive_density_corrected_hi",
+     "type": "float",
+     "units": "per mm2",
+     "meaning": "Upper end of that interval."
+    },
+    {
+     "name": "fp_rate",
+     "type": "float",
+     "units": "fraction",
+     "meaning": "f: the paired no_primary controls' ROI nuclei above each control's own cut, pooled, in the same region (or all regions, see fp_rate_source). Blank under positivity.fp_min_nuclei nuclei, or for a marker segmented on its own channel."
+    },
+    {
+     "name": "fp_rate_n",
+     "type": "int",
+     "units": "",
+     "meaning": "The control nuclei (own-channel markers: objects) f or the control density is over."
+    },
+    {
+     "name": "fp_rate_source",
+     "type": "text",
+     "units": "",
+     "meaning": "The pairing tier (operator, same_file, same_animal) and the controls used, then the region, or `all regions` when the region had fewer than positivity.fp_min_nuclei control nuclei (own-channel markers: no control ROI area in the region); a paired control with no cut of its own is named as left out. `none: no same-slide or same-animal control` when there is none. `operator: <uids> (not measured yet)` when the operator pinned the section only to no_primary controls not measured yet: the row is blank, its note \"paired control not measured yet\"."
+    },
+    {
+     "name": "correction_note",
+     "type": "text",
+     "units": "",
+     "meaning": "Why a value is blank; for a marker segmented on its own channel, that its density is corrected instead and the controls' positive density."
     }
    ]
   },
@@ -6084,7 +6687,7 @@
     "roi_dataset.xlsx"
    ],
    "writer": "06c_excel_dataset.py",
-   "what": "The analysis table: sheet `by_roi`, one row per region per animal (the animal is the unit for statistics). Also `by_disc` (every region placement), `by_section` (how much of each animal is measured) and `coverage` (what is still missing). The columns below are `by_roi`'s.",
+   "what": "The analysis table: sheet `by_roi`, one row per region per animal (the animal is the unit for statistics). Also `by_disc` (every region placement), `by_section` (how much of each animal is measured) and `coverage` (what is still missing). With 06k's `af_scores.csv`, an `af_flag` sheet too: per sample, marker and region the raw `frac_positive` and beside it `frac_positive_without_flagged` = (n_positive - n_flagged) / (n_nuclei - n_flagged), provisional, blank with a `note` where a section is not scored. The columns below are `by_roi`'s.",
    "column_sources": [
     "06c_excel_dataset.py"
    ],

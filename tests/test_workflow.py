@@ -168,6 +168,32 @@ chk("other stages are not read for it", W.shortfall("manifest", _out), None)
 chk("04o's picture stages are not read for a shortfall",
     [W.shortfall(sid, "wrote 9 composites\n  2 not built:\n")
      for sid in ("rgb_perk", "rgb_pcna")], [None, None])
+print("--- 06l nucleus features: on Measure, on request only ---")
+chk("nucleus features are a stage", "nucleus_features" in S.BY_ID)
+chk("...run by hand, never by Run all remaining", "nucleus_features" in W.BY_HAND)
+chk("...shown on Measure", "nucleus_features" in W.SCREENS["measure"].stage_ids(), True)
+chk("...after the per-ROI dataset in the stage list",
+    [st.sid for st in S.STAGES].index("nucleus_features")
+    == [st.sid for st in S.STAGES].index("roi_dataset") + 1)
+chk("...made from detection", S.BY_ID["nucleus_features"].made_from, ["detect"])
+chk("...with plain words", bool(W.PLAIN.get("nucleus_features", "").strip()))
+chk("...whose options are its flags",
+    [o.flag for o in W.options_for("nucleus_features")], ["--force", "--limit"])
+chk("...a finished run with sections not done says how many",
+    W.shortfall("nucleus_features", "  4 section(s) read\n2 section(s) not done (listed "
+                "above)\n"), "2 sections not done")
+
+print("--- 06k autofluorescence flag: on Measure, on request only ---")
+chk("the flag is a stage", "af_score" in S.BY_ID)
+chk("...run by hand, never by Run all remaining", "af_score" in W.BY_HAND)
+chk("...shown on Measure", "af_score" in W.SCREENS["measure"].stage_ids(), True)
+chk("...right after the nucleus features in the stage list",
+    [st.sid for st in S.STAGES].index("af_score")
+    == [st.sid for st in S.STAGES].index("nucleus_features") + 1)
+chk("...made from 06a's dataset and 06l's features", S.BY_ID["af_score"].made_from,
+    ["roi_dataset", "nucleus_features"])
+chk("...with plain words", bool(W.PLAIN.get("af_score", "").strip()))
+
 print("--- 06i detection overlays: a Results button, on request only ---")
 chk("overlays are a stage", "detection_overlays" in S.BY_ID)
 chk("...run by hand, never by Run all remaining", "detection_overlays" in W.BY_HAND)
@@ -567,6 +593,18 @@ for st in S.STAGES:
             if any(c.split("_")[0] in codes for c in k.consumers)
             and k.path not in st.settings and k.path not in W.NOT_TRACKED]
     chk(f"{st.sid}: every setting it reads is tracked, or says why not", left, [])
+
+print("--- a default written out hashes as unset ---")
+for _k, _hi in (("positivity.fp_target", 0.02), ("positivity.fp_min_nuclei", 80)):
+    _leaf = _k.split(".")[1]
+    chk(f"{_k}: the hashed default is ls_config's", W.SETTING_DEFAULTS[_k],
+        _spec[_k].default)
+    chk(f"{_k}: written out at the default, it reads as unset",
+        W._setting({"positivity": {_leaf: _spec[_k].default}}, _k), None)
+    chk(f"{_k}: ...at another value it is that value",
+        W._setting({"positivity": {_leaf: _hi}}, _k), _hi)
+    chk(f"{_k}: tracked by 06a and the results build",
+        [_k in S.BY_ID[s].settings for s in ("roi_dataset", "build_results")], [True, True])
 
 print("--- outputs and inputs the screens offer ---")
 chk("overviews open their folder", W.output_folder("overviews", {"out_root": "/s"}),
@@ -1121,6 +1159,12 @@ if MW:
     w.setup.advanced.setChecked(True)
     chk("Show advanced settings brings every card back",
         w.setup.tabs.count(), 1 + len(W.setting_sections(LC.dialog_fields())))
+    from PySide6.QtWidgets import QTableWidget as _QTW
+    _ck = w.setup.findChild(_QTW, "cut_k_table")
+    chk("Nucleus detection shows the cut multiplier per marker, read-only",
+        (_ck is not None and _ck.item(0, 0).text(), _ck is not None and _ck.item(0, 1).text(),
+         _ck is not None and _ck.editTriggers() == _QTW.NoEditTriggers),
+        ("every marker (*)", "3", True))
     w.setup.advanced.setChecked(False)
     chk("Set up says where this study's slides come from",
         CFG["source_dir"] in w.setup.current.text(), True)

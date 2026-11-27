@@ -747,6 +747,10 @@ STAGES = [
           # No settings: this stage records no inputs (made_from None), so a
           # list here would track nothing. When the confirmed reagent controls
           # change, the confirm list says to run it again (reagent_dialog).
+          # positivity.fp_target and reagent_controls.paired_with change its
+          # output only for an own-channel marker with a usable no-primary
+          # control (the PCNA constraint); a changed cut then reaches 05c
+          # through detection.auto, which 05c tracks.
           blurb="Samples ROIs from sections spread over every animal, measures "
                 "background, signal, noise, signal-to-noise, contrast and "
                 "saturation on the plane detection uses, and picks StarDist's "
@@ -769,9 +773,11 @@ STAGES = [
                     "detection.stardist.prob_thresh", "detection.stardist.nms_thresh",
                     "detection.stardist.use_auto", "detection.auto",
                     # Which sections are reagent controls: 05c measures them
-                    # first. Only these two - the pairing, the rejected names,
-                    # the patterns and the declared answer change nothing it
-                    # measures, and each would put hours of detection out of date.
+                    # first. Only these two - the rejected names, the patterns
+                    # and the declared answer change nothing it measures, and
+                    # each would put hours of detection out of date. The
+                    # pairing picks a control's borrowed range, and a resume
+                    # re-detects just those controls (workflow.NOT_TRACKED).
                     "reagent_controls.files", "reagent_controls.scenes"],
           cli_only=detect_cli_reason,
           blurb="Reads each box at 0.65 um/px, segments nuclei on DAPI with "
@@ -787,10 +793,48 @@ STAGES = [
           settings=["pixel_size_um", "section_thickness_um",
                     "acquisition.marker_segmentation", "detection.abercrombie.enabled",
                     "reagent_controls.files", "reagent_controls.scenes",
-                    "reagent_controls.paired_with"],
+                    "reagent_controls.paired_with", "positivity.cut_k",
+                    "positivity.fp_target", "positivity.fp_min_nuclei"],
           blurb="Positivity cut from each section's own background discs "
-                "(median + 3 x 1.4826 x MAD), the detector's false-positive "
+                "(median + k x 1.4826 x MAD, k = positivity.cut_k, 3 by default), "
+                "the detector's false-positive "
                 "rate, two densities, Abercrombie. Still keyed by animal only."),
+
+    Stage("nucleus_features", "06l  Per-nucleus shape and texture", "Quantification",
+          script="06l_nucleus_features.py", reader="pylibCZIrw",
+          outputs=["results/nucleus_features.csv"],
+          needs=["detect"],
+          # The outlines 05c saved and the boxes they sit on. No settings: the
+          # planes it reads (and, under multiplex, which other marker) are in
+          # each section's fingerprint, so a changed channel setting re-reads
+          # exactly the sections it changes on the next run.
+          made_from=["detect"],
+          blurb="Roundness, solidity, the marker's coefficient of variation above "
+                "the box's non-nuclear pixels and its spot count, for every nucleus in "
+                "roi_nuclei.csv, from the outlines 05c saved and the marker plane "
+                "re-read under them; under multiplex also the other marker's median. "
+                "Never runs StarDist; roi_nuclei.csv is unchanged. For the "
+                "autofluorescence score. Resumable per section."),
+
+    Stage("af_score", "06k  Autofluorescence flag", "Quantification",
+          script="06k_af_score.py", reader="pylibCZIrw",
+          outputs=["results/af_scores.csv"],
+          needs=["roi_dataset", "nucleus_features"],
+          # 06a's cuts and nuclei, 06l's features. The confirmed reagent
+          # controls decide which sections are the labelled class.
+          made_from=["roi_dataset", "nucleus_features"],
+          settings=["reagent_controls.files", "reagent_controls.scenes"],
+          blurb="A flag only, provisional: scores each above-cut nucleus of a stained "
+                "section by how much it looks like the above-cut nuclei of the "
+                "unstained reagent controls (else the no-primary ones, never both; at "
+                "least 200 per marker), by a logistic regression on section-relative "
+                "size, shape, DAPI, marker level and texture. No count changes; 06c "
+                "shows the positive rate without the flagged nuclei beside the raw one. "
+                "Draws a review strip of 24 top and 24 random flagged nuclei for "
+                "hand-labelling. "
+                "The pixels read are for the strip only. Exit 1 when no marker reaches "
+                "the training gate means not enough control nuclei to train, not a "
+                "crash: it says how many it had."),
 
     # ---- Beyond blinding ----------------------------------------------------
     Stage("join_sampling", "06b  Join the experiment", "Beyond blinding",
@@ -845,7 +889,8 @@ STAGES = [
                     "acquisition.marker_segmentation", "detection.abercrombie.enabled",
                     "groups.order", "groups.by_animal",
                     "reagent_controls.files", "reagent_controls.scenes",
-                    "reagent_controls.paired_with"],
+                    "reagent_controls.paired_with", "positivity.cut_k",
+                    "positivity.fp_target", "positivity.fp_min_nuclei"],
           blurb="06a, 06c and 06d in one run, then the figures for every "
                 "measured marker - the same pass the hourly loop makes, made "
                 "once. 06b, the unblinding join, stays its own step. The R "
@@ -868,6 +913,9 @@ STAGES = [
           outputs=["detection_overlays/index.csv"],
           needs=["roi_dataset"],
           made_from=["detect", "roi_dataset"],
+          # Its colours are 06a's cuts. A new multiplier puts it out of date at
+          # once, not only after 06a has run again with it.
+          settings=["positivity.cut_k"],
           blurb="Pictures of every nucleus 05c found, over the marker channel in "
                 "grey: positives filled magenta, negatives outlined cyan, nuclei "
                 "outside the ROI yellow, artifact orange, off tissue blue, censored "

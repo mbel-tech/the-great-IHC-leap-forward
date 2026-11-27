@@ -700,7 +700,7 @@ before the unblinding step read it.
 *What is reported.* Stage 06a writes `results/reagent_controls.csv`, one row per control section,
 marker and region, from the same nuclei and the same cut machinery as the stained sections, and the
 control's own cuts to `results/reagent_control_cuts.csv`. Part A is the share of the control's nuclei
-that its own per-section cut (median + 3 × 1.4826 × MAD of its own background-disc nuclei) calls
+that its own per-section cut (median + k × 1.4826 × MAD of its own background-disc nuclei, k the marker's `positivity.cut_k`, 3 by default) calls
 positive: the false-positive rate of the positivity rule where there is no specific signal, including
 autofluorescence and non-specific secondary binding that is not uniform. It is shown beside the
 paired stained sections' rate in the same region and their difference, as a margin (a density per mm²
@@ -713,6 +713,79 @@ that last, study-wide pairing, Part B is left empty with a note, because across 
 measures the batch and not the reagent. The 06c workbook carries the table as a "Reagent controls"
 sheet; with a no-primary control reported, its limitation text points there instead of saying that
 absolute rates are not defensible.
+
+*The k check (provisional).* With a no-primary control measured, stage 06a tests the positivity cut's
+multiplier against the no-primary controls, per marker, at each k of the grid {2.0, 2.5, 3.0, 3.5, 4.0,
+4.5, 5.0} (`results/reagent_cut_check.csv`). At each k every control section's ROI nuclei are counted
+against its own cut, median + k × 1.4826 × MAD of its own background-disc nuclei (a control with fewer
+than 5 usable background nuclei has no cut and is left out, named), and the counts are pooled over the
+control sections into a false-positive rate with a Wilson 95% score interval (z = 1.96). Beside it is the
+stained sections' leave-one-disc-out rate at the same k, pooled, as an in-study comparison; at the k in
+force the stage says whether that rate falls inside the controls' interval. The suggested k is the
+smallest k on the grid whose control rate (the point estimate) is at most `positivity.fp_target` (0.01 by
+default). There is no rate, and so no suggestion, when the controls have fewer than
+`positivity.fp_min_nuclei` (50) ROI nuclei in all, and none for a marker segmented on its own channel,
+which has no fraction; when no k meets the target the rows say so. The check never changes the cut. The
+operator applies a suggestion in the app, which records the checksum of the check it was taken from in
+`positivity.cut_k_source` and refuses when the check has changed since it was shown; after the
+unblinding step it asks for a typed confirmation and records that the multiplier was changed after
+unblinding. Every cut stays relative to its section's own background: k is the only thing the controls
+inform.
+
+*The admissibility constraint on a marker segmented on its own channel (provisional).* For such a marker
+(PCNA in the LS study) the detection threshold, not a cut on a nuclear stain, decides what is counted, so
+stage 05b holds its chosen StarDist probability cut to the no-primary controls. Each control paired with a
+stained section (the operator's pairing, the same file or the same animal, never study-wide) is read in
+its ROI windows at the range of that stained section, as detection reads it, and the model's objects
+are counted at every cut of the tuning grid on the controls and on the stained sample alike. A cut is
+admissible when the controls' objects per mm² are at most `positivity.fp_target` times the stained
+sample's; with no stained objects nothing is admissible. The plateau-chosen cut is kept when admissible;
+otherwise the lowest admissible cut above it is taken (a higher cut keeps fewer objects on both), and with
+none the chosen cut is kept and the record says so. The densities, the controls used and those skipped,
+with the reason, are recorded with the tuned setting. Without a usable control the tuning is unchanged.
+
+*Corrected positive rate (provisional).* With a no-primary control measured, stage 06a also writes
+`results/roi_corrected.csv`: for each stained section, marker and region, the raw positive rate pooled
+over the section's ROIs, beside a corrected rate. The correction is Rogan–Gladen,
+p_corr = (p_obs − f) / (1 − f), where f is the false-positive rate of the no-primary controls paired with
+that section (the operator's pairing, else the same slide file, else the same animal; never all sections
+of the study, so a batch difference cannot enter), each control's nuclei counted against its own cut, in
+the same region, or over all its regions when that region has fewer than `positivity.fp_min_nuclei`
+control nuclei. It assumes sensitivity 1, that every truly positive nucleus is called positive: it removes
+the control's false positives and adds back nothing missed, so it is a lower-bound adjustment. The 95%
+interval is the 2.5–97.5 percentiles of 4000 Monte-Carlo draws from Jeffreys posteriors of p_obs and f
+(fixed seed), clipped to [0, 1]. The corrected rate is blank, with the reason, when p_obs ≤ f, when no
+control is paired, or when too few control nuclei exist; for a marker segmented on its own channel the
+positive density less the controls' is given instead, with a Poisson interval and no minimum object
+count (a good control has few objects). A control the operator pairs is used only for the sections it
+is paired with. The raw values are not changed. The 06c workbook
+shows it on a "corrected_rate" sheet.
+
+*Reagent controls in detection: the autofluorescence flag (provisional).* Stage 06k flags nuclei of
+stained sections that look like the nuclei a reagent control calls positive; it changes no count. Per
+marker it fits a positive-unlabelled logistic regression: the labelled class is the nuclei above their own
+section's cut on the study's unstained controls, which can only be autofluorescence, when there are at
+least 200 of them; otherwise those on the no-primary controls (autofluorescence or non-specific secondary
+binding), also at least 200. The two kinds are never pooled, isotype and pre-adsorbed controls are not
+used, and below 200 of either kind nothing is fitted. The unlabelled class is the above-cut nuclei of the
+stained sections. Every feature is relative to the nucleus's own section, so the batch difference in
+background between animals cannot enter: the marker median in spreads (1.4826 × MAD) above the section's
+own background discs, the DAPI mean as a robust z among the section's nuclei, the nucleus's area,
+equivalent diameter, roundness and solidity, the ratio of its marker p90 to its median, the coefficient
+of variation of the marker above the region's own background and its count of bright spots (stage 06l,
+which re-reads the saved outlines and never segments again), and, for several markers on one scan, the
+other marker's median in spreads above its own discs. The features are standardised, the classes weighted
+equally, and the L2-penalised model fitted by iteratively reweighted least squares in NumPy from a zero
+start, so it is deterministic. A stained nucleus is flagged at a score of 0.5, as `af_suspect` when the
+model was trained on unstained controls and `control_like` when on no-primary ones. The 06c workbook
+shows, per animal, marker and region, the positive rate with the flagged nuclei left out of both the
+count and the denominator, beside the raw rate, on an `af_flag` sheet. *Validation criterion.* The flag
+stays a flag until it has been validated on a study with known controls: the operator hand-labels the
+review strip (per marker, the 24 highest-scoring stained nuclei, shown for orientation, and 24 drawn at
+random with a fixed seed from the flagged nuclei, score ≥ 0.5, not among them; all of them when fewer are
+left), and the flag must reach a precision of at least 0.8 at a score of 0.5, measured on the random
+flagged half. Until then nothing is censored by
+it, and its rate is reported as provisional.
 
 # 13. Blinding
 

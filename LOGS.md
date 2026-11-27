@@ -30,6 +30,15 @@ the folder corrected. The in-app updater does not carry `ihc.cmd` (it is written
 repository), so the app writes it itself at start-up on an installed Windows copy when it is missing or
 differs (`update_apply.ensure_console_launcher`); adding it to PATH still needs the installer task. The Mac app has no launcher; the docs give the bundled Python's path.
 
+## 2026-11-21 - Reagent controls: how the lab marks them in file names
+
+**Changed:** New study and the confirm list ask "How does your lab mark reagent controls in file names?":
+nothing special, a trailing `-` (preset `trailing_dash`), or other text matched as a whole token. The
+choice is one entry in `reagent_controls.extra_patterns` (with `preset` or `token`; `ls_config` checks
+both); other hand-written patterns are kept. **Why:** a new study names its no-primary slides
+`LS45_3a-.czi`, but in LS a trailing `-` marks a re-scan, so it cannot be built in. **Cost / limits:**
+the row's highlight tints the first `-` in the path, which is not always the matched one.
+
 ## 2026-11-20 - Reagent controls: final review fixes
 
 **Changed:** a confirmed reagent control can no longer silently vanish. 02 carries a control scan as its

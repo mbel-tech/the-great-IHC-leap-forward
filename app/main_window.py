@@ -273,6 +273,7 @@ class MainWindow(QMainWindow):
             scr.goto.connect(self.goto)
         for scr in self.lists.values():
             scr.open_requested.connect(self.open_curator)
+        self.lists["results"].cut_k_applied.connect(self._cut_k_applied)
 
         # ---- the step list ---------------------------------------------------
         # The six steps, then the two screens most people never need under
@@ -829,6 +830,13 @@ class MainWindow(QMainWindow):
             self.refresh()
             self._log("settings applied to the project - saved automatically before the "
                       "next run, or with File > Save")
+
+    def _cut_k_applied(self, message):
+        """Results applied the reagent k check's multiplier to the project."""
+        self.session.touch()
+        self.setup.build()                  # its read-only multiplier table
+        self.refresh()
+        self._log(message + " Saved automatically before the next run, or with File > Save.")
 
     def _options_changed(self, sid, values):
         """A stage's options were changed on screen: keep what differs from the defaults."""

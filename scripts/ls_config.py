@@ -59,6 +59,8 @@ except ImportError:                                         # pragma: no cover
 
 REAGENT_KINDS = (tuple(ls_reagent_controls.KINDS) if ls_reagent_controls
                  else ("no_primary", "unstained", "isotype", "preadsorbed", "other"))
+REAGENT_PRESETS = (tuple(ls_reagent_controls.NAMING_PRESETS) if ls_reagent_controls
+                   else ("trailing_dash",))
 
 #: The built-in atlases, from the registry that owns the concept, so the
 #: settings dialog's dropdown, the generated docs and `ls_atlas.source()` are
@@ -189,7 +191,7 @@ class Key:
 #: Which sections are reagent controls (`files`, `scenes`): every stage that leaves
 #: them out of something, or puts them first.
 _RC_CONSUMERS = ["00", "01", "01b", "01d", "01m", "02", "04b", "04c", "04k", "04n", "05b",
-                 "05c", "06a", "06c", "06d", "app"]
+                 "05c", "06a", "06c", "06d", "06k", "app"]
 #: The other reagent_controls keys are each read by fewer stages, and some only to
 #: print a warning (`declared` and `rejected` in 05b/05c, `rejected` and
 #: `extra_patterns` in 00's name check): a warning changes no output, so those
@@ -607,9 +609,10 @@ note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
         "How many robust standard deviations above the background median a "
         "pixel must be to count as signal, for the `threshold` backend.",
         default=3.0, label="Threshold: MAD multiplier",
-        note="3.0 is the same multiplier 06a uses for the positivity cut, so "
-             "the pipeline has one definition of `above background` rather "
-             "than two. Raising it finds fewer, brighter objects. It is "
+        note="Separate from positivity.cut_k, the multiplier 06a forms the "
+             "positivity cut at, and not linked to it: changing one never "
+             "changes the other. Both start at 3.0. Raising this finds fewer, "
+             "brighter objects. It is "
              "applied to the frame being segmented rather than to curated "
              "background discs, because 05c runs before 06a and cannot read a "
              "file 06a has not written. Median and MAD rather than mean and "
@@ -858,6 +861,61 @@ note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
              "sub-project replaces this with a real table join.",
         consumers=["04l", "05c", "06b", "06c", "06d"]),
 
+    # ---- positivity: the per-section cut 06a counts by ----------------------
+    Key("positivity.fp_target", "float",
+        "The false-positive rate on no-primary reagent controls the cut is "
+        "checked against: 0.01 accepts 1 in 100 control nuclei called positive.",
+        default=0.01, minimum=0.001, maximum=0.2,
+        label="Reagent-control false-positive target",
+        note="Recorded with the study so the check can be repeated. 06a's "
+             "reagent-control check of the cut (results/reagent_cut_check.csv) "
+             "reads it, and it never changes the cut by itself: a suggested "
+             "multiplier is applied only by the operator (positivity.cut_k). "
+             "05b holds a marker segmented on its own channel (PCNA) to it: a "
+             "StarDist cut is inadmissible where paired no-primary controls "
+             "give more than fp_target x the stained sample's detections per "
+             "mm2. Between 0.001 and 0.2.",
+        consumers=["05b", "06a", "app"]),
+
+    Key("positivity.cut_k", "raw",
+        "How many spreads above a section's own background median a nucleus "
+        "must be to count as positive, per marker, with \"*\" for every "
+        "marker not named.",
+        default={"*": 3.0}, ui=False,
+        note="{<marker or \"*\">: k}, each k between 1.0 and 10.0. The cut is "
+             "median + k x 1.4826 x MAD of the section's own background-disc "
+             "nuclei, so it stays relative to each section. A marker not listed "
+             "takes \"*\", and with neither it is 3.0. 06a counts by it; 05c "
+             "colours its crops by it; 06i redraws from 06a's cuts; 06c states "
+             "it on the Reagent controls sheet. Changing it "
+             "puts 06a and the results out of date, never detection. Set it "
+             "before unblinding.",
+        consumers=["05c", "06a", "06c", "06i", "app"]),
+
+    Key("positivity.cut_k_source", "raw",
+        "Where positivity.cut_k came from: the default, the operator, or the "
+        "reagent-control check, and when.",
+        default={"by": "default"}, ui=False, in_example=False,
+        note="{by: default} until a multiplier is applied, then one record per "
+             "marker: {<marker>: {by: operator | controls, at, check}}. `check` "
+             "is the sha256 of the results/reagent_cut_check.csv a suggestion "
+             "was taken from; `after_unblinding: true` when it was applied "
+             "through the typed confirmation once the study was unblinded "
+             "(06b had run, or groups.by_animal was filled). A record the app "
+             "writes; 06c states every marker applied after unblinding on the "
+             "Reagent controls sheet.",
+        consumers=["06c", "app"]),
+
+    Key("positivity.fp_min_nuclei", "int",
+        "The fewest reagent-control nuclei a false-positive rate is given for; "
+        "below it the rate is left blank with a note, never 0.",
+        default=50, minimum=1, label="Reagent-control minimum nuclei",
+        note="A rate from a handful of nuclei is noise with a decimal point. "
+             "Blank rather than 0, because 0 reads as `looked and found none`. "
+             "06a's reagent-control check of the cut gives no rate and no "
+             "suggested k from fewer.",
+        consumers=["06a", "app"]),
+
     # ---- reagent controls (slides stained without the primary, isotype, unstained...) ----
     Key("reagent_controls.declared", "str",
         "Whether this study has reagent controls: no, yes, or unsure.",
@@ -889,8 +947,12 @@ note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
     Key("reagent_controls.paired_with", "raw",
         "Which stained scenes or files each reagent control is compared with.",
         default={}, ui=False, in_example=False,
-        note="{<scene_uid or file>: [<stained scene_uid or file>, ...]}.",
-        consumers=["06a", "app"]),
+        note="{<scene_uid or file>: [<stained scene_uid or file>, ...]}. For a "
+             "marker segmented on its own channel, 05b and 05c also read it to "
+             "pick the stained section whose intensity range a no-primary "
+             "control is detected at; 05c re-detects only a control whose range "
+             "source changed.",
+        consumers=["05b", "05c", "06a", "app"]),
 
     Key("reagent_controls.rejected", "list_str",
         "Scenes or files the operator said are NOT reagent controls.",
@@ -902,7 +964,11 @@ note="1.3 at the finest. The CZI is 0.65 um/px, but a whole "
         "Lab-specific file-name patterns that mark a reagent control.",
         default=[], ui=False, in_example=False,
         note="[{regex, kind}]. Each regex is searched case-insensitively in the path relative "
-             "to the slides folder and must compile.",
+             "to the slides folder and must compile. At most one entry also carries `preset` "
+             "(a named lab convention, e.g. trailing_dash: a '-' at the end of the name) or "
+             "`token` (other text, matched as a whole token); the app writes that one from "
+             "'How does your lab mark reagent controls in file names?' and leaves the others "
+             "as they are.",
         consumers=["00", "app"]),
 ]
 
@@ -1105,10 +1171,57 @@ def _check_reagent_controls(value):
                     out.append(f"`extra_patterns[{i}].regex` is not a valid regex: {exc}")
                 if e.get("kind") not in REAGENT_KINDS:
                     out.append(f"`extra_patterns[{i}].kind` must be one of {kinds}")
+                if "preset" in e and e["preset"] not in REAGENT_PRESETS:
+                    out.append(f"`extra_patterns[{i}].preset` {e['preset']!r} must be one of "
+                               + ", ".join(REAGENT_PRESETS))
+                if "token" in e and (not isinstance(e["token"], str)
+                                     or not e["token"].strip()):
+                    out.append(f"`extra_patterns[{i}].token` must be non-empty text")
     pw = value.get("paired_with")
     if pw is not None and not isinstance(pw, dict):
         out.append("`paired_with` must be a table")
     return out
+
+
+#: The range every positivity.cut_k value must lie in.
+CUT_K_RANGE = (1.0, 10.0)
+
+
+def _check_cut_k(value):
+    """Problems with positivity.cut_k - {marker or "*": k} - as a list of strings.
+
+    A key is not checked against the study's markers here: a map written for
+    a marker the study has since renamed is still the operator's record, and
+    ls_overlay.cut_k simply never asks for it. validate() warns about such a
+    key instead (_cut_k_strays), when the study declares its markers.
+    """
+    if not isinstance(value, dict):
+        return [f"must be a table of marker -> multiplier, e.g. {{\"*\": 3.0}}, "
+                f"not a {type(value).__name__}"]
+    lo, hi = CUT_K_RANGE
+    out = []
+    for marker, k in value.items():
+        if not isinstance(marker, str) or not marker.strip():
+            out.append(f"has a key {marker!r}: each key is a marker name or \"*\"")
+        elif not _is_num(k):
+            out.append(f"[{marker!r}] must be a number, got {type(k).__name__}")
+        elif not lo <= k <= hi:
+            out.append(f"[{marker!r}] must be between {lo} and {hi}, got {k}")
+    return out
+
+
+def _cut_k_strays(cfg):
+    """positivity.cut_k keys that are neither "*" nor one of the study's
+    markers, or [] when the study declares no markers (nothing to judge by)."""
+    pos = cfg.get("positivity")
+    table = pos.get("cut_k") if isinstance(pos, dict) else None
+    if not isinstance(table, dict) or ls_channels is None:
+        return []
+    names = list(ls_channels.marker_names(cfg))
+    if not names:
+        return []
+    return [m for m in table if isinstance(m, str) and m.strip() and m != "*"
+            and m not in names]
 
 
 def _check(key, value):
@@ -1123,6 +1236,10 @@ def _check(key, value):
     elif t == "int":
         if not isinstance(value, int) or isinstance(value, bool):
             return f"expected a whole number, got {type(value).__name__}"
+        if key.minimum is not None and value < key.minimum:
+            return f"must be at least {key.minimum}, got {value}"
+        if key.maximum is not None and value > key.maximum:
+            return f"must be at most {key.maximum}, got {value}"
     elif t == "float":
         if not _is_num(value):
             return f"expected a number, got {type(value).__name__}"
@@ -1276,6 +1393,8 @@ def validate(cfg, path="<config>", strict_paths=False):
             continue
         if key.path == "atlas_source" and atlas_registry is not None:
             problem = _check_atlas_source(cfg, value)
+        elif key.path == "positivity.cut_k":
+            problem = "; ".join(_check_cut_k(value)) or None
         else:
             problem = _check(key, value)
         if problem:
@@ -1342,6 +1461,13 @@ def validate(cfg, path="<config>", strict_paths=False):
             errors.append(f"{path}: {problem}")
         for problem in disp_warnings:
             warnings.append(f"{path}: {problem}")
+
+    # A multiplier for a marker the study does not have is never used (a
+    # rename, or a typo): said, not refused, because it is still the record.
+    if isinstance(cfg, dict):
+        for m in _cut_k_strays(cfg):
+            warnings.append(f"{path}: `positivity.cut_k` names {m!r}, which is not "
+                            f"one of this study's markers - it is never used")
 
     for key, value in missing_paths(cfg):
         line = f"{path}: `{key.path}` does not exist: {value}"

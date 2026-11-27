@@ -484,7 +484,7 @@ periventricular zones where PCNA lives are the bright ones. So for a marker segm
 05c reads all of a section's crops (ROIs and background discs alike), takes **one** (1st, 99.8th)
 percentile range over them (`ls_segment.percentile_range`; each crop subsampled at a regular
 stride, so a re-run gives the same range), and scales every crop by it. The range is recorded in
-**`results/roi_normalisation.csv`** — `scene_uid, marker, segmented_on, norm_lo, norm_hi, n_crops`,
+**`results/roi_normalisation.csv`** — `scene_uid, marker, segmented_on, norm_lo, norm_hi, n_crops, range_from`,
 one row per section and marker. It is a file of its own rather than two more columns of
 `roi_nuclei.csv`, which is ~900,000 rows shared with 06g/06h. A section whose marker plane is flat
 has no range to share; it is skipped with the reason, not measured on an invented one.

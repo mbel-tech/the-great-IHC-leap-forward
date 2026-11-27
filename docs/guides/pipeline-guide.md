@@ -1413,6 +1413,16 @@ thresholds each marker was measured with and refuses to add sections measured wi
 to those already in the results; changing the setting mid-study means re-measuring that marker with
 *Redo finished sections*.
 
+**Held to the reagent controls, for a marker segmented on itself (provisional).** When such a marker
+(PCNA) has a confirmed no-primary reagent control paired with a stained section — by the operator, on
+the same file or from the same animal, never study-wide — the model is also run over the controls'
+regions, each stretched to its stained pair's range as 05c detects it, and counted at the same cuts. A
+cut is admissible when the controls' detections per mm² are at most `positivity.fp_target` times the
+stained sample's. The chosen cut is kept if it is admissible; otherwise it moves **up** to the lowest
+admissible cut above it, and with none it is kept with the reason "no admissible threshold; kept". The
+table and the record (`detection.auto.<marker>.constraint`) go in the report. Without such a control
+nothing here changes.
+
 A **poor** verdict means dim nuclei will be missed whatever the settings, so in the app *Run all
 remaining* stops after the check instead of going on into hours of detection, and says which marker
 and why. This is a pause, not a failure: the report (*Open report*) and the tuned setting are kept,
@@ -1609,6 +1619,23 @@ constant multiplier and barely moves the group contrast — **it is a reporting 
 one.** What it changes is whether a density can honestly be quoted as cells per square millimetre at
 all.
 
+**With reagent controls.** Confirmed reagent controls are kept out of every table above and reported
+on their own (`results/reagent_controls.csv`, each control's own cut and the k it was formed at in
+`results/reagent_control_cuts.csv`). With a no-primary control measured the step also:
+
+- **checks k** (`results/reagent_cut_check.csv`, provisional): for each marker and each k from 2.0 to
+  5.0 in steps of 0.5, the share of the controls' ROI nuclei called positive by each control's own cut at
+  that k, with a Wilson 95% interval, beside the stained sections' leave-one-disc-out rate at the same k.
+  It suggests the smallest k that meets `positivity.fp_target`, and none from fewer than
+  `positivity.fp_min_nuclei` control nuclei. It never changes the cut: a suggestion is applied only by
+  the operator, from the Results screen.
+- **corrects the rate** (`results/roi_corrected.csv`, provisional): per stained section, marker and
+  region, the raw rate beside a Rogan-Gladen correction for the paired controls' false-positive rate,
+  (p − f) / (1 − f), assuming sensitivity 1, with a Monte-Carlo interval. The controls are the
+  operator's pairing, else the same file, else the same animal, never study-wide; a section pinned only to
+  controls not measured yet is blank ("paired control not measured yet"). `roi_measurements.csv` is not
+  changed by any of it.
+
 Alongside the per-region table, the step writes a detector specificity table, one row per section and
 marker, carrying the background count, area, false-positive count and rate, the background level and
 spread, and the cut applied — so the threshold used on each section and the evidence for it travel
@@ -1622,6 +1649,65 @@ together.
 >
 > `bg` is that section's own background nuclei. The scale factor is what makes the median absolute
 > deviation comparable to a standard deviation.
+
+## 06l  Per-nucleus shape and texture {#stage-nucleus_features}
+
+*`scripts/06l_nucleus_features.py` → `results/nucleus_features.csv`* · run on request
+
+Adds, for every nucleus the detection step found, how round and how solid its outline is and how its
+marker stain is spread inside it: how much the stain varies across the nucleus, and how many bright
+spots it holds. A stained nucleus tends to be filled evenly; autofluorescent debris tends to be
+granular and irregular. These are the measurements the autofluorescence check learns from, and nothing
+else reads them. With several markers on one scan, it also records the other marker's level inside the
+same nucleus.
+
+It does not look for nuclei again. It takes the outlines the detection step saved and re-reads only the
+marker under them, so every row matches a row of the nucleus table one for one, and the nucleus table
+itself is not changed. A section whose outlines were never saved (measured by an older version) is
+listed and skipped; drawing the detection overlays saves them once.
+
+The two texture measurements are made so that a uniform brightening or darkening of a whole section —
+the background differs by about a factor of two between animals — cannot change them. The variation
+is taken above the region's own background between the nuclei rather than above zero, and a spot is counted against
+the nucleus's own median and spread.
+
+It reads one section at a time and can be stopped; the next run reads only what is left, or a section
+whose detection has changed since.
+
+## 06k  Autofluorescence flag {#stage-af_score}
+
+*`scripts/06k_af_score.py` → `results/af_scores.csv`* · run on request · provisional
+
+A flag, and nothing more: no count, rate or density changes. It asks, for every nucleus of a stained
+section that is above its section's cut, how much it looks like the nuclei that are above the cut on the
+study's reagent controls — sections with no specific stain, whose "positive" nuclei can only be
+autofluorescence or stray secondary antibody.
+
+It learns from one kind of control per marker. Unstained controls come first: with at least 200 of their
+nuclei above the cut it learns from those alone, and the flag is called `af_suspect` (autofluorescent).
+Otherwise it learns from the no-primary controls, also at least 200, and the flag is called
+`control_like`. The two kinds are never pooled, and isotype and pre-adsorbed controls are not used. With
+fewer than 200 of either kind it writes nothing and says how many it had; the run then ends with an
+error, which here means "not enough control nuclei to learn from", not that something broke.
+
+What it compares is relative to each section, so a brighter or darker batch of animals cannot look like
+autofluorescence: the marker level in spreads above the section's own background discs, the DAPI
+brightness against the section's other nuclei, the nucleus's size and shape, how grainy its stain is
+(from 06l), and with several markers on one scan the other marker's level above its own discs. The model
+is a logistic regression with balanced classes, and a nucleus is flagged at a score of 0.5.
+
+Only sections 06l has finished are used, and only while what 06l measured them from is still current:
+a section detected again since 06l ran is skipped as out of date until 06l runs again (the spreadsheet
+says "06l features out of date - run 06l"). The others are counted and listed as not yet featured. The
+per-sample spreadsheet (06c) then has an `af_flag` sheet: per animal, marker and region, the raw positive
+rate and beside it the rate with the flagged nuclei taken out, blank with a note wherever a section is not
+scored, the positivity cut has changed or a section has been confirmed as a reagent control (or no longer
+is one) since the flag was made (run this step again), and a line naming
+any marker that had too few control nuclei. `qc/af_review.png` shows for each marker the 24 highest-scoring nuclei, for orientation, and 24 drawn at random from the flagged nuclei
+(score 0.5 or more) not among them (all of them, and the title says so, when fewer are left), and
+`qc/af_review.csv` says which nucleus each picture is, with an empty column to label them by hand. The
+flag stays a flag until that labelling of the random flagged row, on a study with known controls, shows a precision of at least 0.8.
+
 
 \newpage
 
@@ -1698,6 +1784,14 @@ not re-derive any number. Buildable part-way through a run.
 for now; see 06e), because one row here is one animal — the unit the
 treatment comparison is made on. The pooling happens in this stage and is weighted by area
 measured: an animal's nuclei summed over its discs, over the area those discs covered.
+
+**With reagent controls, more sheets (all provisional where they say so).** A *Reagent controls*
+sheet carries 06a's report and, below it, the k check as a *Cut check* block. Its header states the k
+06a formed the cuts at, says when `positivity.cut_k` has changed since ("rebuild results"), and says
+when a k was applied after unblinding (once 06b had run or `groups.by_animal` was filled). A *corrected_rate* sheet shows 06a's corrected rate beside the
+raw one, per section, marker and region, never pooled to the animal. After 06k, an *af_flag* sheet
+shows per animal, marker and region the positive rate without the flagged nuclei beside the raw rate.
+Each of these is blank, with a note, where its number cannot be given, never 0.
 
 ## 06d  Spreadsheet — per slide {#stage-excel_slide}
 

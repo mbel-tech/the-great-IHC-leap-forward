@@ -21,7 +21,9 @@ And whether the folder holds reagent controls (slides stained without the
 primary antibody, with an isotype IgG, or unstained): No, Yes or Not sure. The
 answer is `reagent_controls.declared`; with Yes or Not sure, or with No when a
 slide name plainly says it is one (LS45_noPrimary.czi), Create opens the
-confirm list (reagent_dialog) once the study is saved.
+confirm list (reagent_dialog) once the study is saved. Under it, how the lab
+marks reagent controls in file names (nothing special, a trailing "-", or other
+text): Create writes it to `reagent_controls.extra_patterns` before that scan.
 """
 
 import os
@@ -35,6 +37,7 @@ import atlas_registry as AR
 import autodetect as AD
 import ls_channels as CH
 import ls_project as LP
+import ls_reagent_controls as RC
 import reagent_dialog as RDLG
 import slide_read as SRD
 import theme as T
@@ -172,6 +175,12 @@ class NewStudyDialog(QDialog):
                               "list to confirm them; Set up > Slides has it too.")
         reagent_note.setWordWrap(True)
         reagent_note.setStyleSheet(T.HINT)
+        # The lab's own mark, when the built-in name scan would miss it (a
+        # trailing "-" is never built in: in LS it marks a re-scan).
+        self.naming = RDLG.NamingControl()
+        naming_note = QLabel(RDLG.NAMING_HELP)
+        naming_note.setWordWrap(True)
+        naming_note.setStyleSheet(T.HINT)
 
         self.name = QLineEdit()
         self.name.setPlaceholderText("the output folder's name")
@@ -190,6 +199,8 @@ class NewStudyDialog(QDialog):
         form.addRow("Atlas", atlas_box)
         form.addRow("Reagent controls in this folder?", reagent_box)
         form.addRow("", reagent_note)
+        form.addRow(RDLG.NAMING_QUESTION, self.naming)
+        form.addRow("", naming_note)
         form.addRow("Sampling workbook", self.workbook)
         form.addRow("", book_note)
         form.addRow("Name (optional)", self.name)
@@ -376,6 +387,11 @@ class NewStudyDialog(QDialog):
                                 + "\n\n".join(named[:5]))
             return
         project.set("reagent_controls.declared", self.reagent_answer(), by="New study")
+        # Before the name scan below, so the confirm list it opens already uses it.
+        # Nothing special (or empty other text) writes nothing.
+        naming = self.naming.extra(RC.entries(project.cfg)["extra_patterns"])
+        if naming:
+            project.set("reagent_controls.extra_patterns", naming, by="New study")
         if self.workbook.value():
             # 06b's own --xlsx option, where the Unblind question and Set up keep it.
             project.set_stage_options("join_sampling", {"--xlsx": self.workbook.value()})

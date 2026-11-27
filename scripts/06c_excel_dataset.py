@@ -54,7 +54,31 @@ above: 06a routes their rows to `results/reagent_controls.csv`, and when that
 file has rows they are the "Reagent controls" sheet, under a plain-language
 header. Their boxes are left out of `planned` and `coverage` too, by the same
 config lookup 06a uses (ls_reagent_controls), so an animal whose only sections
-are controls is not reported as unmeasured.
+are controls is not reported as unmeasured. When 06a also wrote
+`results/reagent_cut_check.csv` (the reagent k check), the same sheet carries it
+below the controls' table as a "Cut check" block, labelled provisional: the k
+each marker's controls suggest. It is applied only from the app's Results page.
+
+**The corrected rate.** When 06a wrote `results/roi_corrected.csv` (a
+no-primary reagent control is measured), its rows are the "corrected_rate"
+sheet: per stained section, marker and region, the raw pooled `frac_positive`
+with `frac_positive_corrected` and its 95% interval right beside it, under a
+header that states the sensitivity-1 assumption (the correction is a
+lower-bound adjustment) and that it is provisional; for a marker segmented on
+its own channel, positive_density_per_mm2 beside positive_density_corrected
+instead. It is per section, the
+grain the operator chose, so it is its own sheet rather than columns on
+`by_roi`, which is per animal; nothing is pooled to the animal here. The
+other sheets are unchanged, with or without it.
+
+**The autofluorescence flag.** When 06k wrote `results/af_scores.csv` and
+`results/af_scored_sections.csv`, an "af_flag" sheet: per sample, marker and
+region of a scored marker, by_roi's raw `frac_positive` with
+`frac_positive_without_flagged` right beside it - (n_positive - n_flagged) /
+(n_nuclei - n_flagged) - under a header that says provisional and states the
+validation criterion. A row any of whose sections 06k did not score is blank
+with a note, never the raw rate passed off as "none flagged". No count on any
+other sheet changes.
 
 **What "total tissue area" means here.** It is the area of the ROI discs
 themselves, mapped onto the slide and summed - not the whole section, and not a
@@ -108,6 +132,7 @@ if _HERE not in sys.path:
 from ls_config import CONFIG, CONFIG_PATH  # noqa: E402
 import ls_naming as NM  # noqa: E402
 import ls_reagent_report as RR  # noqa: E402
+import ls_overlay as LO  # noqa: E402
 OUT_ROOT = G5.OUT_ROOT
 RESULTS = os.path.join(OUT_ROOT, "results")
 NUCLEI_CSV = os.path.join(RESULTS, "roi_nuclei.csv")
@@ -161,6 +186,10 @@ def write_workbook(path, sheets):
     A sheet may be (name, rows, lines): the lines are written one per row above
     the table, with a blank row between, and the panes freeze under the table's
     header instead of the first row.
+
+    A fourth element is more tables below the first: [(lines, rows)], each
+    after a blank row, its lines above it and its header bold. The columns are
+    sized to the first table alone.
     """
     from openpyxl import Workbook
     from openpyxl.styles import Font
@@ -189,6 +218,18 @@ def write_workbook(path, sheets):
         for c, col in enumerate(cols, 1):
             width = max(len(str(col)), *(len(str(r[col])) for r in data)) + 2
             ws.column_dimensions[get_column_letter(c)].width = min(width, 30)
+        for more_lines, more in (sheet[3] if len(sheet) > 3 else ()):
+            ws.append([])
+            for line in more_lines:
+                ws.append([line])
+            if not more:
+                continue
+            more_cols = list(more[0].keys())
+            ws.append(more_cols)
+            for c in range(1, len(more_cols) + 1):
+                ws.cell(row=ws.max_row, column=c).font = Font(bold=True)
+            for row in more:
+                ws.append([row[c] for c in more_cols])
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with IO.atomic_save(path) as tmp:
         wb.save(tmp)
@@ -218,6 +259,269 @@ def _cell(v):
     return float(v) if "." in v else int(v)
 
 
+def _ks_06a():
+    """{marker: the k 06a formed the reagent controls' cuts at}, from the k
+    column of reagent_control_cuts.csv beside MEAS_CSV; {} without the file or
+    the column (written before 06a recorded it: the k used is not known)."""
+    path = os.path.join(os.path.dirname(MEAS_CSV), AF_RC_CUTS)
+    out = {}
+    for r in (G5.load_csv(path) if os.path.exists(path) else []):
+        try:
+            out[r["marker"]] = float(r["k"])
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
+
+def _cut_ks(rc_rows):
+    """{marker: the k its cut is formed at} for the reagent-control sheet's
+    header: the k 06a used (_ks_06a), so it states the multiplier the rows
+    were made with; positivity.cut_k for a marker 06a recorded none for."""
+    used = _ks_06a()
+    return {m: used.get(m, LO.cut_k(CONFIG, m))
+            for m in sorted({r.get("marker") or "" for r in rc_rows}) if m}
+
+
+def _k_changed_lines(markers):
+    """One line per marker whose positivity.cut_k is not the k 06a used: the
+    sheet's numbers are 06a's, and the results need rebuilding."""
+    used = _ks_06a()
+    out = []
+    for m in sorted(markers):
+        now = LO.cut_k(CONFIG, m)
+        if m in used and float(now) != used[m]:
+            out.append(f"k for {m} changed since 06a ran (06a used {used[m]:g}; "
+                       f"positivity.cut_k is now {float(now):g}) - rebuild results: the "
+                       f"numbers on this sheet are at {used[m]:g}.")
+    return out
+
+
+def _after_unblinding_lines():
+    """One line per marker whose k was applied through the typed confirmation
+    after unblinding - 06b had run or groups.by_animal was filled
+    (positivity.cut_k_source[marker]["after_unblinding"], set by
+    app/cut_apply.py) - for the "Reagent controls" sheet's header."""
+    src = (CONFIG.get("positivity") or {}).get("cut_k_source")
+    src = src if isinstance(src, dict) else {}
+    return [f"k for {m} was changed after unblinding (groups were assigned when the "
+            f"reagent k check's suggestion was applied)."
+            for m in sorted(src) if isinstance(src[m], dict) and src[m].get("after_unblinding")]
+
+
+#: Above the k check's table on the "Reagent controls" sheet.
+CUT_CHECK_LINES = (
+    "Cut check (provisional until validated on a study with known controls): the "
+    "positivity cut's multiplier k tested against the no-primary reagent controls, from "
+    "results/reagent_cut_check.csv. control_fp is the rate of control ROI nuclei called "
+    "positive by each control's own cut at k, with its 95% interval (control_fp_lo, "
+    "control_fp_hi); disc_fp is the stained sections' leave-one-disc-out rate at the same "
+    "k. suggested = 1 on the smallest k that meets positivity.fp_target. A blank is a rate "
+    "that cannot be given (the note says why), never 0. The suggestion never changes the "
+    "cut by itself: it is applied only from the app's Results page.",
+)
+
+
+#: The sheet results/roi_corrected.csv is shown on, when 06a wrote it.
+CORRECTED_SHEET = "corrected_rate"
+
+
+def _corrected_sheet():
+    """The corrected-rate sheet from results/roi_corrected.csv beside
+    MEAS_CSV, or None when 06a wrote none (no no_primary control measured).
+    The raw frac_positive sits right beside the corrected columns, as in the
+    file; the header states the sensitivity-1 assumption."""
+    path = os.path.join(os.path.dirname(MEAS_CSV), RR.ROI_CORRECTED_CSV)
+    rows = G5.load_csv(path) if os.path.exists(path) else []
+    if not rows:
+        return None
+    return (CORRECTED_SHEET,
+            [{c: _cell(r.get(c, "")) for c in RR.ROI_CORRECTED_COLUMNS} for r in rows],
+            RR.corrected_sheet_header())
+
+
+#: The sheet 06k's autofluorescence flag is shown on, when it wrote af_scores.csv.
+AF_SHEET = "af_flag"
+#: 06k's files, beside MEAS_CSV (06k_af_score.SCORES_CSV / SECTIONS_CSV / GATE_CSV).
+AF_SCORES = "af_scores.csv"
+AF_SECTIONS = "af_scored_sections.csv"
+AF_GATE = "af_gate.csv"
+#: 06a's cut files, beside MEAS_CSV (06a_roi_dataset.CUTS_CSV / RC_CUTS_CSV), which
+#: 06k's recorded cuts are compared with. 06a is not imported here (it reads a
+#: whole study at import); tests/test_af_score.py holds the names to 06a's.
+AF_CUTS = "positivity_cuts.csv"
+AF_RC_CUTS = "reagent_control_cuts.csv"
+#: The note on a row whose flags were scored under a cut 06a no longer uses.
+AF_STALE = "flags older than the cut - run 06k"
+#: af_scored_sections.csv's role for a stained section 06k skipped because its
+#: 06l features were computed before 05c re-detected it (06k_af_score), and the
+#: note on a row with one.
+AF_FEATURES_ROLE = "features_out_of_date"
+AF_FEATURES_STALE = "06l features out of date - run 06l"
+#: The note on a row of a marker whose reagent-control set is not the one 06k
+#: trained with (af_gate.csv's control_set against reagent_controls.csv now).
+AF_CONTROLS_CHANGED = "control set changed - run 06k"
+
+AF_LINES = (
+    "Positive rate without flagged nuclei (provisional until validated on a study with "
+    "known controls: the operator hand-labels qc/af_review.png and the flag must reach a "
+    "precision of at least 0.8 at a score of 0.5 on its random flagged row). A flag only: no count is changed, and "
+    "frac_positive is by_roi's raw rate.",
+    "06k scores each above-cut nucleus of a stained section by how much it looks like the "
+    "above-cut nuclei of the study's reagent controls (unstained ones when there are at "
+    "least 200 per marker, flag af_suspect; else no-primary ones, flag control_like; never "
+    "both) and flags it at a score of 0.5. frac_positive_without_flagged = (n_positive - "
+    "n_flagged) / (n_nuclei - n_flagged): the flagged nuclei leave the count and the "
+    "denominator alike.",
+    "A blank is a rate that cannot be given, never 0; the note says why (no raw rate, a "
+    "section not scored yet, a section whose 06l features are out of date, a reagent-"
+    "control set changed since 06k ran, or flags scored under a cut 06a no longer uses).",
+)
+
+
+def _af_sheet(meas, by_roi, sec_by):
+    """The af_flag sheet from 06k's af_scores.csv and af_scored_sections.csv
+    beside MEAS_CSV, or None when 06k wrote none. One row per by_roi row of a
+    scored marker (sample x marker x region): its raw rate, then the rate
+    without the flagged nuclei.
+
+    A row is blank with a note when it has no raw rate, when one of its
+    sections was not scored (a section 06a measured empty counts as scored,
+    with none flagged), or when a cut 06k scored or trained against is not the
+    cut in positivity_cuts.csv / reagent_control_cuts.csv now. The header
+    names every marker 06k did not score, with its control counts."""
+    base = os.path.dirname(MEAS_CSV)
+    spath, cpath = os.path.join(base, AF_SCORES), os.path.join(base, AF_SECTIONS)
+    if not (os.path.exists(spath) and os.path.exists(cpath)):
+        return None
+    secs = G5.load_csv(cpath)
+    stained = [r for r in secs if r.get("role", "stained") == "stained"]
+    scored = {(r["scene_uid"], r["marker"]) for r in stained}
+    feats_old = {(r["scene_uid"], r["marker"]) for r in secs
+                 if r.get("role") == AF_FEATURES_ROLE}
+    secs = [r for r in secs if r.get("role") != AF_FEATURES_ROLE]
+    how = {r["marker"]: (r["flag_name"], r["trained_on"]) for r in secs}
+    if not how:
+        return None
+
+    def cuts_of(name):
+        path = os.path.join(base, name)
+        return ({(r["scene_uid"], r["marker"]): r["cut"] for r in G5.load_csv(path)}
+                if os.path.exists(path) else {})
+
+    def same(a, b):
+        try:
+            return b is not None and float(a) == float(b)
+        except (TypeError, ValueError):
+            return False
+
+    now = {"stained": cuts_of(AF_CUTS), "control": cuts_of(AF_RC_CUTS)}
+    stale = {(r["scene_uid"], r["marker"]) for r in secs
+             if not same(r.get("cut"), now.get(r.get("role", "stained"), {}).get(
+                 (r["scene_uid"], r["marker"])))}
+    stale_markers = {m for (u, m) in stale
+                     if any(r["role"] == "control" for r in secs
+                            if (r["scene_uid"], r["marker"]) == (u, m))}
+    # Measured and found empty: no nucleus in its ROIs, so nothing to flag -
+    # scored with 0. Its background discs may still hold nuclei.
+    n_sec = collections.Counter()
+    for r in meas:
+        n_sec[(r["scene_uid"], r["marker"])] += (int(r["n_nuclei"] or 0)
+                                                 if r["roi_kind"] == "roi" else 0)
+    empty = {k for k, v in n_sec.items() if v == 0}
+    # The control set each marker was trained with (06k's af_gate.csv) against
+    # the one reagent_controls.csv lists now: a section confirmed as a control,
+    # or one no longer a control, since 06k ran changes what was flagged.
+    gpath = os.path.join(base, AF_GATE)
+    gate = G5.load_csv(gpath) if os.path.exists(gpath) else []
+    rpath = os.path.join(base, RR.REPORT_CSV)
+    ctl_now = {}
+    for r in (G5.load_csv(rpath) if os.path.exists(rpath) else []):
+        ctl_now.setdefault(r.get("marker") or "", set()).add((r["scene_uid"], r.get("kind")))
+    ctl_changed = {g["marker"] for g in gate
+                   if (g.get("control_set") or "")
+                   != RR.control_set_hash(ctl_now.get(g["marker"], ()))}
+    # A flagged nucleus's region and animal are its disc's, as 06a wrote it.
+    disc = {(r["scene_uid"], r["marker"], r["roi_index"]): r for r in meas}
+    flagged = collections.Counter()
+    for r in G5.load_csv(spath):
+        if r.get("flagged") != "1":
+            continue
+        d = disc.get((r["scene_uid"], r["marker"], r["roi_index"]))
+        if d is not None and d["roi_kind"] == "roi":
+            flagged[(d["animal"], d["marker"], d["region"])] += 1
+    rows = []
+    for b in by_roi:
+        mk = b["marker"]
+        if mk not in how:
+            continue
+        key = (b["sample"], mk, b["ROI"])
+        uids = sec_by.get(key, set())
+        missing = sorted(u for u in uids if (u, mk) not in scored and (u, mk) not in empty)
+        old = sorted(u for u in uids if (u, mk) in stale)
+        n, npos, raw = b["n_nuclei"], b["n_positive"], b["frac_positive"]
+        nf = flagged[key]
+        rate, note = "", ""
+        if raw == "" or npos == "":
+            note = "no raw rate on this row, so none without the flagged nuclei"
+        elif any((u, mk) in feats_old for u in missing):
+            of = [u for u in missing if (u, mk) in feats_old]
+            note = (f"not scored: {AF_FEATURES_STALE} ({len(of)} of {len(uids)} "
+                    f"section(s), e.g. {of[0]})")
+        elif missing:
+            note = (f"not scored: {len(missing)} of {len(uids)} section(s) have no "
+                    f"autofluorescence score (06l features missing, or 06k not run since; "
+                    f"e.g. {missing[0]})")
+        elif mk in ctl_changed:
+            note = AF_CONTROLS_CHANGED
+        elif old or mk in stale_markers:
+            note = AF_STALE
+        elif nf > npos:
+            note = (f"{nf} flagged but {npos} positive: af_scores.csv is older than "
+                    f"roi_measurements.csv - run 06k again")
+        elif n - nf <= 0:
+            note = "no nucleus left once the flagged ones are taken out"
+        else:
+            rate = round((npos - nf) / (n - nf), 4)
+        rows.append({
+            "sample": b["sample"], "marker": mk, "ROI": b["ROI"],
+            "treatment": b["treatment"], "n_nuclei": n, "n_positive": npos,
+            "frac_positive": raw, "frac_positive_without_flagged": rate,
+            "n_flagged": nf if rate != "" else "",
+            "n_positive_without_flagged": (npos - nf) if rate != "" else "",
+            "n_sections": len(uids), "n_sections_scored": len(uids) - len(missing),
+            "flag_name": how[mk][0], "trained_on": how[mk][1], "note": note,
+        })
+    if not rows:
+        return None
+    lines = list(AF_LINES)
+    for g in gate:
+        if g.get("trained_on"):
+            continue
+        if g.get("reason") == "no_stained":
+            lines.append(f"{g['marker']} not scored: no stained nucleus above the cut "
+                         f"with features, so it has no row here.")
+        else:
+            lines.append(f"{g['marker']} not scored: {g['n_unstained']} unstained / "
+                         f"{g['n_no_primary']} no_primary < 200 above-cut reagent-control "
+                         f"nuclei (06k's training gate), so it has no row here.")
+    return (AF_SHEET, rows, lines)
+
+
+def _rc_sheet(rc_rows):
+    """The "Reagent controls" sheet: the controls' table, then the k check's
+    when 06a wrote results/reagent_cut_check.csv beside reagent_controls.csv.
+    The path is taken from MEAS_CSV when called, as rc_path is."""
+    kc_path = os.path.join(os.path.dirname(MEAS_CSV), RR.CUT_CHECK_CSV)
+    kc_rows = G5.load_csv(kc_path) if os.path.exists(kc_path) else []
+    sheet = ("Reagent controls", [{k: _cell(v) for k, v in r.items()} for r in rc_rows],
+             RR.sheet_header(rc_rows, _cut_ks(rc_rows)) + _after_unblinding_lines()
+             + _k_changed_lines({r.get("marker") or "" for r in rc_rows + kc_rows} - {""}))
+    if kc_rows:
+        sheet += ([(list(CUT_CHECK_LINES) + [RR.cut_rule_text(_cut_ks(kc_rows))],
+                    [{k: _cell(v) for k, v in r.items()} for r in kc_rows])],)
+    return sheet
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=XLSX)
@@ -236,9 +540,7 @@ def main(argv=None):
         # hence no roi_measurements.csv, and a report. That is a partial run
         # reporting what it has, not a missing input - and failing here would
         # end 06e's loop on the first cycle.
-        write_workbook(args.out, [("Reagent controls",
-                                   [{k: _cell(v) for k, v in r.items()} for r in rc_rows],
-                                   RR.sheet_header(rc_rows))])
+        write_workbook(args.out, [_rc_sheet(rc_rows)])
         print(f"no stained section measured yet - only the reagent controls "
               f"({len(rc_rows)} rows) -> {args.out}")
         print(f"  {RR.limitation_text(rc_rows)}")
@@ -551,16 +853,22 @@ def main(argv=None):
 
     sheets = [("by_roi", by_roi), ("by_disc", by_disc),
               ("by_section", by_section), ("coverage", coverage)]
+    corrected = _corrected_sheet()
+    if corrected:
+        sheets.append(corrected)
+    af = _af_sheet(meas, by_roi, sec_by)
+    if af:
+        sheets.append(af)
     if rc_rows:
-        sheets.append(("Reagent controls", [{k: _cell(v) for k, v in r.items()}
-                                            for r in rc_rows],
-                       RR.sheet_header(rc_rows)))
+        sheets.append(_rc_sheet(rc_rows))
     write_workbook(args.out, sheets)
 
     print("=" * 72)
     print(f"{len(by_roi)} rows (one per ROI per sample) -> {args.out}")
     print(f"  sheets: by_roi, by_disc ({len(by_disc)}), "
           f"by_section ({len(by_section)}), coverage"
+          + (f", {CORRECTED_SHEET} ({len(corrected[1])})" if corrected else "")
+          + (f", {AF_SHEET} ({len(af[1])}, provisional)" if af else "")
           + (f", Reagent controls ({len(rc_rows)})" if rc_rows else ""))
     print(f"  {RR.limitation_text(rc_rows)}")
     # Sections, not by_section rows: under `multiplex` a section has a row per

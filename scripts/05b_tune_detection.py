@@ -82,6 +82,17 @@ REPORT_MD = os.path.join(QC, "detection_tuning.md")
 COLUMNS = ["marker", "scene_uid", "animal", "roi_index", "segmented_on",
            "width", "height", "background", "foreground", "noise", "snr",
            "contrast", "coverage", "saturated"]
+#: Added to the table only when the reagent-control constraint ran for some
+#: marker (see `constrain_marker`), so a study without a usable control keeps
+#: the table it always had, byte for byte. Per marker, at the final cut, on
+#: each of that marker's rows; blank on the rows of a marker it did not run for.
+CONSTRAINT_COLUMNS = ["control_density", "stained_density", "admissible",
+                      "constraint_moved_from"]
+ALL_COLUMNS = COLUMNS + CONSTRAINT_COLUMNS
+
+#: Why the constraint did or did not run, per marker, for the report only:
+#: detection.auto says nothing new when it did not run.
+CONSTRAINT_NOTES = {}
 
 #: The 2D_versatile_fluo model's own probability cut, used for the grid when
 #: no model is loaded and as the fallback when the model does not say.
@@ -139,7 +150,8 @@ def window(b, side):
     return D5._Rect(x0 + (w - cw) // 2, y0 + (h - ch) // 2, cw, ch)
 
 
-def read_crops(marker, uids, by_sec, geom, rois, side, model_input=False):
+def read_crops(marker, uids, by_sec, geom, rois, side, model_input=False,
+               borrow=None):
     """[(uid, roi_index, box, crop, x)] off the plane 05c would segment.
 
     `crop` is the box's central window, raw. `x` is that same window of the
@@ -147,6 +159,9 @@ def read_crops(marker, uids, by_sec, geom, rois, side, model_input=False):
     box, under 05c's section range when the marker shares one), or None when
     `model_input` is off or the section has no range to share - 05c skips such
     a section, so it has no input to tune on either.
+
+    `borrow`: {uid: stained uid} for reagent controls stretched by their
+    stained pair's range, as 05c detects them (05c.borrowed_from).
     """
     from pylibCZIrw import czi as pyczi
     own = D5._segments_own(marker)
@@ -180,8 +195,12 @@ def read_crops(marker, uids, by_sec, geom, rois, side, model_input=False):
                     # the range is the one 05c will stretch by, not one of the
                     # sample.
                     try:
-                        norm = D5.section_range(doc, by_sec[uid], marker,
-                                                int(g["scene_index"]))[:2]
+                        if borrow and uid in borrow:
+                            norm = D5.borrowed_range(borrow[uid], marker,
+                                                     by_sec, geom)[:2]
+                        else:
+                            norm = D5.section_range(doc, by_sec[uid], marker,
+                                                    int(g["scene_index"]))[:2]
                     except SG.SegmentError:
                         usable = False
                 for bi, b in spread(boxes, rois):
@@ -198,6 +217,103 @@ def read_crops(marker, uids, by_sec, geom, rois, side, model_input=False):
 
         out.extend(per_section(unit, label=f"{uid} ({g['czi_file']})"))
     return out
+
+
+def constraint_pairs(marker, by_sec, geom, lookup):
+    """([(control uid, stained uid, tier)], [(control uid, why)]): the
+    no_primary reagent controls of `marker` the PCNA constraint can use, each
+    with the stained section whose range it is read at (05c.borrowed_from:
+    operator, same_file or same_animal, never study-wide), and the ones it
+    cannot. Nothing is read when no control is confirmed."""
+    pairs, skipped = [], []
+    if not lookup:
+        return pairs, skipped
+    cache = {}
+    for uid, mk in sorted(lookup, key=lambda k: NM.natural_key(k[0])):
+        if mk != marker or (lookup[(uid, mk)] or {}).get("kind") != "no_primary":
+            continue
+        if uid not in by_sec or uid not in geom:
+            skipped.append((uid, "no ROI boxes"))
+            continue
+        src, tier = D5.borrowed_from(uid, marker, by_sec, geom, lookup, cache)
+        if src is None:
+            skipped.append((uid, "no stained section on its file or animal"
+                            if tier in (None, "study_wide") else
+                            "its paired stained sections have no ROI boxes"))
+            continue
+        pairs.append((uid, src, tier))
+    return pairs, skipped
+
+
+def read_control_crops(marker, pairs, by_sec, geom, rois, side):
+    """The reagent controls' ROI central windows, as the model sees them at
+    their stained pair's range: read_crops with the range borrowed."""
+    borrow = {u: s for u, s, _t in pairs}
+    return read_crops(marker, list(borrow), by_sec, geom, rois, side,
+                      model_input=True, borrow=borrow)
+
+
+def _area_mm2(xs):
+    px = float(D5.BASE_PX_UM) ** 2 / 1e6
+    return sum(int(x.shape[0]) * int(x.shape[1]) for x in xs) * px
+
+
+def fp_target():
+    return float((CONFIG.get("positivity") or {}).get("fp_target", 0.01))
+
+
+def constrain_marker(marker, pairs, skipped, by_sec, geom, args, model, grid,
+                     curve, xs, chosen, default):
+    """(cut, constraint record) for a `segment: own` marker with usable
+    no_primary reagent controls; `chosen` (None: the model's default) held to
+    ls_tune.constrain. Runs StarDist over the controls' ROI central windows at
+    the same grid, each control at its stained pair's range. (chosen, None)
+    when no control gave a window to count."""
+    ccrops = read_control_crops(marker, pairs, by_sec, geom, args.rois, args.window)
+    cxs = [c[4] for c in ccrops if c[4] is not None]
+    if not cxs:
+        CONSTRAINT_NOTES[marker] = ("not applied: no reagent-control window "
+                                    "could be read at its stained pair's range")
+        return chosen, None
+    print(f"{marker}: counting at {len(grid)} probability cuts over {len(cxs)} "
+          f"reagent-control crops, at their stained pairs' ranges...")
+    ccurve = TU.count_curve(model, cxs, grid, nms_thresh=D5._STARDIST.get("nms_thresh"),
+                            n_tiles_for=SG.tiles_for)
+    area_s, area_c = _area_mm2(xs), _area_mm2(cxs)
+    target = fp_target()
+    new, why = TU.constrain(curve, ccurve, area_s, area_c, chosen, target,
+                            default=default)
+    table = TU.densities(curve, ccurve, area_s, area_c, target)
+    at = default if new is None else new
+    here = next((v for p, v in table.items() if abs(p - at) < 1e-4), None) or {}
+    moved = (new is not None and chosen is None) or (
+        new is not None and abs(new - chosen) > 1e-6)
+    used = sorted({c[0] for c in ccrops if c[4] is not None}, key=NM.natural_key)
+    rec = {"fp_target": target,
+           "controls": [{"control": u, "range_from": s, "pairing": t}
+                        for u, s, t in pairs if u in used],
+           "skipped": [{"control": u, "why": w} for u, w in skipped]
+                      + [{"control": u, "why": f"no window could be read at its "
+                                               f"stained pair's range ({s}: flat, "
+                                               f"empty or too small)"}
+                         for u, s, _t in pairs if u not in used],
+           "control_crops": len(cxs),
+           "area_stained_mm2": round(area_s, 6),
+           "area_control_mm2": round(area_c, 6),
+           "control_curve": [[round(p, 6), n] for p, n in ccurve],
+           "control_density": _r(here.get("control_density")),
+           "stained_density": _r(here.get("stained_density")),
+           "admissible": here.get("admissible"),
+           "moved_from": (round(default if chosen is None else chosen, 6)
+                          if moved else None),
+           "why": why,
+           "provisional": True}
+    CONSTRAINT_NOTES[marker] = "applied"
+    return new, rec
+
+
+def _r(v):
+    return None if v is None else round(float(v), 3)
 
 
 def tune_marker(marker, args, model):
@@ -259,6 +375,23 @@ def tune_marker(marker, args, model):
         curve = TU.count_curve(model, xs, grid, nms_thresh=nms,
                                n_tiles_for=SG.tiles_for)
         chosen, why = TU.pick_prob_thresh(curve, default)
+        # THE REAGENT-CONTROL CONSTRAINT, for a marker segmented on its own
+        # channel only, and only with a usable no_primary control: without
+        # one this block does nothing and detection.auto is what it always was.
+        if D5.needs_shared_norm(marker):
+            pairs, skipped = constraint_pairs(marker, by_sec, geom, D5.reagent_lookup())
+            if pairs:
+                chosen, rec = constrain_marker(marker, pairs, skipped, by_sec, geom,
+                                               args, model, grid, curve, xs,
+                                               chosen, default)
+                if rec is not None:
+                    entry["constraint"] = rec
+            else:
+                CONSTRAINT_NOTES[marker] = (
+                    "not applied: no no_primary reagent control pairable with a "
+                    "stained section on its file or animal"
+                    + ("" if not skipped else " (" + "; ".join(
+                        f"{u}: {w}" for u, w in skipped) + ")"))
         entry["model_default"] = {"prob_thresh": default,
                                   "nms_thresh": float(getattr(getattr(model, "thresholds", None), "nms", 0.3) or 0.3)}
         entry["curve"] = [[round(p, 6), n] for p, n in curve]
@@ -273,11 +406,17 @@ def tune_marker(marker, args, model):
     elif backend == "stardist":
         entry["why"] = "StarDist is not available here, so only the signal was measured"
 
+    con = entry.get("constraint")
+    extra = ["", "", "", ""] if con is None else [
+        "" if con["control_density"] is None else con["control_density"],
+        "" if con["stained_density"] is None else con["stained_density"],
+        {True: "yes", False: "no"}.get(con["admissible"], ""),
+        "" if con["moved_from"] is None else f"{con['moved_from']:g}"]
     out_rows = []
     for (uid, bi, b, crop, _x), q in zip(crops, rows):
         out_rows.append([marker, uid, NM.subject_of(uid), bi, seg_on,
                          crop.shape[1], crop.shape[0]]
-                        + [round(q[k], 4) for k in COLUMNS[7:]])
+                        + [round(q[k], 4) for k in COLUMNS[7:]] + extra)
     return entry, out_rows
 
 
@@ -300,17 +439,53 @@ def report(entries):
                                 "contrast", "coverage", "saturated")), ""]
         if "curve" in e:
             p = e["chosen"].get("prob_thresh")
+            c = e.get("constraint") or {}
+            held = ""
+            if c.get("moved_from") is not None:
+                held = (f" Moved up from {c['moved_from']:g} by the reagent-control "
+                        f"constraint (below).")
+            elif c and not c.get("admissible"):
+                held = (" **Flagged: no cut on the grid meets the reagent-control "
+                        "constraint (below); kept.**")
             lines += [f"Probability cut: **{p if p is not None else e['model_default']['prob_thresh']}**"
-                      f"{'' if p is not None else ' (the model default, kept)'}. {e['why']}.", "",
+                      f"{'' if p is not None else ' (the model default, kept)'}. "
+                      f"{'The plateau rule: ' if c else ''}{e['why']}.{held}", "",
                       "| cut | " + " | ".join(f"{c:g}" for c, _ in e["curve"]) + " |",
                       "|---|" + "---|" * len(e["curve"]),
                       "| nuclei | " + " | ".join(str(n) for _, n in e["curve"]) + " |", ""]
         elif e.get("why"):
             lines += [e["why"] + ".", ""]
+        lines += constraint_lines(marker, e)
     lines += ["To override, set detection.stardist.prob_thresh (Set up > "
               "Advanced > Nucleus detection), or turn off "
               "detection.stardist.use_auto to use the model's own.", ""]
     return "\n".join(lines)
+
+
+def constraint_lines(marker, e):
+    """The report's paragraph on the reagent-control constraint (provisional)."""
+    c = e.get("constraint")
+    if c is None:
+        note = CONSTRAINT_NOTES.get(marker)
+        return [f"Reagent-control constraint: {note}.", ""] if note else []
+    out = [f"Reagent-control constraint (provisional): {c['why']}. A cut is "
+           f"admissible when the false detections per mm2 on paired no-primary "
+           f"controls are at most {c['fp_target']:g} x the detections per mm2 "
+           f"on the stained sample. Each control is counted at its stained "
+           f"pair's intensity range: "
+           + ", ".join(f"{x['control']} at {x['range_from']} ({x['pairing']})"
+                       for x in c["controls"]) + ".", ""]
+    if c.get("skipped"):
+        out += ["Not used: " + "; ".join(f"{x['control']} ({x['why']})"
+                                         for x in c["skipped"]) + ".", ""]
+    dens = TU.densities(e["curve"], c["control_curve"], c["area_stained_mm2"],
+                        c["area_control_mm2"], c["fp_target"])
+    out += ["| cut | control_density | stained_density | admissible |",
+            "|---|---|---|---|"]
+    out += [f"| {p:g} | {v['control_density']:.3g} | {v['stained_density']:.3g} | "
+            f"{'yes' if v['admissible'] else 'no'} |" for p, v in sorted(dens.items())]
+    out += [""]
+    return out
 
 
 def _fmt(v, pct=False):
@@ -373,13 +548,21 @@ def main():
                 print(f"{m}: probability cut "
                       f"{p if p is not None else 'kept at the model default'}"
                       f" - {e['why']}")
+            c = e.get("constraint")
+            if c is not None:
+                print(f"{'!! ' if not c['admissible'] else ''}{m}: reagent-control "
+                      f"constraint (provisional) - {c['why']}")
+            elif CONSTRAINT_NOTES.get(m):
+                print(f"{m}: reagent-control constraint {CONSTRAINT_NOTES[m]}")
     if not entries:
         return 1
 
     os.makedirs(QC, exist_ok=True)
     # Both through a temp file and a swap, so a crash leaves the previous
     # tuning record rather than half of a new one.
-    IO.atomic_write_csv(TUNING_CSV, [dict(zip(COLUMNS, r)) for r in rows], COLUMNS)
+    # The constraint's columns only when it ran: zip stops at COLUMNS otherwise.
+    cols = ALL_COLUMNS if any("constraint" in e for e in entries.values()) else COLUMNS
+    IO.atomic_write_csv(TUNING_CSV, [dict(zip(cols, r)) for r in rows], cols)
     with IO.atomic_save(REPORT_MD) as tmp:
         with open(tmp, "w", encoding="utf-8") as fh:
             fh.write(report(entries))

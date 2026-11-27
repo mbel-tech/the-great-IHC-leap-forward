@@ -298,7 +298,9 @@ Detection takes hours; finished sections are kept, so a stopped run resumes.
 - **The positivity cut** is set per section from that section's background discs, from the marker median
   of each disc nucleus that is not censored, on an artifact or off the tissue:
 
-  > cut = median + 3 × 1.4826 × MAD
+  > cut = median + k × 1.4826 × MAD
+
+  with k the marker's `positivity.cut_k` (3 unless the study sets it).
 
   The MAD (median absolute deviation) times 1.4826 is a robust stand-in for the standard deviation; robust
   because a few bright objects in a disc would inflate a standard deviation and raise the very cut meant to
@@ -326,6 +328,11 @@ Detection takes hours; finished sections are kept, so a stopped run resumes.
   hourly while detection runs.
 - **06i** draws every detected nucleus over its marker picture, coloured by whether it was called
   positive, for checking by eye.
+- **06l** (on request, from the Measure screen) adds the shape and marker texture of every detected
+  nucleus to `nucleus_features.csv`, from the outlines 05c saved, for the autofluorescence score.
+- **06k** (on request, from the Measure screen) flags above-cut nuclei of stained sections that look like
+  the reagent controls' above-cut nuclei (`af_scores.csv`), a flag only and provisional; 06c shows the
+  positive rate without them beside the raw one.
 - **R statistics and figures** (`analysis/`, switched off in the app for now and run by hand). With one row
   per animal the model is ordinary least squares, `lm(value ~ group)`; given a table with several rows per
   animal it fits a mixed model with a random intercept per animal instead (`lmerTest::lmer`), so sections
@@ -765,6 +772,8 @@ The full table, generated from the code:
 | `tune_detection` | 05b Check signal quality and tune detection | Quantification | `05b_tune_detection.py` | roi_geometry | `qc/detection_tuning.md` | pylibCZIrw |  | yes |
 | `detect` | 05c Detect and measure nuclei | Quantification | `05c_detect_rois.py` | roi_geometry, tune_detection | `results/roi_nuclei.csv` | pylibCZIrw |  | from source only (needs StarDist) |
 | `roi_dataset` | 06a Per-ROI dataset | Quantification | `06a_roi_dataset.py` | detect | `results/roi_measurements.csv`, `results/detector_specificity.csv` | none |  | yes |
+| `nucleus_features` | 06l Per-nucleus shape and texture | Quantification | `06l_nucleus_features.py` | detect | `results/nucleus_features.csv` | pylibCZIrw |  | yes |
+| `af_score` | 06k Autofluorescence flag | Quantification | `06k_af_score.py` | roi_dataset, nucleus_features | `results/af_scores.csv` | pylibCZIrw |  | yes |
 | `join_sampling` | 06b Join the experiment | Beyond blinding | `06b_join_sampling.py` | roi_dataset | `results/roi_dataset.csv`, `results/animal_metadata.csv` | none |  | yes |
 | `excel_sample` | 06c Spreadsheet - per sample | Beyond blinding | `06c_excel_dataset.py` | roi_dataset | `results/roi_dataset.xlsx` | none |  | yes |
 | `excel_slide` | 06d Spreadsheet - per slide | Beyond blinding | `06d_excel_by_slide.py` | roi_dataset | `results/roi_dataset_by_slide.xlsx` | none |  | yes |
@@ -1767,6 +1776,18 @@ the whole study.
   Reagent controls of the marker (`reagent_controls`, through `ls_reagent_controls.expand`) are left out of
   the sample. While `reagent_controls.declared` is `unsure` and `qc/reagent_screen.csv` has candidates
   neither confirmed nor rejected, it prints a warning and carries on.
+- **Reagent-control constraint (provisional):** for a marker segmented on its own channel (`segment: own`,
+  StarDist: PCNA) with at least one `no_primary` reagent control paired (operator `paired_with`, same file
+  or same animal; never study-wide) with a stained section that has boxes, the model is also run over the
+  controls' ROI central windows, each stretched by its stained pair's `section_range` (05c's
+  `borrowed_from`), at the same grid. `ls_tune.constrain` calls a cut admissible when the control's
+  objects per mm² are at most `positivity.fp_target` × the stained sample's; an inadmissible choice moves to
+  the lowest admissible grid point above it, and with none it is kept and the report says so. The record
+  is `detection.auto.<marker>.constraint`, the four last columns of `qc/detection_tuning.csv` (written only
+  then) and a table in the report. With no usable control none of this runs: `detection.auto` and the
+  table are byte-identical to before, and the report says the constraint was not applied. The stage
+  records no inputs, so the app does not mark it stale when `fp_target` or the pairing changes; re-run it,
+  and a moved cut reaches 05c through `detection.auto`.
 - **Failure and re-run:** `--no-model` measures quality only, without StarDist. If the drive drops while
   a section's crops are read, it waits for the drive (`ls_drive`) and reads that section again, the CZI
   opened afresh, so the sample is the one an uninterrupted run takes.
@@ -1787,7 +1808,13 @@ The longest-running stage (hours).
   counterstain with StarDist (`2D_versatile_fluo`, 1 to 99.8 percentile stretch, the cut from 05b), keeps
   objects whose centroid maps inside the drawn shape, and measures the marker inside each nuclear mask.
   A marker declared `segment: own` (PCNA on the LS slides) is segmented on its own channel instead, with
-  one intensity range per section. A nucleus is `censored` when any of its native pixels is at the clip
+  one intensity range per section. A `no_primary` reagent control of such a marker is detected at its
+  paired stained section's range (operator, same file or same animal; the first in name order with
+  boxes), not its own, which would stretch its noise to full scale; with no such pair it takes its own,
+  and `roi_normalisation.csv`'s `range_from` says which. A resume re-detects only a section whose range
+  source changed (a control re-paired, confirmed or de-confirmed), or whose source section is itself being
+  re-measured. A source section whose boxes changed is caught only through the existing box-fingerprint
+  check: one not among this marker's measured sections does not trigger a control re-detect. A nucleus is `censored` when any of its native pixels is at the clip
   ceiling, and `off_tissue` when it falls outside the tissue mask. Each row records `segmented_on`,
   `backend` and `nucleus_shaped`. The `ls_segment` threshold backend serves markers that are not
   nucleus-shaped.
@@ -1819,10 +1846,11 @@ Stage `roi_dataset`. Turns the per-nucleus rows into per-ROI numbers. Still blin
 - **Reads:** `results/roi_nuclei.csv`, the done log, the ROI boxes and geometry.
 - **Writes:** `results/roi_measurements.csv`, `results/positivity_cuts.csv`,
   `results/detector_specificity.csv` and `results/roi_geometry_changed.csv`; and
-  `results/reagent_controls.csv` and `results/reagent_control_cuts.csv` (each control's own cut, never in
-  `positivity_cuts.csv`) when a measured section is a confirmed reagent control.
+  `results/reagent_controls.csv` and `results/reagent_control_cuts.csv` (each control's own cut and the k it
+  was formed at, `RC_CUTS_COLUMNS`, never in `positivity_cuts.csv`) when a measured section is a confirmed reagent control; and
+  `results/reagent_cut_check.csv` and `results/roi_corrected.csv` when a no_primary one is measured.
 - **How:** **positivity cut** per section and marker from that section's background discs:
-  median + 3 × 1.4826 × MAD, needing at least 5 background nuclei (else no cut, and positives are blank,
+  median + k × 1.4826 × MAD (k = `positivity.cut_k` for the marker, 3 by default), needing at least 5 background nuclei (else no cut, and positives are blank,
   not zero). **Specificity:** the fraction of background nuclei above the cut, a measured false-positive
   rate. **Abercrombie:** N = n × T / (T + h), with T from `section_thickness_um` and h the mean diameter of the
   segmented nuclei, measured per region and marker; withheld, with the reason in the row, for objects that are not
@@ -1837,7 +1865,38 @@ Stage `roi_dataset`. Turns the per-nucleus rows into per-ROI numbers. Still blin
   is removed. The default pairing tiers consider only stained sections with 05a boxes for the marker
   (the manifest's, when 05a has placed none for it). A confirmed control with nothing measured for a
   marker gets one row with blank measures and a note saying why (no 05a boxes, or not detected yet).
-- **Settings:** `section_thickness_um`, `pixel_size_um`, `detection`, `reagent_controls`.
+  **The k check** (`ls_reagent_report.cut_check_rows`, provisional until validated): per marker and
+  k in {2.0, 2.5, ..., 5.0}, the no_primary controls' ROI nuclei above each control's own cut at k
+  (pooled, Wilson 95% interval), beside the stained sections' leave-one-disc-out rate at the same k
+  (`ls_overlay.leave_one_disc_out`, the rule `detector_specificity.csv`'s `loo_` columns use), and
+  `suggested` = 1 on the smallest k meeting `positivity.fp_target`. isotype, preadsorbed and unstained
+  controls are not used; a control with fewer than 5 usable background nuclei is left out and named in
+  the note. Under `positivity.fp_min_nuclei` control nuclei there is no rate and no suggested k, and under
+  it disc nuclei no disc rate (blank, with the count in the note). The console prints the suggested k per marker and whether the disc rate falls inside the
+  controls' interval at the k in force. It never changes `positivity.cut_k`. With no measured
+  no_primary control the file is removed.
+  **The corrected rate** (`ls_reagent_report.corrected_rows`, provisional until validated):
+  `results/roi_corrected.csv`, per stained section x marker x region, pools the ROI rows it writes to
+  `roi_measurements.csv` (which is unchanged, not a key added) and corrects the raw rate for f, the
+  paired no_primary controls' ROI nuclei above each control's own cut in the same region (all their
+  regions under `positivity.fp_min_nuclei` nuclei, and the source says so): Rogan-Gladen
+  (p − f) / (1 − f), assuming sensitivity 1, so a lower-bound adjustment, with a 95% interval from
+  4000 Monte-Carlo draws of Jeffreys posteriors (seed 20261121). The controls are
+  `controls_for`, the report's pairing tiers from the stained section's side (operator, same file,
+  same animal; never study-wide; a control whose operator pin takes effect for the marker is used
+  only for what it is paired with; a pin that resolves to nothing for the marker is ignored, as in
+  `reagent_controls.csv`). The operator tier is looked for over every confirmed control, measured or
+  not: a section pinned only to no_primary controls not measured yet is blank, with the note "paired
+  control not measured yet" (`fp_rate_source` `operator: <uids> (not measured yet)`), never corrected
+  by a fallback tier; of a pin's controls only the measured ones are used. The default tiers skip a
+  control not measured yet, so a measured one further out still corrects the section. Blank, with a
+  note, when it cannot be given. A marker segmented on its own channel gets
+  `positive_density_per_mm2` (pooled as sum(n_positive × each row's Abercrombie factor) / area) less the
+  controls' instead, in the `positive_density_*` columns, with no minimum object count (only control ROI
+  area, all regions when the region has none). With no measured no_primary
+  control the file is removed.
+- **Settings:** `section_thickness_um`, `pixel_size_um`, `detection`, `reagent_controls`,
+  `positivity.cut_k`, `positivity.fp_target`, `positivity.fp_min_nuclei`.
 
 ### `06b_join_sampling.py`
 
@@ -1868,8 +1927,29 @@ Stage `excel_sample`. The analysis table as a workbook, one row per ROI per anim
   `by_section` and `coverage`, written with openpyxl (bold header, frozen first row, sized columns),
   and a `Reagent controls` sheet when 06a's `results/reagent_controls.csv` has rows: the same table
   under a plain-language header (what A and B mean, isotype rows test the antibody and no-primary rows
-  the secondary, a background disc is not a reagent control). `write_workbook` takes an optional third
-  item per sheet, the lines above the table.
+  the secondary, a background disc is not a reagent control). The k it states is the one 06a formed the
+  controls' cuts at (the `k` column of `reagent_control_cuts.csv`; the config's for a marker without
+  one), with a line per marker whose `positivity.cut_k` is not that k now ("k for <marker> changed since
+  06a ran ... - rebuild results"), and one line per marker whose
+  `positivity.cut_k_source` entry has `after_unblinding` ("k for <marker> was changed after
+  unblinding"). When 06a wrote
+  `results/reagent_cut_check.csv`, the same sheet carries it below as a `Cut check` block, labelled
+  provisional. When 06a wrote `results/roi_corrected.csv`, a `corrected_rate` sheet carries it: the raw
+  `frac_positive` beside `frac_positive_corrected` and its interval, per section, marker and region (its own
+  sheet, because `by_roi` is per animal and nothing is pooled to the animal), under a header stating the
+  sensitivity-1 assumption and that it is provisional. When 06k wrote `results/af_scores.csv` and
+  `results/af_scored_sections.csv`, an `af_flag` sheet: per sample, marker and region of a scored marker,
+  by_roi's raw `frac_positive` beside `frac_positive_without_flagged` = (n_positive - n_flagged) /
+  (n_nuclei - n_flagged), each flagged nucleus placed by its disc's row in `roi_measurements.csv`, under a
+  header that says provisional and states the validation criterion, and names each marker
+  `af_gate.csv` says was not scored, with its counts. Blank, with a `note`, when there is no raw rate, when
+  any of the row's sections is not in `af_scored_sections.csv` (a section 06a measured empty counts as
+  scored, none flagged; empty means no nucleus in its ROIs; one listed as `features_out_of_date` says
+  "06l features out of date - run 06l"), when a cut recorded there - the section's, or a control the marker trained on -
+  is not the cut in `positivity_cuts.csv` / `reagent_control_cuts.csv` now ("flags older than the cut -
+  run 06k"), when the marker's `control_set` in `af_gate.csv` is not the hash of the controls
+  `reagent_controls.csv` lists now ("control set changed - run 06k"; checked before the cut), or when more are flagged than positive. `write_workbook` takes an optional third item per sheet, the lines above the table, and a
+  fourth, more tables below it (`[(lines, rows)]`).
 - **How:** groups 06a's rows. Withheld values (no cut, no denominator, Abercrombie not applied) are blank,
   with the reason carried from 06a. Reagent-control boxes are left out of `planned` and `coverage`. The
   limitation text (`ls_reagent_report.limitation_text`, printed and on the sheet) points to the
@@ -1957,6 +2037,77 @@ counts by eye.
   section's boxes or its scene picture are read, it waits for the drive (`ls_drive`) and reads them again,
   the CZI opened afresh; a read that fails with the drive there lists the section not drawn, as before.
 
+### `06k_af_score.py`
+
+Stage `af_score` (Quantification, run on request). The autofluorescence flag: a positive-unlabelled
+logistic regression (`ls_af_model`) per marker, labelled class the above-cut ROI nuclei of the study's
+**unstained** reagent controls when there are at least `GATE` (200) of them, else of its **no_primary**
+controls (at least 200), never pooled; unlabelled class the above-cut ROI nuclei of stained sections.
+Each of the latter gets `af_score`, flagged at >= 0.5 (`af_suspect` when trained on unstained,
+`control_like` on no_primary). A flag only: no count, rate or density is changed anywhere.
+
+- **Reads:** `roi_nuclei.csv` (one pass; artifact and off-tissue rows left out, as in 06a), 06a's
+  `positivity_cuts.csv` (stained) and `reagent_control_cuts.csv` (each control's own cut), the confirmed
+  controls' kinds (`ls_reagent_report.study_lookup`, the entry's `kind`; isotype and preadsorbed never
+  used), 06l's `nucleus_features_done.csv` and `nucleus_features.csv`. "Above the cut" is
+  `ls_overlay.is_positive` against that section's cut.
+- **Featured sections only:** a section is used when 06l's done log lists it with the fingerprint 06l
+  gives it now (`06l_nucleus_features.fingerprints_now`, 06l's own `plan` and `fingerprint`) and every
+  above-cut nucleus has a feature row; the others are counted and named ("N section(s) skipped as not yet
+  featured"). A done line with another fingerprint is out of date - 05c re-detected or 05a re-boxed the
+  section since 06l ran, so its nucleus ids may name other nuclei - and is never joined; it is named
+  separately ("skipped as their 06l features are out of date"), and a stained section of a scored marker
+  skipped so is listed in `af_scored_sections.csv` with role `features_out_of_date`. The gate counts
+  after that.
+- **Features** (`ls_af_model.features_matrix`), section-relative: size, roundness, solidity, DAPI as a
+  robust z within the section, marker_median in spreads above the section's own discs
+  (`ls_overlay.background_stats`, recomputed here for stained and control sections alike), p90 / median,
+  marker_cv, marker_spots and, under multiplex, the other marker (06l's `other_marker`) in spreads above its
+  own discs.
+- **Writes:** `results/af_scores.csv` (`COLUMNS`), `results/af_scored_sections.csv` (every stained section
+  x marker scored, with counts, and every control trained on, each with the cut it was counted against:
+  06c tells "none flagged" from "not scored" by it, and blanks a row whose cut has changed since),
+  `results/af_gate.csv` (per marker, the unstained and no_primary counts, what it trained on and, when
+  not scored, why: `below_gate` or `no_stained`; and `control_set`, `ls_reagent_report.control_set_hash`
+  of the (scene_uid, kind) of every confirmed reagent control of the marker), then
+  `qc/af_review.csv` and `qc/af_review.png`: per marker the 24 highest scores (`strip` `top`, for
+  orientation) and 24 drawn at random (seed 20261121) from the flagged nuclei (score ≥ 0.5) not among them
+  (`strip` `random_flagged`; all of them when fewer are left, and the title and the run's output say so;
+  precision at 0.5 is read off this row) as 64 px crops of the marker plane (05c's `plane_index_for`, read through 06l's loaded
+  05c); a crop that cannot be read is grey.
+- **Gate:** a marker below 200 of either kind is not scored, and the counts are printed. When no marker
+  is scored, nothing is written, the outputs of an earlier run are removed (a stale file would have 06c
+  subtract flags this study no longer supports) and it exits 1: not enough control nuclei to train, not a
+  crash. A missing input (roi_nuclei.csv, positivity_cuts.csv, nucleus_features_done.csv) also removes the
+  earlier outputs and exits 1.
+- `roi_nuclei.csv`, `roi_measurements.csv` and `roi_corrected.csv` are never written.
+
+### `06l_nucleus_features.py`
+
+Stage `nucleus_features` (Quantification, run on request). Shape and marker texture of every nucleus in
+`roi_nuclei.csv`, for the autofluorescence score, written to `results/nucleus_features.csv` keyed as
+`roi_nuclei.csv` is (`scene_uid, marker, roi_index, nucleus_id`): `roundness`, `solidity`, `marker_cv`,
+`marker_spots` and, under multiplex, `other_marker_median` (blank under paired). The features are
+`ls_nucleus_features.features`.
+
+- **Reads:** each section's boxes (05a), the label images 05c saved (`detection_outlines/<marker>/<uid>.npz`),
+  the section's rows of `roi_nuclei.csv` (scanned 32 sections at a time) and, from the CZI, the marker
+  plane of each box that has nuclei (and the other marker's plane under multiplex). Never DAPI, never
+  StarDist: a section with no saved outlines is listed as not done and skipped (06i saves them once).
+- **Checks** before a section is read: each box's saved origin and shape are the box's now, and every
+  `nucleus_id` is a label in its box. A section that fails is not done, with the reason; its old rows go.
+- **Resumes per section:** rows appended and synced, then one line in `nucleus_features_done.csv` with a
+  fingerprint of the outline file, the section's nucleus list, its boxes, its CZI scene, the planes read
+  and the feature version. A section with no current line is read; its rows are dropped first, through a
+  temp file and one replace, and a torn last line is cut back. `--limit N` (a section with no saved
+  outlines is listed and not counted against N), `--force`, `--marker`. A run that leaves sections not
+  done ends with "N section(s) not done", which the app shows as a shortfall. Completeness is the done
+  log, not the CSV existing.
+- **Drive:** each section is one `ls_drive.per_slide_settled` unit, as in 05c and 06i: a read that fails
+  because the slide drive went away waits for it and reads the section again; nothing is written until the
+  unit returns.
+- `roi_nuclei.csv` is read and never written.
+
 ### `atlas_pdf.py`
 
 Shared module. Decides which image XObjects on a salmon atlas page are plates. Since the 2026-09
@@ -2010,6 +2161,17 @@ channel is comes from `ls_channels`. Used by every stage whose pixels reach a re
 Shared module, no Qt. `flatten()` turns a CZI's metadata tree into path and value pairs, and `combine()`
 says per path what the study's files hold (the same everywhere, or differing). The app's "What the slides
 say" window shows the result.
+
+### `ls_af_model.py`
+
+Shared module, NumPy only (scikit-learn is not a dependency): the autofluorescence model for 06k.
+`fit(X, y, l2=1.0, seed=20261121)` standardises each column (NaN imputed by the column mean, so 0 once
+standardised; a column blank or constant throughout is dropped and recorded in `keep`), weights the two
+classes to equal total weight, and solves the L2-penalised logistic regression (no penalty on the
+intercept) by IRLS from zero, so it is deterministic; the seed is recorded with the model. `predict`
+applies the same columns, means and spreads. `features_matrix(rows, section_stats)` builds the `FEATURES`
+columns from merged roi_nuclei.csv and nucleus_features.csv rows: blank cells are NaN, never 0, and a
+spread of 0 or a section without statistics leaves the relative feature blank. Reads no study file.
 
 ### `ls_atlas.py`
 
@@ -2120,10 +2282,24 @@ from the grammar: subject, slide and replicate give `LS105_s10a_sc03`; subject a
 `LS105_s10_sc03`; subject alone gives `LS105_sc03`. The uid is the key of every table and of the saved
 curation, so making its shape configurable would let an edit orphan every result.
 
+### `ls_nucleus_features.py`
+
+Shared module, NumPy, SciPy and scikit-image: `features(label_img, nucleus_id, dapi, marker, other=None)`
+for 06l. `roundness` is 4 pi A / P^2 (skimage perimeter, capped at 1). `solidity` counts the hull in
+pixels, the pixels whose centres lie in the convex hull of the nucleus's pixel centres, so a digital disc
+is 1.0 at any size (skimage's own `solidity` takes the corners' hull and reads 0.86 to 0.95 for a disc of
+radius 4 to 12 px). `marker_cv` is sd / max(mean - b, s) with b and s the median and 1.4826 x MAD of the
+box's pixels in no nucleus: a plain sd / mean moves with an additive background, and two nuclei of
+different brightness can swap order under the ~2x batch between animals; this one does not move under
+x * gain + offset. `marker_spots` counts local maxima (8 neighbours, a plateau once) above the nucleus's
+median + 3 x 1.4826 x MAD; comparisons only, so also unchanged. `dapi` feeds no key. `bboxes()` and
+`background()` let a caller scan a box once for all its nuclei. Reads no study file.
+
 ### `ls_overlay.py`
 
 Shared module, pure NumPy (Pillow is imported only when a file is written). The positivity rule and the
-per-section cut (`section_cut`), what colour each nucleus is drawn, a crop's pixels (`crop_image`) and its
+per-section cut (`section_cut`, at the marker's `cut_k`), the leave-one-disc-out count
+(`leave_one_disc_out`, which 06a's `detector_specificity.csv` and the reagent k check share), what colour each nucleus is drawn, a crop's pixels (`crop_image`) and its
 caption (`crop_lines`). One home, so 06a's counts and 05c's and 06i's pictures cannot disagree. Native
 pixels only; nothing is resampled. Reads no study file.
 
@@ -2151,7 +2327,13 @@ Shared module: which slides or sections are reagent controls, meaning stained wi
 antibody, with an isotype IgG, pre-adsorbed or unstained. `scan(paths, markers, group_labels, extra)`
 reads file names relative to the slides folder (so a folder called `Negative controls` counts) and
 returns at most one `Match` per path, strong or weak; a weak token that is also a group label is never
-proposed, and `IgG`, dye names such as `AF488`, single letters and a trailing `-` never match.
+proposed, and `IgG`, dye names such as `AF488`, single letters and a trailing `-` never match by
+themselves. A lab's own mark is a per-study opt-in: `NAMING_PRESETS` (first `trailing_dash`, a `-` just
+before `.czi` or before a marker suffix such as `_A568`, kind `no_primary`; in LS a trailing `-` marks a
+re-scan, so it is not built in) or other text through `token_pattern(text)` (escaped, bounded like every
+built-in token). `naming_entry`, `naming_of` and `with_naming` write and read the one
+`extra_patterns` entry that carries `preset` or `token`, leaving hand-written entries as they are; New
+study and the confirm list set it.
 `entries`, `expand`, `is_control`, `control_subject` and `unanswered` read the `reagent_controls` block of
 the study file: a file entry expands to its scenes, a scene entry overrides it, and `control_subject`
 gives a control file the subject, slide and replicate its name does not carry. `manifest_lookup` runs
@@ -2185,8 +2367,26 @@ Abercrombie factor 06a's stained rows of that marker and region carry, so it rea
 `stained_positive_per_mm2_*` (each paired section's positive density by the same factor, from
 `stained_areas`); `specificity_margin` is then stained − control in per mm2 and `note` says so (percentage
 points otherwise). A region with discs and no nucleus still gets a row. `limitation_text(rows)`
-is 06c's existing statement unless a `no_primary` row exists; `sheet_header(rows)` is the sheet's header,
-which says a background disc is not a reagent control. It reads no group key.
+is 06c's existing statement unless a `no_primary` row exists; `sheet_header(rows, ks)` is the sheet's header,
+which states the cut rule with the k in force per marker (`ks`, from `ls_overlay.cut_k`) and says a
+background disc is not a reagent control. **The k check:** `cut_check_rows(controls, stained_discs,
+fp_target, ks=K_GRID)` gives `results/reagent_cut_check.csv`'s rows (`CUT_CHECK_COLUMNS`, per marker x k):
+no_primary controls only (an entry of another `kind` is ignored), each control's ROI nuclei against its own
+cut at k, pooled, with a `wilson` 95% interval; the stained sections' leave-one-disc-out rate at k;
+`suggested` on the smallest k meeting `fp_target`, else `NO_K_MEETS` in the note. Blank, never 0, when a
+rate cannot be given, including under `fp_min_nuclei` nuclei; rates withheld for a marker segmented on its own channel. `agreement(row)` says
+whether the disc rate falls inside the controls' interval. **The corrected rate:**
+`controls_for(uid, marker, lookup, scene_rows, config, boxed=None, cache=None)` is `pairing_for`'s tiers turned round, from a
+stained section's side (controls the operator pairs with it, else on its file, else of its animal; a control whose operator pin takes
+effect for the marker, as `pairing_for` decides, is used only for what it lists; a pin to another marker's
+section or a stale one is ignored, as there), `(tier, control uids)` with tier operator, same_file, same_animal or none (never
+study-wide), no_primary controls only. `rogan_gladen(n_pos, n, f_pos, f_n)` gives (p − f) / (1 − f) and a
+Monte-Carlo interval from Jeffreys Beta(k + 0.5, n − k + 0.5) draws (4000, seed 20261121), blank with
+"at or below the reagent control's false-positive rate" when p ≤ f; `density_correction(pos, area_mm2,
+f_pos, f_area_mm2, factor=1.0, f_factor=None)` the same for densities with Gamma(k + 0.5) Poisson draws,
+filling the `positive_density_*` columns for a marker segmented on its own channel.
+`corrected_rows(...)` gives `results/roi_corrected.csv`'s rows (`ROI_CORRECTED_COLUMNS`) and
+`corrected_sheet_header()` 06c's lines above them. It reads no group key.
 
 ### `ls_reagent_screen.py`
 
@@ -2451,6 +2651,10 @@ straight from `sys.argv`) without running it. A script with no options says "(no
 | `06i_detection_overlays.py` | `--force` | off | redraw sections whose inputs have not changed (and the crops 05c drew) |
 | `06i_detection_overlays.py` | `--workers` | `0` | whole-scene pictures drawn at once, each only when there is memory for it (default 0: half the cores, at most 4 - <DEFAULT_WORKERS> here) |
 | `06j_backfill_roi_area.py` | (none) |  |  |
+| `06k_af_score.py` | (none) |  |  |
+| `06l_nucleus_features.py` | `--marker` |  | only this marker (default: every marker with boxes) Choices: G5.MARKERS. |
+| `06l_nucleus_features.py` | `--limit` | `0` | read at most N sections this run; run again to go on |
+| `06l_nucleus_features.py` | `--force` | off | read sections again even when their features are current. A section's old rows are dropped before it is read: one that then fails is left with none (absent, not stale) |
 | `atlas_pdf.py` | (none) |  |  |
 | `atlas_polygons.py` | (none) |  |  |
 | `atlas_registry.py` | (none) |  |  |
@@ -2458,6 +2662,7 @@ straight from `sys.argv`) without running it. A script with no options says "(no
 | `czi_probe.py` | (none) |  |  |
 | `czi_read.py` | (none) |  |  |
 | `czi_report.py` | (none) |  |  |
+| `ls_af_model.py` | (none) |  |  |
 | `ls_atlas.py` | `--rehash` | off | delete the fingerprint cache first, so every plate is re-hashed from bytes rather than answered from the cache. |
 | `ls_atlas_imagej.py` | `src` |  | folder of plate images, each with its ROI Manager .zip beside it |
 | `ls_atlas_imagej.py` | `--name` |  | import it into the active study under this name (lower-case letters, digits, _) |
@@ -2498,6 +2703,7 @@ straight from `sys.argv`) without running it. A script with no options says "(no
 | `ls_jsonio.py` | (none) |  |  |
 | `ls_layouts.py` | (none) |  |  |
 | `ls_naming.py` | (none) |  |  |
+| `ls_nucleus_features.py` | (none) |  |  |
 | `ls_overlay.py` | (none) |  |  |
 | `ls_paths.py` | `--migrate` | off | list the legacy files on the drive. Moves nothing. |
 | `ls_paths.py` | `--table` | off | print every artifact path, per marker. |
@@ -2683,6 +2889,26 @@ the options each stage row offers (`Opt`, `options_for`, `build_argv`), and deci
 layout skips, and `manual` for one the app cannot run here) and the plan for **Run all remaining**
 (`run_plan`). A stage row's buttons run that stage through the runner (section 5.3) on a worker thread;
 `app/progress.py` reads the progress lines. Nothing in `screens.py` starts a thread or writes a file.
+
+**Applying the reagent k check.** Results shows `results/reagent_cut_check.csv` as each marker's suggested
+multiplier against the one in force (`workflow.cut_check_view`, provisional), with a **Use the suggested
+multiplier…** button, disabled with the reason when no marker has a suggestion to apply.
+Both confirmation dialogs name the marker's suggested k and the k in force. The page keeps what it showed
+(`cut_check_view`'s `ks`, `now` and `sha`, the checksum of the check those were read from) and the
+button hands that k and checksum to
+`app/cut_apply.py` (`apply_suggested_k(project, out_root, marker, confirm_text, *, shown_k, shown_sha)`),
+which refuses with "the cut check changed since it was shown - reopen the page" when the file's checksum
+or the marker's suggested k is not the one shown (the hourly 06e loop can rewrite the check between the
+two); after any refusal the panel reads the check again, so the next click asks about what it now shows.
+Otherwise it sets
+`positivity.cut_k[marker]` to the suggested k and `positivity.cut_k_source[marker]` to
+`{"by": "controls", "check": <sha256 of the csv>, "at": <time>}`, the decision recorded as by
+`cut check`. Once any of 06b's outputs (`results/roi_dataset.csv`, `results/animal_metadata.csv`) exists,
+or the project's `groups.by_animal` is non-empty (06c's treatment column, `resolve_groups`, already shows
+the groups then; only its emptiness is checked, never a label), the study is unblinded, and it refuses unless the operator types `apply after unblinding`; a k applied
+that way adds `"after_unblinding": true` to the record, and 06c's "Reagent controls" sheet says so. Every refusal
+comes before anything is written. The change puts 06a and the results out of date (they track
+`positivity.cut_k`), never detection.
 
 ### 8.2 Studies
 
@@ -4041,7 +4267,7 @@ A copy of the curator export 05a read, kept beside its output so the boxes can a
 
 #### `qc/detection_tuning.csv`
 
-One row per sampled crop: the signal statistics 05b's verdict is made from (summary and chosen cut in `qc/detection_tuning.md`).
+One row per sampled crop: the signal statistics 05b's verdict is made from (summary and chosen cut in `qc/detection_tuning.md`). The last four columns are written only when the PCNA reagent-control constraint ran.
 
 - **Written by:** 05b_tune_detection.py
 - **Read by:** a person
@@ -4062,13 +4288,17 @@ One row per sampled crop: the signal statistics 05b's verdict is made from (summ
 | `contrast` | float |  | (foreground - background) / (foreground + background). |
 | `coverage` | float |  | Share of the crop above the Otsu cut. |
 | `saturated` | float |  | Share of the crop at the clip ceiling. |
+| `control_density` | float | objects/mm² | Only when the PCNA reagent-control constraint ran for some marker (else the column is absent). StarDist objects per mm² on the paired no-primary controls' ROI central windows, each at its stained pair's intensity range, at the marker's final cut; the same on every row of the marker, blank for a marker it did not run for. Provisional. |
+| `stained_density` | float | objects/mm² | Only with control_density. Objects per mm² on the stained sample's windows at the same cut. |
+| `admissible` | text |  | Only with control_density. `yes` when control_density ≤ positivity.fp_target × stained_density at the final cut, else `no` (no grid point was admissible and the cut was kept). |
+| `constraint_moved_from` | float |  | Only with control_density. The cut the plateau rule chose (0.479071 = the model default) when the constraint moved it to the lowest admissible grid point above; blank when it did not move. |
 
 #### `results/roi_nuclei.csv`
 
 One row per detected nucleus in every region and background disc. About 900,000 rows on the LS study; appended section by section so a stopped run resumes.
 
 - **Written by:** 05c_detect_rois.py (06f, 06g and 06h repair it in place)
-- **Read by:** 04p_section_provenance.py, 06a_roi_dataset.py, 06c_excel_dataset.py, 06f_recensor_nuclei.py, 06g_flag_off_tissue.py, 06h_backfill_provenance.py
+- **Read by:** 04p_section_provenance.py, 06a_roi_dataset.py, 06c_excel_dataset.py, 06f_recensor_nuclei.py, 06g_flag_off_tissue.py, 06h_backfill_provenance.py, 06k_af_score.py
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
@@ -4128,6 +4358,7 @@ For a marker counted on its own channel: the one intensity range every box of a 
 | `norm_lo` | float | grey value | Bottom of the stretch (the 1st percentile over the section's boxes). |
 | `norm_hi` | float | grey value | Top (the 99.8th percentile). |
 | `n_crops` | int |  | Boxes the range was taken over. |
+| `range_from` | text |  | Whose range it is: `own` (the section's own boxes), or, for a no-primary reagent control of the marker, the stained scene_uid it is paired with (operator, same file or same animal; never study-wide), whose range it borrows. A file from before the column is backfilled `own`. |
 
 #### `results/roi_measured_geometry.csv`
 
@@ -4217,11 +4448,124 @@ Sections measured with no artifact mask, so `artifact` is 0 there because nothin
 
 #### `detection_outlines/<marker>/<scene_uid>.npz`
 
-Every detected nucleus's outline, so 06i can draw them without detecting again.
+Every detected nucleus's outline, so 06i can draw them and 06l measure their shape without detecting again.
 
 - **Written by:** 05c_detect_rois.py
-- **Read by:** 06i_detection_overlays.py
+- **Read by:** 06i_detection_overlays.py, 06l_nucleus_features.py
 - **Format:** Compressed NumPy archive: `roiNN` (uint32 label image of box NN, 0 = background) and `roiNN_origin` (the box's CZI x, y).
+
+#### `results/nucleus_features.csv`
+
+Shape and marker texture of every nucleus in roi_nuclei.csv, one row per roi_nuclei.csv row and keyed as it is, for the autofluorescence score (06k). Computed from the outlines 05c saved and the marker plane re-read under them; StarDist is never run again and roi_nuclei.csv is never written. Appended one section at a time; a section is current while its line in nucleus_features_done.csv carries today's fingerprint. A section with no saved outlines has no rows. Provisional until the Task 8 validation.
+
+- **Written by:** 06l_nucleus_features.py
+- **Read by:** 06k_af_score.py
+
+| Column | Type | Units | Meaning |
+|------------|------|------|---------------------------|
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
+| `marker` | text |  | The marker whose nucleus this is, as roi_nuclei.csv names it. |
+| `roi_index` | int |  | The box, 1-based, as in roi_nuclei.csv. |
+| `nucleus_id` | int |  | The nucleus's label in its box's saved outlines, as in roi_nuclei.csv. |
+| `roundness` | float |  | 4 pi A / P^2 of the nucleus's mask (skimage perimeter), capped at 1. About 0.9 for a filled disc. Blank for an object with no perimeter. |
+| `solidity` | float |  | Pixel area over the pixels whose centres lie in the convex hull of its pixel centres: 1.0 for a digital disc of any size. |
+| `marker_cv` | float |  | sd of the marker inside the nucleus / max(mean - b, s), b and s the median and 1.4826 x MAD of the box's pixels in no nucleus: a coefficient of variation above the box's non-nuclear pixels, unchanged by an offset or a gain. Blank when the box has no such pixels, or the nucleus is not above them and they are flat. |
+| `marker_spots` | int | count | Local maxima of the marker inside the nucleus (8 neighbours, a plateau counted once) above its own median + 3 x 1.4826 x MAD. Unchanged by an offset or a gain. |
+| `other_marker_median` | float | grey value | Under multiplex, the other marker's median inside the nucleus (the first other marker of the declared order on another plane). Blank under paired. |
+
+#### `results/nucleus_features_done.csv`
+
+06l's resume log: one line per section whose rows in nucleus_features.csv were written whole, appended after them. A section is read again when its fingerprint no longer matches (outlines re-saved, boxes moved, other nuclei in roi_nuclei.csv, a new feature version); its rows are dropped first.
+
+- **Written by:** 06l_nucleus_features.py
+- **Read by:** 06l_nucleus_features.py, 06k_af_score.py
+
+| Column | Type | Units | Meaning |
+|------------|------|------|---------------------------|
+| `marker` | text |  | The marker. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
+| `fingerprint` | text |  | Hash of what the section's features were computed from: the feature version and spot k, the outline file's size and mtime, its (roi_index, nucleus_id) list, its box rectangles, its CZI file and scene, and the planes read. |
+
+#### `results/af_scores.csv`
+
+The autofluorescence flag: one row per above-cut ROI nucleus of a stained section that 06k scored, keyed as roi_nuclei.csv is. A flag only - no count anywhere changes. Written only for markers with at least 200 above-cut nuclei on unstained reagent controls (else no-primary ones) in sections 06l has featured; removed when no marker is scored. Provisional until validated (hand-labelled review strip, precision >= 0.8 at score 0.5).
+
+- **Written by:** 06k_af_score.py
+- **Read by:** 06c_excel_dataset.py
+
+| Column | Type | Units | Meaning |
+|------------|------|------|---------------------------|
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
+| `marker` | text |  | The marker, as roi_nuclei.csv names it. |
+| `roi_index` | int |  | The box, 1-based, as in roi_nuclei.csv. |
+| `nucleus_id` | int |  | The nucleus's label in its box, as in roi_nuclei.csv. |
+| `af_score` | float |  | 0-1, rounded to 4 decimals: the logistic model's probability that this nucleus belongs to the reagent-control class (ls_af_model), from section-relative size, shape, DAPI, marker level and texture. |
+| `flag_name` | text |  | `af_suspect` (trained on unstained controls: autofluorescent) or `control_like` (trained on no-primary controls: looks like a reagent-control false positive). |
+| `flagged` | int |  | 1 when af_score (as written) >= 0.5, else 0. |
+| `trained_on` | text |  | The kind of reagent control the marker's model was trained on: `unstained` or `no_primary`, never both. |
+
+#### `results/af_scored_sections.csv`
+
+Every section x marker 06k scored (role `stained`, including those with no nucleus above the cut), so 06c can tell a section with no flagged nucleus from one never scored, and every reagent control it trained on (role `control`); a stained section of a scored marker skipped because its 06l features are out of date (its done line's fingerprint is not 06l's now) is listed with role `features_out_of_date`, so 06c says "06l features out of date - run 06l". Each with the cut it was scored or trained against: 06c blanks a row whose sections' or controls' cut is no longer 06a's. Written and removed with af_scores.csv.
+
+- **Written by:** 06k_af_score.py
+- **Read by:** 06c_excel_dataset.py
+
+| Column | Type | Units | Meaning |
+|------------|------|------|---------------------------|
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
+| `marker` | text |  | The marker, as roi_nuclei.csv names it. |
+| `role` | text |  | `stained` (a section scored), `control` (a reagent control trained on) or `features_out_of_date` (a stained section skipped: 06l's features of it are older than its detection; n_scored and n_flagged blank). |
+| `cut` | float | grey value | The cut 06k counted above-cut nuclei against: positivity_cuts.csv's for a stained section, reagent_control_cuts.csv's for a control (full precision, as 06a wrote it). |
+| `n_scored` | int | count | Above-cut ROI nuclei of the section scored (stained) or trained on (control). |
+| `n_flagged` | int | count | Of those, flagged (score >= 0.5). Blank for a control. |
+| `flag_name` | text |  | As in af_scores.csv. |
+| `trained_on` | text |  | As in af_scores.csv. |
+
+#### `results/af_gate.csv`
+
+06k's training gate, per marker with reagent controls or above-cut nuclei: how many above-cut unstained and no_primary reagent-control nuclei (featured sections) it had, and what it trained on - blank when below 200 of either kind, so 06c's af_flag header says why that marker has no rows - and a hash of its reagent-control set, so 06c can tell flags made before a control was confirmed or removed. Written and removed with af_scores.csv.
+
+- **Written by:** 06k_af_score.py
+- **Read by:** 06c_excel_dataset.py
+
+| Column | Type | Units | Meaning |
+|------------|------|------|---------------------------|
+| `marker` | text |  | The marker. |
+| `n_unstained` | int | count | Above-cut ROI nuclei on unstained reagent controls, featured sections only. |
+| `n_no_primary` | int | count | The same on no_primary reagent controls. |
+| `trained_on` | text |  | `unstained`, `no_primary`, or blank when not scored (below 200 of either kind, or no stained above-cut nucleus). |
+| `reason` | text |  | Why the marker was not scored: `below_gate` (fewer than 200 above-cut nuclei of either kind) or `no_stained` (past the gate, but no featured stained nucleus above the cut). Blank when scored. |
+| `control_set` | text |  | A hash of the reagent controls 06k treated as controls for the marker: their scene_uid and kind (`ls_reagent_report.control_set_hash`, 16 hex digits). 06c works it out again from reagent_controls.csv and blanks the marker's af_flag rows, with the note `control set changed - run 06k`, when the two differ. |
+
+#### `qc/af_review.csv`
+
+The key to qc/af_review.png: which nucleus each tile is, for the operator to hand-label (the validation of the flag). Rewritten every run, so labels belong in a copy.
+
+- **Written by:** 06k_af_score.py
+- **Read by:** a person
+
+| Column | Type | Units | Meaning |
+|------------|------|------|---------------------------|
+| `marker` | text |  | The marker. |
+| `strip` | text |  | `top` (the 24 highest af_score, for orientation) or `random_flagged` (up to 24 drawn with seed 20261121 from the flagged nuclei, af_score >= 0.5, not in the top; all of them when fewer are left). Precision at 0.5 is measured on the `random_flagged` rows (operator ruling 2026-11-22). |
+| `position` | int |  | The tile's place in its row, 1-based from the left. |
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
+| `roi_index` | int |  | As in af_scores.csv. |
+| `nucleus_id` | int |  | As in af_scores.csv. |
+| `af_score` | float |  | As in af_scores.csv. |
+| `flagged` | int |  | As in af_scores.csv. |
+| `flag_name` | text |  | As in af_scores.csv. |
+| `trained_on` | text |  | As in af_scores.csv. |
+| `operator_label` | text |  | Blank: for the operator's call (autofluorescent / control-like or not) when validating the flag. |
+
+#### `qc/af_review.png`
+
+The autofluorescence flag's review strip: per marker, the 24 highest-scoring stained nuclei (for orientation) and 24 drawn at random from the flagged nuclei not among them (all of them, and the title says so, when fewer are left), for hand-labelling against qc/af_review.csv.
+
+- **Written by:** 06k_af_score.py
+- **Read by:** a person
+- **Format:** RGB PNG, 24 x 64 px wide: per marker a title band and a row of 64 px crops of the marker channel centred on each nucleus (05c's plane, stretched p1-p99.8 per crop), its score under it; a crop that could not be read (no slide drive) is grey and says `no image`.
 
 #### `detection_overlays/index.csv`
 
@@ -4341,7 +4685,7 @@ Per section and marker: how many of that marker's background-disc nuclei land ab
 The exact cut per section and marker, at full precision, so 06i draws the same calls 06a counted.
 
 - **Written by:** 06a_roi_dataset.py
-- **Read by:** 06i_detection_overlays.py
+- **Read by:** 06c_excel_dataset.py, 06i_detection_overlays.py, 06k_af_score.py
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
@@ -4362,7 +4706,7 @@ The reagent controls, measured: one row per reagent-control section x marker x r
 | `file` | text |  | The CZI file the section is on, from the manifest. |
 | `kind` | text |  | The reagent-control kind confirmed in Set up: `no_primary`, `unstained`, `isotype`, `preadsorbed` or `other`. |
 | `marker` | text |  | The marker this row is a reagent control for. A multiplex scene that is a control for one marker is stained, and in roi_measurements.csv, for the others. |
-| `region` | text |  | The atlas region of the control's ROI discs. |
+| `region` | text |  | The atlas region of the control's ROI discs. Blank on the one row of a control measured with no ROI region to report. |
 | `pairing` | text |  | Which stained sections it is compared with: `operator` (reagent_controls.paired_with), `same_file`, `same_animal`, or `study_wide` (every stained section of the marker). |
 | `n_nuclei` | integer | count | Kept nuclei in the control's ROI discs in this region (artifact and off-tissue dropped, as in 06a). |
 | `n_positive` | integer | count | A: nuclei the positivity rule calls positive under the control's OWN per-section cut (censored counts as positive). Blank when the control has fewer than 5 usable background-disc nuclei. |
@@ -4381,20 +4725,70 @@ The reagent controls, measured: one row per reagent-control section x marker x r
 | `pct_above_paired_cut` | number | % | B: the control's ROI nuclei scored against EACH paired stained section's own cut; the median across those sections. Never a pooled cut. Empty under study_wide pairing and for an own-channel marker. |
 | `pct_above_paired_cut_min` | number | % | B: the lowest of those per-section scores. |
 | `pct_above_paired_cut_max` | number | % | B: the highest of those per-section scores. |
-| `note` | text |  | Why a column is blank or empty: no own cut, no denominator, paired sections not measured yet, or study-wide pairing (batch). A confirmed reagent control with nothing measured for that marker gets one row, every measure blank, its note `confirmed reagent control, not measured yet: <why>` (no 05a ROIs, or not detected by 05c yet). |
+| `note` | text |  | Why a column is blank or empty: no own cut, no denominator, paired sections not measured yet, or study-wide pairing (batch). A confirmed reagent control with nothing measured for that marker gets one row, every measure blank, its note `confirmed reagent control, not measured yet: <why>` (no 05a ROIs, or not detected by 05c yet). One measured with no nucleus and no usable area in its ROIs also gets one row, region blank, its note `measured, but no ROI region to report: ...`. So every confirmed control has a row; 06c checks 06k's control-set hash against these rows' scene_uid and kind. |
 
 #### `results/reagent_control_cuts.csv`
 
-Each measured reagent control's own cut (per section and marker, at full precision), from its own background discs by the same rule. Kept apart from positivity_cuts.csv, which lists stained sections only; 06i reads both so a control is drawn by its own cut. Removed when no control is measured.
+Each measured reagent control's own cut (per section and marker, at full precision), from its own background discs by the same rule, with the k it was formed at. Kept apart from positivity_cuts.csv, which lists stained sections only; 06i reads both so a control is drawn by its own cut. 06c states the k 06a used on the Reagent controls sheet, and says when positivity.cut_k has changed since. Removed when no control is measured.
 
 - **Written by:** 06a_roi_dataset.py
-- **Read by:** 06i_detection_overlays.py
+- **Read by:** 06c_excel_dataset.py, 06i_detection_overlays.py, 06k_af_score.py
 
 | Column | Type | Units | Meaning |
 |------------|------|------|---------------------------|
 | `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
 | `marker` | text |  | The marker's dye name, as declared in the study. |
 | `cut` | float | grey value | The cut, as Python's repr of the float. |
+| `k` | float |  | The multiplier the cut was formed at (median + k x 1.4826 x MAD): positivity.cut_k for the marker when 06a ran, as Python's repr of the float. 06c states it on the Reagent controls sheet and says when the config's k is not this one. |
+
+#### `results/reagent_cut_check.csv`
+
+The k check, provisional until validated on a study with known controls: the positivity cut's multiplier k tested against the no-primary reagent controls, per marker and k on the grid 2.0-5.0. Each control's ROI nuclei are counted against its own cut at k (median + k x 1.4826 x MAD of its own background-disc nuclei), beside the stained sections' leave-one-disc-out rate at the same k. isotype, preadsorbed and unstained controls are not used. Written only when a no_primary control is measured; otherwise a previous file is removed. It never changes positivity.cut_k: a suggested k is applied only by the operator, with the Results page's "Use the suggested multiplier" button (app/cut_apply.py), which records the file's sha256 in positivity.cut_k_source and asks for a typed confirmation once the study is unblinded (06b has run, or groups.by_animal is filled). 06c adds it to the "Reagent controls" sheet as a provisional "Cut check" block.
+
+- **Written by:** 06a_roi_dataset.py
+- **Read by:** 06c_excel_dataset.py, the app
+
+| Column | Type | Units | Meaning |
+|------------|------|------|---------------------------|
+| `marker` | text |  | The marker's dye name, as declared in the study. |
+| `k` | float |  | The multiplier the cut is formed at for this row. |
+| `n_control_sections` | int |  | no_primary control sections with a cut of their own (at least 5 usable background nuclei) counted at this k. |
+| `n_control_nuclei` | int |  | Their ROI nuclei, censored included: the rate's denominator. |
+| `control_fp` | float | fraction | Control ROI nuclei called positive (above their own section's cut at k, or censored) over n_control_nuclei, pooled over control sections. Blank when there are fewer than positivity.fp_min_nuclei such nuclei (the note gives the count), or for a marker segmented on its own channel. |
+| `control_fp_lo` | float | fraction | Lower end of the Wilson 95% interval on control_fp. |
+| `control_fp_hi` | float | fraction | Upper end of the Wilson 95% interval on control_fp. |
+| `disc_fp` | float | fraction | The stained sections' background discs, leave-one-disc-out at k (the rule of detector_specificity.csv's loo_ columns), pooled over sections. Blank under positivity.fp_min_nuclei nuclei, or with no section of two discs of 5 usable nuclei. |
+| `disc_fp_n` | int |  | The nuclei disc_fp is over; blank with it. |
+| `meets_target` | 0/1 |  | 1 when control_fp <= positivity.fp_target, else 0; blank when control_fp is. |
+| `suggested` | 0/1 |  | 1 on the smallest k that meets the target, 0 on the others; blank when there is no rate. |
+| `note` | text |  | Why something is blank or left out: a control with too few background nuclei for a cut (named), no control rate, own-channel marker, no disc rate, or `no k on the grid meets the target`. |
+
+#### `results/roi_corrected.csv`
+
+The corrected positive rate, provisional until validated on a study with known controls: one row per stained section, marker and region, the raw pooled rate beside a Rogan-Gladen correction for the paired no-primary reagent controls' false-positive rate, (p - f) / (1 - f), with a 95% interval (4000 Monte-Carlo draws of Jeffreys posteriors for p and f, seed 20261121). It assumes sensitivity 1 (every truly positive nucleus is called positive), so it is a lower-bound adjustment. The controls are reagent_controls.csv's pairing tiers turned round, from the stained section's side (ls_reagent_report.controls_for): no_primary controls the operator's paired_with pairs with the section, else those on its file, else those of its animal; never study-wide. A control whose operator pin takes effect for the marker (pairing_for gives it operator pairing) is used only for the sections it is paired with; a pin to another marker's section, or to a name not in the manifest, is ignored, as in reagent_controls.csv. isotype, preadsorbed and unstained controls are not used. A marker segmented on its own channel gets its positive density corrected instead (positive_density_*), with no minimum object count. roi_measurements.csv is unchanged. Written only when a no_primary control is measured; otherwise a previous file is removed. 06c shows it as the "corrected_rate" sheet.
+
+- **Written by:** 06a_roi_dataset.py
+- **Read by:** 06c_excel_dataset.py
+
+| Column | Type | Units | Meaning |
+|------------|------|------|---------------------------|
+| `scene_uid` | text |  | One section: `<subject>_s<NN><replicate>_sc<NN>` (e.g. `LS105_s10a_sc03`), from `ls_naming.scene_uid`. |
+| `marker` | text |  | The marker's dye name, as declared in the study. |
+| `region` | text |  | The atlas region the section's ROIs are pooled over. |
+| `n_nuclei` | int |  | ROI nuclei of the section in the region, summed over its ROIs, as roi_measurements.csv counts them. |
+| `n_positive` | int |  | Of those, positive under the section's own cut; blank when any of its ROIs had no cut. |
+| `frac_positive` | float | fraction | The raw pooled rate, n_positive / n_nuclei; blank with no cut, no nuclei, or for a marker segmented on its own channel. |
+| `frac_positive_corrected` | float | fraction | (frac_positive - fp_rate) / (1 - fp_rate). Blank, never 0, when it cannot be given: at or below the control's rate, no pairable control, no control with a cut, fewer than positivity.fp_min_nuclei control nuclei, or a marker segmented on its own channel (positive_density_corrected then carries the correction). |
+| `frac_positive_corrected_lo` | float | fraction | Lower end of the 95% interval: the 2.5th percentile of the Monte-Carlo corrected draws, clipped to [0, 1]. |
+| `frac_positive_corrected_hi` | float | fraction | Upper end: the 97.5th percentile, clipped to [0, 1]; 1 where every stained nucleus is positive. |
+| `positive_density_per_mm2` | float | per mm2 | For a marker segmented on its own channel only: positive objects per mm2 of usable ROI area, Abercrombie-corrected, pooled as sum(n_positive x each ROI row's factor) / total area, as roi_measurements.csv's positive_density_per_mm2. Blank for other markers or with no cut. |
+| `positive_density_corrected` | float | per mm2 | positive_density_per_mm2 less the paired no_primary controls' positive density (each control's objects above its own cut, by the factor reagent_controls.csv's positive_per_mm2 uses, over their usable ROI area in the region, or all their regions when the region has none). No minimum object count. Blank, never 0, when at or below the control's, with no paired control or control area, or for other markers. |
+| `positive_density_corrected_lo` | float | per mm2 | Lower end of the 95% interval from Poisson rates (Gamma(k + 0.5) Monte-Carlo draws for both counts), clipped at 0. |
+| `positive_density_corrected_hi` | float | per mm2 | Upper end of that interval. |
+| `fp_rate` | float | fraction | f: the paired no_primary controls' ROI nuclei above each control's own cut, pooled, in the same region (or all regions, see fp_rate_source). Blank under positivity.fp_min_nuclei nuclei, or for a marker segmented on its own channel. |
+| `fp_rate_n` | int |  | The control nuclei (own-channel markers: objects) f or the control density is over. |
+| `fp_rate_source` | text |  | The pairing tier (operator, same_file, same_animal) and the controls used, then the region, or `all regions` when the region had fewer than positivity.fp_min_nuclei control nuclei (own-channel markers: no control ROI area in the region); a paired control with no cut of its own is named as left out. `none: no same-slide or same-animal control` when there is none. `operator: <uids> (not measured yet)` when the operator pinned the section only to no_primary controls not measured yet: the row is blank, its note "paired control not measured yet". |
+| `correction_note` | text |  | Why a value is blank; for a marker segmented on its own channel, that its density is corrected instead and the controls' positive density. |
 
 #### `results/roi_geometry_changed.csv`
 
@@ -4433,7 +4827,7 @@ roi_measurements.csv with the animal's metadata columns added to every row.
 
 #### `results/roi_dataset.xlsx`
 
-The analysis table: sheet `by_roi`, one row per region per animal (the animal is the unit for statistics). Also `by_disc` (every region placement), `by_section` (how much of each animal is measured) and `coverage` (what is still missing). The columns below are `by_roi`'s.
+The analysis table: sheet `by_roi`, one row per region per animal (the animal is the unit for statistics). Also `by_disc` (every region placement), `by_section` (how much of each animal is measured) and `coverage` (what is still missing). With 06k's `af_scores.csv`, an `af_flag` sheet too: per sample, marker and region the raw `frac_positive` and beside it `frac_positive_without_flagged` = (n_positive - n_flagged) / (n_nuclei - n_flagged), provisional, blank with a `note` where a section is not scored. The columns below are `by_roi`'s.
 
 - **Written by:** 06c_excel_dataset.py
 - **Read by:** a person

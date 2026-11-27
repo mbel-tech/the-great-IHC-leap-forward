@@ -1,0 +1,166 @@
+{
+ "AF568": {
+  "tuned": "2026-01-01",
+  "segmented_on": "nuclear",
+  "backend": "stardist",
+  "sampled_sections": 3,
+  "sampled_crops": 3,
+  "quality": {
+   "background": 199.1526,
+   "foreground": 1195.8021,
+   "noise": 41.6459,
+   "snr": 23.9315,
+   "contrast": 0.7145,
+   "coverage": 0.1432,
+   "saturated": 0.0,
+   "signal_cv_between_sections": 0.0,
+   "snr_worst_section": 23.9315
+  },
+  "verdict": "good",
+  "reasons": [
+   "signal-to-noise 23.9, little saturation, even across sections"
+  ],
+  "chosen": {
+   "prob_thresh": 0.55
+  },
+  "model_default": {
+   "prob_thresh": 0.479071,
+   "nms_thresh": 0.3
+  },
+  "curve": [
+   [
+    0.3,
+    2700
+   ],
+   [
+    0.35,
+    2100
+   ],
+   [
+    0.4,
+    1560
+   ],
+   [
+    0.45,
+    1200
+   ],
+   [
+    0.479071,
+    1080
+   ],
+   [
+    0.5,
+    990
+   ],
+   [
+    0.55,
+    975
+   ],
+   [
+    0.6,
+    960
+   ],
+   [
+    0.65,
+    840
+   ],
+   [
+    0.7,
+    600
+   ],
+   [
+    0.75,
+    420
+   ],
+   [
+    0.8,
+    270
+   ]
+  ],
+  "why": "the count changes least around 0.55 (0.31 vs 3.13 log-count per unit at the model's 0.479)",
+  "count_at_default": 1080,
+  "count_at_chosen": 975
+ },
+ "AF488": {
+  "tuned": "2026-01-01",
+  "segmented_on": "AF488",
+  "backend": "stardist",
+  "sampled_sections": 3,
+  "sampled_crops": 3,
+  "quality": {
+   "background": 200.7745,
+   "foreground": 1195.7651,
+   "noise": 41.5729,
+   "snr": 23.9336,
+   "contrast": 0.7125,
+   "coverage": 0.1446,
+   "saturated": 0.0,
+   "signal_cv_between_sections": 0.0,
+   "snr_worst_section": 23.9336
+  },
+  "verdict": "good",
+  "reasons": [
+   "signal-to-noise 23.9, little saturation, even across sections"
+  ],
+  "chosen": {
+   "prob_thresh": 0.55
+  },
+  "model_default": {
+   "prob_thresh": 0.479071,
+   "nms_thresh": 0.3
+  },
+  "curve": [
+   [
+    0.3,
+    2700
+   ],
+   [
+    0.35,
+    2100
+   ],
+   [
+    0.4,
+    1560
+   ],
+   [
+    0.45,
+    1200
+   ],
+   [
+    0.479071,
+    1080
+   ],
+   [
+    0.5,
+    990
+   ],
+   [
+    0.55,
+    975
+   ],
+   [
+    0.6,
+    960
+   ],
+   [
+    0.65,
+    840
+   ],
+   [
+    0.7,
+    600
+   ],
+   [
+    0.75,
+    420
+   ],
+   [
+    0.8,
+    270
+   ]
+  ],
+  "why": "the count changes least around 0.55 (0.31 vs 3.13 log-count per unit at the model's 0.479)",
+  "count_at_default": 1080,
+  "count_at_chosen": 975
+ }
+}

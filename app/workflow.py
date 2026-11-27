@@ -173,6 +173,14 @@ MEASURE = Screen(
         ("Count and measure nuclei",
          "Finds nuclei, measures the marker in each, then builds the per-region table.",
          ["tune_detection", "detect", "roi_dataset"]),
+        ("Nucleus shape and texture",
+         "For the autofluorescence check only, on request: the shape of every nucleus "
+         "found and how grainy its stain is. Reads the slides again, never redetects.",
+         ["nucleus_features"]),
+        ("Autofluorescence flag",
+         "On request, with reagent controls: flags positive nuclei that look like the "
+         "controls' false positives. A flag only, provisional; no count changes.",
+         ["af_score"]),
         ("Repairs for older results",
          "Only for a results file written by an older version of the pipeline. "
          "Each one that changes a file backs it up first.",
@@ -252,8 +260,15 @@ REPAIRS = {"recensor", "off_tissue", "seg_provenance", "roi_area"}
 #: a screen's progress.
 VIEW_ONLY = {"scene_renders", "detection_overlays"}
 
+#: Backfills a later stage asks for, run on request: each re-reads the slides
+#: for every measured section, which a study that will never use the result
+#: should not pay for on every Run all remaining. 06l's features are read by the
+#: autofluorescence score only, and that score (06k) needs reagent controls a
+#: study may not have.
+ON_REQUEST = {"nucleus_features", "af_score"}
+
 #: Never planned by Run all remaining.
-BY_HAND = REPAIRS | VIEW_ONLY
+BY_HAND = REPAIRS | VIEW_ONLY | ON_REQUEST
 
 #: Run all remaining uses the one-pass Build results stage instead of the
 #: spreadsheet stages it already runs. They keep their own Run buttons.
@@ -391,6 +406,16 @@ PLAIN = {
                 "tissue. Build the per-region table again afterwards.",
     "roi_dataset": "Turns the nuclei into per-region numbers: how many cells, how many are "
                    "positive, per square millimetre. Still blind.",
+    "nucleus_features": "Measures the shape of every nucleus already found, and how grainy "
+                        "its marker stain is, for the check that flags autofluorescence. "
+                        "It does not look for nuclei again and does not change the "
+                        "nucleus table; it can be stopped and picks up where it was.",
+    "af_score": "Learns, from the reagent controls, what a false-positive nucleus looks "
+                "like (unstained controls first, else no-primary ones) and flags the "
+                "positive nuclei of stained sections that look like one. Nothing is "
+                "counted differently: the spreadsheet shows the rate without them beside "
+                "the raw rate, as provisional, and a strip of pictures is drawn for "
+                "checking the flag by eye.",
     "join_sampling": "Unblinds: joins each animal to its treatment group from the sampling "
                      "workbook.",
     "excel_sample": "The spreadsheet with one row per region per animal."
@@ -579,6 +604,13 @@ OPTIONS = {
             "Stop after reading this many sections; the next run resumes where it stopped. "
             "The list of candidates is written once every section has been read. 0 means "
             "all sections.", default=0, cli_default=0, minimum=0, zero="all"),
+    ],
+    "nucleus_features": [
+        _force("sections"),
+        Opt("--limit", "int", "Read at most N sections",
+            "Stop after reading this many sections; the next run resumes where it "
+            "stopped. 0 means all sections.", default=0, cli_default=0, minimum=0,
+            zero="all"),
     ],
     # Folder, resolution and brightness are study settings (Set up > Pictures).
     "scene_renders": [
@@ -858,8 +890,30 @@ SETTING_SECTIONS = [
      ["detection.nucleus_diameter_um", "detection.abercrombie.enabled",
       "detection.stardist.use_auto", "detection.stardist.prob_thresh",
       "detection.stardist.nms_thresh",
-      "detection.threshold.mad_k", "detection.threshold.min_area_um2"]),
+      "detection.threshold.mad_k", "detection.threshold.min_area_um2",
+      "positivity.fp_target", "positivity.fp_min_nuclei"]),
 ]
+
+#: The multiplier a marker not named in positivity.cut_k is cut at
+#: (ls_overlay.CUT_K; not imported, since that module brings numpy).
+CUT_K_DEFAULT = 3.0
+#: Defaults (ls_config) that hash as unset when written out, for the same
+#: reason as above.
+SETTING_DEFAULTS = {"positivity.fp_target": 0.01, "positivity.fp_min_nuclei": 50}
+
+
+def cut_k_rows(cfg):
+    """[(label, k)] for Set up's read-only multiplier table: "*" first, then
+    every marker of the study, then any marker the map names that the study
+    does not have. Each k is the one ls_overlay.cut_k gives that marker."""
+    table = ((cfg or {}).get("positivity") or {}).get("cut_k")
+    table = table if isinstance(table, dict) else {}
+    star = float(table.get("*", CUT_K_DEFAULT))
+    import ls_channels                      # the layout decides where the names are
+    markers = list(ls_channels.marker_names(cfg or {}))
+    markers += [m for m in table if m != "*" and m not in markers]
+    return [("every marker (*)", star)] + [(m, float(table.get(m, star))) for m in markers]
+
 
 #: Sub-headings inside a card, shown before the key they name: (heading, one line).
 SECTION_HEADINGS = {
@@ -868,6 +922,10 @@ SECTION_HEADINGS = {
         "How sharp the colour pictures in the ROI curator are, and where their pixels "
         "come from. Pictures already made keep their old look until the colour "
         "pictures run again with Redo."),
+    "positivity.fp_target": (
+        "Positivity cut",
+        "The multiplier each marker's positivity cut is formed at is shown below; "
+        "the reagent-control check suggests one, and nothing changes it by itself."),
     "scene_render.out_dir": (
         "Scene pictures",
         "Where the pictures of every scene go, how sharp they are, where their "
@@ -1583,6 +1641,10 @@ SHORTFALL = {
     "scene_renders": (re.compile(r"^\s*(\d+) not drawn:", re.M), "scene", "not drawn"),
     # 06i: a section whose outlines do not agree with 06a's counts is not drawn.
     "detection_overlays": (re.compile(r"^\s*(\d+) not drawn:", re.M), "scene", "not drawn"),
+    # 06l: a section with no saved outlines, or whose outlines disagree with
+    # roi_nuclei.csv, has no features; the run still finishes.
+    "nucleus_features": (re.compile(r"^\s*(\d+) section\(s\) not done", re.M),
+                         "section", "not done"),
     # Not 04o (rgb_perk / rgb_pcna): a kept section it cannot build fails the
     # run ("!! N ... NOT BUILT"), so its "N not built:" list never ends a
     # finished run; an excluded section with no composite is not a shortfall
@@ -1729,6 +1791,19 @@ NOT_TRACKED = {
                   "compared",
     "groups.by_animal": "05c reads it only for the order it measures sections in, "
                         "and the finished file is the same either way",
+    "reagent_controls.paired_with": "05c reads it only to pick the stained section "
+                                    "a no-primary control of an own-channel marker "
+                                    "borrows its range from, and on a resume "
+                                    "re-detects just the controls whose range "
+                                    "source changed (roi_normalisation.csv's "
+                                    "range_from), never every section",
+    "positivity.cut_k": "05c reads it only to colour its overlay crops; 06a's cuts "
+                        "are what count, and 06i redraws every crop whose cut "
+                        "differs from 06a's",
+    "positivity.cut_k_source": "06c reads it only to say on the Reagent controls "
+                               "sheet that a k was applied after unblinding; the "
+                               "apply that writes it changes positivity.cut_k too, "
+                               "which is tracked",
 }
 
 
@@ -1838,6 +1913,18 @@ def _setting(cfg, key):
         if not isinstance(node, dict) or part not in node:
             return None
         node = node[part]
+    if key == "positivity.cut_k" and isinstance(node, dict) and all(
+            isinstance(v, (int, float)) and not isinstance(v, bool)
+            and float(v) == CUT_K_DEFAULT for v in node.values()):
+        # Every marker at the default multiplier is the cut every study had
+        # before the key: Set up writes the default out when it saves, and that
+        # must not put 06a out of date for a cut that has not moved.
+        return None
+    if key in SETTING_DEFAULTS and isinstance(node, (int, float)) and \
+            not isinstance(node, bool) and float(node) == SETTING_DEFAULTS[key]:
+        # The same for the reagent k check's target and minimum count: the
+        # default written out is what every study had, and changes no file.
+        return None
     if key == "detection.auto" and isinstance(node, dict):
         # 05b writes its whole report here (the date, the count curve), but 05c
         # takes only the chosen cut from it; a marker with none uses the model's own.
@@ -2206,6 +2293,37 @@ def limitation_text(out_root):
         except (OSError, ValueError, csv.Error):
             rows = []
     return LR.limitation_text(rows)
+
+
+def cut_check_view(out_root, cfg):
+    """What the Results page says about the reagent k check, or None without
+    results/reagent_cut_check.csv: {"lines": [one per marker, suggested k
+    against the k in force], "markers": [markers whose suggestion differs from
+    the k in force, which the button can apply], "why": why the button cannot
+    apply anything, or "", "ks": {marker: suggested k}, "now": {marker: k in
+    force}, "sha": the checksum of the check these were read from}. The apply
+    is handed "ks" and "sha" (cut_apply.apply_suggested_k), so it applies only
+    what was shown. Provisional, as the check is."""
+    import cut_apply as CA                  # numpy, through ls_overlay: only when asked
+    check, sha = CA.read_check(out_root)
+    rows = CA.summary_of(check, cfg)
+    if not rows:
+        return None
+    lines, markers, whys = [], [], []
+    for mk, k, now, why in rows:
+        if k is None:
+            lines.append(f"{mk}: no suggested k, k in force {now:g}")
+            whys.append(why)
+        elif k == now:
+            lines.append(f"{mk}: suggested k {k:g}, already in force")
+            whys.append(f"{mk}: the suggested k {k:g} is already in force")
+        else:
+            lines.append(f"{mk}: suggested k {k:g}, k in force {now:g}")
+            markers.append(mk)
+    return {"lines": lines, "markers": markers,
+            "why": "" if markers else "; ".join(whys),
+            "ks": {mk: k for mk, k, _n, _w in rows if k is not None},
+            "now": {mk: now for mk, _k, now, _w in rows}, "sha": sha}
 
 
 def notices(screen_sid, study):

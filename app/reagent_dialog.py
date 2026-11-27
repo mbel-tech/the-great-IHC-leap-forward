@@ -15,9 +15,12 @@ whose name the study's naming rule cannot read gets an Animal ID and slide, so
 
 The list proposes; it never decides. A weak name match (NC, ctrl) and every
 signal-screen candidate start undecided. Save writes `reagent_controls.files`,
-`.scenes`, `.rejected` and `.paired_with` and nothing else (`declared` is the
-New study / Set up answer, not this list's). Nothing here reads which animal is
-in which group: the scan is handed the group labels only.
+`.scenes`, `.rejected` and `.paired_with`, and `.extra_patterns` when the lab's
+naming (the control at the top: nothing special, a preset such as a trailing
+"-", or other text) changed, and nothing else (`declared` is the New study /
+Set up answer, not this list's). Changing the naming re-scans the names live.
+Nothing here reads which animal is in which group: the scan is handed the group
+labels only.
 """
 
 import copy
@@ -27,7 +30,7 @@ import os
 import re
 import zipfile
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFrame,
@@ -92,12 +95,83 @@ def slide_paths(source_dir):
     return out
 
 
-def scan_folder(cfg, source_dir):
+def scan_folder(cfg, source_dir, extra=None):
     """ls_reagent_controls.scan over the slides folder, with the study's markers,
-    group labels (groups.order only) and extra patterns."""
+    group labels (groups.order only) and extra patterns (or `extra` instead)."""
     labels = ((cfg or {}).get("groups") or {}).get("order") or []
-    return RC.scan(slide_paths(source_dir), CH.marker_names(cfg or {}), labels,
-                   RC.entries(cfg)["extra_patterns"])
+    if extra is None:
+        extra = RC.entries(cfg)["extra_patterns"]
+    return RC.scan(slide_paths(source_dir), CH.marker_names(cfg or {}), labels, extra)
+
+
+NAMING_QUESTION = "How does your lab mark reagent controls in file names?"
+NAMING_NONE = "Nothing special"
+NAMING_OTHER = "Other text…"
+NAMING_HELP = ("Most names are found without this (noPrimary, 2ndOnly, isotype, NegCtrl...). "
+               "Choose your lab's own mark if it is something else. A '-' at the end of the "
+               "name is never read as one unless you choose it here: in some studies it "
+               "marks a re-scan or a second imaging pass instead.")
+
+
+class NamingControl(QWidget):
+    """The study's naming entry: nothing special, a preset, or other text.
+    `changed` fires on every change; `value()` is (preset, token)."""
+
+    changed = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        self.combo = QComboBox()
+        self.combo.addItem(NAMING_NONE, None)
+        for name, p in RC.NAMING_PRESETS.items():
+            self.combo.addItem(p["label"], name)
+        self.combo.addItem(NAMING_OTHER, "")
+        self.combo.setToolTip(NAMING_HELP)
+        self.other = QLineEdit()
+        self.other.setPlaceholderText("the text, e.g. NEG2 (a whole part of the name)")
+        self.other.setHidden(True)
+        lay.addWidget(self.combo, 1)
+        lay.addWidget(self.other, 1)
+        self.combo.currentIndexChanged.connect(self._combo_changed)
+        self.other.textChanged.connect(lambda _t: self.changed.emit())
+
+    def _is_other(self):
+        return self.combo.currentIndex() == self.combo.count() - 1
+
+    def _combo_changed(self, _i):
+        self.other.setHidden(not self._is_other())
+        self.changed.emit()
+
+    def value(self):
+        """(preset, token): (None, None) for nothing special, or empty other text."""
+        if self._is_other():
+            text = self.other.text().strip()
+            return None, (text or None)
+        return self.combo.currentData() or None, None
+
+    def set_value(self, preset=None, token=None):
+        """Show `preset` or `token`; emits `changed` once when the value moves."""
+        was = self.value()
+        self.blockSignals(True)
+        try:
+            if preset and self.combo.findData(preset) >= 0:
+                self.combo.setCurrentIndex(self.combo.findData(preset))
+            elif token:
+                self.combo.setCurrentIndex(self.combo.count() - 1)
+                self.other.setText(token)
+            else:
+                self.combo.setCurrentIndex(0)
+        finally:
+            self.blockSignals(False)
+        if self.value() != was:
+            self.changed.emit()
+
+    def extra(self, extra_patterns):
+        """`extra_patterns` with this control's naming entry in place of the old one."""
+        preset, token = self.value()
+        return RC.with_naming(extra_patterns, preset, token)
 
 
 def needs_confirming(cfg, source_dir):
@@ -360,6 +434,13 @@ class ReagentControlsDialog(QDialog):
         self.help = QLabel(HELP)
         self.help.setWordWrap(True)
         lay.addWidget(self.help)
+        nrow = QHBoxLayout()
+        nrow.addWidget(QLabel(NAMING_QUESTION))
+        self.naming = NamingControl()
+        self.naming.set_value(*RC.naming_of(cfg))
+        self.naming.setEnabled(not project.read_only)
+        nrow.addWidget(self.naming, 1)
+        lay.addLayout(nrow)
         png = os.path.join(cfg.get("out_root") or "", "qc", "reagent_screen.png")
         if os.path.isfile(png):
             pic = QLabel()
@@ -399,6 +480,7 @@ class ReagentControlsDialog(QDialog):
         lay.addWidget(self.buttons)
 
         self._populate(cfg)
+        self.naming.changed.connect(self._rescan)
 
     # ------------------------------------------------------------- building
     @staticmethod
@@ -470,10 +552,12 @@ class ReagentControlsDialog(QDialog):
         self._refresh_pairings()
         return row
 
-    def _populate(self, cfg):
+    def _scan_rows(self, cfg):
+        """A row for each name match (not rejected, not listed yet), with the naming
+        the control shows."""
         e = self.e
         rejected = set(e["rejected"])
-        for m in scan_folder(cfg, self.slides_dir):
+        for m in scan_folder(cfg, self.slides_dir, self.naming.extra(e["extra_patterns"])):
             key = _base(m.path)
             if key in rejected or m.path in rejected:
                 continue
@@ -483,6 +567,29 @@ class ReagentControlsDialog(QDialog):
                       ticked=bool(old) or m.tier == "strong",
                       markers_on=None if old else (m.markers or None),
                       stored=key in e["files"])
+
+    def _rescan(self):
+        """The naming changed: drop the name-matched rows it no longer matches (never
+        a confirmed, hand-added or signal-screen row) and add the ones it now does."""
+        cfg = self.project.cfg
+        e = self.e
+        matched = {_base(m.path) for m in scan_folder(
+            cfg, self.slides_dir, self.naming.extra(e["extra_patterns"]))}
+        for r in list(self.rows):
+            if (r.where == "files" and r.source == "name" and not r.stored
+                    and r.key not in matched):
+                self.rows.remove(r)
+                self._by_key.pop(r.key, None)
+                self.body_lay.removeWidget(r)
+                r.setParent(None)
+                r.deleteLater()
+        self._scan_rows(cfg)
+        self._refresh_pairings()
+        self.empty.setVisible(not self.rows)
+
+    def _populate(self, cfg):
+        e = self.e
+        self._scan_rows(cfg)
         for key, old in e["files"].items():
             self._add(key, "files", key, (old or {}).get("source") or "manual",
                       token=(old or {}).get("pattern") or "", entry=old, ticked=True,
@@ -683,8 +790,13 @@ class ReagentControlsDialog(QDialog):
                     rejected.append(r.key)
         have = self.project.get("reagent_controls") or {}
         was = {"files": e["files"], "scenes": e["scenes"], "paired_with": e["paired_with"]}
-        for name, value in (("files", files), ("scenes", scenes), ("rejected", rejected),
-                            ("paired_with", self.paired_with)):
+        writes = [("files", files), ("scenes", scenes), ("rejected", rejected),
+                  ("paired_with", self.paired_with)]
+        # The naming is written only when it changed. On its own it changes no
+        # confirmed entry, so it asks for no stage to be run again.
+        if self.naming.value() != RC.naming_of(self.project.cfg):
+            writes.append(("extra_patterns", self.naming.extra(e["extra_patterns"])))
+        for name, value in writes:
             if not value and name not in have:
                 continue
             if self.project.set("reagent_controls." + name, value, by=BY):

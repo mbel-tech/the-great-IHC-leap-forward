@@ -1012,8 +1012,21 @@ function initState(raw, seed){
   // embedded seed both - so this is the ONE place an assignment made against a
   // different plate set can be checked. Migrating anywhere else would leave
   // whichever of the two did not pass through it silently trusted.
+  //
+  // A VERDICT IS ABOUT A PLATE DECISION, so a record with no plate work carries
+  // none. A favourite, a tilt, an exclusion or a background disc names no plate
+  // - exportCsv already declines to write plate_verified for such a row - and
+  // resolvePlate answering by_index for it put it in the re-confirm notice with
+  // nothing to re-confirm. Dropped here rather than in resolvePlate, whose
+  // answer for a bare record is the same as ls_atlas.plate_status's and has to
+  // stay so. With no verdict and no id, the first plate work done on it stamps
+  // the atlas loaded then (ownPlate), like any section curated now.
   return Object.fromEntries(
-    Object.entries(v).map(([uid, rec]) => [uid, resolvePlate(rec, PLATES)]));
+    Object.entries(v).map(([uid, rec]) => {
+      const out = resolvePlate(rec, PLATES);
+      if(!hasPlateWork(out)) delete out.verified;
+      return [uid, out];
+    }));
 }
 // WHAT THE OPERATOR IS TOLD, and the reason a marked record is allowed to stay
 // on screen at all: a count, not a silent degradation. A section whose plate no
@@ -2794,6 +2807,7 @@ function commitPoly(){
   // `pl` is the plate the ROI number belongs to (see usedRois).
   polysOf(s).push({v: draft.slice(), roi: h.roi, region: h.region, part: h.part,
                    n: s.pairs.length, pl: plateAt(s).id});
+  ownPlate(s);                   // a drawn region is plate work - see ownPlate
   draft = null;
   gAdvance();
   save(); drawSec(); drawPl(); status(); paintCell(active);
@@ -2982,6 +2996,7 @@ function clickPl(e){
   if(!pending) return;
   stampFrame(st(active), active);
   st(active).pairs.push([pending[0],pending[1],px,py,0,pending[2]||defaultR()]);
+  ownPlate(st(active));          // a landmark is plate work - see ownPlate
   pending=null;
   save(); drawSec(); drawPl(); status(); paintCell(active);
 }
@@ -3304,6 +3319,27 @@ function confirmPlate(s, v){
   s.verified = verifyPlate(s, PLATES);
   plateNotice();
 }
+// PLATE WORK IS A CONFIRMATION TOO, the first time. The slider does not follow
+// the section (see select), so on a run of serial sections the plate is usually
+// already right and the operator never touches it: they place landmarks, draw
+// regions or press "no ROI" against the plate on screen. Only moving the plate
+// stamped an identity, so those records were saved with none, and the next load
+// read every one of them as by_index - "recorded before plate ids were kept" -
+// counted them in the notice and withheld their landmarks from the fit.
+//
+// ONLY A RECORD WITH NO IDENTITY AND NO VERDICT. One that carries a verdict was
+// loaded from storage and judged against this atlas; work added to it now must
+// not turn a flagged record into a verified one - that is confirmPlate's job,
+// on the operator's own gesture, and doing it here would be the laundering its
+// comment forbids. A record made in this session has neither, and nothing to
+// launder: its work is being done against the plate now loaded.
+//
+// Called AFTER the caller's undoMark, so one undo takes the stamp back with the
+// work that caused it.
+function ownPlate(s){
+  if(!s || s.plate_id || s.verified) return;
+  confirmPlate(s, s.plate);
+}
 function onSlideUser(v){
   undoMark(active, "plate");
   const s=st(active); s.assigned=true; confirmPlate(s, v); save(); onSlide(v); paintCell(active);
@@ -3328,7 +3364,7 @@ function toggleHard(){
 function toggleNoRoi(){
   if(!active) return;
   undoMark(active, "no ROI");
-  const s=st(active); s.noroi=!s.noroi; if(s.noroi) s.assigned=true;
+  const s=st(active); s.noroi=!s.noroi; if(s.noroi){ s.assigned=true; ownPlate(s); }
   save(); paintCell(active); status();
 }
 

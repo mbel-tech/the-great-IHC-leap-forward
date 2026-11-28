@@ -9,6 +9,28 @@ where things landed, not which plausible-looking route was tried and abandoned, 
 
 ---
 
+## 2026-11-28 - A section curated without moving the plate keeps its plate identity
+
+**Changed:** the ROI curator stamps `plate_id` / `plate_fp` / `plate_px` the first time plate work is done
+on a record that has no identity and no verdict yet: a landmark, a drawn region, or "no ROI"
+(`ownPlate`). Until now only moving the plate did (slider, previous/next, Assign plate). And a record with
+no plate work at all (a favourite, a tilt, an exclusion, a background disc) no longer carries a
+`verified` verdict after a load, so it is not counted in the "need their plate re-confirming" notice.
+`verifyPlate` and `resolvePlate` answer what they answered; the verdict is dropped in `initState`.
+
+**Why:** reported from a study where every reagent control came back as needing re-confirming. The slider
+does not follow the section, so on serial sections the plate is usually already right and the operator
+only draws. Those records were saved with no identity and the next load read them as `by_index`
+("recorded before plate ids were kept"), with their landmarks withheld from the fit.
+
+**Cost / limits:** records already saved that way stay flagged, because nothing in them tells them apart
+from records that really predate plate ids; Assign plate on each one clears it. A record that carries a
+verdict is never stamped by added work, so a flagged record is still released only by the operator
+choosing its plate. Not changed: the reason Shotgun is off is still shown only at the foot of the tool
+column, away from the button.
+
+---
+
 ## 2026-11-21 - Single stages from the command line; steps wait out a dropped drive
 
 **Changed:** `python -m app --stage <id> <study.json>` runs one stage as the window's Run button does (saved
